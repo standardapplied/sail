@@ -15,6 +15,7 @@ import picocli.CommandLine.Command;
       SnapCommand.class,
       SnapsCommand.class,
       RestoreCommand.class,
+      SnapDeleteCommand.class,
       SnapsPruneCommand.class,
     })
 public final class ProjectSnapshotCommand implements Runnable {

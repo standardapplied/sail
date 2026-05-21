@@ -23,9 +23,6 @@ import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.SpecWorkspace;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import picocli.CommandLine.Command;
@@ -67,6 +64,14 @@ public final class DispatchCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
+
+  @Option(
+      names = "--snapshot",
+      negatable = true,
+      description =
+          "Take a container snapshot before dispatch. Use --no-snapshot to skip. If neither is"
+              + " passed, prompts interactively unless agent.auto_snapshot is true in sail.yaml.")
+  private Boolean snapshot;
 
   @Option(
       names = {"-f", "--file"},
@@ -179,23 +184,10 @@ public final class DispatchCommand implements Runnable {
 
     String branchName = null;
 
-    if (config.agent().autoSnapshot()) {
+    if (!dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json)) {
       var snapMgr = new SnapshotManager(shell);
-      if (shouldSnapshot(snapMgr, name)) {
-        var label = SnapshotManager.defaultLabel();
-        if (!json) {
-          System.out.println(Ansi.AUTO.string("  @|bold Auto-snapshot:|@ " + label + "..."));
-        }
-        snapMgr.create(name, label);
-        if (!json) {
-          Banner.printSnapshotCreated(name, label, System.out, Ansi.AUTO);
-          System.out.println();
-        }
-      } else if (!json) {
-        System.out.println(
-            Ansi.AUTO.string("  @|faint Snapshot skipped (recent snapshot exists)|@"));
-        System.out.println();
-      }
+      var label = SnapshotManager.defaultLabel();
+      SnapshotDecision.create(System.out, snapMgr, name, label, json);
     }
 
     if (config.agent().autoBranch()) {
@@ -397,24 +389,4 @@ public final class DispatchCommand implements Runnable {
   record DispatchPreview(String name, String specId, String specTitle, String mode, String task) {}
 
   record NoDispatch(String name, boolean dispatched, String reason) {}
-
-  private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
-
-  /**
-   * Returns true if a new snapshot should be created. Skips if a snapshot was created within the
-   * last 24 hours (dir backend snapshots are full copies and expensive).
-   */
-  static boolean shouldSnapshot(SnapshotManager snapMgr, String containerName) {
-    try {
-      var snapshots = snapMgr.list(containerName);
-      if (snapshots.isEmpty()) {
-        return true;
-      }
-      var latest = snapshots.getLast();
-      var latestTime = OffsetDateTime.parse(latest.createdAt()).toInstant();
-      return Instant.now().isAfter(latestTime.plus(SNAPSHOT_INTERVAL));
-    } catch (Exception ignored) {
-      return true;
-    }
-  }
 }

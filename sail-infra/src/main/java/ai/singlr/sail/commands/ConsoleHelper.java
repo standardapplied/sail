@@ -38,6 +38,11 @@ final class ConsoleHelper {
     return line.isBlank() || line.strip().equalsIgnoreCase("y");
   }
 
+  /** Test-only: clears the cached stdin reader so a swapped {@code System.in} is picked up. */
+  static void resetStdin() {
+    stdinReader = null;
+  }
+
   /** Reads a single line from stdin, or returns {@code null} on error/EOF. */
   static String readLine() {
     try {

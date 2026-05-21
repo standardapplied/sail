@@ -50,17 +50,29 @@ class SnapsPruneCommandTest {
 
     var help = sw.toString();
     assertTrue(help.contains("--older-than"));
+    assertTrue(help.contains("--keep"));
     assertTrue(help.contains("--dry-run"));
     assertTrue(help.contains("--json"));
   }
 
   @Test
-  void failsWithoutOlderThanFlag() {
+  void failsWhenNeitherOlderThanNorKeepFlag() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setErr(new PrintWriter(sw));
 
     var exitCode = cmd.execute("project", "snapshot", "prune");
+
+    assertNotEquals(0, exitCode);
+  }
+
+  @Test
+  void rejectsNegativeKeep() {
+    var cmd = new CommandLine(new Sail());
+    var sw = new StringWriter();
+    cmd.setErr(new PrintWriter(sw));
+
+    var exitCode = cmd.execute("project", "snapshot", "prune", "--keep", "-1");
 
     assertNotEquals(0, exitCode);
   }

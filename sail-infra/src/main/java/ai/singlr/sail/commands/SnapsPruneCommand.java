@@ -15,8 +15,11 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -30,7 +33,7 @@ import picocli.CommandLine.Parameters;
  */
 @Command(
     name = "prune",
-    description = "Delete snapshots older than a given age.",
+    description = "Delete snapshots by age and/or retention count.",
     mixinStandardHelpOptions = true)
 public final class SnapsPruneCommand implements Runnable {
 
@@ -44,9 +47,16 @@ public final class SnapsPruneCommand implements Runnable {
 
   @Option(
       names = "--older-than",
-      required = true,
-      description = "Delete snapshots older than this age. Examples: 7d, 24h, 30d")
+      description = "Delete snapshots older than this age. Examples: 7d, 24h, 30d.")
   private String olderThan;
+
+  @Option(
+      names = "--keep",
+      description =
+          "Keep only the N most recently created snapshots per project. Combine with"
+              + " --older-than to delete only snapshots that are both old AND beyond the keep"
+              + " window.")
+  private Integer keep;
 
   @Option(names = "--dry-run", description = "Print what would be deleted without deleting.")
   private boolean dryRun;
@@ -62,8 +72,15 @@ public final class SnapsPruneCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var maxAge = parseAge(olderThan);
-    var cutoff = Instant.now().minus(maxAge);
+    if (olderThan == null && keep == null) {
+      throw new IllegalArgumentException(
+          "Specify at least one of --older-than (e.g. 7d) or --keep N.");
+    }
+    if (keep != null && keep < 0) {
+      throw new IllegalArgumentException("--keep must be 0 or greater.");
+    }
+    Duration maxAge = olderThan != null ? parseAge(olderThan) : null;
+    Instant cutoff = maxAge != null ? Instant.now().minus(maxAge) : null;
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
@@ -82,8 +99,7 @@ public final class SnapsPruneCommand implements Runnable {
       var scope = name != null ? name : "all projects";
       var mode = dryRun ? " (dry run)" : "";
       System.out.println(
-          ansi.string(
-              "  @|bold Pruning snapshots|@ older than " + olderThan + " from " + scope + mode));
+          ansi.string("  @|bold Pruning snapshots|@ from " + scope + describeFilters() + mode));
       System.out.println();
     }
 
@@ -112,11 +128,12 @@ public final class SnapsPruneCommand implements Runnable {
         continue;
       }
 
+      var keepers = keepersByRecency(snapshots, keep);
+
       var deleted = 0;
       var kept = 0;
       for (var snap : snapshots) {
-        var snapTime = parseSnapshotTime(snap.createdAt());
-        if (snapTime != null && snapTime.isBefore(cutoff)) {
+        if (shouldDelete(snap, cutoff, keepers)) {
           if (!json) {
             var action = dryRun ? "would delete" : "deleting";
             System.out.println(ansi.string("  [" + action + "] " + project + "/" + snap.name()));
@@ -144,7 +161,12 @@ public final class SnapsPruneCommand implements Runnable {
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
-      map.put("older_than", olderThan);
+      if (olderThan != null) {
+        map.put("older_than", olderThan);
+      }
+      if (keep != null) {
+        map.put("keep", keep);
+      }
       map.put("dry_run", dryRun);
       map.put("total_deleted", totalDeleted);
       map.put("total_kept", totalKept);
@@ -157,12 +179,49 @@ public final class SnapsPruneCommand implements Runnable {
     var verb = dryRun ? "Would delete" : "Deleted";
     System.out.println(
         ansi.string(
-            "  @|bold,green \u2713|@ "
-                + verb
-                + " "
-                + totalDeleted
-                + " snapshot(s), kept "
-                + totalKept));
+            "  @|bold,green ✓|@ " + verb + " " + totalDeleted + " snapshot(s), kept " + totalKept));
+  }
+
+  private String describeFilters() {
+    var parts = new ArrayList<String>();
+    if (olderThan != null) {
+      parts.add("older than " + olderThan);
+    }
+    if (keep != null) {
+      parts.add("keeping " + keep + " most recent");
+    }
+    return parts.isEmpty() ? "" : " (" + String.join(", ", parts) + ")";
+  }
+
+  private static boolean shouldDelete(
+      SnapshotManager.SnapshotInfo snap, Instant cutoff, Set<String> keepers) {
+    if (cutoff != null) {
+      var t = parseSnapshotTime(snap.createdAt());
+      if (t == null || !t.isBefore(cutoff)) {
+        return false;
+      }
+    }
+    if (keepers != null && keepers.contains(snap.name())) {
+      return false;
+    }
+    return cutoff != null || keepers != null;
+  }
+
+  private static Set<String> keepersByRecency(
+      List<SnapshotManager.SnapshotInfo> snapshots, Integer keep) {
+    if (keep == null) {
+      return null;
+    }
+    return snapshots.stream()
+        .sorted(Comparator.comparing(SnapsPruneCommand::sortKey).reversed())
+        .limit(keep)
+        .map(SnapshotManager.SnapshotInfo::name)
+        .collect(HashSet::new, HashSet::add, HashSet::addAll);
+  }
+
+  private static Instant sortKey(SnapshotManager.SnapshotInfo s) {
+    var t = parseSnapshotTime(s.createdAt());
+    return t != null ? t : Instant.MIN;
   }
 
   static Duration parseAge(String value) {

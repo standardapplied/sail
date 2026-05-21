@@ -54,7 +54,9 @@ class CommandTaxonomyTest {
   void projectSnapshotCommandsAreNestedUnderSnapshot() {
     var snapshot = new CommandLine(new ProjectSnapshotCommand());
 
-    assertEquals(Set.of("create", "list", "restore", "prune"), snapshot.getSubcommands().keySet());
+    assertEquals(
+        Set.of("create", "list", "restore", "delete", "rm", "prune"),
+        snapshot.getSubcommands().keySet());
   }
 
   @Test

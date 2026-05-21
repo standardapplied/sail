@@ -80,6 +80,14 @@ public final class RunCommand implements Runnable {
   private boolean json;
 
   @Option(
+      names = "--snapshot",
+      negatable = true,
+      description =
+          "Take a container snapshot before launch. Use --no-snapshot to skip. If neither is"
+              + " passed, prompts interactively unless agent.auto_snapshot is true in sail.yaml.")
+  private Boolean snapshot;
+
+  @Option(
       names = {"-f", "--file"},
       description = "Path to sail.yaml project descriptor.",
       defaultValue = "sail.yaml")
@@ -252,13 +260,11 @@ public final class RunCommand implements Runnable {
     var agentCli = AgentCli.fromYamlName(agentType);
 
     var label = SnapshotManager.defaultLabel();
+    var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
 
-    if (config.agent() != null && config.agent().autoSnapshot()) {
+    if (snapshotTaken) {
       var snapMgr = new SnapshotManager(shell);
-      System.out.println(Ansi.AUTO.string("  @|bold Auto-snapshot:|@ " + label + "..."));
-      snapMgr.create(name, label);
-      Banner.printSnapshotCreated(name, label, System.out, Ansi.AUTO);
-      System.out.println();
+      SnapshotDecision.create(System.out, snapMgr, name, label, json);
     }
 
     String branchName = null;
@@ -291,7 +297,7 @@ public final class RunCommand implements Runnable {
       System.out.println();
     }
 
-    var snapshotLabel = config.agent() != null && config.agent().autoSnapshot() ? label : null;
+    var snapshotLabel = snapshotTaken ? label : null;
 
     if (task != null && background) {
       launchBackground(
