@@ -36,6 +36,15 @@ public final class JsonBody {
         optionalString(map, "branch"));
   }
 
+  public static Event readEvent(HttpExchange exchange) throws IOException {
+    var map = read(exchange);
+    try {
+      return Event.fromMap(map);
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.INVALID_JSON, e.getMessage(), e);
+    }
+  }
+
   private static Map<String, Object> read(HttpExchange exchange) throws IOException {
     var contentType = exchange.getRequestHeaders().getFirst("Content-Type");
     if (contentType != null && !contentType.toLowerCase().startsWith("application/json")) {

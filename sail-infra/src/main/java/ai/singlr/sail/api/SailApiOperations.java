@@ -41,6 +41,8 @@ public final class SailApiOperations implements ApiOperations {
   private final ShellExec shell;
   private final String file;
   private final WatcherLauncher watcherLauncher;
+  private final EventBus eventBus;
+  private final AuditPersister auditPersister;
 
   public SailApiOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -51,9 +53,26 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   SailApiOperations(ShellExec shell, String file, WatcherLauncher watcherLauncher) {
+    this(shell, file, watcherLauncher, null, null);
+  }
+
+  /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
+  public SailApiOperations(
+      ShellExec shell, String file, EventBus eventBus, AuditPersister auditPersister) {
+    this(shell, file, SailApiOperations::launchWatcherProcess, eventBus, auditPersister);
+  }
+
+  SailApiOperations(
+      ShellExec shell,
+      String file,
+      WatcherLauncher watcherLauncher,
+      EventBus eventBus,
+      AuditPersister auditPersister) {
     this.shell = shell;
     this.file = file;
     this.watcherLauncher = watcherLauncher;
+    this.eventBus = eventBus;
+    this.auditPersister = auditPersister;
   }
 
   @Override
@@ -699,6 +718,54 @@ public final class SailApiOperations implements ApiOperations {
     } catch (Exception e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "A sail system command failed.", e);
     }
+  }
+
+  @Override
+  public Result<EventPublishResponse> publishEvent(Event event) {
+    if (eventBus == null) {
+      return Result.failure(
+          ErrorCode.INTERNAL,
+          "Event bus is not wired into this SailApiOperations instance.",
+          "Use the SailApiOperations constructor that accepts an EventBus.");
+    }
+    return safe(
+        () -> {
+          var stamped = eventBus.publish(event);
+          return new EventPublishResponse(stamped.id(), stamped.toMap());
+        });
+  }
+
+  @Override
+  public Result<RecentEventsResponse> recentEvents(int limit) {
+    if (limit <= 0 || limit > 5000) {
+      return Result.failure(
+          ErrorCode.INVALID_REQUEST, "limit must be between 1 and 5000, got " + limit);
+    }
+    if (auditPersister == null) {
+      return Result.success(new RecentEventsResponse(limit, 0, List.of()));
+    }
+    return safe(
+        () -> {
+          var events = auditPersister.recent(limit);
+          var maps = events.stream().map(Event::toMap).toList();
+          return new RecentEventsResponse(limit, maps.size(), maps);
+        });
+  }
+
+  @Override
+  public Result<EventBusStatsResponse> eventBusStats() {
+    if (eventBus == null) {
+      return Result.success(new EventBusStatsResponse(0L, 0L, List.of()));
+    }
+    return safe(
+        () -> {
+          var stats = eventBus.stats();
+          var subs =
+              stats.subscribers().stream()
+                  .map(s -> new SubscriberStatsView(s.name(), s.capacity(), s.depth(), s.dropped()))
+                  .toList();
+          return new EventBusStatsResponse(stats.published(), stats.rejectedSubscribers(), subs);
+        });
   }
 
   private static <T> Result<T> safe(Supplier<T> supplier) {

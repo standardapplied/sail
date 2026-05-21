@@ -27,4 +27,13 @@ public interface ApiOperations {
   Result<StopAgentResponse> stopAgent(String project);
 
   Result<AgentReportResponse> agentReport(String project);
+
+  /** Publishes an event onto the bus and returns the stamped copy. */
+  Result<EventPublishResponse> publishEvent(Event event);
+
+  /** Returns up to {@code limit} most-recent events (oldest first). */
+  Result<RecentEventsResponse> recentEvents(int limit);
+
+  /** Returns per-subscriber + bus stats for {@code /v1/events/stats}. */
+  Result<EventBusStatsResponse> eventBusStats();
 }

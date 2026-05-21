@@ -6,8 +6,11 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiTokenStore;
+import ai.singlr.sail.api.AuditPersister;
+import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.engine.SailPaths;
 import java.net.InetAddress;
 import java.nio.file.Path;
 import java.security.SecureRandom;
@@ -49,11 +52,23 @@ public final class ApiCommand implements Runnable {
   private void execute() throws Exception {
     requireSafeBindAddress(host, allowRemote);
     var resolvedToken = token != null ? token : tokenStore().readOrCreate();
-    try (var server = new SailApiServer(host, port, new SailApiOperations(), resolvedToken)) {
+    var bus = new EventBus();
+    var persister =
+        new AuditPersister(
+            SailPaths.sailDir().resolve("events.jsonl"), AuditPersister.DEFAULT_RECENT_CAPACITY);
+    var operations =
+        new SailApiOperations(
+            new ai.singlr.sail.engine.ShellExecutor(false),
+            SailPaths.PROJECT_DESCRIPTOR,
+            bus,
+            persister);
+    try (var server = new SailApiServer(host, port, operations, resolvedToken, bus, persister)) {
       server.start();
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ sail API listening on http://" + host + ":" + server.port()));
+      System.out.println(
+          Ansi.AUTO.string("    @|faint Events log: " + persister.eventsFilePath() + "|@"));
       new CountDownLatch(1).await();
     }
   }

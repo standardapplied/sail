@@ -33,9 +33,14 @@ public final class ApiRouter implements HttpHandler {
   private static final String STOP = "stop";
   private static final String REPORT = "report";
   private static final String TAIL = "tail";
+  private static final String EVENTS = "events";
+  private static final String RECENT = "recent";
+  private static final String STATS = "stats";
+  private static final String LIMIT = "limit";
   private static final int DEFAULT_TAIL = 200;
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
+  private static final int DEFAULT_RECENT = 100;
 
   private final ApiOperations operations;
   private final BearerAuth auth;
@@ -79,6 +84,11 @@ public final class ApiRouter implements HttpHandler {
     }
 
     auth.require(exchange);
+
+    if (request.hasEventsPrefix()) {
+      return routeEvents(exchange, request);
+    }
+
     if (!request.hasProjectPrefix()) {
       throw notFound();
     }
@@ -138,6 +148,28 @@ public final class ApiRouter implements HttpHandler {
     }
     requireMethod(request, POST);
     return ApiResponse.from(operations.dispatch(project, JsonBody.readDispatchRequest(exchange)));
+  }
+
+  private ApiResponse routeEvents(HttpExchange exchange, RouteRequest request) throws IOException {
+    if (request.size() == 2) {
+      requireMethod(request, POST);
+      return ApiResponse.from(operations.publishEvent(JsonBody.readEvent(exchange)));
+    }
+    if (request.size() == 3) {
+      return switch (request.segments().get(2)) {
+        case RECENT -> {
+          requireMethod(request, GET);
+          yield ApiResponse.from(
+              operations.recentEvents(QueryParameters.from(request.uri()).limit()));
+        }
+        case STATS -> {
+          requireMethod(request, GET);
+          yield ApiResponse.from(operations.eventBusStats());
+        }
+        default -> throw notFound();
+      };
+    }
+    throw notFound();
   }
 
   private ApiResponse routeAgent(RouteRequest request, String project) {
@@ -214,6 +246,10 @@ public final class ApiRouter implements HttpHandler {
       return segments.size() >= 3 && V1.equals(segments.get(0)) && PROJECTS.equals(segments.get(1));
     }
 
+    boolean hasEventsPrefix() {
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && EVENTS.equals(segments.get(1));
+    }
+
     boolean isProjectRoot() {
       return segments.size() == 3;
     }
@@ -273,6 +309,21 @@ public final class ApiRouter implements HttpHandler {
       } catch (NumberFormatException ignored) {
       }
       throw new ApiException(ErrorCode.INVALID_TAIL, "tail must be between 1 and 5000.");
+    }
+
+    int limit() {
+      var value = values.get(LIMIT);
+      if (value == null) {
+        return DEFAULT_RECENT;
+      }
+      try {
+        var limit = Integer.parseInt(value);
+        if (limit >= MIN_TAIL && limit <= MAX_TAIL) {
+          return limit;
+        }
+      } catch (NumberFormatException ignored) {
+      }
+      throw new ApiException(ErrorCode.INVALID_REQUEST, "limit must be between 1 and 5000.");
     }
 
     private static String decode(String value) {

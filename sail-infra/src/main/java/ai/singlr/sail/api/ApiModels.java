@@ -146,3 +146,13 @@ record BoardSummaryView(
     SpecSummaryView counts, int readyCount, int blockedCount, String nextReadyId) {}
 
 record ErrorResponse(ApiError error) {}
+
+record EventPublishResponse(long id, java.util.Map<String, Object> event) {}
+
+record RecentEventsResponse(
+    int limit, int returned, java.util.List<java.util.Map<String, Object>> events) {}
+
+record EventBusStatsResponse(
+    long published, long rejectedSubscribers, java.util.List<SubscriberStatsView> subscribers) {}
+
+record SubscriberStatsView(String name, int capacity, int depth, long dropped) {}

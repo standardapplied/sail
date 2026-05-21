@@ -554,6 +554,21 @@ class ApiRouterTest {
               false,
               null));
     }
+
+    @Override
+    public Result<EventPublishResponse> publishEvent(Event event) {
+      return Result.success(new EventPublishResponse(1L, event.toMap()));
+    }
+
+    @Override
+    public Result<RecentEventsResponse> recentEvents(int limit) {
+      return Result.success(new RecentEventsResponse(limit, 0, java.util.List.of()));
+    }
+
+    @Override
+    public Result<EventBusStatsResponse> eventBusStats() {
+      return Result.success(new EventBusStatsResponse(0L, 0L, java.util.List.of()));
+    }
   }
 
   private static final class FailingOperations extends FakeOperations {
