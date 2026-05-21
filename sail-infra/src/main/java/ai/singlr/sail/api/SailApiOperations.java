@@ -12,7 +12,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.ClaudeCodeHookConfig;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -657,7 +656,6 @@ public final class SailApiOperations implements ApiOperations {
       session.writeSession(project, task, Objects.requireNonNullElse(branch, ""));
       var agentCli = AgentCli.fromYamlName(agentType);
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
-      installAgentHooksIfClaudeCode(agentCli, project, workDir, spec.id());
       var command =
           mode.equals("background")
               ? AgentSession.buildBackgroundLaunchCommand(
@@ -667,7 +665,9 @@ public final class SailApiOperations implements ApiOperations {
                   true,
                   agentCli,
                   spec.model(),
-                  spec.reasoningEffort())
+                  spec.reasoningEffort(),
+                  spec.id(),
+                  agentType)
               : AgentSession.buildForegroundTaskCommand(
                   project,
                   config.sshUser(),
@@ -675,7 +675,9 @@ public final class SailApiOperations implements ApiOperations {
                   true,
                   agentCli,
                   spec.model(),
-                  spec.reasoningEffort());
+                  spec.reasoningEffort(),
+                  spec.id(),
+                  agentType);
       var result = exec(command);
       if (!result.ok()) {
         throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
@@ -683,22 +685,6 @@ public final class SailApiOperations implements ApiOperations {
       launchWatcherIfGuardrails(project, config);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
-    }
-  }
-
-  private void installAgentHooksIfClaudeCode(
-      AgentCli agentCli, String container, String workDir, String specId) {
-    if (agentCli != AgentCli.CLAUDE_CODE) {
-      return;
-    }
-    try {
-      new ClaudeCodeHookConfig(shell).install(container, workDir, specId);
-    } catch (Exception e) {
-      System.err.println(
-          "  [api] Warning: failed to install Claude Code hooks for "
-              + container
-              + ": "
-              + e.getMessage());
     }
   }
 

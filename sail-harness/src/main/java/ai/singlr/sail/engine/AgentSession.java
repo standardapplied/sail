@@ -159,7 +159,7 @@ public final class AgentSession {
       boolean fullPermissions,
       AgentCli agentCli) {
     return buildBackgroundLaunchCommand(
-        containerName, sshUser, workDir, fullPermissions, agentCli, null, null);
+        containerName, sshUser, workDir, fullPermissions, agentCli, null, null, null, null);
   }
 
   public static String launchWorkDir(String sshUser, List<SailYaml.Repo> targetRepos) {
@@ -178,15 +178,53 @@ public final class AgentSession {
       AgentCli agentCli,
       String model,
       String reasoningEffort) {
+    return buildBackgroundLaunchCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        null,
+        null);
+  }
+
+  /**
+   * Same as the simpler overload, with two extra inputs used to correlate hook events back to a
+   * specific spec dispatch:
+   *
+   * <ul>
+   *   <li>{@code specId} — flows into the spawned agent's environment as {@code SAIL_SPEC_ID}; an
+   *       empty or {@code null} value signals a non-spec ad-hoc launch, in which case the in-
+   *       container hook script no-ops instead of publishing events.
+   *   <li>{@code agentType} — flows in as {@code SAIL_AGENT}; defaults to the CLI's yaml name when
+   *       blank.
+   * </ul>
+   */
+  public static List<String> buildBackgroundLaunchCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
-    var agentCmd = cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort);
+    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
+    var agentCmd =
+        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
+    var effectiveSpec = Objects.requireNonNullElse(specId, "");
+    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
         """
         mkdir -p "$1"
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed sail-agent.service >/dev/null 2>&1 || true
-        systemd-run --user --unit sail-agent bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit sail-agent bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show sail-agent.service --property=MainPID --value 2>/dev/null || true)"
@@ -201,7 +239,18 @@ public final class AgentSession {
         """;
     return ContainerExec.asDevUser(
         containerName,
-        List.of("bash", "-lc", script, "bash", SAIL_DIR, workDir, agentCmd, LOG_FILE, PID_FILE));
+        List.of(
+            "bash",
+            "-lc",
+            script,
+            "bash",
+            SAIL_DIR,
+            workDir,
+            agentCmd,
+            LOG_FILE,
+            PID_FILE,
+            effectiveSpec,
+            effectiveAgent));
   }
 
   /**
@@ -217,7 +266,7 @@ public final class AgentSession {
       boolean fullPermissions,
       AgentCli agentCli) {
     return buildForegroundTaskCommand(
-        containerName, sshUser, workDir, fullPermissions, agentCli, null, null);
+        containerName, sshUser, workDir, fullPermissions, agentCli, null, null, null, null);
   }
 
   public static List<String> buildForegroundTaskCommand(
@@ -228,11 +277,44 @@ public final class AgentSession {
       AgentCli agentCli,
       String model,
       String reasoningEffort) {
+    return buildForegroundTaskCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        null,
+        null);
+  }
+
+  /**
+   * Same as the simpler overload, plus {@code specId} and {@code agentType} for hook attribution.
+   * See {@link #buildBackgroundLaunchCommand(String, String, String, boolean, AgentCli, String,
+   * String, String, String)}.
+   */
+  public static List<String> buildForegroundTaskCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
-    var agentCmd = cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort);
-    var script = "cd \"$1\" && bash -l -c \"$2\"";
+    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
+    var agentCmd =
+        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
+    var effectiveSpec = Objects.requireNonNullElse(specId, "");
+    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
+    var script = "cd \"$1\" && SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" bash -l -c \"$2\"";
     return ContainerExec.asDevUser(
-        containerName, List.of("bash", "-l", "-c", script, "bash", workDir, agentCmd));
+        containerName,
+        List.of(
+            "bash", "-l", "-c", script, "bash", workDir, agentCmd, effectiveSpec, effectiveAgent));
   }
 
   /** Returns the path to the agent log file inside the container. */

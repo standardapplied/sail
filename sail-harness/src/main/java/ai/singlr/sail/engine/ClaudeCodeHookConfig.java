@@ -14,10 +14,10 @@ import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Writes a project-scoped {@code .claude/settings.local.json} into the workspace dir so Claude
- * Code's hook system invokes {@link SailEventHelper} on session lifecycle transitions. The spec id
- * is baked into the hook commands so events are correctly attributed even if the agent runs
- * detached from any sail process.
+ * Writes a sail-owned Claude Code settings file at {@link #SETTINGS_PATH} inside the container.
+ * Passed to {@code claude} via {@code --settings} only when sail launches the agent — engineer SSH
+ * sessions that run bare {@code claude} never see these hooks, so their {@code Stop} events do not
+ * leak into the spec event bus.
  *
  * <p>Hooks wired:
  *
@@ -27,17 +27,20 @@ import java.util.concurrent.TimeoutException;
  *   <li>{@code SessionEnd} → {@code agent_session_completed}
  * </ul>
  *
- * <p>The file is written to {@code <workDir>/.claude/settings.local.json}. Claude Code merges this
- * "local" project-scoped settings file with the user's global {@code ~/.claude/settings.json}, so
- * we don't tamper with anything outside the project workspace.
+ * <p>Spec attribution flows in via the {@code SAIL_SPEC_ID} env var that sail sets at launch — no
+ * spec id is baked into the hook commands, so the file is install-once at provision/sync time
+ * rather than rewritten on every dispatch.
  */
 public final class ClaudeCodeHookConfig {
 
-  /** Subdirectory holding the file relative to the agent workdir. */
-  public static final String CONFIG_DIR = ".claude";
+  /** Container-side directory holding the settings file. */
+  public static final String SETTINGS_DIR = "/home/dev/.sail";
 
-  /** Filename. */
-  public static final String CONFIG_FILE = "settings.local.json";
+  /** Settings filename. */
+  public static final String SETTINGS_FILE = "claude-settings.json";
+
+  /** Container-side absolute path to the settings file. Used with {@code claude --settings}. */
+  public static final String SETTINGS_PATH = SETTINGS_DIR + "/" + SETTINGS_FILE;
 
   private final ShellExec shell;
 
@@ -46,16 +49,13 @@ public final class ClaudeCodeHookConfig {
   }
 
   /**
-   * Returns the JSON content that {@link #install} would write for the given spec id. Pure function
-   * — no I/O. Public for tests and {@code sail spec dispatch --show-hooks}.
+   * Returns the JSON content that {@link #install} writes. Pure function — no I/O. Public for tests
+   * and {@code sail spec dispatch --show-hooks}.
    */
-  public static String render(String specId) {
-    if (specId == null || specId.isBlank()) {
-      throw new IllegalArgumentException("specId is required");
-    }
-    var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started", specId);
-    var stop = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_stopped", specId);
-    var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed", specId);
+  public static String render() {
+    var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started");
+    var stop = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_stopped");
+    var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed");
 
     var hooks = new LinkedHashMap<String, Object>();
     hooks.put("SessionStart", List.of(matcherGroup("startup", sessionStart)));
@@ -68,35 +68,28 @@ public final class ClaudeCodeHookConfig {
   }
 
   /**
-   * Idempotently writes {@code <workDir>/.claude/settings.local.json} inside the container. The
-   * agent picks it up the next time Claude Code starts in that directory.
+   * Idempotently writes {@link #SETTINGS_PATH} inside the container. Install-once at provision or
+   * {@code sail project sync}; not rewritten per dispatch.
    */
-  public void install(String container, String workDir, String specId)
-      throws IOException, InterruptedException, TimeoutException {
+  public void install(String container) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
-    Objects.requireNonNull(workDir, "workDir");
-    if (workDir.isBlank()) {
-      throw new IllegalArgumentException("workDir must not be blank");
-    }
 
-    var content = render(specId);
-    var configDir = workDir + "/" + CONFIG_DIR;
-    var configPath = configDir + "/" + CONFIG_FILE;
-
-    var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", configDir)));
+    var mkdir =
+        shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", SETTINGS_DIR)));
     if (!mkdir.ok()) {
       throw new IOException(
-          "Failed to create " + configDir + " in " + container + ": " + mkdir.stderr());
+          "Failed to create " + SETTINGS_DIR + " in " + container + ": " + mkdir.stderr());
     }
 
     var write =
         shell.exec(
             ContainerExec.asDevUser(
                 container,
-                List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", content, configPath)));
+                List.of(
+                    "bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", render(), SETTINGS_PATH)));
     if (!write.ok()) {
       throw new IOException(
-          "Failed to write " + configPath + " in " + container + ": " + write.stderr());
+          "Failed to write " + SETTINGS_PATH + " in " + container + ": " + write.stderr());
     }
   }
 
@@ -109,10 +102,10 @@ public final class ClaudeCodeHookConfig {
     return group;
   }
 
-  private static Map<String, Object> hookCommand(String script, String eventType, String specId) {
+  private static Map<String, Object> hookCommand(String script, String eventType) {
     var hook = new LinkedHashMap<String, Object>();
     hook.put("type", "command");
-    hook.put("command", script + " " + eventType + " " + specId);
+    hook.put("command", script + " " + eventType);
     hook.put("timeout", 10);
     return hook;
   }

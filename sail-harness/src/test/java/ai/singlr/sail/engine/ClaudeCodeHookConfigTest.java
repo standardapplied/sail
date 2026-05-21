@@ -15,48 +15,54 @@ import org.junit.jupiter.api.Test;
 class ClaudeCodeHookConfigTest {
 
   @Test
-  void renderRejectsBlankSpecId() {
-    assertThrows(IllegalArgumentException.class, () -> ClaudeCodeHookConfig.render(""));
-    assertThrows(IllegalArgumentException.class, () -> ClaudeCodeHookConfig.render(null));
+  void settingsPathConstantsMatch() {
+    assertEquals("/home/dev/.sail", ClaudeCodeHookConfig.SETTINGS_DIR);
+    assertEquals("claude-settings.json", ClaudeCodeHookConfig.SETTINGS_FILE);
+    assertEquals("/home/dev/.sail/claude-settings.json", ClaudeCodeHookConfig.SETTINGS_PATH);
   }
 
   @Test
   void renderIncludesAllThreeHookKinds() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
+    var json = ClaudeCodeHookConfig.render();
     assertTrue(json.contains("SessionStart"));
     assertTrue(json.contains("Stop"));
     assertTrue(json.contains("SessionEnd"));
   }
 
   @Test
-  void renderEmbedsSpecIdInEachCommand() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
-    var occurrences = countOccurrences(json, "oauth-flow");
-    assertEquals(3, occurrences, "spec id should appear in each of three hook commands");
+  void renderEmbedsNoSpecId() {
+    var json = ClaudeCodeHookConfig.render();
+    var firstCmd = SailEventHelper.SCRIPT_PATH + " agent_session_started";
+    assertTrue(
+        json.contains(firstCmd),
+        "command should be '<script> <event-type>' with no spec id baked in");
+    assertFalse(
+        json.contains(firstCmd + " "),
+        "no trailing arg should follow the event type — spec id flows via SAIL_SPEC_ID env var");
   }
 
   @Test
   void renderEmbedsHelperScriptPath() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
+    var json = ClaudeCodeHookConfig.render();
     assertTrue(json.contains(SailEventHelper.SCRIPT_PATH));
   }
 
   @Test
   void renderUsesStartupMatcherForSessionStart() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
+    var json = ClaudeCodeHookConfig.render();
     assertTrue(json.contains("\"matcher\": \"startup\""));
   }
 
   @Test
   void renderProducesValidJson() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
+    var json = ClaudeCodeHookConfig.render();
     assertDoesNotThrow(() -> YamlUtil.parseMap(json));
   }
 
   @Test
   @SuppressWarnings("unchecked")
   void renderShapeMatchesClaudeCodeHooksSchema() {
-    var json = ClaudeCodeHookConfig.render("oauth-flow");
+    var json = ClaudeCodeHookConfig.render();
     var root = YamlUtil.parseMap(json);
     var hooks = (Map<String, Object>) root.get("hooks");
     assertNotNull(hooks);
@@ -71,16 +77,19 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
-  void installInvokesIncusExec() throws Exception {
+  void installWritesToSailOwnedSettingsPath() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var writer = new ClaudeCodeHookConfig(shell);
 
-    writer.install("light-grid", "/home/dev/workspace/sing", "oauth-flow");
+    writer.install("light-grid");
 
     var cmds = shell.invocations();
     assertEquals(2, cmds.size());
-    assertTrue(cmds.get(0).contains("mkdir -p /home/dev/workspace/sing/.claude"));
-    assertTrue(cmds.get(1).contains("/home/dev/workspace/sing/.claude/settings.local.json"));
+    assertTrue(cmds.get(0).contains("mkdir -p /home/dev/.sail"));
+    assertTrue(cmds.get(1).contains("/home/dev/.sail/claude-settings.json"));
+    assertFalse(
+        cmds.get(1).contains("settings.local.json"),
+        "must not write to the project-scoped settings.local.json anymore");
   }
 
   @Test
@@ -88,35 +97,24 @@ class ClaudeCodeHookConfigTest {
     var shell = new ScriptedShellExecutor().onFail("mkdir", "denied");
     var writer = new ClaudeCodeHookConfig(shell);
 
-    assertThrows(
-        IOException.class, () -> writer.install("light-grid", "/home/dev/workspace", "spec-a"));
+    assertThrows(IOException.class, () -> writer.install("light-grid"));
   }
 
   @Test
-  void installRejectsBlankWorkDir() {
-    var writer = new ClaudeCodeHookConfig(new ScriptedShellExecutor());
-    assertThrows(IllegalArgumentException.class, () -> writer.install("p", "", "spec-a"));
-  }
+  void installPropagatesWriteFailure() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("mkdir -p /home/dev/.sail")
+            .onFail("printf '%s'", "disk full");
+    var writer = new ClaudeCodeHookConfig(shell);
 
-  @Test
-  void installRejectsNullWorkDir() {
-    var writer = new ClaudeCodeHookConfig(new ScriptedShellExecutor());
-    assertThrows(NullPointerException.class, () -> writer.install("p", null, "spec-a"));
+    var ex = assertThrows(IOException.class, () -> writer.install("light-grid"));
+    assertTrue(ex.getMessage().contains("disk full"));
   }
 
   @Test
   void installRejectsInvalidContainerName() {
     var writer = new ClaudeCodeHookConfig(new ScriptedShellExecutor());
-    assertThrows(Exception.class, () -> writer.install("../bad", "/home/dev", "spec-a"));
-  }
-
-  private static int countOccurrences(String haystack, String needle) {
-    var n = 0;
-    var idx = 0;
-    while ((idx = haystack.indexOf(needle, idx)) >= 0) {
-      n++;
-      idx += needle.length();
-    }
-    return n;
+    assertThrows(Exception.class, () -> writer.install("../bad"));
   }
 }

@@ -13,7 +13,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ClaudeCodeHookConfig;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -248,7 +247,6 @@ public final class DispatchCommand implements Runnable {
     agentSession.ensureDirectory(name);
     agentSession.writeTaskFile(name, task);
     agentSession.writeSession(name, task, Objects.requireNonNullElse(branchName, ""));
-    installAgentHooksIfClaudeCode(shell, agentCli, name, workDir, nextSpec.id());
 
     if (background) {
       var sshCmd =
@@ -259,7 +257,9 @@ public final class DispatchCommand implements Runnable {
               fullPermissions,
               agentCli,
               taskSpec.model(),
-              taskSpec.reasoningEffort());
+              taskSpec.reasoningEffort(),
+              nextSpec.id(),
+              agentType);
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Launching agent in background...|@"));
         System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
@@ -287,7 +287,9 @@ public final class DispatchCommand implements Runnable {
               fullPermissions,
               agentCli,
               taskSpec.model(),
-              taskSpec.reasoningEffort());
+              taskSpec.reasoningEffort(),
+              nextSpec.id(),
+              agentType);
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Launching agent with spec...|@"));
         System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
@@ -347,26 +349,6 @@ public final class DispatchCommand implements Runnable {
         SpecAuditEvent.restarted(
             SpecAuditEvent.SAIL_AGENT, host, "restarted from " + found.status()));
     return found;
-  }
-
-  private void installAgentHooksIfClaudeCode(
-      ShellExecutor shell, AgentCli agentCli, String container, String workDir, String specId) {
-    if (agentCli != AgentCli.CLAUDE_CODE) {
-      return;
-    }
-    try {
-      new ClaudeCodeHookConfig(shell).install(container, workDir, specId);
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Could not install Claude Code hooks for "
-                  + container
-                  + ": "
-                  + e.getMessage()
-                  + ". Agent will still run; spec lifecycle events from inside the container will"
-                  + " not reach the bus.",
-              Ansi.AUTO));
-    }
   }
 
   static String buildTaskPrompt(Spec spec, String description, String specsDir) {

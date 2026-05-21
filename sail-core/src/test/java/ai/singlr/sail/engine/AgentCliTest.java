@@ -93,6 +93,35 @@ class AgentCliTest {
     assertTrue(cmd.contains("claude --print"));
     assertTrue(cmd.contains("--dangerously-skip-permissions"));
     assertTrue(cmd.contains("-p \"$(cat " + TASK + ")\""));
+    assertFalse(cmd.contains("--settings"), "no settings flag when caller passes null path");
+  }
+
+  @Test
+  void headlessCommandClaudeCodeIncludesSettingsPathWhenProvided() {
+    var cmd =
+        AgentCli.CLAUDE_CODE.headlessCommand(
+            TASK, true, null, null, "/home/dev/.sail/claude-settings.json");
+
+    assertTrue(
+        cmd.contains("claude --print --settings /home/dev/.sail/claude-settings.json"),
+        "settings flag must appear before permission flag for stable arg ordering");
+    assertTrue(cmd.contains("--dangerously-skip-permissions"));
+  }
+
+  @Test
+  void headlessCommandClaudeCodeBlankSettingsPathOmitsFlag() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, false, null, null, "");
+
+    assertFalse(cmd.contains("--settings"));
+  }
+
+  @Test
+  void headlessCommandCodexIgnoresSettingsPath() {
+    var cmd =
+        AgentCli.CODEX.headlessCommand(
+            TASK, true, null, null, "/home/dev/.sail/claude-settings.json");
+
+    assertFalse(cmd.contains("--settings"), "settings flag is Claude-only");
   }
 
   @Test

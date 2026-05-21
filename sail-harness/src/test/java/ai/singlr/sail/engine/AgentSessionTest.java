@@ -190,12 +190,59 @@ class AgentSessionTest {
     assertTrue(cmd.contains("acme"));
     var joined = String.join(" ", cmd);
     assertFalse(joined.contains("nohup"));
-    assertTrue(joined.contains("systemd-run --user --unit sail-agent"));
+    assertTrue(
+        joined.contains(
+            "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\" --unit"
+                + " sail-agent"));
     assertTrue(joined.contains("claude --print"));
+    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
     assertTrue(joined.contains("agent.log"));
     assertTrue(joined.contains("agent.pid"));
     assertTrue(joined.contains("agent-task.txt"));
     assertFalse(joined.contains("--dangerously-skip-permissions"));
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme", "dev", "/home/dev/workspace", false, AgentCli.CLAUDE_CODE);
+
+    var specId = cmd.get(cmd.size() - 2);
+    var agent = cmd.getLast();
+    assertEquals("", specId, "ad-hoc launches pass empty specId so the in-container hook no-ops");
+    assertEquals("claude-code", agent, "agent type defaults to CLI yamlName when blank");
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandPassesSpecIdAndAgent() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "oauth-flow",
+            "claude-code");
+
+    assertTrue(cmd.contains("oauth-flow"), "specId must be present as positional arg");
+    assertTrue(cmd.contains("claude-code"), "agent type must be present as positional arg");
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("--setenv \"SAIL_SPEC_ID=$6\""));
+    assertTrue(joined.contains("--setenv \"SAIL_AGENT=$7\""));
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandNonClaudeOmitsSettingsFlag() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme", "dev", "/home/dev/workspace", true, AgentCli.CODEX);
+
+    var joined = String.join(" ", cmd);
+    assertFalse(joined.contains("--settings"), "only Claude Code gets the sail settings file");
   }
 
   @Test
@@ -205,7 +252,11 @@ class AgentSessionTest {
             "acme", "dev", "/home/dev/workspace", true, AgentCli.CLAUDE_CODE);
 
     var joined = String.join(" ", cmd);
-    assertTrue(joined.contains("claude --print --dangerously-skip-permissions"));
+    assertTrue(
+        joined.contains(
+            "claude --print --settings "
+                + ClaudeCodeHookConfig.SETTINGS_PATH
+                + " --dangerously-skip-permissions"));
   }
 
   @Test
@@ -288,7 +339,8 @@ class AgentSessionTest {
             "acme", "dev", workDir, false, AgentCli.CLAUDE_CODE);
 
     var script = cmd.get(cmd.indexOf("-lc") + 1);
-    assertTrue(script.contains("systemd-run --user --unit sail-agent"));
+    assertTrue(script.contains("systemd-run"));
+    assertTrue(script.contains("--unit sail-agent"));
     assertTrue(script.contains("systemctl --user show sail-agent.service"));
     assertTrue(script.contains("cd \"$1\""));
     assertFalse(script.contains(workDir));
@@ -318,7 +370,27 @@ class AgentSessionTest {
     assertTrue(cmd.contains("acme"));
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("claude --print"));
+    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
     assertTrue(joined.contains("agent-task.txt"));
+    assertTrue(joined.contains("SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\""));
+  }
+
+  @Test
+  void buildForegroundTaskCommandPassesSpecIdAndAgent() {
+    var cmd =
+        AgentSession.buildForegroundTaskCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "oauth-flow",
+            "claude-code");
+
+    assertTrue(cmd.contains("oauth-flow"));
+    assertTrue(cmd.contains("claude-code"));
   }
 
   @Test

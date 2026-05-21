@@ -30,10 +30,27 @@ class SailEventHelperTest {
   }
 
   @Test
-  void scriptTakesEventTypeAndSpecArgs() {
+  void scriptTakesEventTypeArgOnly() {
     var content = SailEventHelper.scriptContent();
     assertTrue(content.contains("EVENT_TYPE=\"${1:?event type required}\""));
-    assertTrue(content.contains("SPEC_ID=\"${2:-}\""));
+  }
+
+  @Test
+  void scriptReadsSpecFromEnvVar() {
+    var content = SailEventHelper.scriptContent();
+    assertTrue(content.contains("SPEC_ID=\"${SAIL_SPEC_ID:-}\""));
+    assertTrue(content.contains("AGENT=\"${SAIL_AGENT:-claude-code}\""));
+  }
+
+  @Test
+  void scriptNoOpsWhenSpecIdMissing() {
+    var content = SailEventHelper.scriptContent();
+    var idx = content.indexOf("if [ -z \"$SPEC_ID\" ]; then");
+    assertTrue(idx > 0, "must short-circuit when SAIL_SPEC_ID is unset");
+    var afterCheck = content.substring(idx);
+    assertTrue(
+        afterCheck.indexOf("exit 0") < afterCheck.indexOf("curl"),
+        "exit 0 must come before the curl call so engineer sessions skip the POST");
   }
 
   @Test
@@ -47,6 +64,17 @@ class SailEventHelperTest {
   void scriptIsBestEffort() {
     var content = SailEventHelper.scriptContent();
     assertTrue(content.contains("|| true"), "curl failure must not propagate");
+  }
+
+  @Test
+  void scriptEmbedsSpecFieldUnconditionally() {
+    var content = SailEventHelper.scriptContent();
+    assertTrue(
+        content.contains("\\\"spec\\\":\\\"$SPEC_ID\\\""),
+        "spec field is always populated when the event is sent");
+    assertFalse(
+        content.contains("SPEC_FIELD"),
+        "the old conditional SPEC_FIELD branch should have been removed");
   }
 
   @Test

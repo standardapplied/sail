@@ -95,17 +95,36 @@ public enum AgentCli {
    * @param fullPermissions whether to auto-approve all actions
    */
   public String headlessCommand(String taskFile, boolean fullPermissions) {
-    return headlessCommand(taskFile, fullPermissions, null, null);
+    return headlessCommand(taskFile, fullPermissions, null, null, null);
   }
 
   public String headlessCommand(
       String taskFile, boolean fullPermissions, String model, String reasoningEffort) {
+    return headlessCommand(taskFile, fullPermissions, model, reasoningEffort, null);
+  }
+
+  /**
+   * Same as {@link #headlessCommand(String, boolean, String, String)} but lets the harness layer
+   * inject a {@code --settings <path>} argument for Claude Code so sail-launched sessions load the
+   * sail-owned hooks without polluting interactive engineer sessions. Non-Claude agents ignore
+   * {@code claudeSettingsPath}.
+   */
+  public String headlessCommand(
+      String taskFile,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String claudeSettingsPath) {
     var task = "\"$(cat " + taskFile + ")\"";
     return switch (this) {
       case CLAUDE_CODE -> {
         requireNoModelOptions(model, reasoningEffort);
         var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
-        yield binaryName + " --print" + perm + " -p " + task;
+        var settings =
+            claudeSettingsPath == null || claudeSettingsPath.isBlank()
+                ? ""
+                : " --settings " + claudeSettingsPath;
+        yield binaryName + " --print" + settings + perm + " -p " + task;
       }
       case CODEX -> {
         var perm = fullPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";

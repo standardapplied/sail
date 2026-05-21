@@ -132,9 +132,11 @@ public final class ProjectProvisioner {
 
   /**
    * Idempotently bind-mounts the host's sail-api event socket into the container at {@code
-   * /run/sail/api.sock} and installs the {@code sail-event.sh} hook helper at {@code
-   * ~/.sail/bin/sail-event.sh}. Failure is logged but non-fatal — without these, agent hooks fall
-   * back to file-only audit and lose the live event-bus fan-out from inside the container.
+   * /run/sail/api.sock}, installs the {@code sail-event.sh} hook helper at {@code
+   * ~/.sail/bin/sail-event.sh}, and writes the sail-owned Claude Code settings file at {@code
+   * ~/.sail/claude-settings.json}. Failure of any step is logged but non-fatal — without these,
+   * agent hooks fall back to file-only audit and lose the live event-bus fan-out from inside the
+   * container.
    */
   private void attachEventSocket(String container) {
     try {
@@ -156,6 +158,15 @@ public final class ProjectProvisioner {
     } catch (Exception e) {
       System.err.println(
           "  [provision] Warning: failed to install sail-event.sh in "
+              + container
+              + ": "
+              + e.getMessage());
+    }
+    try {
+      new ClaudeCodeHookConfig(shell).install(container);
+    } catch (Exception e) {
+      System.err.println(
+          "  [provision] Warning: failed to install claude-settings.json in "
               + container
               + ": "
               + e.getMessage());
