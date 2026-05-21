@@ -85,8 +85,8 @@ public final class ProjectSyncCommand implements Runnable {
       System.out.println();
     }
 
-    var hostSocket = SailPaths.apiSocketPath();
-    var containerSocket = SailPaths.apiSocketContainerPath();
+    var hostSocket = SailPaths.apiSocketHostDir();
+    var containerSocket = SailPaths.apiSocketContainerDir();
     var results = new ArrayList<LinkedHashMap<String, Object>>();
     var added = 0;
     var replaced = 0;

@@ -48,6 +48,12 @@ public final class IncusDeviceManager {
   /**
    * Idempotently attaches the {@code sail-api-sock} disk device to the given container, binding
    * {@code hostPath} on the host to {@code containerPath} inside the container.
+   *
+   * <p>Callers must pass <em>directory</em> paths (not the socket file itself). The {@code
+   * sail-api} listener unlinks and recreates its socket on every start; a file-level bind mount
+   * pins the container to the stale inode and breaks all in-container hook deliveries. A directory
+   * mount stays valid because the kernel resolves the file lookup through the live mountpoint on
+   * every {@code connect()}.
    */
   public EnsureResult ensureEventSocket(String container, Path hostPath, Path containerPath)
       throws IOException, InterruptedException, TimeoutException {

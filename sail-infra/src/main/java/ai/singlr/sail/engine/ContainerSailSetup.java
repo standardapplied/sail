@@ -10,42 +10,51 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Self-healing entry point for sail's in-container plumbing. Probes for the three sail-owned files
- * that {@link ProjectProvisioner#attachEventSocket} installs at provision time (sail-event.sh
- * helper, claude-settings.json, codex hooks.json) and re-runs the installers when any of them is
- * missing. Designed for the dispatch hot path: when everything is present the cost is one
- * in-container {@code test -f} call.
+ * Self-healing entry point for sail's in-container plumbing. Reconciles two things on every
+ * dispatch:
  *
- * <p>Containers provisioned before this code shipped — or containers that lost the files in some
- * way — will get backfilled automatically the next time {@code sail dispatch} runs, instead of
- * silently losing lifecycle events until the engineer remembers to run {@code sail project sync}.
+ * <ol>
+ *   <li><b>Event-socket bind mount.</b> {@link IncusDeviceManager#ensureEventSocket} is called
+ *       every time so the source path matches the current {@link SailPaths#apiSocketHostDir()} —
+ *       containers provisioned before the directory-mount fix (file-level mounts that stranded on
+ *       stale inodes when {@code sail-api} restarted) get auto-migrated to the directory mount on
+ *       the next dispatch.
+ *   <li><b>Helper files in the container.</b> {@code sail-event.sh}, {@code claude-settings.json},
+ *       and {@code codex hooks.json} are probed with a single {@code test -f} chain; if any is
+ *       missing the three installers re-run.
+ * </ol>
+ *
+ * Designed for the dispatch hot path: ensureEventSocket is one idempotent shell call, the
+ * file-existence probe is one more, and only a broken/missing setup costs the four installer
+ * shells.
  */
 public final class ContainerSailSetup {
 
   private ContainerSailSetup() {}
 
-  /** Result of a setup probe + install. */
+  /** Result of a setup reconciliation. */
   public enum Result {
-    /** All sail-owned files were already in place; no install ran. */
+    /** Mount and all sail-owned files were already in place; no install ran. */
     ALREADY_PRESENT,
-    /** At least one file was missing; the full set was reinstalled. */
+    /** Mount was added or replaced, or at least one helper file was missing. */
     BACKFILLED
   }
 
   /**
-   * Ensures the sail event socket is mounted and the three sail-owned helper files are installed
-   * inside {@code container}. Cheap when everything is present (single {@code test -f} chain),
-   * idempotent otherwise.
+   * Reconciles the event-socket bind mount and the three sail-owned helper files in {@code
+   * container}. Idempotent.
    */
   public static Result ensureInstalled(ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
-    if (allFilesPresent(shell, container)) {
+    var mountResult =
+        new IncusDeviceManager(shell)
+            .ensureEventSocket(
+                container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
+    if (allFilesPresent(shell, container)
+        && mountResult == IncusDeviceManager.EnsureResult.ALREADY_PRESENT) {
       return Result.ALREADY_PRESENT;
     }
-    new IncusDeviceManager(shell)
-        .ensureEventSocket(
-            container, SailPaths.apiSocketPath(), SailPaths.apiSocketContainerPath());
     new SailEventHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);

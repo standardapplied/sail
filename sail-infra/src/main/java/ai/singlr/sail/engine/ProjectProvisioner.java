@@ -142,7 +142,7 @@ public final class ProjectProvisioner {
     try {
       var manager = new IncusDeviceManager(shell);
       manager.ensureEventSocket(
-          container, SailPaths.apiSocketPath(), SailPaths.apiSocketContainerPath());
+          container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
     } catch (Exception e) {
       System.err.println(
           "  [provision] Warning: failed to attach event socket to "

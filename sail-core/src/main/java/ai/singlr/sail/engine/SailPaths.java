@@ -108,7 +108,9 @@ public final class SailPaths {
    *       parent via {@code RuntimeDirectory=sail} on the {@code sail-api.service} unit).
    *   <li>{@code $XDG_RUNTIME_DIR} is set → {@code $XDG_RUNTIME_DIR/sail/api.sock} (user-level
    *       systemd creates the parent via the same directive on the user unit).
-   *   <li>Fallback for dev environments without {@code XDG_RUNTIME_DIR} → {@code ~/.sail/api.sock}.
+   *   <li>Fallback for dev environments without {@code XDG_RUNTIME_DIR} → {@code
+   *       ~/.sail/run/api.sock} (dedicated subdirectory so the parent can be bind-mounted without
+   *       exposing the rest of {@code ~/.sail}).
    * </ol>
    */
   public static Path apiSocketPath() {
@@ -123,7 +125,7 @@ public final class SailPaths {
     if (xdgRuntimeDir != null && !xdgRuntimeDir.isBlank()) {
       return Path.of(xdgRuntimeDir, "sail", "api.sock");
     }
-    return SAIL_DIR.resolve("api.sock");
+    return SAIL_DIR.resolve("run/api.sock");
   }
 
   private static boolean isRoot() {
@@ -133,6 +135,21 @@ public final class SailPaths {
   /** Container-side mount point for {@link #apiSocketPath()}. Same on every project. */
   public static Path apiSocketContainerPath() {
     return Path.of("/run/sail/api.sock");
+  }
+
+  /**
+   * Parent directory of {@link #apiSocketPath()} on the host. This is what gets bind-mounted into
+   * project containers. Mounting the directory (not the socket file) is the only way to survive
+   * {@code sail-api} restarts: the listener unlinks and recreates the socket on every start, which
+   * strands any file-level bind mount on the old inode.
+   */
+  public static Path apiSocketHostDir() {
+    return apiSocketPath().getParent();
+  }
+
+  /** Container-side directory corresponding to {@link #apiSocketHostDir()}. */
+  public static Path apiSocketContainerDir() {
+    return apiSocketContainerPath().getParent();
   }
 
   /**
