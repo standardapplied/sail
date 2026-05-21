@@ -157,6 +157,7 @@ public final class SystemdServiceInstaller {
         LimitNOFILE=4096
         RuntimeDirectory=sail
         RuntimeDirectoryMode=0755
+        RuntimeDirectoryPreserve=yes
 
         [Install]
         WantedBy=%s
@@ -180,6 +181,35 @@ public final class SystemdServiceInstaller {
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
     requireSuccess(
         shell.exec(systemctl("enable", "--now", UNIT_NAME)), "Failed to enable+start " + UNIT_NAME);
+  }
+
+  /**
+   * Re-renders the unit file from the current template and rewrites it iff the on-disk content
+   * differs. Runs {@code daemon-reload} when a rewrite happens so the new content takes effect.
+   * Does NOT enable or start the service — the caller is responsible for that (the upgrade flow,
+   * for example, restarts an already-running service after reconciliation).
+   *
+   * <p>This is the seam that prevents binary-only upgrades from leaving stale unit content on disk
+   * — the bug class that held 0.12.5 / 0.12.6 in production stuck on a 0.12.0-era {@code
+   * RuntimeDirectoryMode}.
+   *
+   * @return {@code true} if the on-disk unit was rewritten; {@code false} if it already matched.
+   */
+  public boolean reconcile() throws IOException, InterruptedException, TimeoutException {
+    var expected = renderUnit();
+    String onDisk;
+    try {
+      onDisk = Files.readString(serviceFilePath);
+    } catch (java.nio.file.NoSuchFileException nsf) {
+      install();
+      return true;
+    }
+    if (expected.equals(onDisk)) {
+      return false;
+    }
+    Files.writeString(serviceFilePath, expected);
+    requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
+    return true;
   }
 
   /**

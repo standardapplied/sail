@@ -73,6 +73,39 @@ public final class IncusDeviceManager {
     return EnsureResult.REPLACED;
   }
 
+  /**
+   * Force-refreshes the {@code sail-api-sock} device by removing it (if present) and re-adding it.
+   * Use this on the dispatch hot path: a bind mount's path can match the configured source yet
+   * still resolve to a stale inode after the host directory has been recreated (systemd's {@code
+   * RuntimeDirectory=} cleanup, for example). Removing and re-adding forces Incus to resolve the
+   * source against the current inode.
+   *
+   * <p>Callers in steady state should still prefer {@link #ensureEventSocket} for one-time
+   * provisioning; this method exists specifically for repeated reconciliation where freshness
+   * matters more than the extra two {@code incus} calls.
+   */
+  public void refreshEventSocket(String container, Path hostPath, Path containerPath)
+      throws IOException, InterruptedException, TimeoutException {
+    NameValidator.requireValidProjectName(container);
+    Objects.requireNonNull(hostPath, "hostPath");
+    Objects.requireNonNull(containerPath, "containerPath");
+    if (currentEventSocketSource(container) != null) {
+      var result =
+          shell.exec(
+              List.of("incus", "config", "device", "remove", container, EVENT_SOCKET_DEVICE));
+      if (!result.ok()) {
+        throw new IOException(
+            "Failed to remove "
+                + EVENT_SOCKET_DEVICE
+                + " from "
+                + container
+                + ": "
+                + result.stderr());
+      }
+    }
+    addEventSocket(container, hostPath, containerPath);
+  }
+
   /** Removes the {@code sail-api-sock} device if present. Idempotent — no-op if absent. */
   public void removeEventSocket(String container)
       throws IOException, InterruptedException, TimeoutException {

@@ -42,17 +42,20 @@ public final class ContainerSailSetup {
 
   /**
    * Reconciles the event-socket bind mount and the three sail-owned helper files in {@code
-   * container}. Idempotent.
+   * container}. The mount is force-refreshed on every call (remove + re-add) because Incus tracks
+   * the bind by inode, and the source directory can be recreated under the same path by {@code
+   * systemd}'s {@code RuntimeDirectory=} cleanup — the only signal that the existing mount is stale
+   * is the inode mismatch, which Incus does not surface in {@code config device show}. Idempotent
+   * at the user-visible level (post-call the mount always points at the current inode); costs two
+   * extra {@code incus} shell calls per dispatch.
    */
   public static Result ensureInstalled(ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
-    var mountResult =
-        new IncusDeviceManager(shell)
-            .ensureEventSocket(
-                container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
-    if (allFilesPresent(shell, container)
-        && mountResult == IncusDeviceManager.EnsureResult.ALREADY_PRESENT) {
+    new IncusDeviceManager(shell)
+        .refreshEventSocket(
+            container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
+    if (allFilesPresent(shell, container)) {
       return Result.ALREADY_PRESENT;
     }
     new SailEventHelper(shell).install(container);

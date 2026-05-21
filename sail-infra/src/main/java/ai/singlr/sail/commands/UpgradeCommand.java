@@ -196,14 +196,17 @@ public final class UpgradeCommand implements Runnable {
     if (dryRun) {
       if (!json) {
         System.out.println(
-            Banner.stepLine(stepNum, totalSteps, "Restart sail-api if running...", Ansi.AUTO));
+            Banner.stepLine(stepNum, totalSteps, "Reconcile + restart sail-api...", Ansi.AUTO));
         System.out.println(
-            "[dry-run] Would probe + restart sail-api.service via systemctl when installed.");
+            "[dry-run] Would re-render the unit file from the new binary, daemon-reload, and"
+                + " restart sail-api.service when installed.");
       }
       return RestartStatus.DRY_RUN;
     }
     if (!json) {
-      System.out.println(Banner.stepLine(stepNum, totalSteps, "Restarting sail-api...", Ansi.AUTO));
+      System.out.println(
+          Banner.stepLine(
+              stepNum, totalSteps, "Reconciling sail-api unit + restart...", Ansi.AUTO));
     }
     try {
       var shell = new ShellExecutor(false);
@@ -218,6 +221,10 @@ public final class UpgradeCommand implements Runnable {
         }
         return RestartStatus.NOT_INSTALLED;
       }
+      // Re-render the unit file IF it drifted from the new binary's template. Without this,
+      // template changes shipped with a new binary stay invisible to systemd — the bug that
+      // silently held 0.12.5 / 0.12.6 in production stuck on the 0.12.0 RuntimeDirectory mode.
+      var driftReconciled = reconcileUnitFile(installer);
       var status = installer.status();
       if (!status.running()) {
         if (!json) {
@@ -225,7 +232,8 @@ public final class UpgradeCommand implements Runnable {
               Banner.stepDoneLine(
                   stepNum,
                   totalSteps,
-                  "sail-api is installed but not running; left as-is",
+                  "sail-api is installed but not running; left as-is"
+                      + (driftReconciled ? " (unit file reconciled)" : ""),
                   Ansi.AUTO));
         }
         return RestartStatus.NOT_RUNNING;
@@ -234,11 +242,12 @@ public final class UpgradeCommand implements Runnable {
       if (!json) {
         var modeLabel =
             installer.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";
+        var reconciledTag = driftReconciled ? " (unit file reconciled)" : "";
         System.out.println(
             Banner.stepDoneLine(
                 stepNum,
                 totalSteps,
-                "Restarted sail-api (" + modeLabel + ") on the new binary",
+                "Restarted sail-api (" + modeLabel + ") on the new binary" + reconciledTag,
                 Ansi.AUTO));
       }
       return RestartStatus.RESTARTED;
@@ -254,6 +263,14 @@ public final class UpgradeCommand implements Runnable {
       }
       return RestartStatus.FAILED;
     }
+  }
+
+  /**
+   * Delegates to {@link SystemdServiceInstaller#reconcile} so a binary upgrade that ships a
+   * template change rewrites the on-disk unit and {@code daemon-reload}s before the restart.
+   */
+  private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
+    return installer.reconcile();
   }
 
   /** Lifecycle outcome for the {@code sail-api} restart step. */

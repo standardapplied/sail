@@ -15,53 +15,67 @@ class ContainerSailSetupTest {
   private static final String CONTAINER = "light-grid";
 
   @Test
-  void returnsAlreadyPresentWhenMountMatchesAndAllFilesExist() throws Exception {
-    // ensureEventSocket: existing source already equals the expected dir → ALREADY_PRESENT
-    // file probe: all three sail files present → OK
-    var hostDir = SailPaths.apiSocketHostDir().toString();
+  void returnsAlreadyPresentWhenAllFilesExist() throws Exception {
+    // refresh: device present, gets removed + re-added (3 incus calls: get, remove, add)
+    // probe: all three sail files present → OK
     var shell =
-        new ScriptedShellExecutor()
-            .onOk("config device get " + CONTAINER, hostDir + "\n")
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(ContainerSailSetup.Result.ALREADY_PRESENT, result);
-    assertEquals(
-        2,
-        shell.invocations().size(),
-        "happy path: one device-get + one file probe, no installer runs");
-  }
-
-  @Test
-  void backfillsWhenMountSourceDiffers() throws Exception {
-    // ensureEventSocket: existing source is the legacy file-level mount → REPLACED
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, "/run/sail/api.sock\n")
-            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
-
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
-        result,
-        "mount source changing from /run/sail/api.sock to /run/sail must trigger backfill");
     var commands = shell.invocations();
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("config device remove")),
-        "legacy device should be removed before re-adding with the directory source");
+        "the bind mount must be removed + re-added on every dispatch to refresh the inode");
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("config device add")),
-        "new device should be added pointing at the directory");
+        "the bind mount must be re-added after removal");
+  }
+
+  @Test
+  void refreshHappensEvenWhenSourcePathUnchanged() throws Exception {
+    // Same source path on host and container — the bug class 0.12.5/0.12.6 missed.
+    // refreshEventSocket must still tear down + re-add so the kernel re-resolves the inode.
+    var hostDir = SailPaths.apiSocketHostDir().toString();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, hostDir + "\n")
+            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var commands = shell.invocations();
+    assertTrue(
+        commands.stream().anyMatch(c -> c.contains("config device remove")),
+        "identical source paths must NOT short-circuit the refresh — that was the staleness bug");
+  }
+
+  @Test
+  void addsFreshMountWhenNotConfigured() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("config device get " + CONTAINER, "Device not found")
+            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var commands = shell.invocations();
+    assertTrue(
+        commands.stream().anyMatch(c -> c.contains("config device add")),
+        "fresh mount must be added when the device was not previously configured");
+    assertFalse(
+        commands.stream().anyMatch(c -> c.contains("config device remove")),
+        "no remove needed when the device was absent");
   }
 
   @Test
   void probeCommandChecksAllThreeFilePaths() throws Exception {
-    var hostDir = SailPaths.apiSocketHostDir().toString();
     var shell =
-        new ScriptedShellExecutor()
-            .onOk("config device get " + CONTAINER, hostDir + "\n")
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("config device get " + CONTAINER, "Device not found")
             .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
 
     ContainerSailSetup.ensureInstalled(shell, CONTAINER);
@@ -74,11 +88,10 @@ class ContainerSailSetupTest {
   }
 
   @Test
-  void backfillsWhenFilesMissing() throws Exception {
-    var hostDir = SailPaths.apiSocketHostDir().toString();
+  void backfillsHelperFilesWhenMissing() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, hostDir + "\n")
+            .onFail("config device get " + CONTAINER, "Device not found")
             .onFail("test -f /home/dev/.sail/bin/sail-event.sh", "missing");
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
@@ -104,7 +117,7 @@ class ContainerSailSetupTest {
   }
 
   @Test
-  void propagatesEnsureSocketFailure() {
+  void propagatesRefreshFailure() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("config device get", "Device not found")

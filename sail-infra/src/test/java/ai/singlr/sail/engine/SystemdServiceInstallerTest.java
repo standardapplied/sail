@@ -142,6 +142,10 @@ class SystemdServiceInstallerTest {
     assertTrue(
         unit.contains("RuntimeDirectoryMode=0755"),
         "0755 is required so UID-mapped container processes can traverse /run/sail/");
+    assertTrue(
+        unit.contains("RuntimeDirectoryPreserve=yes"),
+        "preserve=yes keeps the dir inode stable across restarts so directory bind mounts in"
+            + " unprivileged Incus containers do not get stranded on the old (unlinked) inode");
     assertFalse(unit.contains("User=root"), "USER mode unit must not pin User=root");
   }
 
@@ -363,6 +367,62 @@ class SystemdServiceInstallerTest {
     assertTrue(userInstaller(home).enableLingerCommand().startsWith("sudo loginctl enable-linger"));
   }
 
+  // --------------------- reconcile (upgrade-path guard) ---------------------
+
+  @Test
+  void reconcileRewritesWhenOnDiskUnitDiffersFromTemplate(@TempDir Path home) throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var installer = userInstaller(home, shell);
+    Files.createDirectories(installer.serviceFilePath().getParent());
+    Files.writeString(installer.serviceFilePath(), "stale unit content from an old binary\n");
+
+    var rewrote = installer.reconcile();
+
+    assertTrue(rewrote, "reconcile must rewrite when on-disk content drifts from template");
+    assertEquals(installer.renderUnit(), Files.readString(installer.serviceFilePath()));
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.contains("daemon-reload")),
+        "reconcile must run daemon-reload after rewriting the unit file");
+  }
+
+  @Test
+  void reconcileNoOpsWhenUnitMatchesTemplate(@TempDir Path home) throws Exception {
+    var shell = new ScriptedShellExecutor();
+    var installer = userInstaller(home, shell);
+    Files.createDirectories(installer.serviceFilePath().getParent());
+    Files.writeString(installer.serviceFilePath(), installer.renderUnit());
+
+    var rewrote = installer.reconcile();
+
+    assertFalse(rewrote, "no rewrite expected when on-disk content equals the template");
+    assertTrue(
+        shell.invocations().isEmpty(),
+        "no shell calls expected on the no-op reconcile path: " + shell.invocations());
+  }
+
+  @Test
+  void reconcileFullInstallsWhenUnitFileMissing(@TempDir Path home) throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var installer = userInstaller(home, shell);
+
+    var rewrote = installer.reconcile();
+
+    assertTrue(rewrote);
+    assertTrue(Files.exists(installer.serviceFilePath()));
+    assertEquals(installer.renderUnit(), Files.readString(installer.serviceFilePath()));
+  }
+
+  @Test
+  void reconcilePropagatesDaemonReloadFailure(@TempDir Path home) throws Exception {
+    var shell = new ScriptedShellExecutor().onFail("daemon-reload", "no D-Bus");
+    var installer = userInstaller(home, shell);
+    Files.createDirectories(installer.serviceFilePath().getParent());
+    Files.writeString(installer.serviceFilePath(), "stale\n");
+
+    var ex = assertThrows(IOException.class, installer::reconcile);
+    assertTrue(ex.getMessage().contains("no D-Bus"));
+  }
+
   // --------------------- SYSTEM mode ---------------------
 
   @Test
@@ -395,6 +455,7 @@ class SystemdServiceInstallerTest {
         unit.contains("ExecStart=" + SAIL_BINARY + " api --host " + HOST + " --port " + PORT));
     assertTrue(unit.contains("RuntimeDirectory=sail"));
     assertTrue(unit.contains("RuntimeDirectoryMode=0755"));
+    assertTrue(unit.contains("RuntimeDirectoryPreserve=yes"));
   }
 
   @Test
