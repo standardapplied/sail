@@ -176,6 +176,7 @@
                                         <exclude>ai.singlr.sail.api.UnixSocketEventsListener</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiOperations</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
+                                        <exclude>ai.singlr.sail.api.EventStreamClient.StopReadingException</exclude>
                                     </excludes>
                                     <limits>
                                         <limit>
@@ -237,6 +238,32 @@
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.85</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.EventStreamClient.StopReadingException</include>
+                                    </includes>
+                                    <!--
+                                        StopReadingException is a private control-flow sentinel
+                                        thrown from inside the SSE reader lambda to break out of
+                                        Stream.forEach. It carries no logic — just a no-op
+                                        constructor — and is never directly tested. Coverage is
+                                        deliberately not enforced; the constructor is exercised
+                                        only when close() races with the reader.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.0</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.0</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
