@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.singlr</groupId>
         <artifactId>sail</artifactId>
-        <version>0.11.19</version>
+        <version>0.12.0</version>
     </parent>
 
     <artifactId>sail-harness</artifactId>
