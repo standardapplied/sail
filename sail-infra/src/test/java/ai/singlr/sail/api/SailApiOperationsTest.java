@@ -1024,6 +1024,86 @@ class SailApiOperationsTest {
     assertError(ErrorCode.SPEC_STATUS_UPDATE_FAILED, error);
   }
 
+  @Test
+  void publishEventFailsWhenBusNotWired() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    var result =
+        operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "host-01"));
+    assertError(ErrorCode.INTERNAL, result);
+  }
+
+  @Test
+  void publishEventReturnsStampedIdWhenBusWired(@TempDir Path tmp) throws Exception {
+    try (var bus = new EventBus()) {
+      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
+      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var result =
+          operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "host-01"));
+      assertTrue(result.isSuccess());
+      assertEquals(1L, get(result, "id"));
+      assertNotNull(get(result, "event"));
+    }
+  }
+
+  @Test
+  void recentEventsRejectsBadLimit() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(0));
+    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(-1));
+    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(99999));
+  }
+
+  @Test
+  void recentEventsEmptyWhenPersisterMissing() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    var result = operations.recentEvents(10);
+    assertTrue(result.isSuccess());
+    assertEquals(10, get(result, "limit"));
+    assertEquals(0, get(result, "returned"));
+  }
+
+  @Test
+  void recentEventsReplaysFromPersister(@TempDir Path tmp) throws Exception {
+    try (var bus = new EventBus()) {
+      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
+      bus.subscribe(persister);
+      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+
+      operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
+      operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
+
+      Thread.sleep(100);
+      var result = operations.recentEvents(5);
+      assertTrue(result.isSuccess());
+    }
+  }
+
+  @Test
+  void eventBusStatsEmptyWithoutBus() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    var result = operations.eventBusStats();
+    assertTrue(result.isSuccess());
+    assertEquals(0L, get(result, "published"));
+  }
+
+  @Test
+  void eventBusStatsReflectsBusState(@TempDir Path tmp) throws Exception {
+    try (var bus = new EventBus()) {
+      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
+      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
+      var result = operations.eventBusStats();
+      assertTrue(result.isSuccess());
+      assertEquals(1L, get(result, "published"));
+    }
+  }
+
+  private Path baseYamlPath(Path dir) throws IOException {
+    var yaml = dir.resolve("sail.yaml");
+    Files.writeString(yaml, baseYaml());
+    return yaml;
+  }
+
   private static Object get(Result<?> result, String key) {
     return ApiJson.withSchema(result.orThrow()).get(key);
   }

@@ -10,19 +10,36 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Default {@link ProjectNotificationsResolver}: reads {@code
  * ~/.sail/projects/&lt;name&gt;/sail.yaml} for each lookup. No caching — config changes are picked
  * up on the next event delivery, at the cost of one YAML parse per event. Acceptable at the event
  * rates we expect (orders of magnitude below sail.yaml-parse rate).
+ *
+ * <p>The path lookup is parameterized so tests can point at a temp directory without touching the
+ * real user-home location.
  */
 public final class SailYamlNotificationsResolver implements ProjectNotificationsResolver {
 
+  private final Function<String, Path> pathLookup;
+
+  public SailYamlNotificationsResolver() {
+    this(project -> SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR));
+  }
+
+  /** Test seam: replace the project-to-path lookup. */
+  public SailYamlNotificationsResolver(Function<String, Path> pathLookup) {
+    this.pathLookup = Objects.requireNonNull(pathLookup, "pathLookup");
+  }
+
   @Override
   public Notifications resolve(String project) {
-    var path = SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR);
-    if (!Files.exists(path)) {
+    var path = pathLookup.apply(project);
+    if (path == null || !Files.exists(path)) {
       return null;
     }
     try {

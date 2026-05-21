@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -100,11 +99,7 @@ public record WebhookMessage(String title, String message) {
   }
 
   private static String stringFromData(Event event, String key) {
-    var data = event.data();
-    if (data == null) {
-      return "";
-    }
-    var raw = ((Map<String, Object>) data).get(key);
+    var raw = event.data().get(key);
     return raw == null ? "" : raw.toString();
   }
 }

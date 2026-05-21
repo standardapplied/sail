@@ -223,4 +223,113 @@ class EventTest {
   void sailAgentConstant() {
     assertEquals("sail", Event.SAIL_AGENT);
   }
+
+  @Test
+  void fromJsonLineRejectsBlankProject() {
+    var line =
+        "{\"v\":1,\"ts\":\""
+            + TS
+            + "\",\"project\":\" \",\"type\":\"t\",\"agent\":\"a\",\"host\":\"h\"}";
+    assertThrows(IllegalArgumentException.class, () -> Event.fromJsonLine(line));
+  }
+
+  @Test
+  void fromMapParsesIntFieldAsLong() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 7L);
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(7, Event.fromMap(map).v());
+  }
+
+  @Test
+  void fromMapParsesIntFieldAsNumber() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 1.0d);
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(1, Event.fromMap(map).v());
+  }
+
+  @Test
+  void fromMapFallsBackOnUnrecognizedIntType() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", java.util.List.of(1, 2));
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(Event.CURRENT_VERSION, Event.fromMap(map).v());
+  }
+
+  @Test
+  void fromMapParsesLongFieldFromInteger() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 1);
+    map.put("id", 42);
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(42L, Event.fromMap(map).id());
+  }
+
+  @Test
+  void fromMapParsesLongFieldAsNumber() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 1);
+    map.put("id", 99.0d);
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(99L, Event.fromMap(map).id());
+  }
+
+  @Test
+  void fromMapParsesIntFieldAsString() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", "3");
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(3, Event.fromMap(map).v());
+  }
+
+  @Test
+  void fromMapParsesLongFieldAsString() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 1);
+    map.put("id", "8");
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(8L, Event.fromMap(map).id());
+  }
+
+  @Test
+  void fromMapFallsBackOnUnrecognizedLongType() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", 1);
+    map.put("id", java.util.List.of("x"));
+    map.put("ts", TS.toString());
+    map.put("project", "p");
+    map.put("type", "t");
+    map.put("agent", "a");
+    map.put("host", "h");
+    assertEquals(0L, Event.fromMap(map).id());
+  }
 }

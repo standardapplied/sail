@@ -403,6 +403,140 @@ class ApiRouterTest {
     assertThrows(IllegalArgumentException.class, () -> new BearerAuth(""));
   }
 
+  @Test
+  void publishEventReturnsStampedId() throws Exception {
+    try (var server = server()) {
+      var body =
+          "{\"v\":1,\"ts\":\"2026-05-21T12:34:56Z\",\"project\":\"light-grid\","
+              + "\"type\":\"spec_dispatched\",\"agent\":\"sail\",\"host\":\"host-01\"}";
+      var response = post(server, "/v1/events", "token", body);
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"id\": 1"));
+      assertTrue(response.body().contains("\"event\""));
+    }
+  }
+
+  @Test
+  void publishEventRejectsBadJsonBody() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/events", "token", "{not even json}");
+      assertEquals(400, response.statusCode());
+    }
+  }
+
+  @Test
+  void publishEventRejectsMissingRequiredField() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/events", "token", "{\"v\":1}");
+      assertEquals(400, response.statusCode());
+    }
+  }
+
+  @Test
+  void publishEventRejectsGet() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events", "token");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void recentEventsReturnsArray() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/recent", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"events\""));
+      assertTrue(response.body().contains("\"limit\": 100"));
+    }
+  }
+
+  @Test
+  void recentEventsHonorsLimitQueryParam() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/recent?limit=42", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"limit\": 42"));
+    }
+  }
+
+  @Test
+  void recentEventsRejectsInvalidLimit() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/recent?limit=99999", "token");
+      assertEquals(422, response.statusCode());
+    }
+  }
+
+  @Test
+  void recentEventsRejectsNonNumericLimit() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/recent?limit=abc", "token");
+      assertEquals(422, response.statusCode());
+    }
+  }
+
+  @Test
+  void eventBusStatsReturnsCounts() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/stats", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"published\""));
+      assertTrue(response.body().contains("\"subscribers\""));
+    }
+  }
+
+  @Test
+  void unknownEventsPathReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/bogus", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void deeplyNestedEventsPathReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events/recent/extra", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void recentEventsRejectsPost() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/events/recent", "token", "{}");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void eventBusStatsRejectsPost() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/events/stats", "token", "{}");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void eventsEndpointsRequireAuth() throws Exception {
+    try (var server = server()) {
+      assertEquals(401, get(server, "/v1/events/recent", null).statusCode());
+      assertEquals(401, get(server, "/v1/events/stats", null).statusCode());
+    }
+  }
+
+  @Test
+  void eventModelsCoverConstruction() {
+    var pub = new EventPublishResponse(7L, Map.of("k", "v"));
+    var recent = new RecentEventsResponse(10, 2, java.util.List.of(Map.of("a", 1)));
+    var stat = new SubscriberStatsView("audit", 1024, 0, 0L);
+    var stats = new EventBusStatsResponse(5L, 1L, java.util.List.of(stat));
+    assertEquals(7L, pub.id());
+    assertEquals(2, recent.returned());
+    assertEquals(1L, stats.rejectedSubscribers());
+    assertEquals("audit", stats.subscribers().getFirst().name());
+  }
+
   private static SailApiServer server() throws IOException {
     var server = new SailApiServer("127.0.0.1", 0, new FakeOperations(), "token");
     server.start();

@@ -52,7 +52,8 @@ public final class WebhookReactor implements EventSubscriber {
     this.senderFactory = Objects.requireNonNull(senderFactory, "senderFactory");
   }
 
-  private static WebhookSender defaultSender(String url) {
+  /** Test seam: returns a real outbound-HTTPS sender backed by {@link WebhookNotifier}. */
+  static WebhookSender defaultSender(String url) {
     var notifier = new WebhookNotifier(url);
     return notifier::notify;
   }
