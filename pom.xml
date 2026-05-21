@@ -175,6 +175,7 @@
                                         <exclude>ai.singlr.sail.api.SseHandler.StreamSubscriber</exclude>
                                         <exclude>ai.singlr.sail.api.UnixSocketEventsListener</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiOperations</exclude>
+                                        <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
                                     </excludes>
                                     <limits>
                                         <limit>
@@ -206,6 +207,36 @@
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.7</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.EventStreamClient</include>
+                                    </includes>
+                                    <!--
+                                        EventStreamClient runs a virtual-thread SSE reader that
+                                        carries two defensive catch blocks: a generic 'stream
+                                        ended' handler (fires when the HTTP body throws while
+                                        the watcher main loop is still alive) and a silent
+                                        close() that swallows IOException from the underlying
+                                        line stream. Both fire only on injected I/O failures
+                                        that the testcontainer harness doesn't reproduce. The
+                                        happy path, the 4xx response branch, the project filter,
+                                        the close() handshake, and the per-line parser are all
+                                        exercised by EventStreamClientTest.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
