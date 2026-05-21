@@ -204,6 +204,54 @@ public final class HostInitCommand implements Runnable {
     if (hostYaml.serverIp() != null) {
       System.out.println(Ansi.AUTO.string("    @|bold Server:|@   " + hostYaml.serverIp()));
     }
+
+    printApiServiceNextSteps(shell);
+  }
+
+  private void printApiServiceNextSteps(ShellExec shell) {
+    var sudoUser = System.getenv("SUDO_USER");
+    System.out.println();
+    System.out.println(Ansi.AUTO.string("  @|bold Next step:|@ enable the sail API service."));
+    if (sudoUser != null && !sudoUser.isBlank() && !"root".equals(sudoUser)) {
+      enableLingerForUser(shell, sudoUser);
+      System.out.println(Ansi.AUTO.string("    Run as @|bold " + sudoUser + "|@ (without sudo):"));
+    } else {
+      System.out.println("    Run as your dev user (without sudo):");
+    }
+    System.out.println(Ansi.AUTO.string("      @|bold sail host service install|@"));
+  }
+
+  private void enableLingerForUser(ShellExec shell, String user) {
+    try {
+      var result = shell.exec(java.util.List.of("loginctl", "enable-linger", user));
+      if (result.ok()) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green \u2713|@ Enabled systemd linger for user '"
+                    + user
+                    + "' (service survives logout)."));
+      } else {
+        System.err.println(
+            Banner.errorLine(
+                "Could not enable linger for '"
+                    + user
+                    + "': "
+                    + result.stderr().strip()
+                    + ". Run manually: sudo loginctl enable-linger "
+                    + user,
+                Ansi.AUTO));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not enable linger for '"
+                  + user
+                  + "': "
+                  + e.getMessage()
+                  + ". Run manually: sudo loginctl enable-linger "
+                  + user,
+              Ansi.AUTO));
+    }
   }
 
   private String detectAndSelectDisk(ShellExec shell) throws Exception {

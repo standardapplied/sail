@@ -15,7 +15,8 @@ import picocli.CommandLine.Command;
       HostInitCommand.class,
       HostStatusCommand.class,
       HostUpdateCommand.class,
-      HostConfigCommand.class
+      HostConfigCommand.class,
+      HostServiceCommand.class
     })
 public final class HostCommand implements Runnable {
 
