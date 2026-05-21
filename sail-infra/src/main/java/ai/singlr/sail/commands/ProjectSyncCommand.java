@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.SailEventHelper;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
@@ -61,6 +62,7 @@ public final class ProjectSyncCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var containers = new ContainerManager(shell);
     var devices = new IncusDeviceManager(shell);
+    var helper = new SailEventHelper(shell);
 
     List<String> targets;
     if (all) {
@@ -89,6 +91,7 @@ public final class ProjectSyncCommand implements Runnable {
     for (var project : targets) {
       try {
         var result = devices.ensureEventSocket(project, hostSocket, containerSocket);
+        helper.install(project);
         switch (result) {
           case ADDED -> added++;
           case REPLACED -> replaced++;
@@ -97,11 +100,16 @@ public final class ProjectSyncCommand implements Runnable {
         if (!json) {
           System.out.println(
               Ansi.AUTO.string(
-                  "  @|green ✓|@ " + project + " — event socket: " + result.name().toLowerCase()));
+                  "  @|green ✓|@ "
+                      + project
+                      + " — event socket: "
+                      + result.name().toLowerCase()
+                      + ", sail-event.sh: installed"));
         } else {
           var row = new LinkedHashMap<String, Object>();
           row.put("project", project);
           row.put("event_socket", result.name().toLowerCase());
+          row.put("sail_event_helper", "installed");
           results.add(row);
         }
       } catch (Exception e) {
