@@ -125,8 +125,32 @@ public final class ProjectProvisioner {
     if (!result.ok()) {
       throw new IOException("Failed to launch container: " + result.stderr());
     }
+    attachEventSocket(config.name());
     tracker.advance(currentPhase);
     stepDone(1, "Container " + config.name());
+  }
+
+  /**
+   * Idempotently bind-mounts the host's sail-api event socket into the container at {@code
+   * /run/sail/api.sock}. Failure is logged but non-fatal — projects without an attached socket fall
+   * back to file-only audit and lose the live event-bus fan-out from inside the container.
+   */
+  private void attachEventSocket(String container) {
+    try {
+      var manager = new IncusDeviceManager(shell);
+      manager.ensureEventSocket(
+          container, SailPaths.apiSocketPath(), SailPaths.apiSocketContainerPath());
+    } catch (Exception e) {
+      System.err.println(
+          "  [provision] Warning: failed to attach event socket to "
+              + container
+              + ": "
+              + e.getMessage()
+              + ". Container events from inside will not reach the host bus until you run 'sail"
+              + " project sync "
+              + container
+              + "'.");
+    }
   }
 
   private void setDiskQuota(SailYaml config, HostYaml host) throws Exception {

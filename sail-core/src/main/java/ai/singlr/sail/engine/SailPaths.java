@@ -101,6 +101,24 @@ public final class SailPaths {
   }
 
   /**
+   * Path of the event-ingress Unix domain socket. Located under {@code $XDG_RUNTIME_DIR/sail/} so
+   * the parent directory's lifecycle is owned by systemd ({@code RuntimeDirectory=sail}); falls
+   * back to {@code ~/.sail/api.sock} for development environments without {@code XDG_RUNTIME_DIR}.
+   */
+  public static Path apiSocketPath() {
+    var runtimeDir = System.getenv("XDG_RUNTIME_DIR");
+    if (runtimeDir != null && !runtimeDir.isBlank()) {
+      return Path.of(runtimeDir, "sail", "api.sock");
+    }
+    return SAIL_DIR.resolve("api.sock");
+  }
+
+  /** Container-side mount point for {@link #apiSocketPath()}. Same on every project. */
+  public static Path apiSocketContainerPath() {
+    return Path.of("/run/sail/api.sock");
+  }
+
+  /**
    * Returns the path to the running binary. Uses {@code /proc/self/exe} on Linux, falls back to
    * {@code /usr/local/bin/sail}.
    */

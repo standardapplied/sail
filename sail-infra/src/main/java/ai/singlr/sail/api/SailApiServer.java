@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.SailPaths;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -20,6 +22,7 @@ public final class SailApiServer implements AutoCloseable {
   private final EventBus.Subscription persisterSubscription;
   private final EventBus.Subscription webhookSubscription;
   private final SseHandler sseHandler;
+  private final UnixSocketEventsListener socketListener;
 
   public SailApiServer(String host, int port, ApiOperations operations, String token)
       throws IOException {
@@ -28,7 +31,9 @@ public final class SailApiServer implements AutoCloseable {
 
   /**
    * Construct with explicit event-bus wiring. When {@code eventBus} is non-null, the persister is
-   * registered as a subscriber and the operations layer will publish to it.
+   * registered as a subscriber, the SSE handler is mounted, and a Unix-socket events listener is
+   * started at {@link SailPaths#apiSocketPath()} so project containers can publish events without
+   * going over TCP.
    */
   public SailApiServer(
       String host,
@@ -37,6 +42,19 @@ public final class SailApiServer implements AutoCloseable {
       String token,
       EventBus eventBus,
       AuditPersister auditPersister)
+      throws IOException {
+    this(host, port, operations, token, eventBus, auditPersister, SailPaths.apiSocketPath());
+  }
+
+  /** Test / advanced constructor that lets the caller pick the UDS path. */
+  public SailApiServer(
+      String host,
+      int port,
+      ApiOperations operations,
+      String token,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      Path socketPath)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditPersister;
@@ -51,14 +69,20 @@ public final class SailApiServer implements AutoCloseable {
     if (eventBus != null) {
       sseHandler = new SseHandler(eventBus, auth);
       server.createContext("/v1/events/stream", sseHandler);
+      socketListener =
+          socketPath == null ? null : new UnixSocketEventsListener(eventBus, socketPath);
     } else {
       sseHandler = null;
+      socketListener = null;
     }
     server.setExecutor(executor);
   }
 
-  public void start() {
+  public void start() throws IOException {
     server.start();
+    if (socketListener != null) {
+      socketListener.start();
+    }
   }
 
   public int port() {
@@ -80,8 +104,16 @@ public final class SailApiServer implements AutoCloseable {
     return sseHandler;
   }
 
+  /** Returns the Unix-socket events listener, or {@code null} when no bus was configured. */
+  public UnixSocketEventsListener socketListener() {
+    return socketListener;
+  }
+
   @Override
   public void close() {
+    if (socketListener != null) {
+      socketListener.close();
+    }
     if (webhookSubscription != null) {
       webhookSubscription.close();
     }

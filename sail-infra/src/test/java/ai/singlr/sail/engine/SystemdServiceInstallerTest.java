@@ -122,6 +122,7 @@ class SystemdServiceInstallerTest {
     assertTrue(unit.contains("Restart=on-failure"));
     assertTrue(unit.contains("WantedBy=default.target"));
     assertTrue(unit.contains("LimitNOFILE=4096"));
+    assertTrue(unit.contains("RuntimeDirectory=sail"));
   }
 
   @Test

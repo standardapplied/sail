@@ -35,6 +35,7 @@ import picocli.CommandLine.Command;
       ProjectDestroyCommand.class,
       ProjectInstallAgentCommand.class,
       ProjectDemoCommand.class,
+      ProjectSyncCommand.class,
     })
 public final class ProjectCommand implements Runnable {
 
