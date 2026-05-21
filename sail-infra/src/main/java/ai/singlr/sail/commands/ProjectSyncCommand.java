@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ClaudeCodeHookConfig;
+import ai.singlr.sail.engine.CodexHookConfig;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NameValidator;
@@ -65,6 +66,7 @@ public final class ProjectSyncCommand implements Runnable {
     var devices = new IncusDeviceManager(shell);
     var helper = new SailEventHelper(shell);
     var claudeHooks = new ClaudeCodeHookConfig(shell);
+    var codexHooks = new CodexHookConfig(shell);
 
     List<String> targets;
     if (all) {
@@ -95,6 +97,7 @@ public final class ProjectSyncCommand implements Runnable {
         var result = devices.ensureEventSocket(project, hostSocket, containerSocket);
         helper.install(project);
         claudeHooks.install(project);
+        codexHooks.install(project);
         switch (result) {
           case ADDED -> added++;
           case REPLACED -> replaced++;
@@ -107,13 +110,15 @@ public final class ProjectSyncCommand implements Runnable {
                       + project
                       + " — event socket: "
                       + result.name().toLowerCase()
-                      + ", sail-event.sh: installed, claude-settings.json: installed"));
+                      + ", sail-event.sh: installed, claude-settings.json: installed,"
+                      + " codex hooks.json: installed"));
         } else {
           var row = new LinkedHashMap<String, Object>();
           row.put("project", project);
           row.put("event_socket", result.name().toLowerCase());
           row.put("sail_event_helper", "installed");
           row.put("claude_settings", "installed");
+          row.put("codex_hooks", "installed");
           results.add(row);
         }
       } catch (Exception e) {

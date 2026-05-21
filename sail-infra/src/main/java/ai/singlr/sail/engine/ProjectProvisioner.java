@@ -171,6 +171,15 @@ public final class ProjectProvisioner {
               + ": "
               + e.getMessage());
     }
+    try {
+      new CodexHookConfig(shell).install(container);
+    } catch (Exception e) {
+      System.err.println(
+          "  [provision] Warning: failed to install codex hooks.json in "
+              + container
+              + ": "
+              + e.getMessage());
+    }
   }
 
   private void setDiskQuota(SailYaml config, HostYaml host) throws Exception {
