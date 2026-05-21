@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
@@ -244,6 +245,7 @@ public final class DispatchCommand implements Runnable {
       }
     }
 
+    ensureSailSetup(shell, name);
     agentSession.ensureDirectory(name);
     agentSession.writeTaskFile(name, task);
     agentSession.writeSession(name, task, Objects.requireNonNullElse(branchName, ""));
@@ -353,6 +355,30 @@ public final class DispatchCommand implements Runnable {
         SpecAuditEvent.restarted(
             SpecAuditEvent.SAIL_AGENT, host, "restarted from " + found.status()));
     return found;
+  }
+
+  private void ensureSailSetup(ShellExecutor shell, String container) {
+    try {
+      var result = ContainerSailSetup.ensureInstalled(shell, container);
+      if (result == ContainerSailSetup.Result.BACKFILLED && !json) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|faint Backfilled sail event helpers in "
+                    + container
+                    + " (container predates current sail; reinstalled).|@"));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not backfill sail event helpers in "
+                  + container
+                  + ": "
+                  + e.getMessage()
+                  + ". Lifecycle events may not reach the bus; run 'sail project sync "
+                  + container
+                  + "' to retry.",
+              Ansi.AUTO));
+    }
   }
 
   static String buildTaskPrompt(Spec spec, String description, String specsDir) {

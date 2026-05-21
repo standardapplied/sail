@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.GitSpecSync;
@@ -650,6 +651,7 @@ public final class SailApiOperations implements ApiOperations {
       Spec spec,
       String agentType) {
     try {
+      ensureSailSetup(project);
       var session = new AgentSession(shell);
       session.ensureDirectory(project);
       session.writeTaskFile(project, task);
@@ -685,6 +687,18 @@ public final class SailApiOperations implements ApiOperations {
       launchWatcherIfGuardrails(project, config);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
+    }
+  }
+
+  private void ensureSailSetup(String project) {
+    try {
+      ContainerSailSetup.ensureInstalled(shell, project);
+    } catch (Exception e) {
+      System.err.println(
+          "  [api] Warning: failed to backfill sail event helpers in "
+              + project
+              + ": "
+              + e.getMessage());
     }
   }
 
