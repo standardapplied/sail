@@ -5,9 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-public record ApiError(String code, String message, String action, List<FieldError> fieldErrors) {
+public record ApiError(String code, String message, String action, List<FieldError> fieldErrors)
+    implements Mappable {
   public ApiError(String code, String message, String action) {
     this(code, message, action, List.of());
   }
@@ -23,5 +26,15 @@ public record ApiError(String code, String message, String action, List<FieldErr
         failure.errorMessage(),
         failure.action(),
         failure.fieldErrors());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("code", code);
+    m.put("message", message);
+    m.put("action", action);
+    m.put("field_errors", fieldErrors);
+    return m;
   }
 }

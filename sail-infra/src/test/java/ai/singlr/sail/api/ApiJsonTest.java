@@ -54,7 +54,7 @@ class ApiJsonTest {
     source.put("keep", "yes");
     source.put("skip", null);
     var encodedMap = ApiJson.encode(source);
-    var record = new SampleRecord("hello", null, ErrorCode.INTERNAL);
+    var record = new SampleMappable("hello", null, ErrorCode.INTERNAL);
     var encodedRecord = ApiJson.encode(record);
 
     assertEquals(Map.of("keep", "yes"), encodedMap);
@@ -62,7 +62,7 @@ class ApiJsonTest {
     var map = (Map<?, ?>) encodedRecord;
     assertEquals("hello", map.get("camel_case"));
     assertEquals("internal", map.get("error_code"));
-    assertFalse(map.containsKey("missing_value"));
+    assertFalse(map.containsKey("missing_value"), "null values from toMap() must be omitted");
   }
 
   @Test
@@ -73,20 +73,29 @@ class ApiJsonTest {
   }
 
   @Test
-  void wrapsRecordAccessorFailures() {
-    var record = new ExplodingRecord("value");
+  void failsFastOnRecordWithoutMappable() {
+    var record = new NotMappable("value");
 
-    var thrown = assertThrows(IllegalStateException.class, () -> ApiJson.encode(record));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> ApiJson.encode(record));
 
-    assertEquals("Failed to serialize API response", thrown.getMessage());
+    assertTrue(
+        thrown.getMessage().contains("Mappable"),
+        "fail-fast message should name the missing interface: " + thrown.getMessage());
   }
 
-  private record SampleRecord(String camelCase, String missingValue, ErrorCode errorCode) {}
-
-  private record ExplodingRecord(String value) {
+  /** Mappable record whose toMap() returns a null-bearing map; used to verify null-omission. */
+  private record SampleMappable(String camelCase, String missingValue, ErrorCode errorCode)
+      implements Mappable {
     @Override
-    public String value() {
-      throw new IllegalStateException("boom");
+    public Map<String, Object> toMap() {
+      var m = new java.util.LinkedHashMap<String, Object>();
+      m.put("camel_case", camelCase);
+      m.put("missing_value", missingValue);
+      m.put("error_code", errorCode);
+      return m;
     }
   }
+
+  /** Non-Mappable record used to verify the fail-fast path. */
+  private record NotMappable(String value) {}
 }

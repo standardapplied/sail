@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +37,18 @@ final class ApiJson {
       case Enum<?> enumValue -> enumValue.name().toLowerCase();
       case List<?> list -> list.stream().map(ApiJson::encode).toList();
       case Map<?, ?> map -> encodeMap((Map<Object, Object>) map);
-      default -> value.getClass().isRecord() ? encodeRecord(value) : value.toString();
+      case Mappable mappable -> encodeMap((Map<Object, Object>) (Map<?, ?>) mappable.toMap());
+      default -> {
+        if (value.getClass().isRecord()) {
+          throw new IllegalArgumentException(
+              "API record "
+                  + value.getClass().getName()
+                  + " must implement Mappable. Add 'implements Mappable' and a toMap() returning"
+                  + " a LinkedHashMap<String, Object> of its fields keyed by their snake_case"
+                  + " wire names.");
+        }
+        yield value.toString();
+      }
     };
   }
 
@@ -51,37 +61,5 @@ final class ApiJson {
       }
     }
     return map;
-  }
-
-  private static Map<String, Object> encodeRecord(Object record) {
-    var map = new LinkedHashMap<String, Object>();
-    for (var component : record.getClass().getRecordComponents()) {
-      var value = componentValue(record, component);
-      if (value != null) {
-        map.put(toSnakeCase(component.getName()), encode(value));
-      }
-    }
-    return map;
-  }
-
-  private static Object componentValue(Object record, RecordComponent component) {
-    try {
-      return component.getAccessor().invoke(record);
-    } catch (ReflectiveOperationException e) {
-      throw new IllegalStateException("Failed to serialize API response", e);
-    }
-  }
-
-  private static String toSnakeCase(String name) {
-    var builder = new StringBuilder();
-    for (var i = 0; i < name.length(); i++) {
-      var c = name.charAt(i);
-      if (Character.isUpperCase(c)) {
-        builder.append('_').append(Character.toLowerCase(c));
-      } else {
-        builder.append(c);
-      }
-    }
-    return builder.toString();
   }
 }
