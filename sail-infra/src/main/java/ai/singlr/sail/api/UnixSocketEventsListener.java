@@ -72,6 +72,30 @@ public final class UnixSocketEventsListener implements AutoCloseable {
     Files.deleteIfExists(socketPath);
     var channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     channel.bind(UnixDomainSocketAddress.of(socketPath));
+    // Unprivileged Incus containers bind-mount this socket and connect from inside, where their
+    // UID is host-shifted (e.g. host uid 1000000 maps to container root). Linux requires WRITE
+    // permission on the socket file to connect(), so the default umask-derived 0755 blocks every
+    // container process that isn't host-root. World-writable (0666) is the standard answer:
+    // access is gated by the bind-mount itself (only sail-provisioned containers see the socket)
+    // and at the application layer by the events-only HTTP routes the listener serves.
+    try {
+      Files.setPosixFilePermissions(
+          socketPath,
+          java.util.EnumSet.of(
+              java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+              java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+              java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+              java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
+              java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+              java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE));
+    } catch (UnsupportedOperationException | IOException permError) {
+      System.err.println(
+          "  [sail-uds] Warning: could not chmod 0666 "
+              + socketPath
+              + " ("
+              + permError.getMessage()
+              + "). Unprivileged containers may fail to connect.");
+    }
     this.server = channel;
     this.acceptLoop = Thread.ofVirtual().name("sail-uds-accept").start(this::runAcceptLoop);
   }
