@@ -722,6 +722,34 @@ class ApiRouterTest {
   }
 
   @Test
+  void agentSessionsReturns200() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects/acme/agent/sessions", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"project\": \"acme\""));
+      assertTrue(response.body().contains("\"sessions\""));
+      assertTrue(response.body().contains("\"agent\": \"claude-code\""));
+    }
+  }
+
+  @Test
+  void sessionViewModelCoversConstruction() {
+    var row =
+        new ai.singlr.sail.store.SessionStore.SessionRow(
+            "s1", "proj", "auth", "claude-code", "feat/auth", "task", 42, "running", "t0", null);
+    var view = SessionView.from(row);
+    assertEquals("s1", view.id());
+    assertEquals("proj", view.project());
+    assertEquals(42, view.pid());
+    var map = view.toMap();
+    assertEquals("claude-code", map.get("agent"));
+    assertFalse(map.containsKey("completed_at"));
+
+    var list = new SessionListResponse("proj", java.util.List.of(view));
+    assertEquals("proj", list.toMap().get("project"));
+  }
+
+  @Test
   void reviewsRequireAuth() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/reviews/review-123", null);
@@ -1093,6 +1121,23 @@ class ApiRouterTest {
     @Override
     public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
       return Result.success(new FindingDismissResponse(findingId, true));
+    }
+
+    @Override
+    public Result<SessionListResponse> agentSessions(String project) {
+      var session =
+          new SessionView(
+              "s1",
+              project,
+              "auth",
+              "claude-code",
+              "feat/auth",
+              "task",
+              1234,
+              "running",
+              "t0",
+              null);
+      return Result.success(new SessionListResponse(project, java.util.List.of(session)));
     }
   }
 

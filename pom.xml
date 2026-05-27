@@ -177,6 +177,7 @@
                                         <exclude>ai.singlr.sail.api.SailApiOperations</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiClient</exclude>
                                         <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
+                                        <exclude>ai.singlr.sail.api.AgentLogStreamer</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient.StopReadingException</exclude>
                                     </excludes>

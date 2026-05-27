@@ -14,6 +14,9 @@ import picocli.CommandLine.Command;
     subcommands = {
       AgentLaunchCommand.class,
       RunCommand.class,
+      AgentAttachCommand.class,
+      AgentStreamCommand.class,
+      AgentSessionsCommand.class,
       AgentStatusCommand.class,
       AgentStopCommand.class,
       AgentLogCommand.class,

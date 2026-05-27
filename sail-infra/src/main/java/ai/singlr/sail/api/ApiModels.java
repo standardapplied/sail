@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.GitSpecSync;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -728,6 +729,59 @@ record FindingDismissResponse(String findingId, boolean dismissed) implements Ma
     var m = new LinkedHashMap<String, Object>();
     m.put("finding_id", findingId);
     m.put("dismissed", dismissed);
+    return m;
+  }
+}
+
+record SessionView(
+    String id,
+    String project,
+    String specId,
+    String agent,
+    String branch,
+    String task,
+    Integer pid,
+    String status,
+    String startedAt,
+    String completedAt)
+    implements Mappable {
+  static SessionView from(SessionStore.SessionRow row) {
+    return new SessionView(
+        row.id(),
+        row.project(),
+        row.specId(),
+        row.agent(),
+        row.branch(),
+        row.task(),
+        row.pid(),
+        row.status(),
+        row.startedAt(),
+        row.completedAt());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("project", project);
+    if (specId != null) m.put("spec_id", specId);
+    m.put("agent", agent);
+    if (branch != null) m.put("branch", branch);
+    if (task != null) m.put("task", task);
+    if (pid != null) m.put("pid", pid);
+    m.put("status", status);
+    m.put("started_at", startedAt);
+    if (completedAt != null) m.put("completed_at", completedAt);
+    return m;
+  }
+}
+
+record SessionListResponse(String project, List<SessionView> sessions) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", project);
+    m.put("sessions", sessions);
     return m;
   }
 }

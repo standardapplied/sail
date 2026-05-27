@@ -63,4 +63,6 @@ public interface ApiOperations {
   Result<GlobalSpecContentResponse> setGlobalSpecContent(String specId, SpecContentRequest request);
 
   Result<GlobalBoardResponse> globalBoard();
+
+  Result<SessionListResponse> agentSessions(String project);
 }

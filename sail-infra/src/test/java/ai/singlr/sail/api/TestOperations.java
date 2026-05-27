@@ -217,4 +217,12 @@ class TestOperations implements ApiOperations {
   public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
     return Result.success(new FindingDismissResponse(findingId, true));
   }
+
+  @Override
+  public Result<SessionListResponse> agentSessions(String project) {
+    var session =
+        new SessionView(
+            "s1", project, "auth", "claude-code", "feat/auth", "task", 1234, "running", "t0", null);
+    return Result.success(new SessionListResponse(project, List.of(session)));
+  }
 }

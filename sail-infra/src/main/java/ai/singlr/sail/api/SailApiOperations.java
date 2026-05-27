@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.SpecWorkspace;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,6 +53,7 @@ public final class SailApiOperations implements ApiOperations {
   private final AuditPersister auditPersister;
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
+  private final SessionStore sessionStore;
 
   public SailApiOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -117,6 +119,18 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore) {
+    this(shell, file, watcherLauncher, eventBus, auditPersister, specStore, reviewStore, null);
+  }
+
+  SailApiOperations(
+      ShellExec shell,
+      String file,
+      WatcherLauncher watcherLauncher,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      SessionStore sessionStore) {
     this.shell = shell;
     this.file = file;
     this.watcherLauncher = watcherLauncher;
@@ -124,6 +138,7 @@ public final class SailApiOperations implements ApiOperations {
     this.auditPersister = auditPersister;
     this.specStore = specStore;
     this.reviewStore = reviewStore;
+    this.sessionStore = sessionStore;
   }
 
   @Override
@@ -1171,6 +1186,21 @@ public final class SailApiOperations implements ApiOperations {
                           ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found."));
           reviewStore.resolveFinding(findingId, ai.singlr.sail.store.Finding.Resolution.DISMISSED);
           return new FindingDismissResponse(findingId, true);
+        });
+  }
+
+  @Override
+  public Result<SessionListResponse> agentSessions(String project) {
+    return safe(
+        () -> {
+          if (sessionStore == null) {
+            throw new ApiException(
+                ErrorCode.INTERNAL,
+                "Session store not available. Start the server with 'sail server start'.");
+          }
+          var sessions =
+              sessionStore.listForProject(project).stream().map(SessionView::from).toList();
+          return new SessionListResponse(project, sessions);
         });
   }
 

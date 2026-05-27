@@ -43,6 +43,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String BOARD = "board";
   private static final String CONTENT = "content";
   private static final String REVIEWS = "reviews";
+  private static final String SESSIONS = "sessions";
   private static final String APPROVE = "approve";
   private static final String DISMISS = "dismiss";
   private static final int DEFAULT_TAIL = 200;
@@ -298,6 +299,10 @@ public final class ApiRouter implements HttpHandler {
       case REPORT -> {
         requireMethod(request, POST);
         yield ApiResponse.from(operations.agentReport(project));
+      }
+      case SESSIONS -> {
+        requireMethod(request, GET);
+        yield ApiResponse.from(operations.agentSessions(project));
       }
       default -> throw notFound();
     };
