@@ -134,7 +134,23 @@ public final class SchemaManager {
                   CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED'))
           )""",
           "CREATE INDEX IF NOT EXISTS idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX IF NOT EXISTS idx_review_findings_severity ON review_findings(severity)");
+          "CREATE INDEX IF NOT EXISTS idx_review_findings_severity ON review_findings(severity)",
+          """
+          CREATE TABLE IF NOT EXISTS agent_sessions (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT
+          )""",
+          "CREATE INDEX IF NOT EXISTS idx_agent_sessions_project ON agent_sessions(project)",
+          "CREATE INDEX IF NOT EXISTS idx_agent_sessions_spec ON agent_sessions(spec_id)");
 
   private final Sqlite db;
 
