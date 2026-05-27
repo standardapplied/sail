@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.store.SpecStore;
+
 public interface ApiOperations {
   Result<HealthResponse> health();
 
@@ -36,4 +38,20 @@ public interface ApiOperations {
 
   /** Returns per-subscriber + bus stats for {@code /v1/events/stats}. */
   Result<EventBusStatsResponse> eventBusStats();
+
+  Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter);
+
+  Result<GlobalSpecDetailResponse> globalSpec(String specId);
+
+  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
+
+  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(String specId, SpecUpdateRequest request);
+
+  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId);
+
+  Result<GlobalSpecContentResponse> globalSpecContent(String specId);
+
+  Result<GlobalSpecContentResponse> setGlobalSpecContent(String specId, SpecContentRequest request);
+
+  Result<GlobalBoardResponse> globalBoard();
 }

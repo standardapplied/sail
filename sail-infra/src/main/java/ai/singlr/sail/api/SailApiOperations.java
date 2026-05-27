@@ -893,6 +893,183 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
+  @Override
+  public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          var specs = specStore.list(filter).stream().map(GlobalSpecView::from).toList();
+          return new GlobalSpecsListResponse(specs, specs.size());
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          var row =
+              specStore
+                  .findById(specId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          var content = specStore.getContent(specId).orElse(null);
+          return new GlobalSpecDetailResponse(
+              GlobalSpecView.from(row),
+              content != null ? content.body() : null,
+              content != null ? content.plan() : null);
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          if (request.id() == null || request.id().isBlank()) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
+          }
+          if (request.title() == null || request.title().isBlank()) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "spec title is required.");
+          }
+          NameValidator.requireValidSpecId(request.id());
+          var row =
+              new SpecStore.SpecRow(
+                  request.id(),
+                  request.title(),
+                  request.status(),
+                  request.assignee(),
+                  request.agent(),
+                  request.model(),
+                  request.reasoningEffort(),
+                  request.branch(),
+                  request.priority(),
+                  null,
+                  "",
+                  "",
+                  request.dependsOn(),
+                  request.repos());
+          specStore.create(row);
+          if (request.body() != null || request.plan() != null) {
+            specStore.setContent(
+                request.id(),
+                Objects.requireNonNullElse(request.body(), ""),
+                Objects.requireNonNullElse(request.plan(), ""));
+          }
+          var created = specStore.findById(request.id()).orElseThrow();
+          return new GlobalSpecCreatedResponse(GlobalSpecView.from(created));
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
+      String specId, SpecUpdateRequest request) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          var existing =
+              specStore
+                  .findById(specId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          var updated =
+              new SpecStore.SpecRow(
+                  specId,
+                  request.title() != null ? request.title() : existing.title(),
+                  request.status() != null ? request.status() : existing.status(),
+                  request.assignee() != null ? request.assignee() : existing.assignee(),
+                  request.agent() != null ? request.agent() : existing.agent(),
+                  request.model() != null ? request.model() : existing.model(),
+                  request.reasoningEffort() != null
+                      ? request.reasoningEffort()
+                      : existing.reasoningEffort(),
+                  request.branch() != null ? request.branch() : existing.branch(),
+                  request.priority() != null ? request.priority() : existing.priority(),
+                  existing.createdBy(),
+                  existing.createdAt(),
+                  existing.updatedAt(),
+                  request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
+                  request.repos() != null ? request.repos() : existing.repos());
+          specStore.update(updated);
+          var result = specStore.findById(specId).orElseThrow();
+          return new GlobalSpecUpdatedResponse(GlobalSpecView.from(result));
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          specStore
+              .findById(specId)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          specStore.delete(specId);
+          return new GlobalSpecDeletedResponse(specId);
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecContentResponse> globalSpecContent(String specId) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          specStore
+              .findById(specId)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          var content = specStore.getContent(specId).orElse(new SpecStore.SpecContent("", "", ""));
+          return new GlobalSpecContentResponse(specId, content.body(), content.plan());
+        });
+  }
+
+  @Override
+  public Result<GlobalSpecContentResponse> setGlobalSpecContent(
+      String specId, SpecContentRequest request) {
+    return safe(
+        () -> {
+          requireSpecStore();
+          specStore
+              .findById(specId)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          specStore.setContent(
+              specId,
+              Objects.requireNonNullElse(request.body(), ""),
+              Objects.requireNonNullElse(request.plan(), ""));
+          var content = specStore.getContent(specId).orElseThrow();
+          return new GlobalSpecContentResponse(specId, content.body(), content.plan());
+        });
+  }
+
+  @Override
+  public Result<GlobalBoardResponse> globalBoard() {
+    return safe(
+        () -> {
+          requireSpecStore();
+          return new GlobalBoardResponse(specStore.board());
+        });
+  }
+
+  private void requireSpecStore() {
+    if (specStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Spec store not available. Start the server with 'sail server start'.");
+    }
+  }
+
   private record LoadedProject(SailYaml config, ContainerState state) {}
 
   @FunctionalInterface

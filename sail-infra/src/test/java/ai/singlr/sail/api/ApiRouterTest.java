@@ -703,6 +703,98 @@ class ApiRouterTest {
     public Result<EventBusStatsResponse> eventBusStats() {
       return Result.success(new EventBusStatsResponse(0L, 0L, java.util.List.of()));
     }
+
+    @Override
+    public Result<GlobalSpecsListResponse> globalSpecs(
+        ai.singlr.sail.store.SpecStore.SpecFilter filter) {
+      return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+    }
+
+    @Override
+    public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+      return Result.success(
+          new GlobalSpecDetailResponse(
+              new GlobalSpecView(
+                  specId,
+                  "Test",
+                  "pending",
+                  null,
+                  null,
+                  null,
+                  null,
+                  0,
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  null,
+                  "",
+                  ""),
+              null,
+              null));
+    }
+
+    @Override
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+      return Result.success(
+          new GlobalSpecCreatedResponse(
+              new GlobalSpecView(
+                  request.id(),
+                  request.title(),
+                  request.status(),
+                  null,
+                  null,
+                  null,
+                  null,
+                  0,
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  null,
+                  "",
+                  "")));
+    }
+
+    @Override
+    public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
+        String specId, SpecUpdateRequest request) {
+      return Result.success(
+          new GlobalSpecUpdatedResponse(
+              new GlobalSpecView(
+                  specId,
+                  "Updated",
+                  "pending",
+                  null,
+                  null,
+                  null,
+                  null,
+                  0,
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  null,
+                  "",
+                  "")));
+    }
+
+    @Override
+    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+      return Result.success(new GlobalSpecDeletedResponse(specId));
+    }
+
+    @Override
+    public Result<GlobalSpecContentResponse> globalSpecContent(String specId) {
+      return Result.success(new GlobalSpecContentResponse(specId, "", ""));
+    }
+
+    @Override
+    public Result<GlobalSpecContentResponse> setGlobalSpecContent(
+        String specId, SpecContentRequest request) {
+      return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
+    }
+
+    @Override
+    public Result<GlobalBoardResponse> globalBoard() {
+      return Result.success(
+          new GlobalBoardResponse(
+              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null)));
+    }
   }
 
   private static final class FailingOperations extends FakeOperations {

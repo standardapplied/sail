@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
@@ -22,6 +23,8 @@ public final class ApiRouter implements HttpHandler {
 
   private static final String GET = "GET";
   private static final String POST = "POST";
+  private static final String PUT = "PUT";
+  private static final String DELETE = "DELETE";
   private static final String V1 = "v1";
   private static final String HEALTH = "health";
   private static final String PROJECTS = "projects";
@@ -37,6 +40,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String RECENT = "recent";
   private static final String STATS = "stats";
   private static final String LIMIT = "limit";
+  private static final String BOARD = "board";
+  private static final String CONTENT = "content";
   private static final int DEFAULT_TAIL = 200;
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
@@ -91,6 +96,10 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.hasEventsPrefix()) {
       return routeEvents(exchange, request);
+    }
+
+    if (request.hasGlobalSpecsPrefix()) {
+      return routeGlobalSpecs(exchange, request);
     }
 
     if (!request.hasProjectPrefix()) {
@@ -152,6 +161,62 @@ public final class ApiRouter implements HttpHandler {
     }
     requireMethod(request, POST);
     return ApiResponse.from(operations.dispatch(project, JsonBody.readDispatchRequest(exchange)));
+  }
+
+  private ApiResponse routeGlobalSpecs(HttpExchange exchange, RouteRequest request)
+      throws IOException {
+    if (request.size() == 2) {
+      return switch (request.method()) {
+        case GET -> {
+          var params = QueryParameters.from(request.uri());
+          yield ApiResponse.from(
+              operations.globalSpecs(
+                  new SpecStore.SpecFilter(
+                      params.values().get("status"),
+                      params.values().get("assignee"),
+                      params.values().get("repo"),
+                      params.values().get("q"))));
+        }
+        case POST ->
+            ApiResponse.fromCreated(
+                operations.createGlobalSpec(SpecCreateRequest.fromMap(JsonBody.readMap(exchange))));
+        default -> throw methodNotAllowed();
+      };
+    }
+    if (request.size() == 3) {
+      var segment = request.segments().get(2);
+      if (BOARD.equals(segment)) {
+        requireMethod(request, GET);
+        return ApiResponse.from(operations.globalBoard());
+      }
+      var specId = segment;
+      NameValidator.requireValidSpecId(specId);
+      return switch (request.method()) {
+        case GET -> ApiResponse.from(operations.globalSpec(specId));
+        case PUT ->
+            ApiResponse.from(
+                operations.updateGlobalSpec(
+                    specId, SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))));
+        case DELETE -> ApiResponse.from(operations.deleteGlobalSpec(specId));
+        default -> throw methodNotAllowed();
+      };
+    }
+    if (request.size() == 4) {
+      var specId = request.segments().get(2);
+      NameValidator.requireValidSpecId(specId);
+      var sub = request.segments().get(3);
+      if (CONTENT.equals(sub)) {
+        return switch (request.method()) {
+          case GET -> ApiResponse.from(operations.globalSpecContent(specId));
+          case PUT ->
+              ApiResponse.from(
+                  operations.setGlobalSpecContent(
+                      specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
+          default -> throw methodNotAllowed();
+        };
+      }
+    }
+    throw notFound();
   }
 
   private ApiResponse routeEvents(HttpExchange exchange, RouteRequest request) throws IOException {
@@ -252,6 +317,10 @@ public final class ApiRouter implements HttpHandler {
 
     boolean hasEventsPrefix() {
       return segments.size() >= 2 && V1.equals(segments.get(0)) && EVENTS.equals(segments.get(1));
+    }
+
+    boolean hasGlobalSpecsPrefix() {
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && SPECS.equals(segments.get(1));
     }
 
     boolean isProjectRoot() {

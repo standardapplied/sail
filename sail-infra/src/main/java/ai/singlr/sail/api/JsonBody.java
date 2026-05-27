@@ -36,6 +36,10 @@ public final class JsonBody {
         optionalString(map, "branch"));
   }
 
+  public static Map<String, Object> readMap(HttpExchange exchange) throws IOException {
+    return read(exchange);
+  }
+
   public static Event readEvent(HttpExchange exchange) throws IOException {
     var map = read(exchange);
     try {

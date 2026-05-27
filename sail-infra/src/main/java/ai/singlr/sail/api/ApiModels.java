@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.GitSpecSync;
+import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -419,6 +420,201 @@ record SubscriberStatsView(String name, int capacity, int depth, long dropped) i
     m.put("capacity", capacity);
     m.put("depth", depth);
     m.put("dropped", dropped);
+    return m;
+  }
+}
+
+record SpecCreateRequest(
+    String id,
+    String title,
+    String status,
+    String assignee,
+    String agent,
+    String model,
+    String reasoningEffort,
+    String branch,
+    int priority,
+    List<String> dependsOn,
+    List<String> repos,
+    String body,
+    String plan) {
+
+  @SuppressWarnings("unchecked")
+  static SpecCreateRequest fromMap(Map<String, Object> map) {
+    return new SpecCreateRequest(
+        (String) map.get("id"),
+        (String) map.get("title"),
+        (String) map.getOrDefault("status", "draft"),
+        (String) map.get("assignee"),
+        (String) map.get("agent"),
+        (String) map.get("model"),
+        (String) map.get("reasoning_effort"),
+        (String) map.get("branch"),
+        map.containsKey("priority") ? ((Number) map.get("priority")).intValue() : 0,
+        map.containsKey("depends_on") ? (List<String>) map.get("depends_on") : List.of(),
+        map.containsKey("repos") ? (List<String>) map.get("repos") : List.of(),
+        (String) map.get("body"),
+        (String) map.get("plan"));
+  }
+}
+
+record SpecUpdateRequest(
+    String title,
+    String status,
+    String assignee,
+    String agent,
+    String model,
+    String reasoningEffort,
+    String branch,
+    Integer priority,
+    List<String> dependsOn,
+    List<String> repos) {
+
+  @SuppressWarnings("unchecked")
+  static SpecUpdateRequest fromMap(Map<String, Object> map) {
+    return new SpecUpdateRequest(
+        (String) map.get("title"),
+        (String) map.get("status"),
+        (String) map.get("assignee"),
+        (String) map.get("agent"),
+        (String) map.get("model"),
+        (String) map.get("reasoning_effort"),
+        (String) map.get("branch"),
+        map.containsKey("priority") ? ((Number) map.get("priority")).intValue() : null,
+        map.containsKey("depends_on") ? (List<String>) map.get("depends_on") : null,
+        map.containsKey("repos") ? (List<String>) map.get("repos") : null);
+  }
+}
+
+record SpecContentRequest(String body, String plan) {
+  static SpecContentRequest fromMap(Map<String, Object> map) {
+    return new SpecContentRequest((String) map.get("body"), (String) map.get("plan"));
+  }
+}
+
+record GlobalSpecView(
+    String id,
+    String title,
+    String status,
+    String assignee,
+    String agent,
+    String model,
+    String branch,
+    int priority,
+    List<String> dependsOn,
+    List<String> repos,
+    String createdBy,
+    String createdAt,
+    String updatedAt)
+    implements Mappable {
+  static GlobalSpecView from(SpecStore.SpecRow row) {
+    return new GlobalSpecView(
+        row.id(),
+        row.title(),
+        row.status(),
+        row.assignee(),
+        row.agent(),
+        row.model(),
+        row.branch(),
+        row.priority(),
+        row.dependsOn(),
+        row.repos(),
+        row.createdBy(),
+        row.createdAt(),
+        row.updatedAt());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("title", title);
+    m.put("status", status);
+    if (assignee != null) m.put("assignee", assignee);
+    if (agent != null) m.put("agent", agent);
+    if (model != null) m.put("model", model);
+    if (branch != null) m.put("branch", branch);
+    m.put("priority", priority);
+    if (!dependsOn.isEmpty()) m.put("depends_on", dependsOn);
+    if (!repos.isEmpty()) m.put("repos", repos);
+    if (createdBy != null) m.put("created_by", createdBy);
+    m.put("created_at", createdAt);
+    m.put("updated_at", updatedAt);
+    return m;
+  }
+}
+
+record GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("specs", specs);
+    m.put("total", total);
+    return m;
+  }
+}
+
+record GlobalSpecDetailResponse(GlobalSpecView spec, String body, String plan) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec", spec.toMap());
+    if (body != null) m.put("body", body);
+    if (plan != null) m.put("plan", plan);
+    return m;
+  }
+}
+
+record GlobalSpecCreatedResponse(GlobalSpecView spec) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec", spec.toMap());
+    return m;
+  }
+}
+
+record GlobalSpecUpdatedResponse(GlobalSpecView spec) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec", spec.toMap());
+    return m;
+  }
+}
+
+record GlobalSpecDeletedResponse(String id) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("deleted", true);
+    return m;
+  }
+}
+
+record GlobalSpecContentResponse(String specId, String body, String plan) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec_id", specId);
+    m.put("body", body);
+    m.put("plan", plan);
+    return m;
+  }
+}
+
+record GlobalBoardResponse(SpecStore.BoardSummary board) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("draft", board.draft());
+    m.put("pending", board.pending());
+    m.put("in_progress", board.inProgress());
+    m.put("review", board.review());
+    m.put("done", board.done());
+    m.put("archived", board.archived());
+    m.put("next_ready_id", board.nextReadyId());
     return m;
   }
 }
