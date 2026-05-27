@@ -281,7 +281,7 @@ public final class UpgradeCommand implements Runnable {
     var dbPath = SailPaths.sailDir().resolve("sail.db");
     if (dryRun) {
       if (!json) {
-        System.out.println("[dry-run] Would run database schema migration on " + dbPath);
+        System.out.println("[dry-run] Would initialize database and create API token at " + dbPath);
       }
       return;
     }
@@ -296,6 +296,17 @@ public final class UpgradeCommand implements Runnable {
           System.out.println(
               Ansi.AUTO.string(
                   "    @|faint Database schema migrated: " + before + " → " + after + "|@"));
+        }
+        var tokenStore = new ai.singlr.sail.store.TokenStore(db);
+        if (tokenStore.list().isEmpty()) {
+          var created = tokenStore.create("admin", "admin");
+          if (!json) {
+            System.out.println(
+                Ansi.AUTO.string(
+                    "    @|green ✓|@ API token created: @|bold " + created.token() + "|@"));
+            System.out.println(
+                Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
+          }
         }
       }
     } catch (Exception e) {

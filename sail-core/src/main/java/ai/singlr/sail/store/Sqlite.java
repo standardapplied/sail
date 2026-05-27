@@ -292,7 +292,11 @@ public final class Sqlite implements AutoCloseable {
       MethodHandle changes) {
 
     static SqliteLib load(Arena arena) {
-      var lookup = SymbolLookup.libraryLookup("libsqlite3.so.0", arena);
+      var libName =
+          System.getProperty("os.name", "").toLowerCase().contains("mac")
+              ? "libsqlite3.dylib"
+              : "libsqlite3.so.0";
+      var lookup = SymbolLookup.libraryLookup(libName, arena);
       var linker = Linker.nativeLinker();
 
       return new SqliteLib(
