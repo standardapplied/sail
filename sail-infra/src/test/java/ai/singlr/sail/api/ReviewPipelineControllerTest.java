@@ -475,25 +475,25 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void publishesEventsWhenBusProvided() throws Exception {
+  void executePipelinePublishesEventsWhenBusProvided() {
     createSpec("auth", "in_progress");
-    var latch = new CountDownLatch(1);
+    specStore.updateStatus("auth", "review");
+    var reviewId = reviewStore.createReview("auth", 1);
+    reviewStore.updateReviewStatus(reviewId, "running");
+    reviewStore.createStage(reviewId, "security", "agent");
+
     try (var bus = new EventBus()) {
       var ctrl =
           new ReviewPipelineController(
               specStore,
               reviewStore,
               p -> singleAgentStage("no_critical"),
-              new LatchedRunner("[]", latch),
+              (p, a, pr) -> "[]",
               bus);
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      assertTrue(latch.await(5, TimeUnit.SECONDS));
-      ctrl.awaitCompletion(5000);
+      ctrl.executePipeline(reviewId, singleAgentStage("no_critical"), "test-project", "auth");
 
-      var review = reviewStore.latestReviewForSpec("auth");
-      assertTrue(review.isPresent());
-      assertEquals("passed", review.get().status());
+      assertTrue(bus.publishedCount() > 0);
     }
   }
 
