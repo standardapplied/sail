@@ -89,7 +89,52 @@ public final class SchemaManager {
                   CHECK (role IN ('admin', 'member')),
               created_at TEXT NOT NULL,
               last_used_at TEXT
-          )""");
+          )""",
+          """
+          CREATE TABLE IF NOT EXISTS reviews (
+              id TEXT PRIMARY KEY,
+              spec_id TEXT NOT NULL REFERENCES specs(id),
+              iteration INTEGER NOT NULL DEFAULT 1,
+              status TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'running', 'passed', 'failed', 'escalated')),
+              created_at TEXT NOT NULL,
+              completed_at TEXT
+          )""",
+          "CREATE INDEX IF NOT EXISTS idx_reviews_spec ON reviews(spec_id)",
+          """
+          CREATE TABLE IF NOT EXISTS review_stages (
+              id TEXT PRIMARY KEY,
+              review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              stage_type TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'running', 'passed', 'failed', 'skipped')),
+              reviewer TEXT,
+              started_at TEXT,
+              completed_at TEXT
+          )""",
+          "CREATE INDEX IF NOT EXISTS idx_review_stages_review ON review_stages(review_id)",
+          """
+          CREATE TABLE IF NOT EXISTS review_findings (
+              id TEXT PRIMARY KEY,
+              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
+              severity TEXT NOT NULL,
+              category TEXT NOT NULL,
+              file TEXT,
+              line_start INTEGER,
+              line_end INTEGER,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              evidence TEXT,
+              suggestion_before TEXT,
+              suggestion_after TEXT,
+              suggestion_rationale TEXT,
+              confidence REAL NOT NULL DEFAULT 0.0,
+              resolution TEXT NOT NULL DEFAULT 'OPEN'
+                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED'))
+          )""",
+          "CREATE INDEX IF NOT EXISTS idx_review_findings_stage ON review_findings(stage_id)",
+          "CREATE INDEX IF NOT EXISTS idx_review_findings_severity ON review_findings(severity)");
 
   private final Sqlite db;
 

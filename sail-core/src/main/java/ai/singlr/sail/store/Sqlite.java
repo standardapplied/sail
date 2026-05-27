@@ -193,6 +193,8 @@ public final class Sqlite implements AutoCloseable {
         }
         case Integer n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
         case Long n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
+        case Double d -> rc = (int) lib.bindDouble.invokeExact(stmt, idx, (double) d);
+        case Float f -> rc = (int) lib.bindDouble.invokeExact(stmt, idx, (double) f);
         default ->
             throw new SqliteException("Unsupported bind type: " + param.getClass().getName(), 0);
       }
@@ -279,6 +281,7 @@ public final class Sqlite implements AutoCloseable {
       MethodHandle finalize_,
       MethodHandle bindText,
       MethodHandle bindInt64,
+      MethodHandle bindDouble,
       MethodHandle bindNull,
       MethodHandle columnText,
       MethodHandle columnInt64,
@@ -335,6 +338,13 @@ public final class Sqlite implements AutoCloseable {
                   ValueLayout.ADDRESS,
                   ValueLayout.JAVA_INT,
                   ValueLayout.JAVA_LONG)),
+          linker.downcallHandle(
+              lookup.find("sqlite3_bind_double").orElseThrow(),
+              FunctionDescriptor.of(
+                  ValueLayout.JAVA_INT,
+                  ValueLayout.ADDRESS,
+                  ValueLayout.JAVA_INT,
+                  ValueLayout.JAVA_DOUBLE)),
           linker.downcallHandle(
               lookup.find("sqlite3_bind_null").orElseThrow(),
               FunctionDescriptor.of(
