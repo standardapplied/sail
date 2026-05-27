@@ -91,4 +91,50 @@ class SailApiClientTest {
     var result = client.put("/v1/specs/test-spec/content", body);
     assertEquals("# Spec content", result.get("body"));
   }
+
+  @Test
+  void fromConfigThrowsWithoutToken() {
+    assertThrows(IOException.class, SailApiClient::fromConfig);
+  }
+
+  @Test
+  void fromConfigSucceedsWithSystemProperties() throws IOException {
+    System.setProperty("SAIL_SERVER", "http://127.0.0.1:" + server.port());
+    System.setProperty("SAIL_TOKEN", "test-token");
+    try (var fromConfig = SailApiClient.fromConfig()) {
+      var result = fromConfig.get("/v1/health");
+      assertEquals("ok", result.get("status"));
+    } finally {
+      System.clearProperty("SAIL_SERVER");
+      System.clearProperty("SAIL_TOKEN");
+    }
+  }
+
+  @Test
+  void notFoundReturnsGenericMessageWhenNoErrorField() throws Exception {
+    try (var noErrorServer =
+            new SailApiServer(
+                "127.0.0.1",
+                0,
+                new TestOperations() {
+                  @Override
+                  public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+                    return Result.failure(ErrorCode.SPEC_NOT_FOUND, "Not found.");
+                  }
+                },
+                "test-token");
+        var testClient =
+            new SailApiClient("http://127.0.0.1:" + noErrorServer.port(), "test-token")) {
+      noErrorServer.start();
+      var ex = assertThrows(IOException.class, () -> testClient.get("/v1/specs/missing"));
+      assertTrue(ex.getMessage().contains("Not found"));
+    }
+  }
+
+  @Test
+  void closeIsIdempotent() {
+    client.close();
+    client.close();
+    client = null;
+  }
 }

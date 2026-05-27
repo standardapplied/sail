@@ -645,6 +645,38 @@ class ApiRouterTest {
   }
 
   @Test
+  void globalSpecUnknownSubResourceReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/specs/auth-flow/unknown", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void globalSpecExtraDepthReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/specs/auth-flow/content/extra", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void globalSpecDeleteMethodNotAllowedOnContent() throws Exception {
+    try (var server = server()) {
+      var response = delete(server, "/v1/specs/auth-flow/content", "token");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void globalSpecPutMethodNotAllowedOnList() throws Exception {
+    try (var server = server()) {
+      var response = put(server, "/v1/specs", "token", "{}");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
   void globalSpecPostMethodNotAllowedOnDetail() throws Exception {
     try (var server = server()) {
       var response = post(server, "/v1/specs/auth-flow", "token", "{}");

@@ -41,4 +41,16 @@ class ApiResultIntegrationTest {
     assertEquals(404, failure.status());
     assertEquals("not_found", failure.body().toString().contains("not_found") ? "not_found" : null);
   }
+
+  @Test
+  void fromCreatedReturns201ForSuccess() {
+    var result = ApiResponse.fromCreated(Result.success(Map.of("id", "test")));
+    assertEquals(201, result.status());
+  }
+
+  @Test
+  void fromCreatedReturnsErrorForFailure() {
+    var result = ApiResponse.fromCreated(Result.failure(ErrorCode.INVALID_REQUEST, "Bad input."));
+    assertEquals(422, result.status());
+  }
 }

@@ -50,10 +50,6 @@ public final class ApiRouter implements HttpHandler {
   private final ApiOperations operations;
   private final ApiAuth auth;
 
-  public ApiRouter(ApiOperations operations, BearerAuth auth) {
-    this(operations, (ApiAuth) auth);
-  }
-
   public ApiRouter(ApiOperations operations, ApiAuth auth) {
     this.operations = operations;
     this.auth = auth;

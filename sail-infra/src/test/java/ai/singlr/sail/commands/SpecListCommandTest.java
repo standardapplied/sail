@@ -54,7 +54,6 @@ class SpecListCommandTest {
     assertTrue(help.contains("create"));
     assertTrue(help.contains("edit"));
     assertTrue(help.contains("board"));
-    assertTrue(help.contains("legacy"));
   }
 
   @Test
@@ -107,36 +106,6 @@ class SpecListCommandTest {
 
     assertEquals(0, exitCode);
     assertTrue(sw.toString().contains("--json"));
-  }
-
-  @Test
-  void legacySpecStatusHelpShowsUsage() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("spec", "legacy", "status", "--help");
-
-    assertEquals(0, exitCode);
-    var help = sw.toString();
-    assertTrue(help.contains("Update a spec's lifecycle status"));
-    assertTrue(help.contains("--json"));
-  }
-
-  @Test
-  void legacySpecSyncHelpShowsGitOptions() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("spec", "legacy", "sync", "--help");
-
-    assertEquals(0, exitCode);
-    var help = sw.toString();
-    assertTrue(help.contains("Synchronize project specs through Git"));
-    assertTrue(help.contains("--remote"));
-    assertTrue(help.contains("--branch"));
-    assertTrue(help.contains("--json"));
   }
 
   @Test

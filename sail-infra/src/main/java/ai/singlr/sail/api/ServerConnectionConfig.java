@@ -20,21 +20,25 @@ public record ServerConnectionConfig(String serverUrl, String token) {
   private static final String DEFAULT_URL = "http://localhost:7070";
 
   public static ServerConnectionConfig resolve() throws IOException {
-    return resolve(null, null);
+    return resolve(null, null, SailPaths.clientConfigPath());
+  }
+
+  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag)
+      throws IOException {
+    return resolve(serverFlag, tokenFlag, SailPaths.clientConfigPath());
   }
 
   @SuppressWarnings("unchecked")
-  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag)
-      throws IOException {
+  static ServerConnectionConfig resolve(
+      String serverFlag, String tokenFlag, java.nio.file.Path configPath) throws IOException {
     var url = serverFlag;
     var token = tokenFlag;
 
     if (url == null) url = envOrProperty("SAIL_SERVER");
     if (token == null) token = envOrProperty("SAIL_TOKEN");
 
-    var clientConfig = SailPaths.clientConfigPath();
-    if ((url == null || token == null) && Files.exists(clientConfig)) {
-      var config = YamlUtil.parseFile(clientConfig);
+    if ((url == null || token == null) && Files.exists(configPath)) {
+      var config = YamlUtil.parseFile(configPath);
       if (url == null) url = (String) config.get("server");
       if (token == null) token = (String) config.get("token");
     }

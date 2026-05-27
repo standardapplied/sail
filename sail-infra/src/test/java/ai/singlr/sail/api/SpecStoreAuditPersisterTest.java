@@ -83,6 +83,13 @@ class SpecStoreAuditPersisterTest {
   }
 
   @Test
+  void onEventSwallowsExceptionsGracefully() {
+    db.close();
+    persister.onEvent(Event.of("proj", null, "should_fail", "sail", "host"));
+    db = null;
+  }
+
+  @Test
   void integrationWithEventBus() throws Exception {
     try (var bus = new EventBus()) {
       bus.subscribe(persister);
