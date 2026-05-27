@@ -491,7 +491,9 @@ class ReviewPipelineControllerTest {
       assertTrue(latch.await(5, TimeUnit.SECONDS));
       ctrl.awaitCompletion(5000);
 
-      assertTrue(bus.publishedCount() > 0);
+      var review = reviewStore.latestReviewForSpec("auth");
+      assertTrue(review.isPresent());
+      assertEquals("passed", review.get().status());
     }
   }
 
