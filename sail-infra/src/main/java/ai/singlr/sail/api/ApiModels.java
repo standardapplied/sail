@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.GitSpecSync;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -615,6 +616,118 @@ record GlobalBoardResponse(SpecStore.BoardSummary board) implements Mappable {
     m.put("done", board.done());
     m.put("archived", board.archived());
     m.put("next_ready_id", board.nextReadyId());
+    return m;
+  }
+}
+
+record ReviewListResponse(String specId, List<ReviewView> reviews) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec_id", specId);
+    m.put("reviews", reviews);
+    return m;
+  }
+}
+
+record ReviewView(
+    String id,
+    String specId,
+    int iteration,
+    String status,
+    String createdAt,
+    String completedAt,
+    List<StageView> stages)
+    implements Mappable {
+  static ReviewView from(ReviewStore.ReviewRow row, List<StageView> stages) {
+    return new ReviewView(
+        row.id(),
+        row.specId(),
+        row.iteration(),
+        row.status(),
+        row.createdAt(),
+        row.completedAt(),
+        stages);
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("spec_id", specId);
+    m.put("iteration", iteration);
+    m.put("status", status);
+    m.put("created_at", createdAt);
+    if (completedAt != null) m.put("completed_at", completedAt);
+    m.put("stages", stages);
+    return m;
+  }
+}
+
+record StageView(
+    String id,
+    String name,
+    String stageType,
+    String status,
+    String reviewer,
+    String startedAt,
+    String completedAt,
+    int findingCount)
+    implements Mappable {
+  static StageView from(ReviewStore.StageRow row, int findingCount) {
+    return new StageView(
+        row.id(),
+        row.name(),
+        row.stageType(),
+        row.status(),
+        row.reviewer(),
+        row.startedAt(),
+        row.completedAt(),
+        findingCount);
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("name", name);
+    m.put("stage_type", stageType);
+    m.put("status", status);
+    if (reviewer != null) m.put("reviewer", reviewer);
+    if (startedAt != null) m.put("started_at", startedAt);
+    if (completedAt != null) m.put("completed_at", completedAt);
+    m.put("finding_count", findingCount);
+    return m;
+  }
+}
+
+record ReviewDetailResponse(ReviewView review, List<Map<String, Object>> findings)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("review", review.toMap());
+    m.put("findings", findings);
+    return m;
+  }
+}
+
+record ReviewApproveResponse(String reviewId, boolean approved) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("review_id", reviewId);
+    m.put("approved", approved);
+    return m;
+  }
+}
+
+record FindingDismissResponse(String findingId, boolean dismissed) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("finding_id", findingId);
+    m.put("dismissed", dismissed);
     return m;
   }
 }

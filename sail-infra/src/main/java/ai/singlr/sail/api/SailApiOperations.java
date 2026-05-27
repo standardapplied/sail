@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.SpecWorkspace;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -50,6 +51,7 @@ public final class SailApiOperations implements ApiOperations {
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
   private final SpecStore specStore;
+  private final ReviewStore reviewStore;
 
   public SailApiOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -66,23 +68,36 @@ public final class SailApiOperations implements ApiOperations {
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
   public SailApiOperations(
       ShellExec shell, String file, EventBus eventBus, AuditPersister auditPersister) {
-    this(shell, file, SailApiOperations::launchWatcherProcess, eventBus, auditPersister, null);
+    this(
+        shell, file, SailApiOperations::launchWatcherProcess, eventBus, auditPersister, null, null);
   }
 
-  /** Construct with database-backed spec store; used by the control plane server. */
+  /** Construct with database-backed stores; used by the control plane server. */
   public SailApiOperations(
       ShellExec shell,
       String file,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
-      SpecStore specStore) {
+      SpecStore specStore,
+      ReviewStore reviewStore) {
     this(
         shell,
         file,
         SailApiOperations::launchWatcherProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
-        specStore);
+        specStore,
+        reviewStore);
+  }
+
+  /** Construct with database-backed spec store (no review store). */
+  public SailApiOperations(
+      ShellExec shell,
+      String file,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      SpecStore specStore) {
+    this(shell, file, eventBus, auditSubscriber, specStore, null);
   }
 
   SailApiOperations(
@@ -91,7 +106,7 @@ public final class SailApiOperations implements ApiOperations {
       WatcherLauncher watcherLauncher,
       EventBus eventBus,
       AuditPersister auditPersister) {
-    this(shell, file, watcherLauncher, eventBus, auditPersister, null);
+    this(shell, file, watcherLauncher, eventBus, auditPersister, null, null);
   }
 
   SailApiOperations(
@@ -100,13 +115,15 @@ public final class SailApiOperations implements ApiOperations {
       WatcherLauncher watcherLauncher,
       EventBus eventBus,
       AuditPersister auditPersister,
-      SpecStore specStore) {
+      SpecStore specStore,
+      ReviewStore reviewStore) {
     this.shell = shell;
     this.file = file;
     this.watcherLauncher = watcherLauncher;
     this.eventBus = eventBus;
     this.auditPersister = auditPersister;
     this.specStore = specStore;
+    this.reviewStore = reviewStore;
   }
 
   @Override
@@ -1060,6 +1077,109 @@ public final class SailApiOperations implements ApiOperations {
           requireSpecStore();
           return new GlobalBoardResponse(specStore.board());
         });
+  }
+
+  @Override
+  public Result<ReviewListResponse> reviewsForSpec(String specId) {
+    return safe(
+        () -> {
+          requireReviewStore();
+          var reviews = reviewStore.reviewsForSpec(specId);
+          var views =
+              reviews.stream()
+                  .map(
+                      r -> {
+                        var stages = reviewStore.stagesForReview(r.id());
+                        var stageViews =
+                            stages.stream()
+                                .map(
+                                    s ->
+                                        StageView.from(
+                                            s, reviewStore.findingsForStage(s.id()).size()))
+                                .toList();
+                        return ReviewView.from(r, stageViews);
+                      })
+                  .toList();
+          return new ReviewListResponse(specId, views);
+        });
+  }
+
+  @Override
+  public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
+    return safe(
+        () -> {
+          requireReviewStore();
+          var review =
+              reviewStore
+                  .findReview(reviewId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found."));
+          var stages = reviewStore.stagesForReview(reviewId);
+          var stageViews =
+              stages.stream()
+                  .map(s -> StageView.from(s, reviewStore.findingsForStage(s.id()).size()))
+                  .toList();
+          var findings =
+              reviewStore.findingsForReview(reviewId).stream()
+                  .map(ai.singlr.sail.store.Finding::toMap)
+                  .toList();
+          return new ReviewDetailResponse(ReviewView.from(review, stageViews), findings);
+        });
+  }
+
+  @Override
+  public Result<ReviewApproveResponse> approveReview(String reviewId) {
+    return safe(
+        () -> {
+          requireReviewStore();
+          var review =
+              reviewStore
+                  .findReview(reviewId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found."));
+          var stages = reviewStore.stagesForReview(reviewId);
+          var humanStage =
+              stages.stream()
+                  .filter(s -> "human".equals(s.stageType()) && "running".equals(s.status()))
+                  .findFirst()
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.INVALID_REQUEST,
+                              "No human review stage awaiting approval."));
+          reviewStore.completeStage(humanStage.id(), "passed");
+          reviewStore.updateReviewStatus(reviewId, "passed");
+          specStore.updateStatus(review.specId(), "done");
+          return new ReviewApproveResponse(reviewId, true);
+        });
+  }
+
+  @Override
+  public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
+    return safe(
+        () -> {
+          requireReviewStore();
+          reviewStore
+              .findReview(reviewId)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found."));
+          reviewStore.resolveFinding(findingId, ai.singlr.sail.store.Finding.Resolution.DISMISSED);
+          return new FindingDismissResponse(findingId, true);
+        });
+  }
+
+  private void requireReviewStore() {
+    if (reviewStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Review store not available. Start the server with 'sail server start'.");
+    }
   }
 
   private void requireSpecStore() {

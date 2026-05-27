@@ -8,6 +8,15 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.store.SpecStore;
 
 public interface ApiOperations {
+
+  Result<ReviewListResponse> reviewsForSpec(String specId);
+
+  Result<ReviewDetailResponse> reviewDetail(String reviewId);
+
+  Result<ReviewApproveResponse> approveReview(String reviewId);
+
+  Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId);
+
   Result<HealthResponse> health();
 
   Result<ProjectResponse> project(String project);

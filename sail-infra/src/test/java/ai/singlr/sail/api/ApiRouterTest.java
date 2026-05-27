@@ -965,6 +965,29 @@ class ApiRouterTest {
           new GlobalBoardResponse(
               new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null)));
     }
+
+    @Override
+    public Result<ReviewListResponse> reviewsForSpec(String specId) {
+      return Result.success(new ReviewListResponse(specId, java.util.List.of()));
+    }
+
+    @Override
+    public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
+      return Result.success(
+          new ReviewDetailResponse(
+              new ReviewView(reviewId, "spec", 1, "passed", "", null, java.util.List.of()),
+              java.util.List.of()));
+    }
+
+    @Override
+    public Result<ReviewApproveResponse> approveReview(String reviewId) {
+      return Result.success(new ReviewApproveResponse(reviewId, true));
+    }
+
+    @Override
+    public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
+      return Result.success(new FindingDismissResponse(findingId, true));
+    }
   }
 
   private static final class FailingOperations extends FakeOperations {

@@ -286,7 +286,37 @@ public record SailYaml(
       SecurityAudit securityAudit,
       CodeReview codeReview,
       Notifications notifications,
-      Methodology methodology) {
+      Methodology methodology,
+      ReviewPipelineConfig reviewPipeline) {
+    public Agent(
+        String type,
+        boolean autoBranch,
+        String branchPrefix,
+        boolean autoSnapshot,
+        List<String> install,
+        Map<String, String> config,
+        Guardrails guardrails,
+        String specsDir,
+        SecurityAudit securityAudit,
+        CodeReview codeReview,
+        Notifications notifications,
+        Methodology methodology) {
+      this(
+          type,
+          autoBranch,
+          branchPrefix,
+          autoSnapshot,
+          install,
+          config,
+          guardrails,
+          specsDir,
+          securityAudit,
+          codeReview,
+          notifications,
+          methodology,
+          null);
+    }
+
     public Agent(
         String type,
         boolean autoBranch,
@@ -311,6 +341,7 @@ public record SailYaml(
           securityAudit,
           codeReview,
           notifications,
+          null,
           null);
     }
 
@@ -321,6 +352,7 @@ public record SailYaml(
       var codeReviewRaw = (Map<String, Object>) map.get("code_review");
       var notificationsRaw = (Map<String, Object>) map.get("notifications");
       var methodologyRaw = (Map<String, Object>) map.get("methodology");
+      var reviewPipelineRaw = (Map<String, Object>) map.get("review_pipeline");
       return new Agent(
           (String) map.get("type"),
           Boolean.TRUE.equals(map.get("auto_branch")),
@@ -333,7 +365,8 @@ public record SailYaml(
           securityAuditRaw != null ? SecurityAudit.fromMap(securityAuditRaw) : null,
           codeReviewRaw != null ? CodeReview.fromMap(codeReviewRaw) : null,
           notificationsRaw != null ? Notifications.fromMap(notificationsRaw) : null,
-          methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null);
+          methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null,
+          reviewPipelineRaw != null ? ReviewPipelineConfig.fromMap(reviewPipelineRaw) : null);
     }
 
     public Map<String, Object> toMap() {
@@ -350,6 +383,12 @@ public record SailYaml(
       if (codeReview != null) map.put("code_review", codeReview.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (methodology != null) map.put("methodology", methodology.toMap());
+      if (reviewPipeline != null)
+        map.put(
+            "review_pipeline",
+            Map.of(
+                "max_iterations", reviewPipeline.maxIterations(),
+                "stages", reviewPipeline.stages()));
       return map;
     }
 

@@ -42,6 +42,9 @@ public final class ApiRouter implements HttpHandler {
   private static final String LIMIT = "limit";
   private static final String BOARD = "board";
   private static final String CONTENT = "content";
+  private static final String REVIEWS = "reviews";
+  private static final String APPROVE = "approve";
+  private static final String DISMISS = "dismiss";
   private static final int DEFAULT_TAIL = 200;
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
@@ -96,6 +99,10 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.hasGlobalSpecsPrefix()) {
       return routeGlobalSpecs(exchange, request);
+    }
+
+    if (request.hasReviewsPrefix()) {
+      return routeReviews(exchange, request);
     }
 
     if (!request.hasProjectPrefix()) {
@@ -211,6 +218,39 @@ public final class ApiRouter implements HttpHandler {
           default -> throw methodNotAllowed();
         };
       }
+      if (REVIEWS.equals(sub)) {
+        requireMethod(request, GET);
+        return ApiResponse.from(operations.reviewsForSpec(specId));
+      }
+    }
+    throw notFound();
+  }
+
+  private ApiResponse routeReviews(HttpExchange exchange, RouteRequest request) throws IOException {
+    if (request.size() == 3) {
+      var reviewId = request.segments().get(2);
+      requireMethod(request, GET);
+      return ApiResponse.from(operations.reviewDetail(reviewId));
+    }
+    if (request.size() == 4) {
+      var reviewId = request.segments().get(2);
+      var sub = request.segments().get(3);
+      return switch (sub) {
+        case APPROVE -> {
+          requireMethod(request, POST);
+          yield ApiResponse.from(operations.approveReview(reviewId));
+        }
+        default -> throw notFound();
+      };
+    }
+    if (request.size() == 5) {
+      var reviewId = request.segments().get(2);
+      var sub = request.segments().get(3);
+      var findingId = request.segments().get(4);
+      if (DISMISS.equals(sub)) {
+        requireMethod(request, POST);
+        return ApiResponse.from(operations.dismissFinding(reviewId, findingId));
+      }
     }
     throw notFound();
   }
@@ -317,6 +357,10 @@ public final class ApiRouter implements HttpHandler {
 
     boolean hasGlobalSpecsPrefix() {
       return segments.size() >= 2 && V1.equals(segments.get(0)) && SPECS.equals(segments.get(1));
+    }
+
+    boolean hasReviewsPrefix() {
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && REVIEWS.equals(segments.get(1));
     }
 
     boolean isProjectRoot() {
