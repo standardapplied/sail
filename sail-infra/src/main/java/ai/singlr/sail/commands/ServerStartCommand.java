@@ -45,15 +45,20 @@ public final class ServerStartCommand implements Runnable {
 
   private void execute() throws Exception {
     var dbPath = SailPaths.sailDir().resolve("sail.db");
-    if (!Files.exists(dbPath)) {
-      throw new IllegalStateException(
-          "Database not found at " + dbPath + ". Run 'sail server init' first.");
-    }
+    Files.createDirectories(dbPath.getParent());
 
     var db = Sqlite.open(dbPath);
     new SchemaManager(db).migrate();
 
     var tokenStore = new TokenStore(db);
+    if (tokenStore.list().isEmpty()) {
+      var created = tokenStore.create("admin", "admin");
+      System.out.println(Ansi.AUTO.string("  @|green ✓|@ API token created:"));
+      System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
+      System.out.println(
+          Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
+      System.out.println();
+    }
     var specStore = new SpecStore(db);
     var eventStore = new EventStore(db);
     var bus = new EventBus();

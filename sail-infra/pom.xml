@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.singlr</groupId>
         <artifactId>sail</artifactId>
-        <version>0.13.0</version>
+        <version>0.13.1</version>
     </parent>
 
     <artifactId>sail-infra</artifactId>
@@ -120,6 +120,7 @@
                                 <buildArg>-march=compatibility</buildArg>
                                 <buildArg>-H:+AddAllCharsets</buildArg>
                                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+                                <buildArg>-H:+ForeignAPISupport</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
