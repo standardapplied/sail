@@ -538,6 +538,37 @@ class ApiRouterTest {
   }
 
   @Test
+  void reviewModelsCoverConstruction() {
+    var stageRow =
+        new ai.singlr.sail.store.ReviewStore.StageRow(
+            "s1", "r1", "security", "agent", "passed", "codex", "t1", "t2");
+    var stageView = StageView.from(stageRow, 3);
+    assertEquals("security", stageView.name());
+    assertEquals(3, stageView.findingCount());
+    var map = stageView.toMap();
+    assertEquals("codex", map.get("reviewer"));
+
+    var reviewRow =
+        new ai.singlr.sail.store.ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1");
+    var reviewView = ReviewView.from(reviewRow, java.util.List.of(stageView));
+    assertEquals(1, reviewView.iteration());
+    var rmap = reviewView.toMap();
+    assertEquals("r1", rmap.get("id"));
+
+    var list = new ReviewListResponse("auth", java.util.List.of(reviewView));
+    assertEquals("auth", list.toMap().get("spec_id"));
+
+    var detail = new ReviewDetailResponse(reviewView, java.util.List.of());
+    assertNotNull(detail.toMap().get("review"));
+
+    var approve = new ReviewApproveResponse("r1", true);
+    assertEquals(true, approve.toMap().get("approved"));
+
+    var dismiss = new FindingDismissResponse("f1", true);
+    assertEquals(true, dismiss.toMap().get("dismissed"));
+  }
+
+  @Test
   void globalSpecsListReturnsEmptyArray() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/specs", "token");
@@ -625,6 +656,76 @@ class ApiRouterTest {
       var response = get(server, "/v1/specs/board", "token");
       assertEquals(200, response.statusCode());
       assertTrue(response.body().contains("\"pending\": 0"));
+    }
+  }
+
+  @Test
+  void specReviewsListReturns200() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/specs/auth-flow/reviews", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"spec_id\": \"auth-flow\""));
+      assertTrue(response.body().contains("\"reviews\""));
+    }
+  }
+
+  @Test
+  void reviewDetailReturns200() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/reviews/review-123", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"id\": \"review-123\""));
+      assertTrue(response.body().contains("\"findings\""));
+    }
+  }
+
+  @Test
+  void reviewApproveReturns200() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/reviews/review-123/approve", "token", "");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"approved\": true"));
+    }
+  }
+
+  @Test
+  void reviewDismissFindingReturns200() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/reviews/review-123/dismiss/finding-456", "token", "");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"dismissed\": true"));
+    }
+  }
+
+  @Test
+  void reviewUnknownSubResourceReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/reviews/review-123/unknown", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void reviewExtraDepthReturns404() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/reviews/r1/approve/extra", "token");
+      assertEquals(404, response.statusCode());
+    }
+  }
+
+  @Test
+  void reviewGetOnApproveReturns405() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/reviews/r1/approve", "token");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void reviewsRequireAuth() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/reviews/review-123", null);
+      assertEquals(401, response.statusCode());
     }
   }
 
@@ -968,15 +1069,20 @@ class ApiRouterTest {
 
     @Override
     public Result<ReviewListResponse> reviewsForSpec(String specId) {
-      return Result.success(new ReviewListResponse(specId, java.util.List.of()));
+      var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 2);
+      var review = new ReviewView("r1", specId, 1, "passed", "t0", "t1", java.util.List.of(stage));
+      return Result.success(new ReviewListResponse(specId, java.util.List.of(review)));
     }
 
     @Override
     public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
-      return Result.success(
-          new ReviewDetailResponse(
-              new ReviewView(reviewId, "spec", 1, "passed", "", null, java.util.List.of()),
-              java.util.List.of()));
+      var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 1);
+      var review =
+          new ReviewView(reviewId, "spec", 1, "passed", "t0", "t1", java.util.List.of(stage));
+      var finding =
+          java.util.Map.<String, Object>of(
+              "id", "f1", "severity", "HIGH", "title", "SQL injection");
+      return Result.success(new ReviewDetailResponse(review, java.util.List.of(finding)));
     }
 
     @Override

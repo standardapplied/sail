@@ -30,7 +30,7 @@ import java.util.function.Predicate;
  * <p>Review stages run in a virtual thread so the event bus drain is never blocked. The controller
  * is thread-safe: only one pipeline can run per spec at a time (checked via review status).
  */
-public final class ReviewPipelineController implements EventSubscriber {
+public final class ReviewPipelineController implements EventSubscriber, AutoCloseable {
 
   private static final Set<String> TRIGGER_TYPES =
       Set.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED);
@@ -40,6 +40,9 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final Function<String, ReviewPipelineConfig> configResolver;
   private final ReviewAgentRunner agentRunner;
   private final EventBus eventBus;
+  private final java.util.concurrent.ConcurrentHashMap<
+          String, java.util.concurrent.CompletableFuture<Void>>
+      inFlight = new java.util.concurrent.ConcurrentHashMap<>();
 
   public ReviewPipelineController(
       SpecStore specStore,
@@ -52,6 +55,31 @@ public final class ReviewPipelineController implements EventSubscriber {
     this.configResolver = configResolver;
     this.agentRunner = agentRunner;
     this.eventBus = eventBus;
+  }
+
+  /**
+   * Waits for all in-flight pipeline executions to complete. Call before closing the database or
+   * shutting down the server.
+   */
+  public void awaitCompletion(long timeoutMillis) throws InterruptedException {
+    var futures = List.copyOf(inFlight.values());
+    if (futures.isEmpty()) return;
+    try {
+      java.util.concurrent.CompletableFuture.allOf(
+              futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+          .get(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  @Override
+  public void close() {
+    try {
+      awaitCompletion(5000);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   @Override
@@ -108,7 +136,12 @@ public final class ReviewPipelineController implements EventSubscriber {
           reviewId, stageConfig.name(), stageConfig.type().name().toLowerCase());
     }
 
-    Thread.startVirtualThread(() -> executePipeline(reviewId, config, event.project(), specId));
+    var future =
+        java.util.concurrent.CompletableFuture.runAsync(
+            () -> executePipeline(reviewId, config, event.project(), specId),
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+    inFlight.put(reviewId, future);
+    future.whenComplete((v, ex) -> inFlight.remove(reviewId));
   }
 
   void executePipeline(

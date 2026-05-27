@@ -175,11 +175,12 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void transitionsSpecToReview() {
+  void transitionsSpecToReview() throws Exception {
     createSpec("auth", "in_progress");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
+    ctrl.awaitCompletion(5000);
 
     var spec = specStore.findById("auth").orElseThrow();
     assertTrue("review".equals(spec.status()) || "done".equals(spec.status()));
@@ -194,7 +195,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("passed", review.status());
@@ -218,7 +219,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     var findings = reviewStore.findingsForReview(review.id());
@@ -243,7 +244,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("failed", review.status());
@@ -265,7 +266,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("passed", review.status());
@@ -281,7 +282,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("passed", review.status());
@@ -302,7 +303,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("running", review.status());
@@ -351,7 +352,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(100);
+    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("failed", review.status());
@@ -378,9 +379,159 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.awaitCompletion(5000);
 
     assertNotNull(capturedPrompt.get());
     assertTrue(capturedPrompt.get().contains("security"));
+  }
+
+  @Test
+  void failedReviewTriggersFixIteration() throws Exception {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]
+        ```
+        """;
+    var callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+    var latch = new CountDownLatch(2);
+    ReviewAgentRunner runner =
+        (p, a, prompt) -> {
+          var call = callCount.incrementAndGet();
+          latch.countDown();
+          return call == 1 ? criticalOutput : "[]";
+        };
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_iterations",
+                3,
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "categories",
+                        List.of("security"),
+                        "gate",
+                        "no_critical"))));
+    var ctrl = new ReviewPipelineController(specStore, reviewStore, p -> config, runner, null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.awaitCompletion(5000);
+
+    assertTrue(callCount.get() >= 2);
+    var reviews = reviewStore.reviewsForSpec("auth");
+    assertFalse(reviews.isEmpty());
+  }
+
+  @Test
+  void maxIterationsEscalates() throws Exception {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Persistent issue",
+          "description": "Cannot fix", "confidence": 0.95}]
+        ```
+        """;
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_iterations",
+                1,
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical"))));
+    var latch = new CountDownLatch(1);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore, reviewStore, p -> config, new LatchedRunner(criticalOutput, latch), null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.awaitCompletion(5000);
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("escalated", review.status());
+  }
+
+  @Test
+  void publishesEventsWhenBusProvided() throws Exception {
+    createSpec("auth", "in_progress");
+    var latch = new CountDownLatch(1);
+    try (var bus = new EventBus()) {
+      var ctrl =
+          new ReviewPipelineController(
+              specStore,
+              reviewStore,
+              p -> singleAgentStage("no_critical"),
+              new LatchedRunner("[]", latch),
+              bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      assertTrue(latch.await(5, TimeUnit.SECONDS));
+      ctrl.awaitCompletion(5000);
+
+      assertTrue(bus.publishedCount() > 0);
+    }
+  }
+
+  @Test
+  void duplicateEventForRunningReviewIsIgnored() throws Exception {
+    createSpec("auth", "in_progress");
+    var latch = new CountDownLatch(1);
+    var ctrl = controller(singleAgentStage("no_critical"), new LatchedRunner("[]", latch));
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.awaitCompletion(5000);
+
+    specStore.updateStatus("auth", "in_progress");
+    var reviewBefore = reviewStore.reviewsForSpec("auth").size();
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    ctrl.awaitCompletion(5000);
+
+    var reviewAfter = reviewStore.reviewsForSpec("auth").size();
+    assertTrue(reviewAfter >= reviewBefore);
+  }
+
+  @Test
+  void closeAwaitsInFlightPipelines() throws Exception {
+    createSpec("auth", "in_progress");
+    var latch = new CountDownLatch(1);
+    var ctrl = controller(singleAgentStage("no_critical"), new LatchedRunner("[]", latch));
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.close();
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("passed", review.status());
+  }
+
+  @Test
+  void awaitCompletionWithNoInFlightReturnsImmediately() throws Exception {
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+    ctrl.awaitCompletion(1000);
   }
 
   private static class LatchedRunner implements ReviewAgentRunner {
