@@ -29,8 +29,8 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     var url = serverFlag;
     var token = tokenFlag;
 
-    if (url == null) url = System.getenv("SAIL_SERVER");
-    if (token == null) token = System.getenv("SAIL_TOKEN");
+    if (url == null) url = envOrProperty("SAIL_SERVER");
+    if (token == null) token = envOrProperty("SAIL_TOKEN");
 
     var clientConfig = SailPaths.clientConfigPath();
     if ((url == null || token == null) && Files.exists(clientConfig)) {
@@ -44,5 +44,10 @@ public record ServerConnectionConfig(String serverUrl, String token) {
       throw new IOException("No API token configured. Set SAIL_TOKEN or run 'sail client init'.");
     }
     return new ServerConnectionConfig(url, token);
+  }
+
+  private static String envOrProperty(String name) {
+    var env = System.getenv(name);
+    return env != null ? env : System.getProperty(name);
   }
 }
