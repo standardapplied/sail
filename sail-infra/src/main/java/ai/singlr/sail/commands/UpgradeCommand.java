@@ -14,6 +14,8 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -172,6 +174,8 @@ public final class UpgradeCommand implements Runnable {
       }
     }
 
+    migrateDatabase(dryRun);
+
     var restartStatus = restartSailApi(dryRun);
 
     if (json) {
@@ -271,6 +275,37 @@ public final class UpgradeCommand implements Runnable {
    */
   private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
     return installer.reconcile();
+  }
+
+  private void migrateDatabase(boolean dryRun) {
+    var dbPath = SailPaths.sailDir().resolve("sail.db");
+    if (dryRun) {
+      if (!json) {
+        System.out.println("[dry-run] Would run database schema migration on " + dbPath);
+      }
+      return;
+    }
+    try {
+      Files.createDirectories(dbPath.getParent());
+      try (var db = Sqlite.open(dbPath)) {
+        var schema = new SchemaManager(db);
+        var before = schema.currentVersion();
+        schema.migrate();
+        var after = schema.currentVersion();
+        if (!json && after > before) {
+          System.out.println(
+              Ansi.AUTO.string(
+                  "    @|faint Database schema migrated: " + before + " → " + after + "|@"));
+        }
+      }
+    } catch (Exception e) {
+      if (!json) {
+        System.err.println(
+            "    Database migration skipped: "
+                + e.getMessage()
+                + ". Run 'sail server init' manually.");
+      }
+    }
   }
 
   /** Lifecycle outcome for the {@code sail-api} restart step. */

@@ -7,12 +7,16 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecMigrator;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 @Command(
@@ -20,6 +24,13 @@ import picocli.CommandLine.Spec;
     description = "Initialize the Sail server: create database and first API token.",
     mixinStandardHelpOptions = true)
 public final class ServerInitCommand implements Runnable {
+
+  @Option(
+      names = "--import-specs",
+      description = "Import file-based specs from a local directory into the database.",
+      arity = "0..1",
+      fallbackValue = "")
+  private String importSpecsPath;
 
   @Spec private CommandSpec spec;
 
@@ -62,6 +73,37 @@ public final class ServerInitCommand implements Runnable {
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ " + existing.size() + " API token(s) exist."));
       }
+
+      if (importSpecsPath != null) {
+        importFileBasedSpecs(db);
+      }
     }
+  }
+
+  private void importFileBasedSpecs(Sqlite db) {
+    var specsDir =
+        importSpecsPath.isEmpty()
+            ? Path.of(System.getProperty("user.home"), "workspace", "specs")
+            : Path.of(importSpecsPath);
+
+    if (!Files.isDirectory(specsDir)) {
+      System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ Specs directory not found: " + specsDir));
+      return;
+    }
+
+    var specStore = new SpecStore(db);
+    var migrator = new SpecMigrator(specStore);
+    var result = migrator.importFromDirectory(specsDir);
+
+    for (var error : result.errors()) {
+      System.err.println("    " + error);
+    }
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|green ✓|@ Specs imported: "
+                + result.imported()
+                + " new, "
+                + result.skipped()
+                + " skipped."));
   }
 }
