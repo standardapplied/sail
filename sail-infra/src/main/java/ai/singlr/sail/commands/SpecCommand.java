@@ -7,18 +7,20 @@ package ai.singlr.sail.commands;
 
 import picocli.CommandLine.Command;
 
-/** Parent command for spec management subcommands (list, create, update, etc.). */
 @Command(
     name = "spec",
-    description = "Manage project specs.",
+    description = "Manage specs via the Sail control plane.",
     mixinStandardHelpOptions = true,
     subcommands = {
-      SpecListCommand.class,
-      SpecShowCommand.class,
-      SpecCreateCommand.class,
-      SpecStatusCommand.class,
-      SpecSyncCommand.class,
+      ApiSpecListCommand.class,
+      ApiSpecShowCommand.class,
+      ApiSpecCreateCommand.class,
+      ApiSpecEditCommand.class,
+      ApiSpecContentCommand.class,
+      ApiSpecDeleteCommand.class,
+      ApiSpecBoardCommand.class,
       DispatchCommand.class,
+      LegacySpecCommand.class,
     })
 public final class SpecCommand implements Runnable {
 

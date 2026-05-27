@@ -36,7 +36,7 @@ class SpecListCommandTest {
     var exitCode = cmd.execute("spec", "list", "--help");
 
     assertEquals(0, exitCode);
-    assertTrue(sw.toString().contains("kanban"));
+    assertTrue(sw.toString().contains("List specs"));
   }
 
   @Test
@@ -52,18 +52,9 @@ class SpecListCommandTest {
     assertTrue(help.contains("list"));
     assertTrue(help.contains("show"));
     assertTrue(help.contains("create"));
-    assertTrue(help.contains("status"));
-  }
-
-  @Test
-  void specListRequiresProjectName() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setErr(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("spec", "list");
-
-    assertNotEquals(0, exitCode);
+    assertTrue(help.contains("edit"));
+    assertTrue(help.contains("board"));
+    assertTrue(help.contains("legacy"));
   }
 
   @Test
@@ -79,7 +70,7 @@ class SpecListCommandTest {
   }
 
   @Test
-  void specListAcceptsFileFlag() {
+  void specListAcceptsServerFlag() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
@@ -87,7 +78,7 @@ class SpecListCommandTest {
     var exitCode = cmd.execute("spec", "list", "--help");
 
     assertEquals(0, exitCode);
-    assertTrue(sw.toString().contains("--file"));
+    assertTrue(sw.toString().contains("--server"));
   }
 
   @Test
@@ -119,12 +110,12 @@ class SpecListCommandTest {
   }
 
   @Test
-  void specStatusHelpShowsUsage() {
+  void legacySpecStatusHelpShowsUsage() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("spec", "status", "--help");
+    var exitCode = cmd.execute("spec", "legacy", "status", "--help");
 
     assertEquals(0, exitCode);
     var help = sw.toString();
@@ -133,12 +124,12 @@ class SpecListCommandTest {
   }
 
   @Test
-  void specSyncHelpShowsGitOptions() {
+  void legacySpecSyncHelpShowsGitOptions() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("spec", "sync", "--help");
+    var exitCode = cmd.execute("spec", "legacy", "sync", "--help");
 
     assertEquals(0, exitCode);
     var help = sw.toString();

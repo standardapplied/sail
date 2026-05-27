@@ -64,7 +64,8 @@ class CommandTaxonomyTest {
     var spec = new CommandLine(new SpecCommand());
 
     assertEquals(
-        Set.of("list", "show", "create", "status", "sync", "dispatch"),
+        Set.of(
+            "list", "show", "create", "edit", "content", "delete", "board", "dispatch", "legacy"),
         spec.getSubcommands().keySet());
   }
 
