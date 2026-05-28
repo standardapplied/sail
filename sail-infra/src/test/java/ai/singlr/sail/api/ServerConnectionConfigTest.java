@@ -120,4 +120,32 @@ class ServerConnectionConfigTest {
     var resolved = ServerConnectionConfig.resolve(null, null, configFile);
     assertEquals("two-arg-token", resolved.token());
   }
+
+  @Test
+  void saveLocalTokenUsesClientConfigPath() throws IOException {
+    var configFile = tempDir.resolve("client.yaml");
+    System.setProperty("sail.client.config.path", configFile.toString());
+    try {
+      ServerConnectionConfig.saveLocalToken("my-token");
+      var resolved = ServerConnectionConfig.resolve(null, null, configFile);
+      assertEquals("my-token", resolved.token());
+      assertEquals("http://localhost:7070", resolved.serverUrl());
+    } finally {
+      System.clearProperty("sail.client.config.path");
+    }
+  }
+
+  @Test
+  void saveLocalConfigTwoArgUsesClientConfigPath() throws IOException {
+    var configFile = tempDir.resolve("client.yaml");
+    System.setProperty("sail.client.config.path", configFile.toString());
+    try {
+      ServerConnectionConfig.saveLocalConfig("http://custom:9090", "tok");
+      var resolved = ServerConnectionConfig.resolve(null, null, configFile);
+      assertEquals("http://custom:9090", resolved.serverUrl());
+      assertEquals("tok", resolved.token());
+    } finally {
+      System.clearProperty("sail.client.config.path");
+    }
+  }
 }
