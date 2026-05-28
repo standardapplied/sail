@@ -92,4 +92,32 @@ class ServerConnectionConfigTest {
     assertEquals("http://localhost:7070", config.serverUrl());
     assertEquals("from-file", config.token());
   }
+
+  @Test
+  void saveLocalConfigWritesYaml() throws IOException {
+    var configFile = tempDir.resolve("new-config.yaml");
+    ServerConnectionConfig.saveLocalConfig("http://localhost:7070", "test-token", configFile);
+
+    assertTrue(Files.exists(configFile));
+    var config = ServerConnectionConfig.resolve(null, null, configFile);
+    assertEquals("http://localhost:7070", config.serverUrl());
+    assertEquals("test-token", config.token());
+  }
+
+  @Test
+  void saveLocalConfigCreatesParentDirectories() throws IOException {
+    var configFile = tempDir.resolve("deep/nested/config.yaml");
+    ServerConnectionConfig.saveLocalConfig("http://localhost:7070", "tok", configFile);
+
+    assertTrue(Files.exists(configFile));
+  }
+
+  @Test
+  void saveLocalConfigTwoArgRoundTrips() throws IOException {
+    var configFile = tempDir.resolve("two-arg.yaml");
+    ServerConnectionConfig.saveLocalConfig("http://localhost:7070", "two-arg-token", configFile);
+
+    var resolved = ServerConnectionConfig.resolve(null, null, configFile);
+    assertEquals("two-arg-token", resolved.token());
+  }
 }

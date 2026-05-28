@@ -53,10 +53,10 @@ public final class ServerStartCommand implements Runnable {
     var tokenStore = new TokenStore(db);
     if (tokenStore.list().isEmpty()) {
       var created = tokenStore.create("admin", "admin");
-      System.out.println(Ansi.AUTO.string("  @|green ✓|@ API token created:"));
-      System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
+      ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
       System.out.println(
-          Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
+          Ansi.AUTO.string(
+              "  @|green ✓|@ API token created and saved to " + SailPaths.clientConfigPath()));
       System.out.println();
     }
     var specStore = new SpecStore(db);

@@ -300,12 +300,12 @@ public final class UpgradeCommand implements Runnable {
         var tokenStore = new ai.singlr.sail.store.TokenStore(db);
         if (tokenStore.list().isEmpty()) {
           var created = tokenStore.create("admin", "admin");
+          ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
           if (!json) {
             System.out.println(
                 Ansi.AUTO.string(
-                    "    @|green ✓|@ API token created: @|bold " + created.token() + "|@"));
-            System.out.println(
-                Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
+                    "    @|green ✓|@ API token created and saved to "
+                        + SailPaths.clientConfigPath()));
           }
         }
       }

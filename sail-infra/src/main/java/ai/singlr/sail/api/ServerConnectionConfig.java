@@ -50,6 +50,21 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     return new ServerConnectionConfig(url, token);
   }
 
+  public static void saveLocalToken(String token) throws IOException {
+    saveLocalConfig(DEFAULT_URL, token);
+  }
+
+  public static void saveLocalConfig(String serverUrl, String token) throws IOException {
+    saveLocalConfig(serverUrl, token, SailPaths.clientConfigPath());
+  }
+
+  static void saveLocalConfig(String serverUrl, String token, java.nio.file.Path configPath)
+      throws IOException {
+    var yaml = "server: " + serverUrl + "\ntoken: " + token + "\n";
+    Files.createDirectories(configPath.getParent());
+    Files.writeString(configPath, yaml);
+  }
+
   private static String envOrProperty(String name) {
     var env = System.getenv(name);
     return env != null ? env : System.getProperty(name);
