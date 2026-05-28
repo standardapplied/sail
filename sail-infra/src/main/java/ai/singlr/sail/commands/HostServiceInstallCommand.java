@@ -59,7 +59,8 @@ public final class HostServiceInstallCommand implements Runnable {
           Ansi.AUTO.string("    @|faint Linked at " + installer.systemdLinkPath() + "|@"));
     }
     System.out.println(
-        Ansi.AUTO.string("    @|bold ExecStart:|@ sail api --host " + host + " --port " + port));
+        Ansi.AUTO.string(
+            "    @|bold ExecStart:|@ sail server start --host " + host + " --port " + port));
 
     if (!dryRun
         && installer.mode() == SystemdServiceInstaller.Mode.USER

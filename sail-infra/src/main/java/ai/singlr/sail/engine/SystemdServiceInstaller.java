@@ -64,7 +64,7 @@ public final class SystemdServiceInstaller {
    * @param userHome target user's home directory; only used in {@link Mode#USER} for the unit and
    *     discovery-symlink paths
    * @param sailBinary absolute path to the {@code sail} binary for {@code ExecStart}
-   * @param bindAddress bind address for {@code sail api --host}
+   * @param bindAddress bind address for {@code sail server start --host}
    * @param bindPort bind port
    * @param username target username; in {@link Mode#USER} used for {@code loginctl} queries, in
    *     {@link Mode#SYSTEM} written into the unit's {@code User=} field
@@ -151,7 +151,7 @@ public final class SystemdServiceInstaller {
 
         [Service]
         Type=simple
-        %sExecStart=%s api --host %s --port %d
+        %sExecStart=%s server start --host %s --port %d
         Restart=on-failure
         RestartSec=2
         LimitNOFILE=4096

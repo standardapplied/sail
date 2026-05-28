@@ -134,7 +134,8 @@ class SystemdServiceInstallerTest {
     var unit = userInstaller(home).renderUnit();
 
     assertTrue(
-        unit.contains("ExecStart=" + SAIL_BINARY + " api --host " + HOST + " --port " + PORT));
+        unit.contains(
+            "ExecStart=" + SAIL_BINARY + " server start --host " + HOST + " --port " + PORT));
     assertTrue(unit.contains("Restart=on-failure"));
     assertTrue(unit.contains("WantedBy=default.target"));
     assertTrue(unit.contains("LimitNOFILE=4096"));
@@ -452,7 +453,8 @@ class SystemdServiceInstallerTest {
     assertTrue(unit.contains("User=root"));
     assertTrue(unit.contains("WantedBy=multi-user.target"));
     assertTrue(
-        unit.contains("ExecStart=" + SAIL_BINARY + " api --host " + HOST + " --port " + PORT));
+        unit.contains(
+            "ExecStart=" + SAIL_BINARY + " server start --host " + HOST + " --port " + PORT));
     assertTrue(unit.contains("RuntimeDirectory=sail"));
     assertTrue(unit.contains("RuntimeDirectoryMode=0755"));
     assertTrue(unit.contains("RuntimeDirectoryPreserve=yes"));

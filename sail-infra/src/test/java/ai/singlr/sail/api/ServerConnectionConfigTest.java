@@ -10,10 +10,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ServerConnectionConfigTest {
+
+  @TempDir Path tempDir;
+
+  @BeforeEach
+  void isolateClientConfig() {
+    System.setProperty(
+        "sail.client.config.path", tempDir.resolve("missing-config.yaml").toString());
+  }
+
+  @AfterEach
+  void clearClientConfigOverride() {
+    System.clearProperty("sail.client.config.path");
+  }
 
   @Test
   void flagsOverrideEverything() throws IOException {
@@ -52,8 +67,6 @@ class ServerConnectionConfigTest {
   void resolveNoArgThrowsWithoutToken() {
     assertThrows(IOException.class, ServerConnectionConfig::resolve);
   }
-
-  @TempDir Path tempDir;
 
   @Test
   void resolvesFromConfigFile() throws IOException {

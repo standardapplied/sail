@@ -8,18 +8,24 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SailApiClientTest {
 
   private SailApiServer server;
   private SailApiClient client;
 
+  @TempDir Path tempDir;
+
   @BeforeEach
   void setUp() throws Exception {
+    System.setProperty(
+        "sail.client.config.path", tempDir.resolve("missing-config.yaml").toString());
     server = new SailApiServer("127.0.0.1", 0, new TestOperations(), "test-token");
     server.start();
     client = new SailApiClient("http://127.0.0.1:" + server.port(), "test-token");
@@ -29,6 +35,7 @@ class SailApiClientTest {
   void tearDown() {
     if (client != null) client.close();
     if (server != null) server.close();
+    System.clearProperty("sail.client.config.path");
   }
 
   @Test
