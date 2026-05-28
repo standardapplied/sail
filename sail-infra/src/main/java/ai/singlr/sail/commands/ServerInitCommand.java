@@ -62,16 +62,22 @@ public final class ServerInitCommand implements Runnable {
       }
 
       var tokenStore = new TokenStore(db);
+      var configPath = SailPaths.clientConfigPath();
+      var configMissing = !Files.exists(configPath);
       var existing = tokenStore.list();
-      if (existing.isEmpty()) {
+      if (existing.isEmpty() || configMissing) {
+        tokenStore.revoke("admin");
         var created = tokenStore.create("admin", "admin");
         ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
         System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ API token created and saved to " + SailPaths.clientConfigPath()));
+            Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
       } else {
         System.out.println(
-            Ansi.AUTO.string("  @|green ✓|@ " + existing.size() + " API token(s) exist."));
+            Ansi.AUTO.string(
+                "  @|green ✓|@ "
+                    + existing.size()
+                    + " API token(s) exist; config at "
+                    + configPath));
       }
 
       if (importSpecsPath != null) {
