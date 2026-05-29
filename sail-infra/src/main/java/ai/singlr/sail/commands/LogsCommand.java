@@ -9,7 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
@@ -60,17 +60,7 @@ public final class LogsCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireRunning(state, name);
 
     if (service == null) {
       listServices(shell);

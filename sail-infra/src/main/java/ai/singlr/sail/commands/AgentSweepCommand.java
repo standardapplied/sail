@@ -11,7 +11,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -80,17 +80,7 @@ public final class AgentSweepCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireRunning(state, name);
 
     var singYamlPath = SailPaths.resolveSailYaml(name, file);
     SailYaml config = null;

@@ -8,7 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
@@ -55,15 +55,7 @@ public final class SnapCommand implements Runnable {
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored -> {}
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireCreated(state, name);
 
     if (label == null) {
       label = SnapshotManager.defaultLabel();
