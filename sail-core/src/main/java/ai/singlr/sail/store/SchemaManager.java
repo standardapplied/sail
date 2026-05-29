@@ -157,7 +157,21 @@ public final class SchemaManager {
           CREATE TABLE IF NOT EXISTS data_migrations (
               name TEXT PRIMARY KEY,
               applied_at TEXT NOT NULL
-          )""");
+          )""",
+          """
+          CREATE TABLE api_tokens_new (
+              token_hash TEXT PRIMARY KEY,
+              name TEXT NOT NULL UNIQUE,
+              role TEXT NOT NULL DEFAULT 'member'
+                  CHECK (role IN ('admin', 'member', 'viewer')),
+              created_at TEXT NOT NULL,
+              last_used_at TEXT
+          )""",
+          """
+          INSERT INTO api_tokens_new (token_hash, name, role, created_at, last_used_at)
+              SELECT token_hash, name, role, created_at, last_used_at FROM api_tokens""",
+          "DROP TABLE api_tokens",
+          "ALTER TABLE api_tokens_new RENAME TO api_tokens");
 
   private final Sqlite db;
 

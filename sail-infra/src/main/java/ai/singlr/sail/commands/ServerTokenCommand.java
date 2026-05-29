@@ -39,7 +39,10 @@ public final class ServerTokenCommand implements Runnable {
     @Parameters(index = "0", description = "Token name.")
     private String name;
 
-    @Parameters(index = "1", description = "Role: admin or member.", defaultValue = "member")
+    @Parameters(
+        index = "1",
+        description = "Role: admin, member, or viewer.",
+        defaultValue = "member")
     private String role;
 
     @Spec private CommandSpec spec;

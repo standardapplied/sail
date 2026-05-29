@@ -93,6 +93,7 @@ public final class ApiRouter implements HttpHandler {
     }
 
     auth.require(exchange);
+    Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
 
     if (request.hasEventsPrefix()) {
       return routeEvents(exchange, request);

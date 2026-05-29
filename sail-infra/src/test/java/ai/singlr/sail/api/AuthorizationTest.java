@@ -1,0 +1,85 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.api;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Path;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class AuthorizationTest {
+
+  @TempDir Path tempDir;
+  private Sqlite db;
+  private TokenStore tokenStore;
+  private SailApiServer server;
+
+  @BeforeEach
+  void setUp() throws Exception {
+    db = Sqlite.open(tempDir.resolve("test.db"));
+    new SchemaManager(db).migrate();
+    tokenStore = new TokenStore(db);
+    server = new SailApiServer("127.0.0.1", 0, new FakeOps(), tokenStore, new EventBus(), null);
+    server.start();
+  }
+
+  @AfterEach
+  void tearDown() {
+    if (server != null) server.close();
+    if (db != null) db.close();
+  }
+
+  @Test
+  void viewerCanRead() throws Exception {
+    var viewer = tokenStore.create("v", "viewer").token();
+    assertEquals(200, send("GET", "/v1/specs/board", viewer, null).statusCode());
+  }
+
+  @Test
+  void viewerCannotWrite() throws Exception {
+    var viewer = tokenStore.create("v", "viewer").token();
+    var response = send("POST", "/v1/specs", viewer, "{}");
+    assertEquals(403, response.statusCode());
+    assertTrue(response.body().contains("forbidden"), response.body());
+  }
+
+  @Test
+  void memberCanWrite() throws Exception {
+    var member = tokenStore.create("m", "member").token();
+    assertNotEquals(403, send("POST", "/v1/specs", member, "{}").statusCode());
+  }
+
+  @Test
+  void adminCanWrite() throws Exception {
+    var admin = tokenStore.create("a", "admin").token();
+    assertNotEquals(403, send("POST", "/v1/specs", admin, "{}").statusCode());
+  }
+
+  private HttpResponse<String> send(String method, String path, String token, String body)
+      throws Exception {
+    var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
+    if (token != null) builder.header("Authorization", "Bearer " + token);
+    var publisher =
+        body == null
+            ? HttpRequest.BodyPublishers.noBody()
+            : HttpRequest.BodyPublishers.ofString(body);
+    builder.method(method, publisher);
+    if (body != null) builder.header("Content-Type", "application/json");
+    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+  }
+
+  private static final class FakeOps extends TestOperations {}
+}
