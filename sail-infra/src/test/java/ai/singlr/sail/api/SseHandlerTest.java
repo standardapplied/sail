@@ -26,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class SseHandlerTest {
 
-  private static final BearerAuth AUTH = new BearerAuth("test-token");
+  private static final ApiAuth AUTH = new FixedTokenTestAuth("test-token");
 
   @Test
   void constructorRejectsNullBus() {
@@ -105,7 +105,7 @@ class SseHandlerTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -177,7 +177,7 @@ class SseHandlerTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -205,7 +205,7 @@ class SseHandlerTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -236,19 +236,14 @@ class SseHandlerTest {
         var port = httpServer.getAddress().getPort();
         var client = HttpClient.newHttpClient();
 
-        // First connection — opens a long-running stream
         var firstReq =
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/v1/events/stream"))
                 .header("Authorization", "Bearer test-token")
                 .GET()
                 .build();
         var firstFuture = client.sendAsync(firstReq, HttpResponse.BodyHandlers.ofInputStream());
-        firstFuture.thenAccept(r -> {}); // detach
-
-        // Wait for the connection to be established
-        for (var i = 0; i < 50 && handler.openConnections() == 0; i++) {
-          Thread.sleep(20);
-        }
+        var firstResponse = firstFuture.get(5, TimeUnit.SECONDS);
+        assertEquals(200, firstResponse.statusCode());
         assertEquals(1, handler.openConnections());
 
         // Second connection should be rejected

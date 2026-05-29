@@ -49,7 +49,13 @@ class SailEventPublisherTest {
               new ShellExecutor(true), tmp.resolve("sail.yaml").toString(), bus, persister);
       try (var server =
           new SailApiServer(
-              "127.0.0.1", 0, operations, "tok", bus, persister, tmp.resolve("api.sock"))) {
+              "127.0.0.1",
+              0,
+              operations,
+              new FixedTokenTestAuth("tok"),
+              bus,
+              persister,
+              tmp.resolve("api.sock"))) {
         server.start();
         var publisher = new SailEventPublisher("127.0.0.1", server.port(), "tok");
 
@@ -82,7 +88,7 @@ class SailEventPublisherTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -154,8 +160,14 @@ class SailEventPublisherTest {
 
   @Test
   void localDefaultBuildsLocalhostPublisher() throws Exception {
-    var publisher = SailEventPublisher.localDefault();
-
-    assertNotNull(publisher, "localDefault must produce a usable publisher even on a fresh host");
+    System.setProperty("SAIL_TOKEN", "test-token");
+    System.setProperty("SAIL_SERVER", "http://127.0.0.1:7070");
+    try {
+      var publisher = SailEventPublisher.localDefault();
+      assertNotNull(publisher);
+    } finally {
+      System.clearProperty("SAIL_TOKEN");
+      System.clearProperty("SAIL_SERVER");
+    }
   }
 }

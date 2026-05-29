@@ -92,7 +92,7 @@ class ApiCoverageEdgesTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -106,7 +106,15 @@ class ApiCoverageEdgesTest {
 
   @Test
   void sailApiServerAccessorsNullWithoutBus() throws Exception {
-    try (var server = new SailApiServer("127.0.0.1", 0, new SailApiOperations(), "tok")) {
+    try (var server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            new SailApiOperations(),
+            new FixedTokenTestAuth("tok"),
+            null,
+            null,
+            null)) {
       assertNull(server.eventBus());
       assertNull(server.auditPersister());
       assertNull(server.sseHandler());
@@ -118,7 +126,14 @@ class ApiCoverageEdgesTest {
   void sailApiServerSocketPathCanBeOmitted() throws Exception {
     try (var bus = new EventBus()) {
       try (var server =
-          new SailApiServer("127.0.0.1", 0, new SailApiOperations(), "tok", bus, null, null)) {
+          new SailApiServer(
+              "127.0.0.1",
+              0,
+              new SailApiOperations(),
+              new FixedTokenTestAuth("tok"),
+              bus,
+              null,
+              null)) {
         assertNotNull(server.eventBus());
         assertNull(server.socketListener());
       }

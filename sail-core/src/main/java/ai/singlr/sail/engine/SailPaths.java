@@ -54,8 +54,7 @@ public final class SailPaths {
 
   /** Returns the client config file path: {@code ~/.sail/config.yaml}. */
   public static Path clientConfigPath() {
-    var override = System.getProperty("sail.client.config.path");
-    return override != null ? Path.of(override) : SAIL_DIR.resolve("config.yaml");
+    return SAIL_DIR.resolve("config.yaml");
   }
 
   /**

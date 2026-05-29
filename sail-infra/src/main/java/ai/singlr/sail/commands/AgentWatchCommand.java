@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.ApiTokenStore;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventStreamClient;
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.SailYaml;
@@ -105,7 +105,7 @@ public final class AgentWatchCommand implements Runnable {
     announceStart(guardrails, deadline);
 
     var queue = new LinkedBlockingQueue<Event>();
-    var token = ApiTokenStore.defaultStore().readOrCreate();
+    var token = ServerConnectionConfig.resolve().token();
     try (var ignored = EventStreamClient.subscribe(apiHost, apiPort, token, name, queue)) {
       runLoop(
           queue,

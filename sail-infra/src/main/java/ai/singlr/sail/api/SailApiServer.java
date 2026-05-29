@@ -26,31 +26,11 @@ public final class SailApiServer implements AutoCloseable {
   private final SseHandler sseHandler;
   private final UnixSocketEventsListener socketListener;
 
-  public SailApiServer(String host, int port, ApiOperations operations, String token)
-      throws IOException {
-    this(host, port, operations, token, null, null);
-  }
-
-  /**
-   * Construct with explicit event-bus wiring. When {@code eventBus} is non-null, the persister is
-   * registered as a subscriber, the SSE handler is mounted, and a Unix-socket events listener is
-   * started at {@link SailPaths#apiSocketPath()} so project containers can publish events without
-   * going over TCP.
-   */
-  public SailApiServer(
-      String host,
-      int port,
-      ApiOperations operations,
-      String token,
-      EventBus eventBus,
-      AuditPersister auditPersister)
-      throws IOException {
-    this(host, port, operations, token, eventBus, auditPersister, SailPaths.apiSocketPath());
-  }
-
   /**
    * Construct with database-backed token auth. Used by the control plane server ({@code sail server
-   * start}).
+   * start}). When {@code eventBus} is non-null, the persister is registered as a subscriber, the
+   * SSE handler is mounted, and a Unix-socket events listener is started at {@link
+   * SailPaths#apiSocketPath()} so project containers can publish events without going over TCP.
    */
   public SailApiServer(
       String host,
@@ -75,15 +55,15 @@ public final class SailApiServer implements AutoCloseable {
       String host,
       int port,
       ApiOperations operations,
-      String token,
+      TokenStore tokenStore,
       EventBus eventBus,
-      AuditPersister auditPersister,
+      EventSubscriber auditSubscriber,
       Path socketPath)
       throws IOException {
-    this(host, port, operations, new BearerAuth(token), eventBus, auditPersister, socketPath);
+    this(host, port, operations, new TokenAuth(tokenStore), eventBus, auditSubscriber, socketPath);
   }
 
-  private SailApiServer(
+  SailApiServer(
       String host,
       int port,
       ApiOperations operations,

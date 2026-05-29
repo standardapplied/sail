@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.ApiTokenStore;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.PrintStream;
 import java.net.URI;
@@ -74,7 +74,7 @@ public final class EventsCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var token = ApiTokenStore.defaultStore().readOrCreate();
+    var token = ServerConnectionConfig.resolve().token();
     var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     if (follow) {
       streamEvents(client, token, System.out);

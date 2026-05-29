@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecMigrator;
@@ -63,12 +64,24 @@ public final class ServerInitCommand implements Runnable {
 
       var tokenStore = new TokenStore(db);
       var configPath = SailPaths.clientConfigPath();
-      var configMissing = !Files.exists(configPath);
       var existing = tokenStore.list();
-      if (existing.isEmpty() || configMissing) {
-        tokenStore.revoke("admin");
+      var existingAdmin = existing.stream().anyMatch(t -> "admin".equals(t.name()));
+      var configMissing = !Files.exists(configPath);
+      if (existing.isEmpty()) {
         var created = tokenStore.create("admin", "admin");
-        ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
+        ServerConnectionConfig.saveLocalToken(created.token(), configPath);
+        System.out.println(
+            Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
+      } else if (configMissing) {
+        if (existingAdmin) {
+          tokenStore.revoke("admin");
+          System.out.println(
+              Ansi.AUTO.string(
+                  "  @|yellow ↻|@ Config missing — rotating admin token (old plaintext is"
+                      + " unrecoverable)."));
+        }
+        var created = tokenStore.create("admin", "admin");
+        ServerConnectionConfig.saveLocalToken(created.token(), configPath);
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
       } else {

@@ -370,7 +370,7 @@ class ApiRouterTest {
 
   @Test
   void operationExceptionsBecomeStructuredErrors() throws Exception {
-    try (var server = new SailApiServer("127.0.0.1", 0, new FailingOperations(), "token")) {
+    try (var server = serverWith(new FailingOperations())) {
       server.start();
 
       var response = get(server, "/v1/projects/acme/agent", "token");
@@ -382,7 +382,7 @@ class ApiRouterTest {
 
   @Test
   void unexpectedOperationExceptionsBecomeInternalErrors() throws Exception {
-    try (var server = new SailApiServer("127.0.0.1", 0, new ExplodingOperations(), "token")) {
+    try (var server = serverWith(new ExplodingOperations())) {
       server.start();
 
       var response = get(server, "/v1/projects/acme/agent", "token");
@@ -399,8 +399,7 @@ class ApiRouterTest {
         ApiJson.withSchema(new ApiError("code", "message", "")).toString().contains("action"));
     assertTrue(
         ApiJson.withSchema(new ApiError("code", "message", "fix")).toString().contains("action"));
-    assertThrows(IllegalArgumentException.class, () -> new BearerAuth(null));
-    assertThrows(IllegalArgumentException.class, () -> new BearerAuth(""));
+    assertThrows(NullPointerException.class, () -> new TokenAuth(null));
   }
 
   @Test
@@ -814,8 +813,19 @@ class ApiRouterTest {
   }
 
   private static SailApiServer server() throws IOException {
-    var server = new SailApiServer("127.0.0.1", 0, new FakeOperations(), "token");
-    server.start();
+    return serverWith(new FakeOperations(), true);
+  }
+
+  private static SailApiServer serverWith(ApiOperations ops) throws IOException {
+    return serverWith(ops, false);
+  }
+
+  private static SailApiServer serverWith(ApiOperations ops, boolean autoStart) throws IOException {
+    var server =
+        new SailApiServer("127.0.0.1", 0, ops, new FixedTokenTestAuth("token"), null, null, null);
+    if (autoStart) {
+      server.start();
+    }
     return server;
   }
 

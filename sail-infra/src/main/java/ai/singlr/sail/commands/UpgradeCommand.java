@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.PlatformDetector;
@@ -16,12 +17,15 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -214,10 +218,14 @@ public final class UpgradeCommand implements Runnable {
     }
     try {
       var shell = new ShellExecutor(false);
-      var installer =
+      var defaultEndpoint = new Endpoint("127.0.0.1", 7070);
+      var bootstrap =
           HostServiceInstallers.create(
-              shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
-      if (!installer.isInstalled()) {
+              shell,
+              defaultEndpoint.host(),
+              defaultEndpoint.port(),
+              HostServiceInstallers.currentUsername());
+      if (!bootstrap.isInstalled()) {
         if (!json) {
           System.out.println(
               Banner.stepDoneLine(
@@ -225,9 +233,10 @@ public final class UpgradeCommand implements Runnable {
         }
         return RestartStatus.NOT_INSTALLED;
       }
-      // Re-render the unit file IF it drifted from the new binary's template. Without this,
-      // template changes shipped with a new binary stay invisible to systemd — the bug that
-      // silently held 0.12.5 / 0.12.6 in production stuck on the 0.12.0 RuntimeDirectory mode.
+      var endpoint = readUnitEndpoint(bootstrap.serviceFilePath()).orElse(defaultEndpoint);
+      var installer =
+          HostServiceInstallers.create(
+              shell, endpoint.host(), endpoint.port(), HostServiceInstallers.currentUsername());
       var driftReconciled = reconcileUnitFile(installer);
       var status = installer.status();
       if (!status.running()) {
@@ -270,11 +279,50 @@ public final class UpgradeCommand implements Runnable {
   }
 
   /**
-   * Delegates to {@link SystemdServiceInstaller#reconcile} so a binary upgrade that ships a
-   * template change rewrites the on-disk unit and {@code daemon-reload}s before the restart.
+   * Re-renders the unit file iff it drifted from the new binary's template, then {@code
+   * daemon-reload}s. Skipping this would let template changes shipped with a new binary stay
+   * invisible to systemd — the bug class that held 0.12.5 / 0.12.6 stuck on the 0.12.0 {@code
+   * RuntimeDirectory} mode and held 0.13.6 stuck on the legacy {@code sail api} command.
    */
   private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
     return installer.reconcile();
+  }
+
+  /** Bind address + port pair extracted from a sail-api unit file's {@code ExecStart}. */
+  record Endpoint(String host, int port) {}
+
+  /**
+   * Reads the existing sail-api unit file and pulls the {@code --host}/{@code --port} values out of
+   * the {@code ExecStart=} line so the reconcile step preserves the operator's configured endpoint.
+   * Returns empty when the file can't be parsed; the caller falls back to the bootstrap defaults.
+   */
+  static Optional<Endpoint> readUnitEndpoint(Path unitFile) {
+    try {
+      var content = Files.readString(unitFile);
+      var host = extractOption(content, "--host");
+      var port = extractOption(content, "--port");
+      if (host == null || port == null) {
+        return Optional.empty();
+      }
+      return Optional.of(new Endpoint(host, Integer.parseInt(port)));
+    } catch (IOException | NumberFormatException e) {
+      return Optional.empty();
+    }
+  }
+
+  private static String extractOption(String unitContent, String optionName) {
+    for (var line : unitContent.split("\n", -1)) {
+      if (!line.stripLeading().startsWith("ExecStart=")) {
+        continue;
+      }
+      var tokens = line.trim().split("\\s+");
+      for (var i = 0; i < tokens.length - 1; i++) {
+        if (optionName.equals(tokens[i])) {
+          return tokens[i + 1];
+        }
+      }
+    }
+    return null;
   }
 
   private void migrateDatabase(boolean dryRun) {
@@ -297,15 +345,14 @@ public final class UpgradeCommand implements Runnable {
               Ansi.AUTO.string(
                   "    @|faint Database schema migrated: " + before + " → " + after + "|@"));
         }
-        var tokenStore = new ai.singlr.sail.store.TokenStore(db);
+        var tokenStore = new TokenStore(db);
         if (tokenStore.list().isEmpty()) {
           var created = tokenStore.create("admin", "admin");
-          ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
+          var configPath = SailPaths.clientConfigPath();
+          ServerConnectionConfig.saveLocalToken(created.token(), configPath);
           if (!json) {
             System.out.println(
-                Ansi.AUTO.string(
-                    "    @|green ✓|@ API token created and saved to "
-                        + SailPaths.clientConfigPath()));
+                Ansi.AUTO.string("    @|green ✓|@ API token created and saved to " + configPath));
           }
         }
       }

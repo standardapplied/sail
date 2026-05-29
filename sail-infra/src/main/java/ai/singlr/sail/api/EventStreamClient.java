@@ -16,6 +16,8 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -36,9 +38,12 @@ import java.util.stream.Stream;
 public final class EventStreamClient implements AutoCloseable {
 
   private static final String DATA_PREFIX = "data: ";
+  private static final String SUBSCRIBED_LINE = ": subscribed";
+  private static final Duration SUBSCRIBED_TIMEOUT = Duration.ofSeconds(5);
 
   private final Stream<String> lineStream;
   private final Thread reader;
+  private final CountDownLatch subscribedLatch = new CountDownLatch(1);
   private volatile boolean stopped;
 
   private EventStreamClient(
@@ -52,8 +57,9 @@ public final class EventStreamClient implements AutoCloseable {
 
   /**
    * Opens an SSE connection to {@code http://<host>:<port>/v1/events/stream} (optionally filtered
-   * by {@code projectFilter}) and starts the background reader. Returns the live client; close it
-   * with try-with-resources.
+   * by {@code projectFilter}) and starts the background reader. Blocks until the server emits its
+   * {@code : subscribed} hello line so callers can publish events immediately on return without
+   * racing the subscription. Returns the live client; close it with try-with-resources.
    */
   public static EventStreamClient subscribe(
       String host, int port, String token, String projectFilter, BlockingQueue<Event> queue)
@@ -74,7 +80,16 @@ public final class EventStreamClient implements AutoCloseable {
       throw new IOException(
           "Event stream request returned HTTP " + response.statusCode() + " from " + request.uri());
     }
-    return new EventStreamClient(response, queue, projectFilter);
+    var stream = new EventStreamClient(response, queue, projectFilter);
+    if (!stream.subscribedLatch.await(SUBSCRIBED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+      stream.close();
+      throw new IOException(
+          "Did not receive subscribed hello from "
+              + request.uri()
+              + " within "
+              + SUBSCRIBED_TIMEOUT);
+    }
+    return stream;
   }
 
   private void readLoop(BlockingQueue<Event> queue) {
@@ -83,6 +98,10 @@ public final class EventStreamClient implements AutoCloseable {
           line -> {
             if (stopped) {
               throw new StopReadingException();
+            }
+            if (line != null && line.startsWith(SUBSCRIBED_LINE)) {
+              subscribedLatch.countDown();
+              return;
             }
             if (!processLine(line, queue)) {
               throw new StopReadingException();

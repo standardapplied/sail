@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -51,12 +52,12 @@ public final class ServerStartCommand implements Runnable {
     new SchemaManager(db).migrate();
 
     var tokenStore = new TokenStore(db);
+    var configPath = SailPaths.clientConfigPath();
     if (tokenStore.list().isEmpty()) {
       var created = tokenStore.create("admin", "admin");
-      ai.singlr.sail.api.ServerConnectionConfig.saveLocalToken(created.token());
+      ServerConnectionConfig.saveLocalToken(created.token(), configPath);
       System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ API token created and saved to " + SailPaths.clientConfigPath()));
+          Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
       System.out.println();
     }
     var specStore = new SpecStore(db);

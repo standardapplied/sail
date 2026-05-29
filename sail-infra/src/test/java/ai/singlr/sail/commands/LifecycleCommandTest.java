@@ -592,7 +592,7 @@ class LifecycleCommandTest {
     var output = sw.toString();
     assertTrue(output.contains("project"), "Should list 'project' command");
     assertTrue(output.contains("agent"), "Should list 'agent' command");
-    assertTrue(output.contains("api"), "Should list 'api' command");
+    assertTrue(output.contains("events"), "Should list 'events' command");
   }
 
   @Test

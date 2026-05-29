@@ -18,9 +18,9 @@ import java.util.Objects;
 /**
  * HTTP client that publishes a single {@link Event} to the running sail-api server. Mirrors {@link
  * EventStreamClient} on the consume side: same host/port resolution, same bearer-token auth via
- * {@link ApiTokenStore}, same minimal surface. Used by orchestrator-side code paths (CLI {@code
- * sail spec dispatch}, future spec lifecycle commands) where the agent hooks inside containers
- * cannot emit the event because the change is happening on the host.
+ * {@link ServerConnectionConfig}, same minimal surface. Used by orchestrator-side code paths (CLI
+ * {@code sail spec dispatch}, future spec lifecycle commands) where the agent hooks inside
+ * containers cannot emit the event because the change is happening on the host.
  *
  * <p>The publisher is intentionally small: one {@link #publish} method that raises {@link
  * IOException} on any non-2xx response or transport failure. Callers decide their own failure
@@ -48,12 +48,14 @@ public final class SailEventPublisher {
   }
 
   /**
-   * Builds a publisher pointing at the local sail-api with the token from {@link
-   * ApiTokenStore#defaultStore()}. The token store is created or loaded on demand, so this works
-   * even on a fresh host where {@code sail host service install} has just run.
+   * Builds a publisher pointing at the server resolved by {@link ServerConnectionConfig#resolve()}.
+   * Reads the token (and optional URL) from flags, env vars, or {@code ~/.sail/config.yaml}.
    */
   public static SailEventPublisher localDefault() throws IOException {
-    return new SailEventPublisher("127.0.0.1", 7070, ApiTokenStore.defaultStore().readOrCreate());
+    var config = ServerConnectionConfig.resolve();
+    var uri = URI.create(config.serverUrl());
+    var port = uri.getPort() == -1 ? 7070 : uri.getPort();
+    return new SailEventPublisher(uri.getHost(), port, config.token());
   }
 
   /**

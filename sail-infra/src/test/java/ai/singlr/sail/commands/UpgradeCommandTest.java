@@ -8,7 +8,10 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ai.singlr.sail.SailVersion;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 class UpgradeCommandTest {
@@ -34,5 +37,59 @@ class UpgradeCommandTest {
     var provider = new SailVersion();
     var lines = provider.getVersion();
     assertTrue(lines[0].startsWith("sail "));
+  }
+
+  @TempDir Path tempDir;
+
+  @Test
+  void readUnitEndpointParsesHostAndPort() throws Exception {
+    var unit = tempDir.resolve("sail-api.service");
+    Files.writeString(
+        unit,
+        """
+        [Service]
+        ExecStart=/usr/local/bin/sail server start --host 10.0.0.5 --port 9999
+        """);
+    var endpoint = UpgradeCommand.readUnitEndpoint(unit).orElseThrow();
+    assertEquals("10.0.0.5", endpoint.host());
+    assertEquals(9999, endpoint.port());
+  }
+
+  @Test
+  void readUnitEndpointHandlesLegacyApiExecStart() throws Exception {
+    var unit = tempDir.resolve("legacy.service");
+    Files.writeString(
+        unit,
+        """
+        [Service]
+        ExecStart=/usr/local/bin/sail api --host 127.0.0.1 --port 7070
+        """);
+    var endpoint = UpgradeCommand.readUnitEndpoint(unit).orElseThrow();
+    assertEquals("127.0.0.1", endpoint.host());
+    assertEquals(7070, endpoint.port());
+  }
+
+  @Test
+  void readUnitEndpointReturnsEmptyWhenFileMissing() {
+    assertTrue(UpgradeCommand.readUnitEndpoint(tempDir.resolve("nope.service")).isEmpty());
+  }
+
+  @Test
+  void readUnitEndpointReturnsEmptyWhenExecStartMissing() throws Exception {
+    var unit = tempDir.resolve("no-exec.service");
+    Files.writeString(unit, "[Service]\nType=simple\n");
+    assertTrue(UpgradeCommand.readUnitEndpoint(unit).isEmpty());
+  }
+
+  @Test
+  void readUnitEndpointReturnsEmptyOnNonNumericPort() throws Exception {
+    var unit = tempDir.resolve("bad-port.service");
+    Files.writeString(
+        unit,
+        """
+        [Service]
+        ExecStart=/usr/local/bin/sail server start --host 127.0.0.1 --port not-a-number
+        """);
+    assertTrue(UpgradeCommand.readUnitEndpoint(unit).isEmpty());
   }
 }

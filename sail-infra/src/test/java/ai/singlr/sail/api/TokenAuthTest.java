@@ -72,6 +72,24 @@ class TokenAuthTest {
   }
 
   @Test
+  void constructorRejectsNullStore() {
+    assertThrows(NullPointerException.class, () -> new TokenAuth(null));
+  }
+
+  @Test
+  void duplicateAuthorizationHeadersAreRejected() throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/board"));
+    request.header("Authorization", "Bearer " + validToken);
+    request.header("Authorization", "Bearer " + validToken);
+    var response =
+        HttpClient.newHttpClient()
+            .send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+    assertEquals(403, response.statusCode());
+    assertTrue(response.body().contains("invalid_bearer_token"));
+  }
+
+  @Test
   void multipleTokensWorkIndependently() throws Exception {
     var secondToken = tokenStore.create("second", "member").token();
     assertEquals(200, get("/v1/specs/board", validToken).statusCode());

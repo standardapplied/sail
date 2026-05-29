@@ -10,8 +10,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,20 +17,13 @@ class ServerConnectionConfigTest {
 
   @TempDir Path tempDir;
 
-  @BeforeEach
-  void isolateClientConfig() {
-    System.setProperty(
-        "sail.client.config.path", tempDir.resolve("missing-config.yaml").toString());
-  }
-
-  @AfterEach
-  void clearClientConfigOverride() {
-    System.clearProperty("sail.client.config.path");
+  private Path missingConfig() {
+    return tempDir.resolve("missing-config.yaml");
   }
 
   @Test
   void flagsOverrideEverything() throws IOException {
-    var config = ServerConnectionConfig.resolve("http://custom:9090", "my-token");
+    var config = ServerConnectionConfig.resolve("http://custom:9090", "my-token", missingConfig());
     assertEquals("http://custom:9090", config.serverUrl());
     assertEquals("my-token", config.token());
   }
@@ -40,12 +31,13 @@ class ServerConnectionConfigTest {
   @Test
   void missingTokenWithoutConfigThrows() {
     assertThrows(
-        IOException.class, () -> ServerConnectionConfig.resolve("http://localhost:7070", null));
+        IOException.class,
+        () -> ServerConnectionConfig.resolve("http://localhost:7070", null, missingConfig()));
   }
 
   @Test
   void defaultUrlIsLocalhostWhenNotProvided() throws IOException {
-    var config = ServerConnectionConfig.resolve(null, "some-token");
+    var config = ServerConnectionConfig.resolve(null, "some-token", missingConfig());
     assertEquals("http://localhost:7070", config.serverUrl());
   }
 
@@ -54,7 +46,7 @@ class ServerConnectionConfigTest {
     System.setProperty("SAIL_SERVER", "http://prop-server:8080");
     System.setProperty("SAIL_TOKEN", "prop-token");
     try {
-      var config = ServerConnectionConfig.resolve(null, null);
+      var config = ServerConnectionConfig.resolve(null, null, missingConfig());
       assertEquals("http://prop-server:8080", config.serverUrl());
       assertEquals("prop-token", config.token());
     } finally {
@@ -65,7 +57,8 @@ class ServerConnectionConfigTest {
 
   @Test
   void resolveNoArgThrowsWithoutToken() {
-    assertThrows(IOException.class, ServerConnectionConfig::resolve);
+    assertThrows(
+        IOException.class, () -> ServerConnectionConfig.resolve(null, null, missingConfig()));
   }
 
   @Test
@@ -126,39 +119,12 @@ class ServerConnectionConfigTest {
   }
 
   @Test
-  void saveLocalConfigTwoArgRoundTrips() throws IOException {
-    var configFile = tempDir.resolve("two-arg.yaml");
-    ServerConnectionConfig.saveLocalConfig("http://localhost:7070", "two-arg-token", configFile);
+  void saveLocalTokenUsesDefaultUrl() throws IOException {
+    var configFile = tempDir.resolve("token-only.yaml");
+    ServerConnectionConfig.saveLocalToken("my-token", configFile);
 
     var resolved = ServerConnectionConfig.resolve(null, null, configFile);
-    assertEquals("two-arg-token", resolved.token());
-  }
-
-  @Test
-  void saveLocalTokenUsesClientConfigPath() throws IOException {
-    var configFile = tempDir.resolve("client.yaml");
-    System.setProperty("sail.client.config.path", configFile.toString());
-    try {
-      ServerConnectionConfig.saveLocalToken("my-token");
-      var resolved = ServerConnectionConfig.resolve(null, null, configFile);
-      assertEquals("my-token", resolved.token());
-      assertEquals("http://localhost:7070", resolved.serverUrl());
-    } finally {
-      System.clearProperty("sail.client.config.path");
-    }
-  }
-
-  @Test
-  void saveLocalConfigTwoArgUsesClientConfigPath() throws IOException {
-    var configFile = tempDir.resolve("client.yaml");
-    System.setProperty("sail.client.config.path", configFile.toString());
-    try {
-      ServerConnectionConfig.saveLocalConfig("http://custom:9090", "tok");
-      var resolved = ServerConnectionConfig.resolve(null, null, configFile);
-      assertEquals("http://custom:9090", resolved.serverUrl());
-      assertEquals("tok", resolved.token());
-    } finally {
-      System.clearProperty("sail.client.config.path");
-    }
+    assertEquals("my-token", resolved.token());
+    assertEquals("http://localhost:7070", resolved.serverUrl());
   }
 }

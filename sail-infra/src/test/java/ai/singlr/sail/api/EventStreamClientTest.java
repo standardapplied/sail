@@ -48,7 +48,7 @@ class EventStreamClientTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -57,8 +57,6 @@ class EventStreamClientTest {
 
         try (var client =
             EventStreamClient.subscribe("127.0.0.1", server.port(), "tok", "light-grid", queue)) {
-          Thread.sleep(200);
-
           var published =
               bus.publish(
                   Event.of(
@@ -89,15 +87,13 @@ class EventStreamClientTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();
         var client = EventStreamClient.subscribe("127.0.0.1", server.port(), "tok", "any", queue);
-        Thread.sleep(200);
-
         client.close();
 
         bus.publish(
@@ -119,7 +115,7 @@ class EventStreamClientTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -180,8 +176,6 @@ class EventStreamClientTest {
 
   @Test
   void processLineReturnsFalseWhenInterrupted() throws Exception {
-    // A bounded queue with no capacity forces put() to block; interrupting the thread
-    // causes put() to throw InterruptedException, which processLine reports as stop.
     var queue = new java.util.concurrent.ArrayBlockingQueue<Event>(1);
     queue.put(Event.of("p", null, "t", "a", "h"));
     var ts = "2026-05-21T12:34:56Z";
@@ -195,7 +189,10 @@ class EventStreamClientTest {
             () -> EventStreamClient.processLine("data: " + json, queue));
     var thread = new Thread(task);
     thread.start();
-    Thread.sleep(50);
+    while (thread.getState() != Thread.State.WAITING
+        && thread.getState() != Thread.State.TIMED_WAITING) {
+      Thread.onSpinWait();
+    }
     thread.interrupt();
 
     var result = task.get(2, TimeUnit.SECONDS);
@@ -211,7 +208,7 @@ class EventStreamClientTest {
               "127.0.0.1",
               0,
               new SailApiOperations(),
-              "tok",
+              new FixedTokenTestAuth("tok"),
               bus,
               persister,
               tmp.resolve("api.sock"))) {
@@ -220,8 +217,6 @@ class EventStreamClientTest {
 
         try (var ignored =
             EventStreamClient.subscribe("127.0.0.1", server.port(), "tok", "light-grid", queue)) {
-          Thread.sleep(200);
-
           bus.publish(
               Event.of(
                   "other-project",

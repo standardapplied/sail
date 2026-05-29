@@ -8,21 +8,25 @@ package ai.singlr.sail.api;
 import com.sun.net.httpserver.HttpExchange;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Objects;
 
-public final class BearerAuth implements ApiAuth {
+/**
+ * Test-only {@link ApiAuth} that accepts a single fixed bearer token via constant-time comparison.
+ * Production servers use {@link TokenAuth} backed by SQLite. Tests of {@link SseHandler} or {@link
+ * ApiRouter} that don't care about token rotation can use this to avoid spinning up a SQLite store.
+ */
+final class FixedTokenTestAuth implements ApiAuth {
 
   private final byte[] expected;
 
-  public BearerAuth(String token) {
-    if (token == null || token.isBlank()) {
-      throw new IllegalArgumentException("API token must not be blank.");
-    }
-    expected = token.getBytes(StandardCharsets.UTF_8);
+  FixedTokenTestAuth(String token) {
+    this.expected = Objects.requireNonNull(token, "token").getBytes(StandardCharsets.UTF_8);
   }
 
+  @Override
   public void require(HttpExchange exchange) {
     var headers = exchange.getRequestHeaders().get("Authorization");
-    if (headers != null && headers.size() != 1) {
+    if (headers != null && headers.size() > 1) {
       throw new ApiException(ErrorCode.INVALID_BEARER_TOKEN, "Bearer token is invalid.");
     }
     var header = exchange.getRequestHeaders().getFirst("Authorization");

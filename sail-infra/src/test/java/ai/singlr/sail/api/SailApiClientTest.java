@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.AfterEach;
@@ -17,25 +18,23 @@ import org.junit.jupiter.api.io.TempDir;
 
 class SailApiClientTest {
 
-  private SailApiServer server;
-  private SailApiClient client;
-
   @TempDir Path tempDir;
+
+  private ApiTestServer fixture;
+  private SailApiClient client;
+  private Path missingConfig;
 
   @BeforeEach
   void setUp() throws Exception {
-    System.setProperty(
-        "sail.client.config.path", tempDir.resolve("missing-config.yaml").toString());
-    server = new SailApiServer("127.0.0.1", 0, new TestOperations(), "test-token");
-    server.start();
-    client = new SailApiClient("http://127.0.0.1:" + server.port(), "test-token");
+    fixture = ApiTestServer.start(tempDir, new TestOperations());
+    client = new SailApiClient("http://127.0.0.1:" + fixture.port(), fixture.token());
+    missingConfig = tempDir.resolve("missing-config.yaml");
   }
 
   @AfterEach
   void tearDown() {
     if (client != null) client.close();
-    if (server != null) server.close();
-    System.clearProperty("sail.client.config.path");
+    if (fixture != null) fixture.close();
   }
 
   @Test
@@ -76,7 +75,7 @@ class SailApiClientTest {
 
   @Test
   void invalidTokenThrowsIOException() {
-    try (var badClient = new SailApiClient("http://127.0.0.1:" + server.port(), "wrong-token")) {
+    try (var badClient = new SailApiClient("http://127.0.0.1:" + fixture.port(), "wrong-token")) {
       assertThrows(IOException.class, () -> badClient.get("/v1/specs/board"));
     }
   }
@@ -84,7 +83,7 @@ class SailApiClientTest {
   @Test
   void trailingSlashInBaseUrlIsHandled() throws IOException {
     try (var slashClient =
-        new SailApiClient("http://127.0.0.1:" + server.port() + "/", "test-token")) {
+        new SailApiClient("http://127.0.0.1:" + fixture.port() + "/", fixture.token())) {
       var result = slashClient.get("/v1/health");
       assertEquals("ok", result.get("status"));
     }
@@ -101,14 +100,14 @@ class SailApiClientTest {
 
   @Test
   void fromConfigThrowsWithoutToken() {
-    assertThrows(IOException.class, SailApiClient::fromConfig);
+    assertThrows(IOException.class, () -> SailApiClient.fromConfig(missingConfig));
   }
 
   @Test
   void fromConfigSucceedsWithSystemProperties() throws IOException {
-    System.setProperty("SAIL_SERVER", "http://127.0.0.1:" + server.port());
-    System.setProperty("SAIL_TOKEN", "test-token");
-    try (var fromConfig = SailApiClient.fromConfig()) {
+    System.setProperty("SAIL_SERVER", "http://127.0.0.1:" + fixture.port());
+    System.setProperty("SAIL_TOKEN", fixture.token());
+    try (var fromConfig = SailApiClient.fromConfig(missingConfig)) {
       var result = fromConfig.get("/v1/health");
       assertEquals("ok", result.get("status"));
     } finally {
@@ -119,20 +118,18 @@ class SailApiClientTest {
 
   @Test
   void notFoundReturnsGenericMessageWhenNoErrorField() throws Exception {
-    try (var noErrorServer =
-            new SailApiServer(
-                "127.0.0.1",
-                0,
-                new TestOperations() {
-                  @Override
-                  public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
-                    return Result.failure(ErrorCode.SPEC_NOT_FOUND, "Not found.");
-                  }
-                },
-                "test-token");
+    var ops =
+        new TestOperations() {
+          @Override
+          public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+            return Result.failure(ErrorCode.SPEC_NOT_FOUND, "Not found.");
+          }
+        };
+    var subDir = Files.createDirectories(tempDir.resolve("not-found"));
+    try (var noErrorFixture = ApiTestServer.start(subDir, ops);
         var testClient =
-            new SailApiClient("http://127.0.0.1:" + noErrorServer.port(), "test-token")) {
-      noErrorServer.start();
+            new SailApiClient(
+                "http://127.0.0.1:" + noErrorFixture.port(), noErrorFixture.token())) {
       var ex = assertThrows(IOException.class, () -> testClient.get("/v1/specs/missing"));
       assertTrue(ex.getMessage().contains("Not found"));
     }

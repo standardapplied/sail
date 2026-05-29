@@ -9,11 +9,15 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Resolves server connection details. Resolution order for URL: {@code --server} flag → {@code
- * SAIL_SERVER} env → {@code ~/.sail/client.yaml} → {@code http://localhost:7070}. Resolution order
- * for token: {@code --token} flag → {@code SAIL_TOKEN} env → {@code ~/.sail/client.yaml}.
+ * SAIL_SERVER} env → config file → {@code http://localhost:7070}. Resolution order for token:
+ * {@code --token} flag → {@code SAIL_TOKEN} env → config file.
+ *
+ * <p>The config file lives at {@link SailPaths#clientConfigPath()} in production; tests pass an
+ * explicit path via the three-arg {@link #resolve(String, String, Path)} overload.
  */
 public record ServerConnectionConfig(String serverUrl, String token) {
 
@@ -29,8 +33,8 @@ public record ServerConnectionConfig(String serverUrl, String token) {
   }
 
   @SuppressWarnings("unchecked")
-  static ServerConnectionConfig resolve(
-      String serverFlag, String tokenFlag, java.nio.file.Path configPath) throws IOException {
+  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag, Path configPath)
+      throws IOException {
     var url = serverFlag;
     var token = tokenFlag;
 
@@ -50,15 +54,11 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     return new ServerConnectionConfig(url, token);
   }
 
-  public static void saveLocalToken(String token) throws IOException {
-    saveLocalConfig(DEFAULT_URL, token);
+  public static void saveLocalToken(String token, Path configPath) throws IOException {
+    saveLocalConfig(DEFAULT_URL, token, configPath);
   }
 
-  public static void saveLocalConfig(String serverUrl, String token) throws IOException {
-    saveLocalConfig(serverUrl, token, SailPaths.clientConfigPath());
-  }
-
-  static void saveLocalConfig(String serverUrl, String token, java.nio.file.Path configPath)
+  public static void saveLocalConfig(String serverUrl, String token, Path configPath)
       throws IOException {
     var yaml = "server: " + serverUrl + "\ntoken: " + token + "\n";
     Files.createDirectories(configPath.getParent());

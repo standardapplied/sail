@@ -6,12 +6,14 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -95,7 +97,11 @@ public final class SailApiClient implements AutoCloseable {
   }
 
   public static SailApiClient fromConfig() throws IOException {
-    var config = ServerConnectionConfig.resolve();
+    return fromConfig(SailPaths.clientConfigPath());
+  }
+
+  public static SailApiClient fromConfig(Path configPath) throws IOException {
+    var config = ServerConnectionConfig.resolve(null, null, configPath);
     return new SailApiClient(config.serverUrl(), config.token());
   }
 }
