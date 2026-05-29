@@ -306,6 +306,15 @@ public final class SpecStore {
         repos);
   }
 
+  /**
+   * Inserts dependency edges for an already-persisted spec. Used by bulk import, which inserts all
+   * spec rows before wiring dependencies so forward references within a batch don't violate the
+   * {@code depends_on} foreign key. Callers must ensure each target spec already exists.
+   */
+  public void addDependencies(String specId, List<String> deps) {
+    db.transaction(() -> insertDependencies(specId, deps));
+  }
+
   private void insertDependencies(String specId, List<String> deps) {
     for (var dep : deps) {
       db.execute("INSERT INTO spec_dependencies (spec_id, depends_on) VALUES (?, ?)", specId, dep);

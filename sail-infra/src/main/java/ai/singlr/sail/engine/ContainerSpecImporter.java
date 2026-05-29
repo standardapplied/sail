@@ -23,8 +23,10 @@ import java.util.Objects;
  * the same way every other command does: through the container shell ({@link SpecWorkspace} over
  * {@code incus exec}), bucketing each spec under its project name.
  *
- * <p>Idempotent — {@link SpecMigrator} skips by id. Driven only by {@code sail migrate}; the daemon
- * never walks containers.
+ * <p>Specs from every running container are collected first, then imported as a single batch so a
+ * spec can depend on a spec in another project. {@link SpecMigrator} does the two-phase insert and
+ * skips by id, so this is idempotent. Driven only by {@code sail migrate}; the daemon never walks
+ * containers.
  */
 public final class ContainerSpecImporter {
 
@@ -33,7 +35,7 @@ public final class ContainerSpecImporter {
    *
    * @param imported newly-inserted specs across all containers
    * @param skipped specs already in the DB (skip-by-id)
-   * @param notes one line per project the scan touched (or skipped)
+   * @param notes one line per project the scan touched (or skipped), plus any import errors
    */
   public record Report(int imported, int skipped, List<String> notes) {
     public static Report empty() {
@@ -65,8 +67,7 @@ public final class ContainerSpecImporter {
       return new Report(0, 0, List.of("  • Failed to list projects: " + e.getMessage()));
     }
 
-    var imported = 0;
-    var skipped = 0;
+    var imports = new ArrayList<SpecMigrator.SpecImport>();
     var notes = new ArrayList<String>();
     for (var projectDir : projectDirs) {
       var project = projectDir.getFileName().toString();
@@ -75,57 +76,47 @@ public final class ContainerSpecImporter {
         continue;
       }
       try {
-        var report = importProject(project, descriptor);
-        imported += report.imported();
-        skipped += report.skipped();
-        notes.addAll(report.notes());
+        imports.addAll(collectProject(project, descriptor, notes));
       } catch (Exception e) {
         notes.add("  • " + project + " ERROR: " + e.getMessage());
       }
     }
-    return new Report(imported, skipped, List.copyOf(notes));
+
+    var result = migrator.importSpecs(imports);
+    for (var error : result.errors()) {
+      notes.add("  • " + error);
+    }
+    return new Report(result.imported(), result.skipped(), List.copyOf(notes));
   }
 
-  private Report importProject(String project, Path descriptor) throws Exception {
+  private List<SpecMigrator.SpecImport> collectProject(
+      String project, Path descriptor, List<String> notes) throws Exception {
     var config = SailYaml.fromMap(YamlUtil.parseFile(descriptor));
     if (config.agent() == null || config.agent().specsDir() == null) {
-      return Report.empty();
+      return List.of();
     }
     var state = containers.queryState(project);
     if (!(state instanceof ContainerState.Running)) {
-      return new Report(0, 0, List.of("  • " + project + ": skipped (" + describe(state) + ")"));
+      notes.add("  • " + project + ": skipped (" + describe(state) + ")");
+      return List.of();
     }
 
     var specsDir = "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
     var workspace = new SpecWorkspace(shell, project, specsDir);
     var specs = workspace.readSpecs();
     if (specs.isEmpty()) {
-      return Report.empty();
+      return List.of();
     }
 
-    var imported = 0;
-    var skipped = 0;
+    var imports = new ArrayList<SpecMigrator.SpecImport>();
     for (var spec : specs) {
+      var bucket = spec.project() != null ? spec.project() : project;
       var body = workspace.readSpecBody(spec.id());
       var plan = workspace.readPlanBody(spec.id());
-      if (migrator.importSpec(spec, project, body, plan)) {
-        imported++;
-      } else {
-        skipped++;
-      }
+      imports.add(new SpecMigrator.SpecImport(spec, bucket, body, plan));
     }
-    return new Report(
-        imported,
-        skipped,
-        List.of(
-            "  • "
-                + project
-                + ": imported "
-                + imported
-                + ", skipped (already present) "
-                + skipped
-                + " from "
-                + specsDir));
+    notes.add("  • " + project + ": " + specs.size() + " spec(s) found in " + specsDir);
+    return imports;
   }
 
   private static String describe(ContainerState state) {

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -219,5 +220,51 @@ class SpecMigratorTest {
     assertEquals(0, result.imported());
     assertEquals(1, result.errors().size());
     assertTrue(result.errors().getFirst().startsWith("broken:"));
+  }
+
+  @Test
+  void wiresDependencyOnSpecImportedLaterInTheBatch() throws IOException {
+    writeSpec(
+        "aaa-consumer",
+        """
+        id: aaa-consumer
+        title: Depends on a spec that sorts later
+        status: pending
+        depends_on:
+          - zzz-provider
+        """);
+    writeSpec(
+        "zzz-provider",
+        """
+        id: zzz-provider
+        title: The dependency target
+        status: pending
+        """);
+
+    var result = migrator.importFromDirectory(specsDir);
+
+    assertEquals(2, result.imported());
+    assertTrue(result.errors().isEmpty(), () -> "unexpected errors: " + result.errors());
+    assertEquals(List.of("zzz-provider"), store.findById("aaa-consumer").get().dependsOn());
+  }
+
+  @Test
+  void skipsUnknownDependencyWithoutFailingTheImport() throws IOException {
+    writeSpec(
+        "lonely",
+        """
+        id: lonely
+        title: Depends on a spec that does not exist
+        status: pending
+        depends_on:
+          - ghost
+        """);
+
+    var result = migrator.importFromDirectory(specsDir);
+
+    assertEquals(1, result.imported());
+    assertEquals(1, result.errors().size());
+    assertTrue(result.errors().getFirst().contains("unknown dependency 'ghost'"));
+    assertTrue(store.findById("lonely").get().dependsOn().isEmpty());
   }
 }
