@@ -7,7 +7,7 @@
     <parent>
         <groupId>ai.singlr</groupId>
         <artifactId>sail</artifactId>
-        <version>0.13.23</version>
+        <version>0.13.24</version>
     </parent>
 
     <artifactId>sail-core</artifactId>

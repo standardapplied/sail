@@ -53,7 +53,7 @@ public record ServerConnectionConfig(String serverUrl, String token) {
 
     if (url == null) url = DEFAULT_URL;
     if (token == null) {
-      throw new IOException("No API token configured. Set SAIL_TOKEN or run 'sail client init'.");
+      throw new IOException("No API token configured. Set SAIL_TOKEN or run 'sail init'.");
     }
     return new ServerConnectionConfig(url, token);
   }
