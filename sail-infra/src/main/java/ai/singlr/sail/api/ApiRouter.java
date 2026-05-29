@@ -185,7 +185,9 @@ public final class ApiRouter implements HttpHandler {
         }
         case POST ->
             ApiResponse.fromCreated(
-                operations.createGlobalSpec(SpecCreateRequest.fromMap(JsonBody.readMap(exchange))));
+                operations.createGlobalSpec(
+                    SpecCreateRequest.fromMap(JsonBody.readMap(exchange))
+                        .withCreatedBy(actor(exchange))));
         default -> throw methodNotAllowed();
       };
     }
@@ -322,6 +324,19 @@ public final class ApiRouter implements HttpHandler {
     if (!request.is(method)) {
       throw methodNotAllowed();
     }
+  }
+
+  /**
+   * Resolves the acting principal for attribution: the authenticated FDE handle when the token has
+   * an owner, otherwise the token name (machine/CI credential). Null only when unauthenticated.
+   */
+  private static String actor(HttpExchange exchange) {
+    var fde = exchange.getAttribute("token.fde");
+    if (fde != null) {
+      return fde.toString();
+    }
+    var name = exchange.getAttribute("token.name");
+    return name == null ? null : name.toString();
   }
 
   private static ApiException methodNotAllowed() {

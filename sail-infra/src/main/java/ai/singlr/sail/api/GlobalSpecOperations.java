@@ -72,7 +72,7 @@ final class GlobalSpecOperations {
             validReasoning(request.reasoningEffort()),
             request.branch(),
             request.priority(),
-            null,
+            request.createdBy(),
             "",
             "",
             request.dependsOn(),

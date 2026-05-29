@@ -440,7 +440,8 @@ record SpecCreateRequest(
     List<String> dependsOn,
     List<String> repos,
     String body,
-    String plan) {
+    String plan,
+    String createdBy) {
 
   @SuppressWarnings("unchecked")
   static SpecCreateRequest fromMap(Map<String, Object> map) {
@@ -458,7 +459,31 @@ record SpecCreateRequest(
         map.containsKey("depends_on") ? (List<String>) map.get("depends_on") : List.of(),
         map.containsKey("repos") ? (List<String>) map.get("repos") : List.of(),
         (String) map.get("body"),
-        (String) map.get("plan"));
+        (String) map.get("plan"),
+        null);
+  }
+
+  /**
+   * Returns a copy attributed to {@code actor}. {@code created_by} is set by the server from the
+   * authenticated principal, never from the request body, so a client cannot forge authorship.
+   */
+  SpecCreateRequest withCreatedBy(String actor) {
+    return new SpecCreateRequest(
+        id,
+        project,
+        title,
+        status,
+        assignee,
+        agent,
+        model,
+        reasoningEffort,
+        branch,
+        priority,
+        dependsOn,
+        repos,
+        body,
+        plan,
+        actor);
   }
 }
 

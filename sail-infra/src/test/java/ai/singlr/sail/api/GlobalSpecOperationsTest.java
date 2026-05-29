@@ -44,6 +44,18 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void createPersistsAuthenticatedAuthor() {
+    ops.create(createReq(Map.of()).withCreatedBy("uday"));
+    assertEquals("uday", ops.get("auth").spec().createdBy());
+  }
+
+  @Test
+  void clientSuppliedCreatedByIsIgnored() {
+    ops.create(createReq(Map.of("created_by", "attacker")));
+    assertNull(ops.get("auth").spec().createdBy());
+  }
+
+  @Test
   void createThenGetRoundTrips() {
     var created = ops.create(createReq(Map.of("status", "pending", "body", "B", "plan", "P")));
     assertEquals("auth", created.spec().id());

@@ -68,6 +68,13 @@ class AuthorizationTest {
     assertNotEquals(403, send("POST", "/v1/specs", admin, "{}").statusCode());
   }
 
+  @Test
+  void fdeOwnedTokenCanWrite() throws Exception {
+    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var token = tokenStore.create("uday-laptop", "admin", fde.id()).token();
+    assertNotEquals(403, send("POST", "/v1/specs", token, "{}").statusCode());
+  }
+
   private HttpResponse<String> send(String method, String path, String token, String body)
       throws Exception {
     var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
