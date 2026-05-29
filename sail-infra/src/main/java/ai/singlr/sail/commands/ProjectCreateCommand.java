@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
@@ -218,17 +219,17 @@ public final class ProjectCreateCommand implements Runnable {
     }
 
     if (gitToken != null && !gitToken.isBlank()) {
-      return ProjectProvisioner.singleTokenMap(gitToken);
+      return GitCredentials.singleTokenMap(gitToken);
     }
 
-    var hosts = ProjectProvisioner.extractHttpsHosts(config.repos());
+    var hosts = GitCredentials.extractHttpsHosts(config.repos());
     if (hosts.isEmpty()) {
       return Map.of();
     }
 
     var tokens = new LinkedHashMap<String, String>();
     for (var host : hosts) {
-      var envToken = ProjectProvisioner.resolveTokenForHost(host, null);
+      var envToken = GitCredentials.resolveTokenForHost(host, null);
       if (envToken != null && !envToken.isBlank()) {
         tokens.put(host, envToken);
       }

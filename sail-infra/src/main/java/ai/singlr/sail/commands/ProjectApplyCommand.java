@@ -10,10 +10,10 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectDefaults;
-import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
@@ -133,7 +133,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var repoResult =
         applier.applyRepos(
-            name, config.repos(), sshUser, ProjectProvisioner.singleTokenMap(token), config.git());
+            name, config.repos(), sshUser, GitCredentials.singleTokenMap(token), config.git());
     totalAdded += repoResult.added();
     totalSkipped += repoResult.skipped();
 

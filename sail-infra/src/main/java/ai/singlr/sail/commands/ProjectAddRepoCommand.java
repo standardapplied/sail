@@ -11,9 +11,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
+import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
@@ -110,7 +110,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     var applier = new ProjectApplier(shell, out);
     var result =
         applier.applyRepos(
-            name, List.of(repo), sshUser, ProjectProvisioner.singleTokenMap(token), config.git());
+            name, List.of(repo), sshUser, GitCredentials.singleTokenMap(token), config.git());
 
     SailYamlUpdater.addRepo(singYamlPath, repo);
 

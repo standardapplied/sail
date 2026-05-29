@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.GitHubFetcher;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
@@ -145,8 +146,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     var provisioner = new ProjectProvisioner(shell, tracker, listener);
-    provisioner.provision(
-        config, hostYaml, ProjectProvisioner.singleTokenMap(gitToken), singYamlPath);
+    provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), singYamlPath);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

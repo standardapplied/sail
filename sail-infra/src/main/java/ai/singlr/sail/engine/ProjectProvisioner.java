@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,8 +37,6 @@ public final class ProjectProvisioner {
   private static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(10);
 
   private static final Pattern VERSION_PATTERN = Pattern.compile("[0-9][0-9.]*");
-  private static final Pattern HOST_PATTERN =
-      Pattern.compile("^[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?$");
   private static final String MAVEN_PRIMARY_BASE_URL = "https://dlcdn.apache.org/maven/maven-3/";
   private static final String MAVEN_ARCHIVE_BASE_URL =
       "https://archive.apache.org/dist/maven/maven-3/";
@@ -650,7 +647,7 @@ public final class ProjectProvisioner {
     }
 
     var knownHostsPath = "/etc/ssh/ssh_known_hosts";
-    var sshHosts = extractSshHosts(config.repos());
+    var sshHosts = GitCredentials.extractSshHosts(config.repos());
     if (!sshHosts.isEmpty()) {
       var command =
           new ArrayList<>(
@@ -665,7 +662,7 @@ public final class ProjectProvisioner {
     }
 
     if ("token".equals(config.git().auth()) && gitTokens != null && !gitTokens.isEmpty()) {
-      var credContent = buildCredentialStore(gitTokens, config.repos());
+      var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
       var credPath = "/home/" + user + "/.git-credentials";
       pushFileToContainer(name, credPath, credContent, "0600");
       var chownCred = execInContainer(name, List.of("chown", user + ":" + user, credPath));
@@ -680,7 +677,7 @@ public final class ProjectProvisioner {
     }
 
     if ("ssh".equals(config.git().auth()) && config.git().sshKey() != null) {
-      var sshKeyHostPath = resolveHostPath(config.git().sshKey());
+      var sshKeyHostPath = GitCredentials.resolveHostPath(config.git().sshKey());
       if (!Files.exists(sshKeyHostPath)) {
         throw new IOException(
             "SSH key not found: "
@@ -848,7 +845,7 @@ public final class ProjectProvisioner {
     if (config.git() == null || !"token".equals(config.git().auth())) {
       return;
     }
-    var credContent = buildCredentialStore(gitTokens, config.repos());
+    var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
     if (credContent.isEmpty()) {
       return;
     }
@@ -1254,154 +1251,9 @@ public final class ProjectProvisioner {
     }
   }
 
-  /**
-   * Builds the contents of a {@code .git-credentials} file with one entry per unique HTTPS host
-   * found in the repo URLs. Looks up each host in the supplied token map, then falls back to
-   * provider-specific environment variables ({@code GITHUB_TOKEN}, {@code GITLAB_TOKEN}, {@code
-   * BITBUCKET_TOKEN}).
-   */
-  static String buildCredentialStore(Map<String, String> tokens, List<SailYaml.Repo> repos) {
-    var hosts = extractHttpsHosts(repos);
-    var sb = new StringBuilder();
-    for (var host : hosts) {
-      var resolved = resolveTokenForHost(host, tokens);
-      if (resolved != null && !resolved.isBlank()) {
-        sb.append("https://oauth2:").append(resolved).append('@').append(host).append('\n');
-      }
-    }
-    return sb.toString();
-  }
-
-  /**
-   * Extracts unique HTTPS hostnames from repo URLs. Only includes hosts from repos that use HTTPS.
-   */
-  public static List<String> extractHttpsHosts(List<SailYaml.Repo> repos) {
-    var hosts = new LinkedHashSet<String>();
-    if (repos != null) {
-      for (var repo : repos) {
-        var url = repo.url();
-        if (url.startsWith("https://")) {
-          var afterScheme = url.substring(8);
-          var slashIdx = afterScheme.indexOf('/');
-          if (slashIdx > 0) {
-            hosts.add(afterScheme.substring(0, slashIdx));
-          }
-        }
-      }
-    }
-    return hosts.stream().map(ProjectProvisioner::requireSafeHost).toList();
-  }
-
-  /**
-   * Resolves the git credential token for a specific host. Checks the token map first (exact host,
-   * then wildcard "*"), then falls back to provider-specific environment variables.
-   */
-  public static String resolveTokenForHost(String host, Map<String, String> tokens) {
-    if (tokens != null) {
-      var explicit = tokens.get(host);
-      if (explicit != null && !explicit.isBlank()) {
-        return explicit;
-      }
-      var wildcard = tokens.get("*");
-      if (wildcard != null && !wildcard.isBlank()) {
-        return wildcard;
-      }
-    }
-    return providerEnvToken(host);
-  }
-
-  private static String providerEnvToken(String host) {
-    if ("github.com".equals(host)) {
-      return System.getenv("GITHUB_TOKEN");
-    }
-    if ("gitlab.com".equals(host) || host.contains("gitlab")) {
-      return System.getenv("GITLAB_TOKEN");
-    }
-    if (host.contains("bitbucket")) {
-      return System.getenv("BITBUCKET_TOKEN");
-    }
-    return null;
-  }
-
-  /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */
-  public static Map<String, String> singleTokenMap(String token) {
-    if (token == null || token.isBlank()) return Map.of();
-    return Map.of("*", token);
-  }
-
-  /**
-   * Extracts unique SSH hostnames from repo URLs. Handles both SSH-style ({@code git@host:path})
-   * and HTTPS-style URLs. Always includes {@code github.com} and {@code gitlab.com} as common
-   * defaults for {@code ssh-keyscan}.
-   */
-  static List<String> extractSshHosts(List<SailYaml.Repo> repos) {
-    var hosts = new LinkedHashSet<String>();
-    hosts.add("github.com");
-    hosts.add("gitlab.com");
-    if (repos != null) {
-      for (var repo : repos) {
-        var url = repo.url();
-        if (url.startsWith("git@")) {
-          var colonIdx = url.indexOf(':');
-          if (colonIdx > 4) {
-            hosts.add(url.substring(4, colonIdx));
-          }
-        } else if (url.startsWith("https://")) {
-          var afterScheme = url.substring(8);
-          var slashIdx = afterScheme.indexOf('/');
-          if (slashIdx > 0) {
-            hosts.add(afterScheme.substring(0, slashIdx));
-          }
-        }
-      }
-    }
-    return hosts.stream().map(ProjectProvisioner::requireSafeHost).toList();
-  }
-
-  private static String requireSafeHost(String host) {
-    if (host == null
-        || host.length() > 253
-        || !HOST_PATTERN.matcher(host).matches()
-        || host.contains("..")
-        || host.endsWith(".")
-        || invalidPort(host)) {
-      throw new IllegalArgumentException("Invalid repository host: '" + host + "'.");
-    }
-    return host;
-  }
-
-  private static boolean invalidPort(String host) {
-    var colon = host.lastIndexOf(':');
-    if (colon < 0) {
-      return false;
-    }
-    try {
-      var port = Integer.parseInt(host.substring(colon + 1));
-      return port < 1 || port > 65535;
-    } catch (NumberFormatException e) {
-      return true;
-    }
-  }
-
   /** Returns the SSH user from config, defaulting to {@code "dev"}. */
   private static String sshUser(SailYaml config) {
     return config.ssh() != null ? config.ssh().user() : "dev";
-  }
-
-  /**
-   * Resolves a host-side file path, expanding {@code ~} to the invoking user's home directory. When
-   * running under {@code sudo}, uses {@code SUDO_USER} to find the real user's home instead of
-   * root's.
-   */
-  static Path resolveHostPath(String path) {
-    if (path.startsWith("~/")) {
-      var sudoUser = System.getenv("SUDO_USER");
-      if (sudoUser != null && !sudoUser.isBlank()) {
-        return Path.of("/home", sudoUser, path.substring(2));
-      }
-      return Path.of(System.getProperty("user.home"), path.substring(2));
-    }
-    return Path.of(path);
   }
 
   /**
@@ -1495,25 +1347,7 @@ public final class ProjectProvisioner {
   private void pushFileToContainer(
       String containerName, String remotePath, String content, String mode)
       throws IOException, InterruptedException, TimeoutException {
-    var tmpFile = Files.createTempFile("sail-push-", ".tmp");
-    try {
-      Files.writeString(tmpFile, content);
-      var result =
-          shell.exec(
-              List.of(
-                  "incus",
-                  "file",
-                  "push",
-                  "--mode",
-                  mode,
-                  tmpFile.toString(),
-                  containerName + remotePath));
-      if (!result.ok()) {
-        throw new IOException("Failed to push file to " + remotePath + ": " + result.stderr());
-      }
-    } finally {
-      Files.deleteIfExists(tmpFile);
-    }
+    ContainerFilePush.push(shell, containerName, remotePath, content, List.of("--mode", mode));
   }
 
   private void step(int step, String description) {

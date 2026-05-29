@@ -503,7 +503,7 @@ public final class ProjectApplier {
   private void ensureCredentialStore(
       String name, String sshUser, Map<String, String> gitTokens, List<SailYaml.Repo> repos)
       throws IOException, InterruptedException, TimeoutException {
-    var credContent = ProjectProvisioner.buildCredentialStore(gitTokens, repos);
+    var credContent = GitCredentials.buildCredentialStore(gitTokens, repos);
     if (credContent.isEmpty()) {
       return;
     }
@@ -528,7 +528,7 @@ public final class ProjectApplier {
     if (git == null || !"ssh".equals(git.auth()) || git.sshKey() == null) {
       return;
     }
-    var sshKeyHostPath = ProjectProvisioner.resolveHostPath(git.sshKey());
+    var sshKeyHostPath = GitCredentials.resolveHostPath(git.sshKey());
     if (!Files.exists(sshKeyHostPath)) {
       throw new IOException(
           "SSH key not found: "
@@ -559,32 +559,13 @@ public final class ProjectApplier {
   private void pushFile(
       String containerName, String remotePath, String content, String sshUser, String mode)
       throws IOException, InterruptedException, TimeoutException {
-    var tmpFile = Files.createTempFile("sail-push-", ".tmp");
-    try {
-      Files.writeString(tmpFile, content);
-      var parentDir = remotePath.substring(0, remotePath.lastIndexOf('/'));
-      shell.exec(ContainerExec.asDevUser(containerName, List.of("mkdir", "-p", parentDir)));
-      var cmd =
-          new ArrayList<>(
-              List.of(
-                  "incus",
-                  "file",
-                  "push",
-                  "--uid",
-                  ContainerExec.DEV_UID,
-                  "--gid",
-                  ContainerExec.DEV_GID));
-      if (mode != null) {
-        cmd.addAll(List.of("--mode", mode));
-      }
-      cmd.add(tmpFile.toString());
-      cmd.add(containerName + remotePath);
-      var pushResult = shell.exec(cmd);
-      if (!pushResult.ok()) {
-        throw new IOException("Failed to push file to " + remotePath + ": " + pushResult.stderr());
-      }
-    } finally {
-      Files.deleteIfExists(tmpFile);
+    var parentDir = remotePath.substring(0, remotePath.lastIndexOf('/'));
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("mkdir", "-p", parentDir)));
+    var flags =
+        new ArrayList<>(List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID));
+    if (mode != null) {
+      flags.addAll(List.of("--mode", mode));
     }
+    ContainerFilePush.push(shell, containerName, remotePath, content, flags);
   }
 }
