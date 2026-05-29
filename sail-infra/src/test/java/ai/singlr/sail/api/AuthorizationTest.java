@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.net.URI;
@@ -32,7 +33,7 @@ class AuthorizationTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     tokenStore = new TokenStore(db);
-    server = new SailApiServer("127.0.0.1", 0, new FakeOps(), tokenStore, new EventBus(), null);
+    server = new SailApiServer("127.0.0.1", 0, ops, tokenStore, new EventBus(), null);
     server.start();
   }
 
@@ -88,5 +89,37 @@ class AuthorizationTest {
     return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
-  private static final class FakeOps extends TestOperations {}
+  @Test
+  void assigneeMeResolvesToFdeHandle() throws Exception {
+    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var token = tokenStore.create("uday-laptop", "member", fde.id()).token();
+    send("GET", "/v1/specs?assignee=me", token, null);
+    assertEquals("uday", ops.lastAssignee);
+  }
+
+  @Test
+  void assigneeMeFallsBackToTokenNameWithoutFde() throws Exception {
+    var token = tokenStore.create("ci-bot", "member").token();
+    send("GET", "/v1/specs?assignee=me", token, null);
+    assertEquals("ci-bot", ops.lastAssignee);
+  }
+
+  @Test
+  void explicitAssigneePassesThrough() throws Exception {
+    var token = tokenStore.create("m", "member").token();
+    send("GET", "/v1/specs?assignee=alice", token, null);
+    assertEquals("alice", ops.lastAssignee);
+  }
+
+  private final RecordingOps ops = new RecordingOps();
+
+  private static final class RecordingOps extends TestOperations {
+    volatile String lastAssignee;
+
+    @Override
+    public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
+      lastAssignee = filter.assignee();
+      return super.globalSpecs(filter);
+    }
+  }
 }

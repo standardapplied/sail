@@ -31,7 +31,7 @@ public final class ApiSpecListCommand implements Runnable {
   @Option(names = "--status", description = "Filter by status (comma-separated).")
   private String status;
 
-  @Option(names = "--assignee", description = "Filter by assignee.")
+  @Option(names = "--assignee", description = "Filter by assignee ('me' = your own FDE).")
   private String assignee;
 
   @Option(names = "--repo", description = "Filter by repo.")

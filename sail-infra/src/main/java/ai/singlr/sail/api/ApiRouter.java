@@ -179,7 +179,7 @@ public final class ApiRouter implements HttpHandler {
                   new SpecStore.SpecFilter(
                       params.values().get("project"),
                       params.values().get("status"),
-                      params.values().get("assignee"),
+                      resolveAssignee(params.values().get("assignee"), actor(exchange)),
                       params.values().get("repo"),
                       params.values().get("q"))));
         }
@@ -324,6 +324,15 @@ public final class ApiRouter implements HttpHandler {
     if (!request.is(method)) {
       throw methodNotAllowed();
     }
+  }
+
+  /**
+   * Resolves the {@code assignee} filter value, expanding the sentinel {@code "me"} to the acting
+   * principal so {@code spec list --assignee me} returns the caller's own specs. Left unchanged
+   * when the actor is unknown, or for any other value.
+   */
+  static String resolveAssignee(String assignee, String actor) {
+    return "me".equals(assignee) && actor != null ? actor : assignee;
   }
 
   /**
