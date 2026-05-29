@@ -8,6 +8,7 @@ package ai.singlr.sail;
 import ai.singlr.sail.commands.AgentCommand;
 import ai.singlr.sail.commands.ClientInitCommand;
 import ai.singlr.sail.commands.EventsCommand;
+import ai.singlr.sail.commands.FdeCommand;
 import ai.singlr.sail.commands.HostCommand;
 import ai.singlr.sail.commands.MigrateCommand;
 import ai.singlr.sail.commands.ProjectCommand;
@@ -29,6 +30,7 @@ import picocli.CommandLine.Help.Ansi;
       HostCommand.class,
       ProjectCommand.class,
       ServerCommand.class,
+      FdeCommand.class,
       SpecCommand.class,
       AgentCommand.class,
       EventsCommand.class,

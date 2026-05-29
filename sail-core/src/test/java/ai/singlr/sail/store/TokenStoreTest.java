@@ -32,6 +32,19 @@ class TokenStoreTest {
   }
 
   @Test
+  void unownedTokenHasNoFdeHandle() {
+    var created = store.create("ci", "member");
+    assertNull(store.validate(created.token()).orElseThrow().fdeHandle());
+  }
+
+  @Test
+  void tokenOwnedByFdeReportsHandle() {
+    var fde = new FdeStore(db).add("uday", null, null);
+    var created = store.create("uday-laptop", "admin", fde.id());
+    assertEquals("uday", store.validate(created.token()).orElseThrow().fdeHandle());
+  }
+
+  @Test
   void createReturnsTokenWithSailPrefix() {
     var created = store.create("admin", "admin");
     assertEquals("admin", created.name());

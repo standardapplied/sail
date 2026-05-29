@@ -100,6 +100,13 @@ class TokenAuthTest {
     assertEquals(200, get("/v1/specs/board", secondToken).statusCode());
   }
 
+  @Test
+  void tokenOwnedByFdeAuthenticates() throws Exception {
+    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var token = tokenStore.create("uday-laptop", "admin", fde.id()).token();
+    assertEquals(200, get("/v1/specs/board", token).statusCode());
+  }
+
   private HttpResponse<String> get(String path, String token) throws Exception {
     var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
     if (token != null) builder.header("Authorization", "Bearer " + token);

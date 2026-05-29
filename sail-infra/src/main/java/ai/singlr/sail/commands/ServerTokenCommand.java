@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import picocli.CommandLine.Command;
@@ -45,6 +46,9 @@ public final class ServerTokenCommand implements Runnable {
         defaultValue = "member")
     private String role;
 
+    @picocli.CommandLine.Option(names = "--fde", description = "Owning FDE handle.")
+    private String fde;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -53,7 +57,8 @@ public final class ServerTokenCommand implements Runnable {
           spec,
           () -> {
             try (var db = Sqlite.open(SailPaths.sailDir().resolve("sail.db"))) {
-              var created = new TokenStore(db).create(name, role);
+              var fdeId = resolveFdeId(db);
+              var created = new TokenStore(db).create(name, role, fdeId);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
               System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
@@ -61,6 +66,19 @@ public final class ServerTokenCommand implements Runnable {
                   Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
             }
           });
+    }
+
+    private String resolveFdeId(Sqlite db) {
+      if (fde == null || fde.isBlank()) {
+        return null;
+      }
+      return new FdeStore(db)
+          .byHandle(fde)
+          .map(FdeStore.Fde::id)
+          .orElseThrow(
+              () ->
+                  new IllegalArgumentException(
+                      "No FDE with handle '" + fde + "'. Add it with 'sail fde add " + fde + "'."));
     }
   }
 

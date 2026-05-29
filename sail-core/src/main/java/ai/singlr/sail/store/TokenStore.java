@@ -26,29 +26,32 @@ public final class TokenStore {
     this.db = db;
   }
 
-  public record TokenInfo(String name, String role, String createdAt, String lastUsedAt) {}
+  public record TokenInfo(
+      String name, String role, String createdAt, String lastUsedAt, String fdeHandle) {}
 
   public record CreatedToken(String name, String token, String role) {}
 
   public CreatedToken create(String name, String role) {
+    return create(name, role, null);
+  }
+
+  /** Creates a token optionally owned by an FDE ({@code fdes.id}, or null for an unowned token). */
+  public CreatedToken create(String name, String role, String fdeId) {
     var token = generateToken();
     var hash = sha256(token);
     db.execute(
-        "INSERT INTO api_tokens (token_hash, name, role, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO api_tokens (token_hash, name, role, fde_id, created_at) VALUES (?, ?, ?, ?, ?)",
         hash,
         name,
         role,
+        fdeId,
         Instant.now().toString());
     return new CreatedToken(name, token, role);
   }
 
   public Optional<TokenInfo> validate(String token) {
     var hash = sha256(token);
-    var result =
-        db.queryOne(
-            "SELECT name, role, created_at, last_used_at FROM api_tokens WHERE token_hash = ?",
-            row -> new TokenInfo(row.text(0), row.text(1), row.text(2), row.text(3)),
-            hash);
+    var result = db.queryOne(SELECT + " WHERE t.token_hash = ?", TokenStore::map, hash);
     result.ifPresent(
         info ->
             db.execute(
@@ -59,9 +62,15 @@ public final class TokenStore {
   }
 
   public List<TokenInfo> list() {
-    return db.query(
-        "SELECT name, role, created_at, last_used_at FROM api_tokens ORDER BY created_at",
-        row -> new TokenInfo(row.text(0), row.text(1), row.text(2), row.text(3)));
+    return db.query(SELECT + " ORDER BY t.created_at", TokenStore::map);
+  }
+
+  private static final String SELECT =
+      "SELECT t.name, t.role, t.created_at, t.last_used_at, f.handle"
+          + " FROM api_tokens t LEFT JOIN fdes f ON t.fde_id = f.id";
+
+  private static TokenInfo map(Sqlite.Row row) {
+    return new TokenInfo(row.text(0), row.text(1), row.text(2), row.text(3), row.text(4));
   }
 
   public boolean revoke(String name) {

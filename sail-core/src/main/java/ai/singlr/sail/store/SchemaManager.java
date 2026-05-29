@@ -171,7 +171,18 @@ public final class SchemaManager {
           INSERT INTO api_tokens_new (token_hash, name, role, created_at, last_used_at)
               SELECT token_hash, name, role, created_at, last_used_at FROM api_tokens""",
           "DROP TABLE api_tokens",
-          "ALTER TABLE api_tokens_new RENAME TO api_tokens");
+          "ALTER TABLE api_tokens_new RENAME TO api_tokens",
+          """
+          CREATE TABLE IF NOT EXISTS fdes (
+              id TEXT PRIMARY KEY,
+              handle TEXT NOT NULL UNIQUE,
+              display_name TEXT,
+              email TEXT,
+              status TEXT NOT NULL DEFAULT 'active'
+                  CHECK (status IN ('active', 'disabled')),
+              created_at TEXT NOT NULL
+          )""",
+          "ALTER TABLE api_tokens ADD COLUMN fde_id TEXT");
 
   private final Sqlite db;
 

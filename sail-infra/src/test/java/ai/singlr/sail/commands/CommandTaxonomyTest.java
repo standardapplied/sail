@@ -20,7 +20,8 @@ class CommandTaxonomyTest {
 
     assertEquals(
         Set.of(
-            "init", "host", "project", "server", "spec", "agent", "events", "migrate", "upgrade"),
+            "init", "host", "project", "server", "fde", "spec", "agent", "events", "migrate",
+            "upgrade"),
         command.getSubcommands().keySet());
   }
 
