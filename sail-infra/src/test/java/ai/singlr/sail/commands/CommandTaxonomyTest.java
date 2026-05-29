@@ -19,7 +19,8 @@ class CommandTaxonomyTest {
     var command = new CommandLine(new Sail());
 
     assertEquals(
-        Set.of("init", "host", "project", "server", "spec", "agent", "events", "upgrade"),
+        Set.of(
+            "init", "host", "project", "server", "spec", "agent", "events", "migrate", "upgrade"),
         command.getSubcommands().keySet());
   }
 

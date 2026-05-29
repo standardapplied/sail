@@ -5,9 +5,27 @@
 
 package ai.singlr.sail.api;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-public record ApiResponse(int status, Map<String, Object> body) {
+public record ApiResponse(int status, Map<String, Object> body, Map<String, String> headers) {
+
+  public ApiResponse {
+    headers = Map.copyOf(headers);
+  }
+
+  public ApiResponse(int status, Map<String, Object> body) {
+    this(status, body, Map.of());
+  }
+
+  public ApiResponse withHeader(String name, String value) {
+    if (value == null) {
+      return this;
+    }
+    var next = new LinkedHashMap<>(headers);
+    next.put(name, value);
+    return new ApiResponse(status, body, next);
+  }
 
   public static ApiResponse from(Result<?> result) {
     return switch (result) {

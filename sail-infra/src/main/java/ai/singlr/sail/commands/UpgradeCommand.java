@@ -330,6 +330,8 @@ public final class UpgradeCommand implements Runnable {
     if (dryRun) {
       if (!json) {
         System.out.println("[dry-run] Would initialize database and create API token at " + dbPath);
+        System.out.println(
+            "[dry-run] Would run all pending data migrations (rebucket-specs, etc.)");
       }
       return;
     }
@@ -356,13 +358,40 @@ public final class UpgradeCommand implements Runnable {
           }
         }
       }
+      runDataMigrations();
     } catch (Throwable e) {
       if (!json) {
         System.err.println(
-            "    Database migration skipped: "
-                + e.getMessage()
-                + ". Run 'sail server init' manually.");
+            "    Database migration skipped: " + e.getMessage() + ". Run 'sail migrate' manually.");
       }
+    }
+  }
+
+  /**
+   * Runs every pending data migration (rebucket specs, etc.) after the schema is up to date.
+   * Non-interactive so an unattended upgrade never blocks on a prompt; the operator can rerun
+   * {@code sail migrate} interactively afterwards if anything was left ambiguous.
+   */
+  private void runDataMigrations() {
+    var runs = MigrateCommand.runMigrations(true, json);
+    if (json) {
+      return;
+    }
+    var skipped = 0;
+    var ambiguous = 0;
+    for (var run : runs) {
+      if (run.alreadyApplied()) {
+        continue;
+      }
+      skipped += run.report().skipped();
+      ambiguous += run.report().ambiguous();
+    }
+    if (skipped > 0 || ambiguous > 0) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "    @|yellow ⚠|@ "
+                  + (skipped + ambiguous)
+                  + " data row(s) need manual follow-up — run 'sail migrate' interactively."));
     }
   }
 

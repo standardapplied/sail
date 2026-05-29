@@ -198,12 +198,17 @@ public final class ApiRouter implements HttpHandler {
       var specId = segment;
       NameValidator.requireValidSpecId(specId);
       return switch (request.method()) {
-        case GET -> ApiResponse.from(operations.globalSpec(specId));
-        case PUT ->
-            ApiResponse.from(
-                operations.updateGlobalSpec(
-                    specId, SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))));
-        case DELETE -> ApiResponse.from(operations.deleteGlobalSpec(specId));
+        case GET -> globalSpecWithEtag(specId);
+        case PUT -> {
+          checkIfMatch(exchange, specId);
+          yield ApiResponse.from(
+              operations.updateGlobalSpec(
+                  specId, SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))));
+        }
+        case DELETE -> {
+          checkIfMatch(exchange, specId);
+          yield ApiResponse.from(operations.deleteGlobalSpec(specId));
+        }
         default -> throw methodNotAllowed();
       };
     }
@@ -214,10 +219,12 @@ public final class ApiRouter implements HttpHandler {
       if (CONTENT.equals(sub)) {
         return switch (request.method()) {
           case GET -> ApiResponse.from(operations.globalSpecContent(specId));
-          case PUT ->
-              ApiResponse.from(
-                  operations.setGlobalSpecContent(
-                      specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
+          case PUT -> {
+            checkIfMatch(exchange, specId);
+            yield ApiResponse.from(
+                operations.setGlobalSpecContent(
+                    specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
+          }
           default -> throw methodNotAllowed();
         };
       }
@@ -330,10 +337,68 @@ public final class ApiRouter implements HttpHandler {
     return new ApiException(ErrorCode.NOT_FOUND, "API endpoint was not found.");
   }
 
+  /**
+   * Loads a spec and returns the response with an {@code ETag} header set to its {@code updated_at}
+   * timestamp. Clients echo that value back via {@code If-Match} on subsequent {@code PUT}/{@code
+   * DELETE} to get optimistic-concurrency protection — the server rejects the write with {@code 412
+   * Precondition Failed} if anyone modified the row in the meantime.
+   */
+  private ApiResponse globalSpecWithEtag(String specId) {
+    var result = operations.globalSpec(specId);
+    var response = ApiResponse.from(result);
+    if (result instanceof Result.Success<?> success
+        && success.value() instanceof GlobalSpecDetailResponse detail) {
+      var etag = etagOf(detail.spec().updatedAt());
+      if (etag != null) {
+        return response.withHeader("ETag", etag);
+      }
+    }
+    return response;
+  }
+
+  /**
+   * Enforces optimistic-concurrency when the caller sent {@code If-Match}. Absent header = no
+   * check, last-write-wins (preserves CLI ergonomics). Present header must equal the current spec's
+   * {@code updated_at}, otherwise the write is rejected with {@code 412}.
+   */
+  private void checkIfMatch(HttpExchange exchange, String specId) {
+    var ifMatchHeaders = exchange.getRequestHeaders().get("If-Match");
+    if (ifMatchHeaders == null || ifMatchHeaders.isEmpty()) {
+      return;
+    }
+    var ifMatch = ifMatchHeaders.getFirst();
+    if (ifMatch == null || ifMatch.isBlank() || "*".equals(ifMatch.trim())) {
+      return;
+    }
+    var detail = operations.globalSpec(specId);
+    if (detail instanceof Result.Failure<?> failure) {
+      throw new ApiException(failure.errorCode(), failure.errorMessage());
+    }
+    var current = ((Result.Success<GlobalSpecDetailResponse>) detail).value();
+    var currentEtag = etagOf(current.spec().updatedAt());
+    if (!ifMatch.trim().equals(currentEtag)) {
+      throw new ApiException(
+          ErrorCode.PRECONDITION_FAILED,
+          "Spec '" + specId + "' was modified by another writer.",
+          "Re-GET the spec, replay your changes against the fresh ETag, then retry.");
+    }
+  }
+
+  private static String etagOf(String updatedAt) {
+    if (updatedAt == null || updatedAt.isBlank()) {
+      return null;
+    }
+    return "\"" + updatedAt + "\"";
+  }
+
   private static void write(HttpExchange exchange, ApiResponse response) throws IOException {
     var body =
         YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
-    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+    var headers = exchange.getResponseHeaders();
+    headers.set("Content-Type", "application/json; charset=utf-8");
+    for (var entry : response.headers().entrySet()) {
+      headers.set(entry.getKey(), entry.getValue());
+    }
     exchange.sendResponseHeaders(response.status(), body.length);
     try (var output = exchange.getResponseBody()) {
       output.write(body);

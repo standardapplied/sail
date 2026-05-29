@@ -24,6 +24,9 @@ public final class ApiSpecEditCommand implements Runnable {
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
+  @Option(names = "--project", description = "Move the spec to a different client project.")
+  private String project;
+
   @Option(names = "--title", description = "New title.")
   private String title;
 
@@ -69,6 +72,7 @@ public final class ApiSpecEditCommand implements Runnable {
     var config = ServerConnectionConfig.resolve(server, token);
 
     var body = new LinkedHashMap<String, Object>();
+    if (project != null) body.put("project", project);
     if (title != null) body.put("title", title);
     if (status != null) body.put("status", status);
     if (assignee != null) body.put("assignee", assignee);
