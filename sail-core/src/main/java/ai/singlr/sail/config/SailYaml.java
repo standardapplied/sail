@@ -203,6 +203,7 @@ public record SailYaml(
       if (!(url instanceof String)) {
         throw new IllegalArgumentException("repos[].url is required");
       }
+      NameValidator.requireValidGitUrl((String) url, "repos[].url");
       var path = map.get("path");
       if (!(path instanceof String)) {
         throw new IllegalArgumentException("repos[].path is required");

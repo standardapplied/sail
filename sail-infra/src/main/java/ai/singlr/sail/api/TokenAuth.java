@@ -9,7 +9,16 @@ import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpExchange;
 import java.util.Objects;
 
-/** Validates bearer tokens against the SQLite-backed {@link TokenStore}. */
+/**
+ * Validates bearer tokens against the SQLite-backed {@link TokenStore}.
+ *
+ * <p>Authentication only — there is no authorization tier. Every valid token is a full-access
+ * operator credential; the {@code token.role} attribute is recorded for audit/display but is
+ * deliberately not enforced, because the product issues a single operator token and the security
+ * boundary is the server's loopback bind (see {@code ServerStartCommand}), not a role check.
+ * Introducing real role enforcement would be a deliberate feature with its own token-issuance UX
+ * and schema migration; until then, do not treat the role column as an access-control mechanism.
+ */
 public final class TokenAuth implements ApiAuth {
 
   private final TokenStore tokenStore;

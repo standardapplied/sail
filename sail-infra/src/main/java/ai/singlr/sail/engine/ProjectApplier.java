@@ -115,6 +115,7 @@ public final class ProjectApplier {
       if (repo.branch() != null && !repo.branch().isBlank()) {
         cloneCmd.addAll(List.of("--branch", repo.branch()));
       }
+      cloneCmd.add("--");
       cloneCmd.add(repo.url());
       cloneCmd.add(targetDir);
       var result = shell.exec(ContainerExec.asDevUser(name, cloneCmd), null, INSTALL_TIMEOUT);

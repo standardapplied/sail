@@ -26,13 +26,23 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
+/**
+ * Starts the control-plane server. The API is a single-trust-level surface: every issued token is a
+ * full-access operator credential (there is no role separation), and it can dispatch agents — which
+ * is code execution inside project containers. The security boundary is therefore the bind address,
+ * which defaults to loopback. Binding a non-loopback address exposes that surface to the network
+ * over plaintext HTTP and must be opted into explicitly (put it behind a TLS reverse proxy).
+ */
 @Command(
     name = "start",
     description = "Start the Sail control plane server.",
     mixinStandardHelpOptions = true)
 public final class ServerStartCommand implements Runnable {
 
-  @Option(names = "--host", description = "Host to bind.", defaultValue = "0.0.0.0")
+  @Option(
+      names = "--host",
+      description = "Host to bind. Defaults to loopback; use 0.0.0.0 to expose on the network.",
+      defaultValue = "127.0.0.1")
   private String host;
 
   @Option(names = "--port", description = "Port to bind.", defaultValue = "7070")
@@ -102,11 +112,22 @@ public final class ServerStartCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Sail server listening on http://" + host + ":" + server.port()));
+      if (!isLoopback(host)) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ Bound to a non-loopback address over plaintext HTTP. Any holder"
+                    + " of a token can dispatch agents (code execution in containers). Put this"
+                    + " behind a TLS reverse proxy and restrict network access."));
+      }
       System.out.println(Ansi.AUTO.string("    @|faint Database: " + dbPath + "|@"));
       System.out.println(Ansi.AUTO.string("    @|faint Press Ctrl+C to stop.|@"));
       new CountDownLatch(1).await();
     } finally {
       db.close();
     }
+  }
+
+  private static boolean isLoopback(String host) {
+    return "127.0.0.1".equals(host) || "localhost".equals(host) || "::1".equals(host);
   }
 }

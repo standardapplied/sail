@@ -831,6 +831,7 @@ public final class ProjectProvisioner {
       if (repo.branch() != null) {
         cmd.addAll(List.of("--branch", repo.branch()));
       }
+      cmd.add("--");
       cmd.addAll(List.of(repo.url(), targetDir));
 
       var result = execAsDevUser(name, cmd, INSTALL_TIMEOUT);

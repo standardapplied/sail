@@ -144,6 +144,37 @@ class SailYamlTest {
   }
 
   @Test
+  void repoFromMapRejectsUrlThatLooksLikeAGitOption() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SailYaml.Repo.fromMap(
+                    java.util.Map.of("url", "--upload-pack=touch /tmp/pwned", "path", "evil")));
+    assertTrue(ex.getMessage().contains("repos[].url"));
+  }
+
+  @Test
+  void repoFromMapRejectsUrlWithoutKnownScheme() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> SailYaml.Repo.fromMap(java.util.Map.of("url", "not-a-url", "path", "x")));
+  }
+
+  @Test
+  void repoFromMapAcceptsHttpsAndScpUrls() {
+    var https =
+        SailYaml.Repo.fromMap(
+            java.util.Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
+    assertEquals("https://github.com/acme/backend.git", https.url());
+
+    var scp =
+        SailYaml.Repo.fromMap(
+            java.util.Map.of("url", "git@github.com:acme/backend.git", "path", "backend"));
+    assertEquals("git@github.com:acme/backend.git", scp.url());
+  }
+
+  @Test
   void resourcesFromMapThrowsOnMissingCpu() {
     var ex =
         assertThrows(

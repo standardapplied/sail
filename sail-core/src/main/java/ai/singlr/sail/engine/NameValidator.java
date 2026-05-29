@@ -25,6 +25,9 @@ public final class NameValidator {
   private static final Pattern SAFE_PATH = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
   private static final Pattern GIT_REF = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
   static final Pattern GITHUB_REPO = Pattern.compile("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$");
+  private static final Pattern SCHEME_GIT_URL = Pattern.compile("^(https?|ssh|git)://[^\\s]+$");
+  private static final Pattern SCP_GIT_URL =
+      Pattern.compile("^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^\\s]+$");
 
   private NameValidator() {}
 
@@ -136,6 +139,27 @@ public final class NameValidator {
           "Invalid GitHub repository: '"
               + repo
               + "'. Must be in 'owner/name' format (e.g. acme-org/backend).");
+    }
+  }
+
+  /**
+   * Validates a git remote URL. Accepts {@code https://}, {@code http://}, {@code ssh://}, {@code
+   * git://} URLs and scp-style {@code user@host:path} remotes. Rejects anything else — in
+   * particular anything starting with {@code -}, which {@code git clone} would otherwise interpret
+   * as an option (e.g. {@code --upload-pack=...}) rather than a URL.
+   */
+  public static void requireValidGitUrl(String url, String field) {
+    var ok =
+        url != null
+            && !url.startsWith("-")
+            && (SCHEME_GIT_URL.matcher(url).matches() || SCP_GIT_URL.matcher(url).matches());
+    if (!ok) {
+      throw new IllegalArgumentException(
+          "Invalid "
+              + field
+              + ": '"
+              + url
+              + "'. Must be an https://, ssh://, git:// or user@host:path git URL.");
     }
   }
 
