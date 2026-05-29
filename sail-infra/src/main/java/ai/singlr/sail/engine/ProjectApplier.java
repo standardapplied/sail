@@ -8,11 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
+import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.CodeReviewGenerator;
-import ai.singlr.sail.gen.GeneratedFile;
-import ai.singlr.sail.gen.PostTaskHooksGenerator;
-import ai.singlr.sail.gen.SecurityAuditGenerator;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -254,11 +251,7 @@ public final class ProjectApplier {
   /** Regenerates agent context files (per-agent context + SECURITY.md + audit hooks). */
   public ApplyResult applyAgentContext(String name, SailYaml config) throws Exception {
     var contextFiles = AgentContextGenerator.generateFiles(config);
-    var excludeAgents = resolveSecurityAuditorExclude(config);
-    var auditFiles = new ArrayList<GeneratedFile>();
-    auditFiles.addAll(SecurityAuditGenerator.generateFiles(config));
-    auditFiles.addAll(CodeReviewGenerator.generateFiles(config, excludeAgents));
-    auditFiles.addAll(PostTaskHooksGenerator.generateFiles(config, excludeAgents));
+    var auditFiles = AgentAuditFiles.assemble(config);
 
     if (contextFiles.isEmpty() && auditFiles.isEmpty()) {
       return ApplyResult.empty();
@@ -285,22 +278,6 @@ public final class ProjectApplier {
       out.println("  [apply] Audit file \u2192 " + file.remotePath());
     }
     return new ApplyResult(contextFiles.size() + auditFiles.size(), 0, 0, List.of());
-  }
-
-  private static Set<String> resolveSecurityAuditorExclude(SailYaml config) {
-    if (config.agent() != null
-        && config.agent().securityAudit() != null
-        && config.agent().securityAudit().enabled()) {
-      var resolved =
-          config
-              .agent()
-              .securityAudit()
-              .resolveAuditor(config.agent().type(), config.agent().install());
-      if (resolved != null) {
-        return Set.of(resolved);
-      }
-    }
-    return Set.of();
   }
 
   /**

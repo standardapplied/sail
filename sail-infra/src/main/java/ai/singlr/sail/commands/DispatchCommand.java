@@ -16,12 +16,14 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
+import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
@@ -177,7 +179,7 @@ public final class DispatchCommand implements Runnable {
 
     var agentType = nextSpec.agent() != null ? nextSpec.agent() : config.agent().type();
     var targetRepos = DispatchRepos.resolve(config, nextSpec, repoOverrides);
-    var taskSpec = withTargetRepos(nextSpec, targetRepos);
+    var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
     var branchName = BranchPolicy.branchName(config, nextSpec);
     specWorkspace.updateStatus(nextSpec.id(), "in_progress");
     specAudit.append(nextSpec.id(), SpecAuditEvent.dispatched(agentType, host, null));
@@ -195,7 +197,7 @@ public final class DispatchCommand implements Runnable {
 
     var specBody = Objects.requireNonNullElse(specWorkspace.readSpecBody(nextSpec.id()), "");
     var description = !specBody.isBlank() ? specBody : nextSpec.title();
-    var task = buildTaskPrompt(taskSpec, description, config.agent().specsDir());
+    var task = AgentTaskPrompt.build(taskSpec, description);
 
     if (json) {
       System.out.println(
@@ -298,7 +300,7 @@ public final class DispatchCommand implements Runnable {
       }
       Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
       if (!dryRun) {
-        launchWatcherIfGuardrails(config);
+        GuardrailWatcher.launchIfConfigured(name, file, config);
       }
     } else {
       var sshCmd =
@@ -477,49 +479,6 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
-  static String buildTaskPrompt(Spec spec, String description, String specsDir) {
-    var targetRepos =
-        spec.repos().isEmpty()
-            ? ""
-            : "\nTarget repo"
-                + (spec.repos().size() == 1 ? "" : "s")
-                + ": "
-                + String.join(", ", spec.repos())
-                + "\n";
-    var targetAgent = spec.agent() == null ? "" : "\nTarget agent: " + spec.agent() + "\n";
-    var targetModel = spec.model() == null ? "" : "\nTarget model: " + spec.model() + "\n";
-    var targetReasoning =
-        spec.reasoningEffort() == null
-            ? ""
-            : "\nTarget reasoning effort: " + spec.reasoningEffort() + "\n";
-    return "Your current spec: \""
-        + spec.title()
-        + "\" (id: "
-        + spec.id()
-        + ")."
-        + targetRepos
-        + targetAgent
-        + targetModel
-        + targetReasoning
-        + "\n"
-        + description;
-  }
-
-  private static Spec withTargetRepos(Spec spec, List<SailYaml.Repo> targetRepos) {
-    return new Spec(
-        spec.id(),
-        spec.project(),
-        spec.title(),
-        spec.status(),
-        spec.assignee(),
-        spec.dependsOn(),
-        targetRepos.stream().map(SailYaml.Repo::path).toList(),
-        spec.agent(),
-        spec.model(),
-        spec.reasoningEffort(),
-        spec.branch());
-  }
-
   private void printNoSpecs() {
     if (json) {
       System.out.println(CliJson.stringify(new NoDispatch(name, false, "no_pending_specs")));
@@ -530,41 +489,6 @@ public final class DispatchCommand implements Runnable {
 
   static String branchRepoDir(String workDir, List<SailYaml.Repo> targetRepos, SailYaml.Repo repo) {
     return targetRepos.size() == 1 ? workDir : workDir + "/" + repo.path();
-  }
-
-  private void launchWatcherIfGuardrails(SailYaml config) {
-    if (config.agent() == null || config.agent().guardrails() == null) {
-      return;
-    }
-    try {
-      var singBinary = SailPaths.binaryPath().toString();
-      var singYamlPath = SailPaths.resolveSailYaml(name, file);
-      var cmd =
-          List.of(
-              "nohup",
-              singBinary,
-              "agent",
-              "watch",
-              name,
-              "-f",
-              singYamlPath.toAbsolutePath().toString());
-      var watchLog = SailPaths.projectDir(name).resolve("watch.log");
-      Files.createDirectories(watchLog.getParent());
-      var pb = new ProcessBuilder(cmd);
-      pb.redirectOutput(ProcessBuilder.Redirect.to(watchLog.toFile()));
-      pb.redirectErrorStream(true);
-      pb.start();
-      System.out.println(
-          Ansi.AUTO.string("  @|green \u2713|@ Guardrail watcher started (log: " + watchLog + ")"));
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Failed to start guardrail watcher: "
-                  + e.getMessage()
-                  + ". Run manually: sail agent watch "
-                  + name,
-              Ansi.AUTO));
-    }
   }
 
   record DispatchPreview(String name, String specId, String specTitle, String mode, String task) {}

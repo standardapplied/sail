@@ -7,11 +7,8 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.CodeReviewGenerator;
-import ai.singlr.sail.gen.GeneratedFile;
-import ai.singlr.sail.gen.PostTaskHooksGenerator;
-import ai.singlr.sail.gen.SecurityAuditGenerator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1070,11 +1067,7 @@ public final class ProjectProvisioner {
     }
 
     var contextFiles = AgentContextGenerator.generateFiles(config);
-    var excludeAgents = resolveSecurityAuditorExclude(config);
-    var auditFiles = new ArrayList<GeneratedFile>();
-    auditFiles.addAll(SecurityAuditGenerator.generateFiles(config));
-    auditFiles.addAll(CodeReviewGenerator.generateFiles(config, excludeAgents));
-    auditFiles.addAll(PostTaskHooksGenerator.generateFiles(config, excludeAgents));
+    var auditFiles = AgentAuditFiles.assemble(config);
 
     if (contextFiles.isEmpty() && auditFiles.isEmpty()) {
       tracker.advance(currentPhase);
@@ -1125,22 +1118,6 @@ public final class ProjectProvisioner {
       summary.append(" — kept existing: ").append(String.join(", ", skipped));
     }
     stepDone(18, summary.toString());
-  }
-
-  private static Set<String> resolveSecurityAuditorExclude(SailYaml config) {
-    if (config.agent() != null
-        && config.agent().securityAudit() != null
-        && config.agent().securityAudit().enabled()) {
-      var resolved =
-          config
-              .agent()
-              .securityAudit()
-              .resolveAuditor(config.agent().type(), config.agent().install());
-      if (resolved != null) {
-        return Set.of(resolved);
-      }
-    }
-    return Set.of();
   }
 
   private void createSpecsScaffold(SailYaml config) throws Exception {

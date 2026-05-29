@@ -14,16 +14,15 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.SpecWorkspace;
+import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.CodeReviewGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
-import ai.singlr.sail.gen.PostTaskHooksGenerator;
-import ai.singlr.sail.gen.SecurityAuditGenerator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -149,11 +148,7 @@ public final class RunCommand implements Runnable {
       return;
     }
 
-    var excludeAgents = resolveSecurityAuditorExclude(config);
-    var auditFiles = new ArrayList<GeneratedFile>();
-    auditFiles.addAll(SecurityAuditGenerator.generateFiles(config));
-    auditFiles.addAll(CodeReviewGenerator.generateFiles(config, excludeAgents));
-    auditFiles.addAll(PostTaskHooksGenerator.generateFiles(config, excludeAgents));
+    var auditFiles = AgentAuditFiles.assemble(config);
 
     var allFiles = new ArrayList<GeneratedFile>();
     allFiles.addAll(contextFiles);
@@ -365,7 +360,7 @@ public final class RunCommand implements Runnable {
     Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
 
     if (!dryRun) {
-      launchWatcherIfGuardrails(config);
+      GuardrailWatcher.launchIfConfigured(name, file, config);
     }
   }
 
@@ -386,45 +381,6 @@ public final class RunCommand implements Runnable {
     } catch (Exception rollbackEx) {
       System.err.println(
           Banner.errorLine("Auto-rollback failed: " + rollbackEx.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  private void launchWatcherIfGuardrails(SailYaml config) {
-    if (config.agent() == null || config.agent().guardrails() == null) {
-      return;
-    }
-
-    try {
-      var singBinary = SailPaths.binaryPath().toString();
-      var singYamlPath = SailPaths.resolveSailYaml(name, file);
-      var cmd =
-          List.of(
-              "nohup",
-              singBinary,
-              "agent",
-              "watch",
-              name,
-              "-f",
-              singYamlPath.toAbsolutePath().toString());
-
-      var watchLog = SailPaths.projectDir(name).resolve("watch.log");
-      java.nio.file.Files.createDirectories(watchLog.getParent());
-
-      var pb = new ProcessBuilder(cmd);
-      pb.redirectOutput(ProcessBuilder.Redirect.to(watchLog.toFile()));
-      pb.redirectErrorStream(true);
-      pb.start();
-
-      System.out.println(
-          Ansi.AUTO.string("  @|green \u2713|@ Guardrail watcher started (log: " + watchLog + ")"));
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Failed to start guardrail watcher: "
-                  + e.getMessage()
-                  + ". Run manually: sail agent watch "
-                  + name,
-              Ansi.AUTO));
     }
   }
 
@@ -502,22 +458,6 @@ public final class RunCommand implements Runnable {
             Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
       }
     }
-  }
-
-  private static Set<String> resolveSecurityAuditorExclude(SailYaml config) {
-    if (config.agent() != null
-        && config.agent().securityAudit() != null
-        && config.agent().securityAudit().enabled()) {
-      var resolved =
-          config
-              .agent()
-              .securityAudit()
-              .resolveAuditor(config.agent().type(), config.agent().install());
-      if (resolved != null) {
-        return Set.of(resolved);
-      }
-    }
-    return Set.of();
   }
 
   private static void pushFile(

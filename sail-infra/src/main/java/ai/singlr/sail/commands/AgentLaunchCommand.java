@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -293,46 +294,7 @@ public final class AgentLaunchCommand implements Runnable {
     Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
 
     if (!dryRun) {
-      launchWatcherIfGuardrails(config);
-    }
-  }
-
-  private void launchWatcherIfGuardrails(SailYaml config) {
-    if (config == null || config.agent() == null || config.agent().guardrails() == null) {
-      return;
-    }
-
-    try {
-      var singBinary = SailPaths.binaryPath().toString();
-      var singYamlPath = SailPaths.resolveSailYaml(name, file);
-      var cmd =
-          List.of(
-              "nohup",
-              singBinary,
-              "agent",
-              "watch",
-              name,
-              "-f",
-              singYamlPath.toAbsolutePath().toString());
-
-      var watchLog = SailPaths.projectDir(name).resolve("watch.log");
-      Files.createDirectories(watchLog.getParent());
-
-      var pb = new ProcessBuilder(cmd);
-      pb.redirectOutput(ProcessBuilder.Redirect.to(watchLog.toFile()));
-      pb.redirectErrorStream(true);
-      pb.start();
-
-      System.out.println(
-          Ansi.AUTO.string("  @|green \u2713|@ Guardrail watcher started (log: " + watchLog + ")"));
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Failed to start guardrail watcher: "
-                  + e.getMessage()
-                  + ". Run manually: sail agent watch "
-                  + name,
-              Ansi.AUTO));
+      GuardrailWatcher.launchIfConfigured(name, file, config);
     }
   }
 

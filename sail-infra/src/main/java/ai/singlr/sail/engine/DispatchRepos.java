@@ -39,6 +39,22 @@ public final class DispatchRepos {
     return requested.stream().map(DispatchRepos::validatedPath).distinct().toList();
   }
 
+  /** Returns a copy of {@code spec} whose repos are the resolved target repo paths. */
+  public static Spec withTargetRepos(Spec spec, List<SailYaml.Repo> targetRepos) {
+    return new Spec(
+        spec.id(),
+        spec.project(),
+        spec.title(),
+        spec.status(),
+        spec.assignee(),
+        spec.dependsOn(),
+        targetRepos.stream().map(SailYaml.Repo::path).toList(),
+        spec.agent(),
+        spec.model(),
+        spec.reasoningEffort(),
+        spec.branch());
+  }
+
   private static String validatedPath(String path) {
     NameValidator.requireSafePath(path, "spec.repo");
     return path;

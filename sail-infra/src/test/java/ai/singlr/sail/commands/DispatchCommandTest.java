@@ -11,6 +11,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentTaskPrompt;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -103,7 +104,7 @@ class DispatchCommandTest {
     var spec = new Spec("oauth-flow", "Implement OAuth", SpecStatus.PENDING, null, List.of(), null);
     var description = "Build Google OAuth integration with PKCE flow.";
 
-    var prompt = DispatchCommand.buildTaskPrompt(spec, description, "specs");
+    var prompt = AgentTaskPrompt.build(spec, description);
 
     assertTrue(prompt.contains("oauth-flow"));
     assertTrue(prompt.contains("Implement OAuth"));
@@ -115,7 +116,7 @@ class DispatchCommandTest {
   void buildTaskPromptContainsSpecIdAndDescription() {
     var spec = new Spec("auth", "Auth", SpecStatus.PENDING, null, List.of(), null);
 
-    var prompt = DispatchCommand.buildTaskPrompt(spec, "Details", "my-specs");
+    var prompt = AgentTaskPrompt.build(spec, "Details");
 
     assertTrue(prompt.contains("auth"));
     assertTrue(prompt.contains("Details"));
@@ -132,7 +133,7 @@ class DispatchCommandTest {
         - migrations
         """;
 
-    var prompt = DispatchCommand.buildTaskPrompt(spec, longDescription.strip(), "specs");
+    var prompt = AgentTaskPrompt.build(spec, longDescription.strip());
 
     assertTrue(prompt.contains("users table"));
     assertTrue(prompt.contains("sessions table"));
@@ -155,7 +156,7 @@ class DispatchCommandTest {
             "high",
             null);
 
-    var prompt = DispatchCommand.buildTaskPrompt(spec, "Details", "specs");
+    var prompt = AgentTaskPrompt.build(spec, "Details");
 
     assertTrue(prompt.contains("Target repo: chorus"));
     assertTrue(prompt.contains("Target agent: codex"));

@@ -14,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -287,10 +288,10 @@ public final class SailApiOperations implements ApiOperations {
     }
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
-    var taskSpec = withTargetRepos(nextSpec, targetRepos);
+    var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
     updateStatus(workspace, nextSpec.id(), "in_progress");
     var specBody = Objects.requireNonNullElse(readSpecBody(workspace, nextSpec.id()), "");
-    var task = buildTaskPrompt(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
+    var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
     var branch = branchName(loaded.config(), nextSpec);
     publishDispatched(project, nextSpec.id(), agentType, branch, request.mode());
@@ -619,49 +620,6 @@ public final class SailApiOperations implements ApiOperations {
         spec.model(),
         spec.reasoningEffort(),
         branch != null && !branch.isBlank() ? branch : null);
-  }
-
-  private static Spec withTargetRepos(Spec spec, List<SailYaml.Repo> targetRepos) {
-    return new Spec(
-        spec.id(),
-        spec.project(),
-        spec.title(),
-        spec.status(),
-        spec.assignee(),
-        spec.dependsOn(),
-        targetRepos.stream().map(SailYaml.Repo::path).toList(),
-        spec.agent(),
-        spec.model(),
-        spec.reasoningEffort(),
-        spec.branch());
-  }
-
-  private static String buildTaskPrompt(Spec spec, String description) {
-    var targetRepos =
-        spec.repos().isEmpty()
-            ? ""
-            : "\nTarget repo"
-                + (spec.repos().size() == 1 ? "" : "s")
-                + ": "
-                + String.join(", ", spec.repos())
-                + "\n";
-    var targetAgent = spec.agent() == null ? "" : "\nTarget agent: " + spec.agent() + "\n";
-    var targetModel = spec.model() == null ? "" : "\nTarget model: " + spec.model() + "\n";
-    var targetReasoning =
-        spec.reasoningEffort() == null
-            ? ""
-            : "\nTarget reasoning effort: " + spec.reasoningEffort() + "\n";
-    return "Your current spec: \""
-        + spec.title()
-        + "\" (id: "
-        + spec.id()
-        + ")."
-        + targetRepos
-        + targetAgent
-        + targetModel
-        + targetReasoning
-        + "\n"
-        + description;
   }
 
   private static String branchName(SailYaml config, Spec spec) {

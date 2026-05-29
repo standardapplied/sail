@@ -14,11 +14,9 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.CodeReviewGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
-import ai.singlr.sail.gen.PostTaskHooksGenerator;
-import ai.singlr.sail.gen.SecurityAuditGenerator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -89,11 +87,7 @@ public final class AgentContextRegenCommand implements Runnable {
     }
 
     var contextFiles = AgentContextGenerator.generateFiles(config);
-    var excludeAgents = resolveSecurityAuditorExclude(config);
-    var auditFiles = new ArrayList<GeneratedFile>();
-    auditFiles.addAll(SecurityAuditGenerator.generateFiles(config));
-    auditFiles.addAll(CodeReviewGenerator.generateFiles(config, excludeAgents));
-    auditFiles.addAll(PostTaskHooksGenerator.generateFiles(config, excludeAgents));
+    var auditFiles = AgentAuditFiles.assemble(config);
 
     if (contextFiles.isEmpty()) {
       throw new IllegalStateException(
@@ -171,22 +165,6 @@ public final class AgentContextRegenCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|bold,green \u2713 Agent context regenerated:|@ " + file.remotePath()));
     }
-  }
-
-  private static Set<String> resolveSecurityAuditorExclude(SailYaml config) {
-    if (config.agent() != null
-        && config.agent().securityAudit() != null
-        && config.agent().securityAudit().enabled()) {
-      var resolved =
-          config
-              .agent()
-              .securityAudit()
-              .resolveAuditor(config.agent().type(), config.agent().install());
-      if (resolved != null) {
-        return Set.of(resolved);
-      }
-    }
-    return Set.of();
   }
 
   private static Set<String> listWorkspaceFiles(
