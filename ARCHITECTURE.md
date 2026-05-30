@@ -125,8 +125,17 @@ The deployment is **single-trust**: one operator, one bare-metal server.
 - **Auth** — bearer token, stored `0600` under `~/.sail/` (`0700`). No RBAC or
   multi-user identity yet (see *Known gaps*).
 - **API transport** — the HTTP API binds `127.0.0.1` by default; remote binding
-  requires explicit `--allow-remote`. It does not terminate TLS itself; the intended
-  remote story is loopback + SSH tunnel / SSH command-forwarding.
+  requires explicit `--allow-remote`. The loopback default is reachable via SSH
+  tunnel / SSH command-forwarding; for direct remote access the server terminates
+  TLS with an operator-supplied certificate (`TlsMaterial` loads a PEM cert chain +
+  PKCS#8 key).
+- **Certificates are out of scope by design.** sail is *not in the cert-issuance
+  business* — exactly like the Kubernetes API server, which terminates TLS with a
+  cert you provide and leaves issuance/renewal to cert-manager / ingress / platform
+  PKI. sail terminates TLS with whatever cert it is given; obtaining and renewing it
+  (including Let's Encrypt) is delegated to the operator's tooling — a TLS-terminating
+  reverse proxy (Caddy/Traefik/nginx) or any ACME client (certbot/lego/acme.sh) that
+  writes a cert+key sail loads. sail never speaks ACME, never runs a CA, never renews.
 - **Input hardening** — repo URLs validated, `--` guards on git invocations, webhook
   URLs SSRF-checked at parse time *and re-checked at send time* (DNS-rebinding defense),
   API field validation mirroring the domain records.
