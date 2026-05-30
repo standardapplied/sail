@@ -208,6 +208,15 @@ public final class SchemaManager {
               created_at TEXT NOT NULL,
               expires_at TEXT NOT NULL,
               last_used_at TEXT
+          )""",
+          """
+          CREATE TABLE IF NOT EXISTS webauthn_challenges (
+              id TEXT PRIMARY KEY,
+              challenge TEXT NOT NULL,
+              ceremony TEXT NOT NULL CHECK (ceremony IN ('register', 'assert')),
+              fde_id TEXT REFERENCES fdes(id) ON DELETE CASCADE,
+              created_at TEXT NOT NULL,
+              expires_at TEXT NOT NULL
           )""");
 
   private final Sqlite db;

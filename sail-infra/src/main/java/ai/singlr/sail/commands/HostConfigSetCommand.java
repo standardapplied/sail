@@ -101,7 +101,8 @@ public final class HostConfigSetCommand implements Runnable {
               current.image(),
               current.incusVersion(),
               value,
-              current.initializedAt());
+              current.initializedAt(),
+              current.webauthn());
       default -> throw new IllegalArgumentException("Unhandled key: " + key);
     };
   }

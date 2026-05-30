@@ -99,5 +99,56 @@ class HostYamlTest {
     assertTrue(yaml.contains("pool: devpool") || yaml.contains("pool: \"devpool\""));
     assertTrue(yaml.contains("pool_disk:"));
     assertTrue(yaml.contains("base_profile:"));
+    assertFalse(yaml.contains("webauthn"));
+  }
+
+  @Test
+  void parsesWebauthnBlock() throws Exception {
+    var yaml =
+        """
+            storage_backend: dir
+            incus_version: "6.21"
+            initialized_at: "2026-02-18T01:00:00Z"
+            webauthn:
+              rp_id: sail.acme.dev
+              rp_name: Sail
+              origins:
+                - https://sail.acme.dev
+            """;
+
+    var host = HostYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    assertTrue(host.webauthn().isConfigured());
+    assertEquals("sail.acme.dev", host.webauthn().rpId());
+    assertEquals("Sail", host.webauthn().rpName());
+    assertEquals(java.util.List.of("https://sail.acme.dev"), host.webauthn().origins());
+  }
+
+  @Test
+  void absentWebauthnBlockIsDisabledNotNull() throws Exception {
+    var host = HostYaml.fromMap(YamlUtil.parseMap("storage_backend: dir\n"));
+    assertNotNull(host.webauthn());
+    assertFalse(host.webauthn().isConfigured());
+  }
+
+  @Test
+  void webauthnBlockSurvivesRoundTrip() throws Exception {
+    var host =
+        new HostYaml(
+            "dir",
+            "devpool",
+            null,
+            "incusbr0",
+            "singlr-base",
+            "ubuntu/24.04",
+            "6.21",
+            null,
+            "2026-02-18T01:00:00Z",
+            new WebauthnConfig(
+                "sail.acme.dev", "Sail", java.util.List.of("https://sail.acme.dev")));
+
+    var reparsed = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(host.toMap())));
+
+    assertEquals(host.webauthn(), reparsed.webauthn());
   }
 }

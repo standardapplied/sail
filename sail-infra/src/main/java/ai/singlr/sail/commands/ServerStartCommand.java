@@ -10,15 +10,28 @@ import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.TokenAuth;
+import ai.singlr.sail.api.WebauthnAuthHandler;
+import ai.singlr.sail.auth.PasskeyService;
+import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.WebauthnConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
+import ai.singlr.sail.webauthn.RelyingParty;
 import java.nio.file.Files;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -47,6 +60,25 @@ public final class ServerStartCommand implements Runnable {
 
   @Option(names = "--port", description = "Port to bind.", defaultValue = "7070")
   private int port;
+
+  @Option(
+      names = "--rp-id",
+      description =
+          "WebAuthn Relying Party ID for passkey login (the registrable domain the proxy serves)."
+              + " Overrides the host.yaml webauthn block.")
+  private String rpId;
+
+  @Option(
+      names = "--rp-name",
+      description = "Human-facing Relying Party name shown during passkey enrollment.")
+  private String rpName;
+
+  @Option(
+      names = "--origin",
+      description =
+          "Allowed passkey origin (e.g. https://sail.example.dev). Repeatable. Overrides the"
+              + " host.yaml webauthn origins.")
+  private List<String> origins;
 
   @Spec private CommandSpec spec;
 
@@ -107,11 +139,20 @@ public final class ServerStartCommand implements Runnable {
         new SailApiOperations(
             new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR, bus, persister, specStore);
 
-    try (var server = new SailApiServer(host, port, operations, tokenStore, bus, persister)) {
+    var webauthn = resolveWebauthn();
+    var passkeyService = webauthn.isConfigured() ? buildPasskeyService(db, webauthn) : null;
+    var passkeyHandler = new WebauthnAuthHandler(passkeyService, new TokenAuth(tokenStore));
+
+    try (var server =
+        new SailApiServer(host, port, operations, tokenStore, bus, persister, passkeyHandler)) {
       server.start();
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Sail server listening on http://" + host + ":" + server.port()));
+      if (webauthn.isConfigured()) {
+        System.out.println(
+            Ansi.AUTO.string("    @|faint Passkey login enabled for " + webauthn.rpId() + "|@"));
+      }
       if (!isLoopback(host)) {
         System.out.println(
             Ansi.AUTO.string(
@@ -125,6 +166,30 @@ public final class ServerStartCommand implements Runnable {
     } finally {
       db.close();
     }
+  }
+
+  private WebauthnConfig resolveWebauthn() throws Exception {
+    var hostConfigPath = SailPaths.hostConfigPath();
+    var base =
+        Files.exists(hostConfigPath)
+            ? HostYaml.fromMap(YamlUtil.parseFile(hostConfigPath)).webauthn()
+            : WebauthnConfig.disabled();
+    return new WebauthnConfig(
+        rpId != null ? rpId : base.rpId(),
+        rpName != null ? rpName : base.rpName(),
+        origins != null && !origins.isEmpty() ? origins : base.origins());
+  }
+
+  private static PasskeyService buildPasskeyService(Sqlite db, WebauthnConfig webauthn) {
+    var relyingParty =
+        new RelyingParty(
+            webauthn.rpId(), webauthn.resolvedRpName(), Set.copyOf(webauthn.origins()));
+    return new PasskeyService(
+        relyingParty,
+        new FdeStore(db),
+        new WebauthnCredentialStore(db),
+        new AuthSessionStore(db),
+        new PendingChallengeStore(db));
   }
 
   private static boolean isLoopback(String host) {

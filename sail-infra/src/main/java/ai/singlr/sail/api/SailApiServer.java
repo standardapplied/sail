@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.TokenStore;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -47,7 +48,32 @@ public final class SailApiServer implements AutoCloseable {
         new TokenAuth(tokenStore),
         eventBus,
         auditSubscriber,
-        SailPaths.apiSocketPath());
+        SailPaths.apiSocketPath(),
+        null);
+  }
+
+  /**
+   * Control-plane constructor that also mounts the passkey ceremony endpoints at {@code /v1/auth}.
+   * Pass {@code null} for {@code passkeyHandler} to leave passkey login unmounted.
+   */
+  public SailApiServer(
+      String host,
+      int port,
+      ApiOperations operations,
+      TokenStore tokenStore,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      HttpHandler passkeyHandler)
+      throws IOException {
+    this(
+        host,
+        port,
+        operations,
+        new TokenAuth(tokenStore),
+        eventBus,
+        auditSubscriber,
+        SailPaths.apiSocketPath(),
+        passkeyHandler);
   }
 
   /** Test / advanced constructor that lets the caller pick the UDS path. */
@@ -60,7 +86,15 @@ public final class SailApiServer implements AutoCloseable {
       EventSubscriber auditSubscriber,
       Path socketPath)
       throws IOException {
-    this(host, port, operations, new TokenAuth(tokenStore), eventBus, auditSubscriber, socketPath);
+    this(
+        host,
+        port,
+        operations,
+        new TokenAuth(tokenStore),
+        eventBus,
+        auditSubscriber,
+        socketPath,
+        null);
   }
 
   SailApiServer(
@@ -71,6 +105,19 @@ public final class SailApiServer implements AutoCloseable {
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       Path socketPath)
+      throws IOException {
+    this(host, port, operations, auth, eventBus, auditSubscriber, socketPath, null);
+  }
+
+  SailApiServer(
+      String host,
+      int port,
+      ApiOperations operations,
+      ApiAuth auth,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      Path socketPath,
+      HttpHandler passkeyHandler)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
@@ -83,6 +130,9 @@ public final class SailApiServer implements AutoCloseable {
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
     server.createContext("/", new ApiRouter(operations, auth));
+    if (passkeyHandler != null) {
+      server.createContext("/v1/auth", passkeyHandler);
+    }
     if (eventBus != null) {
       sseHandler = new SseHandler(eventBus, auth);
       server.createContext("/v1/events/stream", sseHandler);

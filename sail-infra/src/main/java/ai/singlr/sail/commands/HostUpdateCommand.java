@@ -94,7 +94,8 @@ public final class HostUpdateCommand implements Runnable {
               hostYaml.image(),
               newVersion,
               hostYaml.serverIp(),
-              hostYaml.initializedAt());
+              hostYaml.initializedAt(),
+              hostYaml.webauthn());
       YamlUtil.dumpToFile(updated.toMap(), hostYamlPath);
     }
 
