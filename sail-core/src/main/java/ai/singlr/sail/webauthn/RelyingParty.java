@@ -5,8 +5,11 @@
 
 package ai.singlr.sail.webauthn;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.security.Signature;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -78,5 +81,80 @@ public final class RelyingParty {
         attested.aaguid(),
         authData.backupEligible(),
         authData.backupState());
+  }
+
+  /**
+   * Verifies an assertion (W3C WebAuthn §7.2) against the credential the caller looked up by
+   * credential id. Returns the new signature counter (to persist) or throws if any check fails.
+   *
+   * @param credentialPublicKeyCose the stored COSE public key (as returned at registration)
+   * @param storedSignCount the signature counter persisted from the last ceremony
+   * @param clientDataJson the raw {@code clientDataJSON} bytes
+   * @param authenticatorData the raw authenticator data
+   * @param signature the authenticator's signature over {@code authenticatorData ‖ clientDataHash}
+   * @param expectedChallenge the challenge issued for this ceremony
+   */
+  public AssertionResult finishAssertion(
+      byte[] credentialPublicKeyCose,
+      long storedSignCount,
+      byte[] clientDataJson,
+      byte[] authenticatorData,
+      byte[] signature,
+      byte[] expectedChallenge) {
+    var clientData = ClientData.parse(clientDataJson);
+    if (!ClientData.TYPE_GET.equals(clientData.type())) {
+      throw new IllegalArgumentException(
+          "clientDataJSON type must be " + ClientData.TYPE_GET + ", got " + clientData.type());
+    }
+    if (!MessageDigest.isEqual(clientData.challenge(), expectedChallenge)) {
+      throw new IllegalArgumentException("Assertion challenge mismatch");
+    }
+    if (!origins.contains(clientData.origin())) {
+      throw new IllegalArgumentException("Assertion origin not allowed: " + clientData.origin());
+    }
+
+    var authData = AuthenticatorData.parse(authenticatorData);
+    if (!MessageDigest.isEqual(authData.rpIdHash(), rpIdHash)) {
+      throw new IllegalArgumentException("Assertion rpIdHash mismatch");
+    }
+    if (!authData.userPresent()) {
+      throw new IllegalArgumentException("User presence (UP) flag not set");
+    }
+    if (!authData.userVerified()) {
+      throw new IllegalArgumentException("User verification (UV) flag not set");
+    }
+
+    if (!(Cbor.decode(credentialPublicKeyCose) instanceof Map<?, ?> coseMap)) {
+      throw new IllegalArgumentException("Stored credential public key is not a CBOR map");
+    }
+    var key = CoseKey.parse(coseMap);
+    if (!verifySignature(key, concat(authenticatorData, clientData.hash()), signature)) {
+      throw new IllegalArgumentException("Assertion signature is invalid");
+    }
+
+    var newSignCount = authData.signCount();
+    if ((newSignCount != 0 || storedSignCount != 0) && newSignCount <= storedSignCount) {
+      throw new IllegalArgumentException(
+          "Signature counter did not increase (possible cloned authenticator)");
+    }
+    return new AssertionResult(newSignCount, authData.userVerified(), authData.backupState());
+  }
+
+  private static boolean verifySignature(CoseKey key, byte[] signedData, byte[] signature) {
+    try {
+      var verifier = Signature.getInstance(key.jdkSignatureAlgorithm());
+      verifier.initVerify(key.publicKey());
+      verifier.update(signedData);
+      return verifier.verify(signature);
+    } catch (GeneralSecurityException e) {
+      throw new IllegalArgumentException("Could not verify assertion signature", e);
+    }
+  }
+
+  private static byte[] concat(byte[] a, byte[] b) {
+    var out = new ByteArrayOutputStream(a.length + b.length);
+    out.writeBytes(a);
+    out.writeBytes(b);
+    return out.toByteArray();
   }
 }

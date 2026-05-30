@@ -12,6 +12,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
+import java.security.Signature;
 import java.security.interfaces.ECPublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Base64;
@@ -139,6 +140,163 @@ class RelyingPartyTest {
         () ->
             rp.finishRegistration(
                 clientJson("webauthn.create", CHALLENGE, ORIGIN), attObj, CHALLENGE));
+  }
+
+  // --- assertion verification ----------------------------------------------------------------
+
+  @Test
+  void verifiesValidAssertionAndReturnsNewSignCount() throws Exception {
+    var a = signEc(0x05, 11, CHALLENGE, ORIGIN); // UP | UV
+    var result = rp.finishAssertion(a.cose, 10, a.clientData, a.authData, a.signature, CHALLENGE);
+    assertEquals(11, result.signCount());
+    assertTrue(result.userVerified());
+  }
+
+  @Test
+  void acceptsZeroSignCountWhenStoredIsZero() throws Exception {
+    var a = signEc(0x05, 0, CHALLENGE, ORIGIN);
+    assertEquals(
+        0,
+        rp.finishAssertion(a.cose, 0, a.clientData, a.authData, a.signature, CHALLENGE)
+            .signCount());
+  }
+
+  @Test
+  void rejectsNonIncreasingSignCountAsClone() throws Exception {
+    var a = signEc(0x05, 5, CHALLENGE, ORIGIN);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> rp.finishAssertion(a.cose, 5, a.clientData, a.authData, a.signature, CHALLENGE));
+  }
+
+  @Test
+  void rejectsRegressionToZeroSignCount() throws Exception {
+    var a = signEc(0x05, 0, CHALLENGE, ORIGIN); // authenticator reports 0
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> rp.finishAssertion(a.cose, 5, a.clientData, a.authData, a.signature, CHALLENGE));
+  }
+
+  @Test
+  void rejectsAssertionWrongType() throws Exception {
+    var a = sign(0x05, 1, CHALLENGE, ORIGIN, "webauthn.create");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> rp.finishAssertion(a.cose, 0, a.clientData, a.authData, a.signature, CHALLENGE));
+  }
+
+  @Test
+  void rejectsAssertionChallengeOriginRpIdAndFlags() throws Exception {
+    var ok = signEc(0x05, 1, CHALLENGE, ORIGIN);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(ok.cose, 0, ok.clientData, ok.authData, ok.signature, new byte[32]));
+
+    var badOrigin = signEc(0x05, 1, CHALLENGE, "https://evil.com");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                badOrigin.cose,
+                0,
+                badOrigin.clientData,
+                badOrigin.authData,
+                badOrigin.signature,
+                CHALLENGE));
+
+    var badRp = signEc(0x05, 1, CHALLENGE, ORIGIN, "other.com");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                badRp.cose, 0, badRp.clientData, badRp.authData, badRp.signature, CHALLENGE));
+
+    var noUv = signEc(0x01, 1, CHALLENGE, ORIGIN); // UP only
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                noUv.cose, 0, noUv.clientData, noUv.authData, noUv.signature, CHALLENGE));
+
+    var noUp = signEc(0x04, 1, CHALLENGE, ORIGIN); // UV only
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                noUp.cose, 0, noUp.clientData, noUp.authData, noUp.signature, CHALLENGE));
+  }
+
+  @Test
+  void rejectsSignatureOverTamperedData() throws Exception {
+    var a = signEc(0x05, 1, CHALLENGE, ORIGIN);
+    // same parsed fields, different bytes -> different clientDataHash -> signature no longer
+    // matches
+    var tampered =
+        new String(a.clientData, StandardCharsets.UTF_8)
+            .replace("{", "{ ")
+            .getBytes(StandardCharsets.UTF_8);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> rp.finishAssertion(a.cose, 0, tampered, a.authData, a.signature, CHALLENGE));
+  }
+
+  @Test
+  void rejectsMalformedSignatureBytes() throws Exception {
+    var a = signEc(0x05, 1, CHALLENGE, ORIGIN);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                a.cose, 0, a.clientData, a.authData, new byte[] {1, 2, 3}, CHALLENGE));
+  }
+
+  @Test
+  void rejectsStoredKeyThatIsNotACborMap() throws Exception {
+    var a = signEc(0x05, 1, CHALLENGE, ORIGIN);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            rp.finishAssertion(
+                new byte[] {0x01}, 0, a.clientData, a.authData, a.signature, CHALLENGE));
+  }
+
+  private record Signed(byte[] cose, byte[] clientData, byte[] authData, byte[] signature) {}
+
+  private static Signed signEc(int flags, long signCount, byte[] challenge, String origin)
+      throws Exception {
+    return sign(flags, signCount, challenge, origin, "webauthn.get", RP_ID);
+  }
+
+  private static Signed signEc(
+      int flags, long signCount, byte[] challenge, String origin, String rpId) throws Exception {
+    return sign(flags, signCount, challenge, origin, "webauthn.get", rpId);
+  }
+
+  private static Signed sign(
+      int flags, long signCount, byte[] challenge, String origin, String type) throws Exception {
+    return sign(flags, signCount, challenge, origin, type, RP_ID);
+  }
+
+  private static Signed sign(
+      int flags, long signCount, byte[] challenge, String origin, String type, String rpId)
+      throws Exception {
+    var kpg = KeyPairGenerator.getInstance("EC");
+    kpg.initialize(new ECGenParameterSpec("secp256r1"));
+    var kp = kpg.generateKeyPair();
+    var pub = (ECPublicKey) kp.getPublic();
+    var cose = coseEc2(fixed32(pub.getW().getAffineX()), fixed32(pub.getW().getAffineY()));
+    var clientData = clientJson(type, challenge, origin);
+    var authData = cat(rpIdHash(rpId), new byte[] {(byte) flags}, be32(signCount));
+    var signedOver = cat(authData, sha256(clientData));
+    var signer = Signature.getInstance("SHA256withECDSA");
+    signer.initSign(kp.getPrivate());
+    signer.update(signedOver);
+    return new Signed(cose, clientData, authData, signer.sign());
+  }
+
+  private static byte[] sha256(byte[] in) throws Exception {
+    return MessageDigest.getInstance("SHA-256").digest(in);
   }
 
   // --- test authenticator emulator ---------------------------------------------------------
