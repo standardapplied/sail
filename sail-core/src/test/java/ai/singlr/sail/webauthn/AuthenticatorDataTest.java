@@ -102,6 +102,9 @@ class AuthenticatorDataTest {
     assertArrayEquals(credId, attested.credentialId());
     assertEquals(CoseKey.ES256, attested.publicKey().algorithm());
     assertArrayEquals(key.getEncoded(), attested.publicKey().publicKey().getEncoded());
+    // the retained COSE wire bytes re-parse to the same key
+    var reparsed = CoseKey.parse((java.util.Map<?, ?>) Cbor.decode(attested.publicKeyCose()));
+    assertArrayEquals(key.getEncoded(), reparsed.publicKey().getEncoded());
   }
 
   @Test

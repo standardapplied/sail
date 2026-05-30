@@ -18,8 +18,12 @@ import java.util.Map;
 public record AuthenticatorData(
     byte[] rpIdHash, int flags, long signCount, AttestedCredential attestedCredential) {
 
-  /** The credential registered in a ceremony with the AT flag set. */
-  public record AttestedCredential(byte[] aaguid, byte[] credentialId, CoseKey publicKey) {}
+  /**
+   * The credential registered in a ceremony with the AT flag set. {@code publicKeyCose} is the
+   * exact COSE_Key wire encoding, retained so it can be stored verbatim and re-parsed at assertion.
+   */
+  public record AttestedCredential(
+      byte[] aaguid, byte[] credentialId, CoseKey publicKey, byte[] publicKeyCose) {}
 
   private static final int FLAG_UP = 0x01;
   private static final int FLAG_UV = 0x04;
@@ -82,11 +86,14 @@ public record AuthenticatorData(
       var credentialId = Arrays.copyOfRange(data, offset, offset + credIdLen);
       offset += credIdLen;
 
-      var reader = new Cbor(Arrays.copyOfRange(data, offset, data.length));
+      var slice = Arrays.copyOfRange(data, offset, data.length);
+      var reader = new Cbor(slice);
       if (!(reader.readValue() instanceof Map<?, ?> coseMap)) {
         throw new IllegalArgumentException("Credential public key is not a CBOR map");
       }
-      attested = new AttestedCredential(aaguid, credentialId, CoseKey.parse(coseMap));
+      var publicKeyCose = Arrays.copyOf(slice, reader.position());
+      attested =
+          new AttestedCredential(aaguid, credentialId, CoseKey.parse(coseMap), publicKeyCose);
       offset += reader.position();
     }
 
