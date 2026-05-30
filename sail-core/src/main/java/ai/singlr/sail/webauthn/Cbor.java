@@ -79,8 +79,10 @@ public final class Cbor {
   }
 
   private int lengthOf(int info) {
+    // readUnsigned never yields a negative value (8-byte overflow is rejected there), so only the
+    // upper bound can fail here.
     var length = readUnsigned(info);
-    if (length < 0 || length > Integer.MAX_VALUE) {
+    if (length > Integer.MAX_VALUE) {
       throw new IllegalArgumentException("CBOR length out of range: " + length);
     }
     return (int) length;

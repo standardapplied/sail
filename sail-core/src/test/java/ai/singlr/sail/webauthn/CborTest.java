@@ -113,4 +113,16 @@ class CborTest {
   void rejectsDuplicateMapKeys() {
     assertThrows(IllegalArgumentException.class, () -> decode("a201000101")); // key 1 twice
   }
+
+  @Test
+  void rejectsIntegerExceedingLongRange() {
+    // major type 0, 8-byte value 0xffffffffffffffff overflows a signed long
+    assertThrows(IllegalArgumentException.class, () -> decode("1bffffffffffffffff"));
+  }
+
+  @Test
+  void rejectsLengthExceedingIntRange() {
+    // byte string with 8-byte length 0x80000000 (> Integer.MAX_VALUE)
+    assertThrows(IllegalArgumentException.class, () -> decode("5b0000000080000000"));
+  }
 }
