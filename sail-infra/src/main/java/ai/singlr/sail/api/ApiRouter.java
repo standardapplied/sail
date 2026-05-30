@@ -253,7 +253,7 @@ public final class ApiRouter implements HttpHandler {
       return switch (sub) {
         case APPROVE -> {
           requireMethod(request, POST);
-          yield ApiResponse.from(operations.approveReview(reviewId));
+          yield ApiResponse.from(operations.approveReview(reviewId, actor(exchange)));
         }
         default -> throw notFound();
       };

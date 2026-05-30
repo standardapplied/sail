@@ -13,7 +13,7 @@ public interface ApiOperations {
 
   Result<ReviewDetailResponse> reviewDetail(String reviewId);
 
-  Result<ReviewApproveResponse> approveReview(String reviewId);
+  Result<ReviewApproveResponse> approveReview(String reviewId, String actor);
 
   Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId);
 

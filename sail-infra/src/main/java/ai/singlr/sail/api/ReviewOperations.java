@@ -54,7 +54,7 @@ final class ReviewOperations {
     return new ReviewDetailResponse(ReviewView.from(review, stageViews), findings);
   }
 
-  ReviewApproveResponse approve(String reviewId) {
+  ReviewApproveResponse approve(String reviewId, String actor) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
     var humanStage =
@@ -66,7 +66,7 @@ final class ReviewOperations {
                     new ApiException(
                         ErrorCode.INVALID_REQUEST, "No human review stage awaiting approval."));
     reviewStore.completeStage(humanStage.id(), "passed");
-    reviewStore.updateReviewStatus(reviewId, "passed");
+    reviewStore.approve(reviewId, actor);
     specStore.updateStatus(review.specId(), SpecStatus.DONE);
     return new ReviewApproveResponse(reviewId, true);
   }

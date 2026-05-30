@@ -28,7 +28,8 @@ public final class ReviewStore {
       int iteration,
       String status,
       String createdAt,
-      String completedAt) {}
+      String completedAt,
+      String decidedBy) {}
 
   public record StageRow(
       String id,
@@ -53,7 +54,8 @@ public final class ReviewStore {
 
   public Optional<ReviewRow> findReview(String reviewId) {
     return db.queryOne(
-        "SELECT id, spec_id, iteration, status, created_at, completed_at FROM reviews WHERE id = ?",
+        "SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by"
+            + " FROM reviews WHERE id = ?",
         this::mapReview,
         reviewId);
   }
@@ -61,7 +63,7 @@ public final class ReviewStore {
   public Optional<ReviewRow> latestReviewForSpec(String specId) {
     return db.queryOne(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at
+        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by
         FROM reviews WHERE spec_id = ? ORDER BY iteration DESC LIMIT 1""",
         this::mapReview,
         specId);
@@ -70,10 +72,19 @@ public final class ReviewStore {
   public List<ReviewRow> reviewsForSpec(String specId) {
     return db.query(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at
+        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by
         FROM reviews WHERE spec_id = ? ORDER BY iteration ASC""",
         this::mapReview,
         specId);
+  }
+
+  /** Marks a review passed and records the deciding principal (the human who approved it). */
+  public void approve(String reviewId, String decidedBy) {
+    db.execute(
+        "UPDATE reviews SET status = 'passed', completed_at = ?, decided_by = ? WHERE id = ?",
+        Instant.now().toString(),
+        decidedBy,
+        reviewId);
   }
 
   public void updateReviewStatus(String reviewId, String status) {
@@ -208,7 +219,13 @@ public final class ReviewStore {
 
   private ReviewRow mapReview(Sqlite.Row row) {
     return new ReviewRow(
-        row.text(0), row.text(1), (int) row.integer(2), row.text(3), row.text(4), row.text(5));
+        row.text(0),
+        row.text(1),
+        (int) row.integer(2),
+        row.text(3),
+        row.text(4),
+        row.text(5),
+        row.text(6));
   }
 
   private StageRow mapStage(Sqlite.Row row) {

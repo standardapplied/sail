@@ -946,8 +946,8 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<ReviewApproveResponse> approveReview(String reviewId) {
-    return safe(() -> reviewOps.approve(reviewId));
+  public Result<ReviewApproveResponse> approveReview(String reviewId, String actor) {
+    return safe(() -> reviewOps.approve(reviewId, actor));
   }
 
   @Override

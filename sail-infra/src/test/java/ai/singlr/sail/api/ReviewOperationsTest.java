@@ -106,10 +106,12 @@ class ReviewOperationsTest {
     var stageId = reviewStore.createStage(reviewId, "human", "human");
     reviewStore.startStage(stageId, "uday");
 
-    var response = ops.approve(reviewId);
+    var response = ops.approve(reviewId, "uday");
 
     assertTrue(response.approved());
-    assertEquals("passed", reviewStore.findReview(reviewId).orElseThrow().status());
+    var review = reviewStore.findReview(reviewId).orElseThrow();
+    assertEquals("passed", review.status());
+    assertEquals("uday", review.decidedBy());
   }
 
   @Test
@@ -117,13 +119,13 @@ class ReviewOperationsTest {
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.createStage(reviewId, "security", "agent");
 
-    var ex = assertThrows(ApiException.class, () -> ops.approve(reviewId));
+    var ex = assertThrows(ApiException.class, () -> ops.approve(reviewId, "uday"));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
   @Test
   void approveMissingThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.approve("nope"));
+    assertThrows(ApiException.class, () -> ops.approve("nope", "uday"));
   }
 
   @Test

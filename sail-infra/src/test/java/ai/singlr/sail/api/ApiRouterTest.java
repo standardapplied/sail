@@ -548,7 +548,7 @@ class ApiRouterTest {
     assertEquals("codex", map.get("reviewer"));
 
     var reviewRow =
-        new ai.singlr.sail.store.ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1");
+        new ai.singlr.sail.store.ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null);
     var reviewView = ReviewView.from(reviewRow, java.util.List.of(stageView));
     assertEquals(1, reviewView.iteration());
     var rmap = reviewView.toMap();
@@ -1114,7 +1114,8 @@ class ApiRouterTest {
     @Override
     public Result<ReviewListResponse> reviewsForSpec(String specId) {
       var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 2);
-      var review = new ReviewView("r1", specId, 1, "passed", "t0", "t1", java.util.List.of(stage));
+      var review =
+          new ReviewView("r1", specId, 1, "passed", "t0", "t1", null, java.util.List.of(stage));
       return Result.success(new ReviewListResponse(specId, java.util.List.of(review)));
     }
 
@@ -1122,7 +1123,7 @@ class ApiRouterTest {
     public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
       var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 1);
       var review =
-          new ReviewView(reviewId, "spec", 1, "passed", "t0", "t1", java.util.List.of(stage));
+          new ReviewView(reviewId, "spec", 1, "passed", "t0", "t1", null, java.util.List.of(stage));
       var finding =
           java.util.Map.<String, Object>of(
               "id", "f1", "severity", "HIGH", "title", "SQL injection");
@@ -1130,7 +1131,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<ReviewApproveResponse> approveReview(String reviewId) {
+    public Result<ReviewApproveResponse> approveReview(String reviewId, String actor) {
       return Result.success(new ReviewApproveResponse(reviewId, true));
     }
 
