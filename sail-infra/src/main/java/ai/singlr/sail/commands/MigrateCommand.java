@@ -9,6 +9,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSpecImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.MigrationRunner;
@@ -79,20 +80,48 @@ public final class MigrateCommand implements Runnable {
     try (var db = Sqlite.open(dbPath)) {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var shell = new ShellExecutor(false);
-      var importReport =
+      var importer =
           new ContainerSpecImporter(
-                  shell, new ContainerManager(shell), new SpecStore(db), SailPaths.projectsDir())
-              .importAll();
-      var result = MigrationRunner.applyAll(db, REGISTRY, prompter);
-      if (!jsonOutput) {
-        printSummary(
-            dbPath.toString(),
-            result.schemaBefore(),
-            result.schemaAfter(),
-            importReport,
-            result.dataRuns());
-      }
-      return result.dataRuns();
+              shell, new ContainerManager(shell), new SpecStore(db), SailPaths.projectsDir());
+      var animate = !jsonOutput && System.console() != null;
+      return applyMigrations(
+          db, dbPath.toString(), importer::importAll, prompter, animate, jsonOutput);
+    }
+  }
+
+  /**
+   * Applies schema migrations first, then imports specs from project containers. The order is
+   * load-bearing: the spec importer queries {@code specs} through {@link SpecStore}, whose SELECT
+   * lists the running binary's columns, so the on-disk schema must be brought current before the
+   * import runs — otherwise an upgrade that added a spec column fails the import with an "unknown
+   * column" error before the schema catches up. Visible for tests to lock that ordering.
+   */
+  static List<DataMigrator.Run> applyMigrations(
+      Sqlite db,
+      String dbPath,
+      java.util.function.Supplier<ContainerSpecImporter.Report> specImport,
+      DataMigration.Prompter prompter,
+      boolean animate,
+      boolean jsonOutput) {
+    var result =
+        phase(
+            animate,
+            "Migrating database schema",
+            () -> MigrationRunner.applyAll(db, REGISTRY, prompter));
+    var importReport = phase(animate, "Probing project containers for specs", specImport);
+    if (!jsonOutput) {
+      printSummary(
+          dbPath, result.schemaBefore(), result.schemaAfter(), importReport, result.dataRuns());
+    }
+    return result.dataRuns();
+  }
+
+  private static <T> T phase(boolean animate, String message, java.util.function.Supplier<T> work) {
+    if (!animate) {
+      return work.get();
+    }
+    try (var ignored = Spinner.start(System.out, message)) {
+      return work.get();
     }
   }
 
