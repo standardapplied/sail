@@ -6,7 +6,7 @@
 
     <groupId>ai.singlr</groupId>
     <artifactId>sail</artifactId>
-    <version>0.13.49</version>
+    <version>0.13.50</version>
     <packaging>pom</packaging>
 
     <modules>
