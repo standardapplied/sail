@@ -9,9 +9,12 @@ import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.EnrollmentTicketStore;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SqliteException;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -28,7 +31,12 @@ import picocli.CommandLine.Spec;
     name = "fde",
     description = "Manage Forward Deployed Engineers (FDEs).",
     mixinStandardHelpOptions = true,
-    subcommands = {FdeCommand.Add.class, FdeCommand.ListFdes.class, FdeCommand.Enroll.class})
+    subcommands = {
+      FdeCommand.Add.class,
+      FdeCommand.ListFdes.class,
+      FdeCommand.Enroll.class,
+      FdeCommand.Key.class
+    })
 public final class FdeCommand implements Runnable {
 
   @Override
@@ -156,6 +164,141 @@ public final class FdeCommand implements Runnable {
       }
       var webauthn = HostYaml.fromMap(YamlUtil.parseFile(path)).webauthn();
       return webauthn.isConfigured() ? webauthn.origins().getFirst() : null;
+    }
+  }
+
+  @Command(
+      name = "key",
+      description = "Manage the SSH keys an FDE authenticates the terminal with.",
+      mixinStandardHelpOptions = true,
+      subcommands = {Key.Add.class, Key.ListKeys.class, Key.Remove.class})
+  static final class Key implements Runnable {
+
+    @Override
+    public void run() {
+      new picocli.CommandLine(this).usage(System.out);
+    }
+
+    @Command(
+        name = "add",
+        description = "Register an SSH public key for an FDE.",
+        mixinStandardHelpOptions = true)
+    static final class Add implements Runnable {
+
+      @Parameters(index = "0", description = "FDE handle (must already exist).")
+      private String handle;
+
+      @Parameters(
+          index = "1",
+          description = "SSH public key line, e.g. \"ssh-ed25519 AAAA... me@host\".")
+      private String publicKey;
+
+      @Spec private CommandSpec spec;
+
+      @Override
+      public void run() {
+        CliCommand.run(
+            spec,
+            () -> {
+              try (var db = Sqlite.open(dbPath())) {
+                var fde =
+                    new FdeStore(db)
+                        .byHandle(handle)
+                        .orElseThrow(
+                            () ->
+                                new IllegalArgumentException(
+                                    "Unknown FDE '"
+                                        + handle
+                                        + "'. Add it with 'sail fde add "
+                                        + handle
+                                        + "'."));
+                var key = SshPublicKey.parse(publicKey);
+                try {
+                  new FdeSshKeyStore(db).add(fde.id(), key);
+                } catch (SqliteException e) {
+                  throw new IllegalArgumentException(
+                      "That key (" + key.fingerprint() + ") is already registered.");
+                }
+                System.out.println(
+                    Ansi.AUTO.string(
+                        "  @|green ✓|@ Registered key for "
+                            + fde.handle()
+                            + ": "
+                            + key.fingerprint()));
+              }
+            });
+      }
+    }
+
+    @Command(
+        name = "list",
+        description = "List registered SSH keys.",
+        mixinStandardHelpOptions = true)
+    static final class ListKeys implements Runnable {
+
+      @Parameters(index = "0", arity = "0..1", description = "Optional FDE handle to filter by.")
+      private String handle;
+
+      @Spec private CommandSpec spec;
+
+      @Override
+      public void run() {
+        CliCommand.run(
+            spec,
+            () -> {
+              try (var db = Sqlite.open(dbPath())) {
+                var keyStore = new FdeSshKeyStore(db);
+                var keys =
+                    handle == null
+                        ? keyStore.list()
+                        : new FdeStore(db)
+                            .byHandle(handle)
+                            .map(fde -> keyStore.listForFde(fde.id()))
+                            .orElseThrow(
+                                () ->
+                                    new IllegalArgumentException("Unknown FDE '" + handle + "'."));
+                if (keys.isEmpty()) {
+                  System.out.println("  No SSH keys. Register one with 'sail fde key add'.");
+                  return;
+                }
+                for (var key : keys) {
+                  System.out.printf(
+                      "  %-16s  %-12s  %s%n",
+                      key.fdeHandle(),
+                      key.comment() == null ? "" : key.comment(),
+                      key.fingerprint());
+                }
+              }
+            });
+      }
+    }
+
+    @Command(
+        name = "rm",
+        description = "Remove a registered SSH key by fingerprint.",
+        mixinStandardHelpOptions = true)
+    static final class Remove implements Runnable {
+
+      @Parameters(index = "0", description = "The key's SHA256: fingerprint.")
+      private String fingerprint;
+
+      @Spec private CommandSpec spec;
+
+      @Override
+      public void run() {
+        CliCommand.run(
+            spec,
+            () -> {
+              try (var db = Sqlite.open(dbPath())) {
+                if (new FdeSshKeyStore(db).remove(fingerprint)) {
+                  System.out.println(Ansi.AUTO.string("  @|green ✓|@ Removed key " + fingerprint));
+                } else {
+                  System.out.println(
+                      Ansi.AUTO.string("  @|yellow ⚠|@ No key with fingerprint " + fingerprint));
+                }
+              }
+            });
+      }
     }
   }
 }

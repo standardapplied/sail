@@ -226,7 +226,15 @@ public final class SchemaManager {
               expires_at TEXT NOT NULL,
               consumed_at TEXT
           )""",
-          "ALTER TABLE fdes ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+          "ALTER TABLE fdes ADD COLUMN role TEXT NOT NULL DEFAULT 'member'",
+          """
+          CREATE TABLE IF NOT EXISTS fde_ssh_keys (
+              fingerprint TEXT PRIMARY KEY,
+              fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
+              public_key TEXT NOT NULL,
+              comment TEXT,
+              created_at TEXT NOT NULL
+          )""");
 
   private final Sqlite db;
 
