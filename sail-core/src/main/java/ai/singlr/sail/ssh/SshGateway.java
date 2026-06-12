@@ -14,18 +14,30 @@ import java.util.Set;
 /**
  * Decides what a forced-command SSH session may run and as whom. When an engineer's key hits the
  * {@code sail} user's forced command, this resolves their FDE (passed as {@code --fde} on the
- * authorized_keys line), validates the requested command against an allow-list, mints a short-lived
- * session for that FDE, and returns the argument vector to exec with {@code SAIL_TOKEN} set — so
- * the downstream command authenticates to the loopback API as the FDE and {@code Authorizer}
- * enforces its role. Default-deny: only API-backed, role-governed commands are permitted;
- * database-direct admin commands ({@code fde}, {@code host}, {@code server}, {@code migrate}) are
- * not, because they would bypass the API and run with the {@code sail} user's full access
- * regardless of role.
+ * authorized_keys line), classifies the requested command, mints a short-lived session for that
+ * FDE, and returns the argument vector to exec with {@code SAIL_TOKEN} set — so the downstream
+ * command authenticates to the loopback API as the FDE and {@code Authorizer} enforces its role.
+ *
+ * <p>Commands are authorized by kind, default-deny:
+ *
+ * <ul>
+ *   <li>{@link #API_COMMANDS} run for every active FDE — they talk to the loopback API, where the
+ *       FDE's role decides what each request may do.
+ *   <li>{@link #ADMIN_COMMANDS} are database-direct, so no downstream check exists; the gateway
+ *       itself requires the {@code admin} role.
+ *   <li>Everything else ({@code project}, {@code host}, {@code server}, {@code migrate}, …) runs
+ *       with host privileges the {@code sail} user must never have, and is refused.
+ * </ul>
  */
 public final class SshGateway {
 
   static final Duration SESSION_TTL = Duration.ofMinutes(10);
-  static final Set<String> ALLOWED_COMMANDS = Set.of("spec", "dispatch", "agent", "events");
+
+  /** Commands the loopback API authorizes per-request by FDE role. */
+  public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events");
+
+  /** Database-direct administration commands; the gateway admits only admin-role FDEs. */
+  public static final Set<String> ADMIN_COMMANDS = Set.of("fde");
 
   private SshGateway() {}
 
@@ -56,12 +68,19 @@ public final class SshGateway {
       return new Rejected("No 'sail' subcommand supplied.");
     }
     var subcommand = tokens.getFirst();
-    if (!ALLOWED_COMMANDS.contains(subcommand)) {
-      return new Rejected("'" + subcommand + "' is not permitted over an SSH-key session.");
+    if (!API_COMMANDS.contains(subcommand) && !ADMIN_COMMANDS.contains(subcommand)) {
+      return new Rejected(
+          "'"
+              + subcommand
+              + "' requires host privileges and is not available over an SSH-key session."
+              + " SSH to the host directly to run it.");
     }
     var fde = fdes.byHandle(fdeHandle);
     if (fde.isEmpty() || !"active".equals(fde.get().status())) {
       return new Rejected("Unknown or disabled FDE.");
+    }
+    if (ADMIN_COMMANDS.contains(subcommand) && !"admin".equals(fde.get().role())) {
+      return new Rejected("'" + subcommand + "' requires the admin role.");
     }
     var session = sessions.create(fde.get().id(), SESSION_TTL);
     return new Authorized(List.copyOf(tokens), session.token());

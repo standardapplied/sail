@@ -55,7 +55,30 @@ class ClientConfigTest {
 
     var rebuilt = ClientConfig.fromMap(original.toMap());
 
-    assertEquals(original.host(), rebuilt.host());
+    assertEquals(original, rebuilt);
+  }
+
+  @Test
+  void userDefaultsToGatewayUser() {
+    var config = ClientConfig.fromMap(Map.<String, Object>of("host", "devbox"));
+
+    assertEquals(ClientConfig.GATEWAY_USER, config.user());
+    assertTrue(config.gatewayEnabled());
+    assertEquals("sail@devbox", config.gatewayTarget());
+  }
+
+  @Test
+  void blankUserDisablesGateway() {
+    var config = ClientConfig.fromMap(Map.<String, Object>of("host", "devbox", "user", ""));
+
+    assertFalse(config.gatewayEnabled());
+  }
+
+  @Test
+  void explicitUserOverridesGatewayTarget() {
+    var config = ClientConfig.fromMap(Map.<String, Object>of("host", "devbox", "user", "gw"));
+
+    assertEquals("gw@devbox", config.gatewayTarget());
   }
 
   @Test

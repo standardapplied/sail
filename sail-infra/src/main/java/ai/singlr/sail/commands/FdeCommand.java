@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.EnrollmentTicketStore;
@@ -48,6 +49,37 @@ public final class FdeCommand implements Runnable {
     return SailPaths.controlPlaneDb();
   }
 
+  private static void registerKey(Sqlite db, FdeStore.Fde fde, String publicKey) throws Exception {
+    var key = SshPublicKey.parse(publicKey);
+    try {
+      new FdeSshKeyStore(db).add(fde.id(), key);
+    } catch (SqliteException e) {
+      throw new IllegalArgumentException(
+          "That key (" + key.fingerprint() + ") is already registered.");
+    }
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|green ✓|@ Registered key for " + fde.handle() + ": " + key.fingerprint()));
+    applyKeys(db);
+  }
+
+  private static void applyKeys(Sqlite db) throws Exception {
+    switch (new AuthorizedKeysSync().sync(db)) {
+      case AuthorizedKeysSync.Synced synced ->
+          System.out.println(
+              Ansi.AUTO.string(
+                  "  @|green ✓|@ authorized_keys synced (" + synced.keyCount() + " key(s))"));
+      case AuthorizedKeysSync.NeedsRoot _ ->
+          System.out.println(
+              Ansi.AUTO.string("  @|faint Run 'sudo sail host keys sync' to apply.|@"));
+      case AuthorizedKeysSync.NotProvisioned _ ->
+          System.out.println(
+              Ansi.AUTO.string(
+                  "  @|faint SSH-key login is not provisioned on this host. Run 'sudo sail host"
+                      + " ssh-identity' to enable it.|@"));
+    }
+  }
+
   @Command(name = "add", description = "Add an FDE.", mixinStandardHelpOptions = true)
   static final class Add implements Runnable {
 
@@ -66,6 +98,13 @@ public final class FdeCommand implements Runnable {
         defaultValue = FdeStore.DEFAULT_ROLE)
     private String role;
 
+    @Option(
+        names = "--key",
+        description =
+            "SSH public key line to register for terminal login, e.g."
+                + " \"ssh-ed25519 AAAA... me@host\".")
+    private String publicKey;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -78,6 +117,9 @@ public final class FdeCommand implements Runnable {
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|green ✓|@ FDE added: " + fde.handle() + " (" + fde.role() + ")"));
+              if (publicKey != null) {
+                registerKey(db, fde, publicKey);
+              }
             }
           });
     }
@@ -212,21 +254,7 @@ public final class FdeCommand implements Runnable {
                                         + "'. Add it with 'sail fde add "
                                         + handle
                                         + "'."));
-                var key = SshPublicKey.parse(publicKey);
-                try {
-                  new FdeSshKeyStore(db).add(fde.id(), key);
-                } catch (SqliteException e) {
-                  throw new IllegalArgumentException(
-                      "That key (" + key.fingerprint() + ") is already registered.");
-                }
-                System.out.println(
-                    Ansi.AUTO.string(
-                        "  @|green ✓|@ Registered key for "
-                            + fde.handle()
-                            + ": "
-                            + key.fingerprint()));
-                System.out.println(
-                    Ansi.AUTO.string("  @|faint Run 'sail host keys sync' to apply.|@"));
+                registerKey(db, fde, publicKey);
               }
             });
       }
@@ -294,8 +322,7 @@ public final class FdeCommand implements Runnable {
               try (var db = Sqlite.open(dbPath())) {
                 if (new FdeSshKeyStore(db).remove(fingerprint)) {
                   System.out.println(Ansi.AUTO.string("  @|green ✓|@ Removed key " + fingerprint));
-                  System.out.println(
-                      Ansi.AUTO.string("  @|faint Run 'sail host keys sync' to apply.|@"));
+                  applyKeys(db);
                 } else {
                   System.out.println(
                       Ansi.AUTO.string("  @|yellow ⚠|@ No key with fingerprint " + fingerprint));

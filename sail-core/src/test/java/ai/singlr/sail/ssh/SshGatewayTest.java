@@ -12,6 +12,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,7 @@ class SshGatewayTest {
   void permitsAllowedCommandAndMintsUsableSession() {
     var decision = authorize("sail spec list", "uday");
     var authorized = assertInstanceOf(SshGateway.Authorized.class, decision);
-    assertEquals(java.util.List.of("spec", "list"), authorized.args());
+    assertEquals(List.of("spec", "list"), authorized.args());
     assertTrue(authorized.sessionToken().startsWith("sess_"));
     assertTrue(sessions.validate(authorized.sessionToken()).isPresent());
   }
@@ -54,21 +55,35 @@ class SshGatewayTest {
   @Test
   void stripsLeadingSailToken() {
     var authorized = assertInstanceOf(SshGateway.Authorized.class, authorize("spec list", "uday"));
-    assertEquals(java.util.List.of("spec", "list"), authorized.args());
+    assertEquals(List.of("spec", "list"), authorized.args());
   }
 
   @Test
-  void rejectsDisallowedCommand() {
+  void rejectsFdeCommandForNonAdminRole() {
     var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde list", "uday"));
-    assertTrue(rejected.reason().contains("fde"));
+    assertTrue(rejected.reason().contains("admin role"));
     assertTrue(sessions.validate("sess_anything").isEmpty());
   }
 
   @Test
-  void rejectsAdminDirectCommands() {
-    assertInstanceOf(SshGateway.Rejected.class, authorize("sail host status", "uday"));
-    assertInstanceOf(SshGateway.Rejected.class, authorize("sail migrate", "uday"));
-    assertInstanceOf(SshGateway.Rejected.class, authorize("sail server start", "uday"));
+  void permitsFdeCommandForAdminRole() {
+    fdes.add("ada", null, null, "admin");
+    var authorized =
+        assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde list", "ada"));
+    assertEquals(List.of("fde", "list"), authorized.args());
+    assertTrue(sessions.validate(authorized.sessionToken()).isPresent());
+  }
+
+  @Test
+  void rejectsHostPrivilegedCommandsEvenForAdmins() {
+    fdes.add("ada", null, null, "admin");
+    for (var handle : List.of("uday", "ada")) {
+      for (var command : List.of("host status", "migrate", "server start", "project up")) {
+        var rejected =
+            assertInstanceOf(SshGateway.Rejected.class, authorize("sail " + command, handle));
+        assertTrue(rejected.reason().contains("host privileges"));
+      }
+    }
   }
 
   @Test
@@ -97,6 +112,7 @@ class SshGatewayTest {
   @Test
   void noSessionIsMintedWhenRejected() {
     authorize("sail fde list", "uday");
+    authorize("sail project up acme", "uday");
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", "uday");
     authorize("sail spec list", "uday");
     assertEquals(

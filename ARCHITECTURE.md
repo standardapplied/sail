@@ -1,7 +1,7 @@
 # Sail Architecture
 
 > Status: living document. Captures the positioning and design decisions behind `sail`.
-> Last substantive update: 2026-05-29.
+> Last substantive update: 2026-06-12.
 
 ## What Sail is
 
@@ -94,11 +94,15 @@ Coverage discipline: `ai.singlr.sail.api.*` is held to **100% line/method** JaCo
 - **Host mode** — `~/.sail/host.yaml` exists. Commands execute locally: lifecycle
   commands drive `incus`/`podman`; API commands hit the local server.
 - **Client mode** — `~/.sail/config.yaml` exists (and no host config). Commands are
-  forwarded to the host over SSH by `RemoteCommandRunner`:
-  - **Local** (`--version`, `upgrade`, `init`) run on the client.
+  forwarded to the host over SSH by `RemoteCommandRunner`, in two lanes:
+  - **Local** (`--version`, `upgrade`, `init`, `login`) run on the client.
   - **Host-only** (`host …`) error with guidance to SSH in.
-  - **Everything else** is forwarded over SSH; the host renders output, the client
-    displays it.
+  - **FDE-gateway commands** (`spec`, `agent`, `events`, `fde`) target `sail@host`.
+    The engineer's SSH key hits a forced command (`sail _gateway --fde <handle>`)
+    that resolves their FDE, mints a short-lived session, and re-execs the command —
+    so the loopback API sees *who* is acting and `Authorizer` enforces their role.
+  - **Everything else** (project lifecycle, interactive shells) is forwarded as the
+    plain SSH host, because it needs host privileges the `sail` user must never have.
 
 This is why the loopback-only API is not a limitation for the Mac client: commands
 run *on the host*, where the API is reachable at `127.0.0.1:7070`.
@@ -111,7 +115,7 @@ bytes and SHA-256 checksum, and strips the Gatekeeper quarantine flag. An FDE ru
 
 ```
 curl -fsSL .../install.sh | bash      # downloads darwin-arm64
-sail init my-server                   # writes ~/.sail/config.yaml { host: my-server }
+sail init my-server                   # writes ~/.sail/config.yaml { host, user: sail }
 sail project up acme                  # forwarded over SSH, runs on my-server
 ```
 
@@ -120,10 +124,25 @@ and proxy settings.
 
 ## Security model
 
-The deployment is **single-trust**: one operator, one bare-metal server.
+**One ingress by design.** The only network surface a sail host exposes is sshd, which
+the operator runs anyway; the API binds `127.0.0.1` and is never network-reachable.
+There are exactly two identity doors, both landing on the same `fdes` row, role, and
+`Authorizer`:
 
-- **Auth** — bearer token, stored `0600` under `~/.sail/` (`0700`). No RBAC or
-  multi-user identity yet (see *Known gaps*).
+1. **Terminal: SSH key → FDE.** Each registered key is pinned in the `sail` user's
+   `authorized_keys` to `command="sail _gateway --fde <handle>",restrict` — no shell,
+   no forwarding, a default-deny command classification, and a short-lived session
+   minted per invocation. `sail fde add <handle> --key "<pubkey>"` is the whole
+   enrollment; removing the key revokes SSH and API access in one step.
+2. **Web (opt-in, off by default): passkeys.** For Mast/browser clients only. Requires
+   the operator to deploy a TLS-terminating reverse proxy and configure the `webauthn`
+   block; until then the endpoints answer 503.
+
+- **Auth** — FDE identity with capability roles (`admin`/`member`/`viewer`) enforced
+  at the API boundary (GET ⇒ READ, mutating ⇒ WRITE, sensitive routes ⇒ ADMIN), plus
+  anti-spoof attribution (`created_by`/`updated_by`/`decided_by` stamped server-side).
+  Host-local bearer tokens remain for the operator and back-compat, stored `0600`
+  under `~/.sail/` (`0700`); scoping them down further is tracked in *Known gaps*.
 - **API transport — sail serves plain HTTP on `127.0.0.1`; it does not do TLS at all.**
   The loopback API is reached by the CLI via SSH tunnel / SSH command-forwarding; for
   network or browser access (Mast, passkeys), the operator fronts sail with a
@@ -147,20 +166,28 @@ See `SECURITY_AUDIT.md` for the full checklist and accepted risks.
 
 ## Known gaps / evolution
 
-These are the deliberate edges between today's single-trust CLI tool and the
-multi-FDE platform that must support Mast:
+These are the deliberate edges between today's CLI tool and the multi-FDE platform
+that must support Mast:
 
-1. **Single-trust → multi-FDE identity + authz.** The largest gap before Mast. One
-   shared bearer token does not model many FDEs coordinating on shared specs.
-   *(Tracked as a design spec.)*
-2. **Two remote-config models.** `ClientConfig` (SSH-forward via `host`) and
+1. **Project lifecycle is host-privileged, not API-backed.** `project up` drives
+   `incus` directly, so it cannot ride the FDE gateway — engineers need admin SSH for
+   it. The k8s-shaped fix is for the control plane to own provisioning (the API runs
+   as root on the host already) and for the CLI to become a pure client. This is the
+   largest remaining gap before "a member-role FDE can create containers and get
+   going" without host privileges.
+2. **Host admin token rides along for back-compat** (missing role ⇒ ADMIN). Once
+   SSH-key + passkey identity is proven in the field, scope it down to break-glass.
+3. **Two remote-config models.** `ClientConfig` (SSH-forward via `host`/`user`) and
    `ServerConnectionConfig` (HTTP API via `server` + `token`) both read
    `~/.sail/config.yaml` with different keys. SSH-forwarding papers over this today;
    direct API access from a client (Mast, or a future direct-mode CLI) needs them
-   reconciled and the transport decision made.
-3. **No API rate limiting** — relevant once long-lived desktop / Chorus clients connect.
-4. **Single platform per OS** — Mac arm64 only, Linux amd64 only.
-5. **Release signing/notarization** — checksums protect against corruption, not a
+   reconciled. Related: a passkey `sail login` session currently has no CLI consumer
+   on a forwarding client — sessions serve the browser/Mast until the direct-API
+   client exists.
+4. **Session/event actor attribution** — deferred to land with multi-node dispatch.
+5. **No API rate limiting** — relevant once long-lived desktop / Chorus clients connect.
+6. **Single platform per OS** — Mac arm64 only, Linux amd64 only.
+7. **Release signing/notarization** — checksums protect against corruption, not a
    compromised release channel.
 
 ## Design invariants to preserve

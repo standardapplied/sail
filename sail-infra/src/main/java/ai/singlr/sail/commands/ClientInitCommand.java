@@ -47,8 +47,13 @@ public final class ClientInitCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string("  @|bold,green \u2713|@ Client configured: " + configPath));
     System.out.println(Ansi.AUTO.string("  @|faint Host:|@ " + host));
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|faint Identity:|@ your SSH key, via the '"
+                + ClientConfig.GATEWAY_USER
+                + "' gateway user"));
     System.out.println();
-    System.out.println(Ansi.AUTO.string("  Test with: @|bold sail spec list <project>|@"));
+    System.out.println(Ansi.AUTO.string("  Test with: @|bold sail spec list|@"));
   }
 
   /**

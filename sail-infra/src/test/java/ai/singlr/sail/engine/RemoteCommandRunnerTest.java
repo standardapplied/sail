@@ -23,11 +23,37 @@ class RemoteCommandRunnerTest {
 
     assertEquals("ssh", cmd.getFirst());
     assertFalse(cmd.contains("-t"));
-    assertTrue(cmd.contains("kubera-server"));
+    assertTrue(cmd.contains("sail@kubera-server"));
     assertTrue(cmd.contains("sail"));
     assertTrue(cmd.contains("spec"));
     assertTrue(cmd.contains("list"));
     assertTrue(cmd.contains("kubera"));
+  }
+
+  @Test
+  void gatewayCommandsTargetTheSailUser() {
+    var runner = new RemoteCommandRunner(CONFIG);
+
+    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"spec", "list"}));
+    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"agent", "status"}));
+    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"events", "tail"}));
+    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"fde", "list"}));
+  }
+
+  @Test
+  void hostPrivilegedCommandsTargetThePlainHost() {
+    var runner = new RemoteCommandRunner(CONFIG);
+
+    assertEquals("kubera-server", runner.sshTarget(new String[] {"project", "up", "demo"}));
+    assertEquals("kubera-server", runner.sshTarget(new String[] {"shell", "demo"}));
+    assertEquals("kubera-server", runner.sshTarget(new String[] {}));
+  }
+
+  @Test
+  void blankGatewayUserDisablesTheGatewayLane() {
+    var runner = new RemoteCommandRunner(new ClientConfig("kubera-server", ""));
+
+    assertEquals("kubera-server", runner.sshTarget(new String[] {"spec", "list"}));
   }
 
   @Test

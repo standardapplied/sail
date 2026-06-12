@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.ReleaseFetcher;
@@ -182,6 +183,8 @@ public final class UpgradeCommand implements Runnable {
 
     var restartStatus = restartSailApi(dryRun);
 
+    syncAuthorizedKeys(dryRun);
+
     if (json) {
       printJsonResult(
           currentVersion, latestVersionStr, "upgraded", binaryPath.toString(), restartStatus);
@@ -286,6 +289,34 @@ public final class UpgradeCommand implements Runnable {
    */
   private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
     return installer.reconcile();
+  }
+
+  /**
+   * Converges the {@code sail} user's {@code authorized_keys} with the SSH-key registry so a host
+   * comes fully online from an upgrade alone — keys registered before this binary's auto-sync
+   * existed are installed without any manual {@code keys sync}. Quiet when there is nothing to do
+   * (unprovisioned host, non-root upgrade) and never fatal: the binary install already succeeded.
+   */
+  private void syncAuthorizedKeys(boolean dryRun) {
+    if (dryRun) {
+      System.out.println(
+          "[dry-run] Would sync the sail user's authorized_keys from the SSH-key registry.");
+      return;
+    }
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      if (new AuthorizedKeysSync().sync(db) instanceof AuthorizedKeysSync.Synced synced && !json) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ authorized_keys synced (" + synced.keyCount() + " key(s))"));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine(
+              "authorized_keys sync failed: "
+                  + e.getMessage()
+                  + ". Converge manually with 'sudo sail host keys sync'.",
+              Ansi.AUTO));
+    }
   }
 
   /** Bind address + port pair extracted from a sail-api unit file's {@code ExecStart}. */

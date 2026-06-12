@@ -22,9 +22,9 @@ import picocli.CommandLine.Option;
  * hand: each registered key's {@code authorized_keys} line is {@code command="sail _gateway --fde
  * <handle>"}, so sshd invokes this with the engineer's real command in {@code
  * SSH_ORIGINAL_COMMAND}. It authorizes the request through {@link SshGateway} — resolving the FDE,
- * checking the allow-list, minting a short-lived session — then re-execs {@code sail} with {@code
- * SAIL_TOKEN} set so the command runs as that FDE under role-based authorization. Disallowed
- * commands are refused without minting anything.
+ * classifying the command by kind and role, minting a short-lived session — then re-execs {@code
+ * sail} with {@code SAIL_TOKEN} set so the command runs as that FDE under role-based authorization.
+ * Refused commands mint nothing.
  */
 @Command(name = "_gateway", description = "Internal SSH forced-command entry point.", hidden = true)
 public final class GatewayCommand implements Callable<Integer> {
