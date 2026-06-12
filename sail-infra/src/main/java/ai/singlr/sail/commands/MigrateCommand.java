@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.ContainerSpecImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
+import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.MigrationRunner;
@@ -21,6 +22,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
 import picocli.CommandLine.Command;
@@ -88,8 +92,47 @@ public final class MigrateCommand implements Runnable {
       var runs =
           applyMigrations(
               db, dbPath.toString(), importer::importAll, prompter, animate, jsonOutput);
+      relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       return runs;
+    }
+  }
+
+  /**
+   * Moves {@code host.yaml} into the shared data directory on provisioned hosts, so commands
+   * arriving through the {@code sail} user's SSH gateway can read host configuration (e.g. the
+   * webauthn origin printed by {@code fde enroll}). Same upgrade-convergence rationale as {@link
+   * #syncAuthorizedKeys}: this is the step guaranteed to run new-binary code during an upgrade.
+   * No-op unless this host is provisioned (shared dir exists), the process is root, a legacy file
+   * exists, and the shared copy does not.
+   */
+  private static void relocateHostConfig(boolean jsonOutput) {
+    var legacy = SailPaths.sailDir().resolve("host.yaml");
+    var shared = Path.of(SshIdentityProvisioner.DEFAULT_DATA_DIR).resolve("host.yaml");
+    if (!SailPaths.isRoot()
+        || !Files.isDirectory(shared.getParent())
+        || Files.exists(shared)
+        || !Files.exists(legacy)) {
+      return;
+    }
+    try {
+      Files.move(legacy, shared);
+      var view = Files.getFileAttributeView(shared, PosixFileAttributeView.class);
+      view.setGroup(
+          shared
+              .getFileSystem()
+              .getUserPrincipalLookupService()
+              .lookupPrincipalByGroupName(SshIdentityProvisioner.SAIL_USER));
+      Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rw-r-----"));
+      if (!jsonOutput) {
+        System.out.println(
+            Ansi.AUTO.string("  @|green ✓|@ host.yaml moved to " + shared.getParent()));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          "  host.yaml relocation failed: "
+              + e.getMessage()
+              + ". Converge manually with 'sudo sail host ssh-identity'.");
     }
   }
 

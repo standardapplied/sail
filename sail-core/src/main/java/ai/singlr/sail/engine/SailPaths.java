@@ -79,9 +79,23 @@ public final class SailPaths {
     return SAIL_DIR.resolve("update-check.yaml");
   }
 
-  /** Returns the host config file path: {@code ~/.sail/host.yaml}. */
+  /**
+   * Returns the host config file path. Resolution mirrors {@link #dataDir()}: the shared system
+   * copy {@code /var/lib/sail/host.yaml} when it exists (a host provisioned for SSH-key FDE login),
+   * otherwise {@code ~/.sail/host.yaml}. The shared location matters for the same reason the
+   * database moved: commands arriving through the {@code sail} user's SSH gateway must read host
+   * configuration (e.g. the webauthn origin for enrollment URLs), and the operator's home is
+   * unreadable to them. Solo/dev installs stay under {@code ~/.sail} unchanged.
+   */
   public static Path hostConfigPath() {
-    return SAIL_DIR.resolve("host.yaml");
+    return hostConfigPath(Files.exists(SYSTEM_DATA_DIR.resolve("host.yaml")));
+  }
+
+  /** Pure resolver; visible for tests so resolution can be exercised without the environment. */
+  static Path hostConfigPath(boolean provisionedSystemConfig) {
+    return provisionedSystemConfig
+        ? SYSTEM_DATA_DIR.resolve("host.yaml")
+        : SAIL_DIR.resolve("host.yaml");
   }
 
   /** Returns the client config file path: {@code ~/.sail/config.yaml}. */

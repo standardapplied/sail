@@ -52,6 +52,20 @@ class YamlUtilTest {
   }
 
   @Test
+  void dumpToStringEmitsBlockStyleForHandEditing() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("host", "devbox");
+    map.put("webauthn", Map.of("origins", List.of("http://localhost:7070")));
+
+    var yaml = YamlUtil.dumpToString(map);
+
+    assertFalse(yaml.contains("{"), yaml);
+    assertTrue(yaml.contains("host: devbox\n"), yaml);
+    assertTrue(yaml.contains("origins:\n"), yaml);
+    assertEquals(map, YamlUtil.parseMap(yaml));
+  }
+
+  @Test
   void dumpJsonProducesFlowStyleOutput() {
     var map = new LinkedHashMap<String, Object>();
     map.put("name", "snap-1");

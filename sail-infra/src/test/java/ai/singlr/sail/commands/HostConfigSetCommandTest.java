@@ -133,4 +133,71 @@ class HostConfigSetCommandTest {
       throw new RuntimeException(e);
     }
   }
+
+  private static final HostYaml BASE =
+      HostYaml.fromMap(java.util.Map.of("storage_backend", "dir", "server_ip", "10.0.0.1"));
+
+  @Test
+  void webauthnRpIdIsSetWithoutDisturbingOtherFields() {
+    var updated = HostConfigSetCommand.applyChange(BASE, "webauthn-rp-id", "localhost");
+
+    assertEquals("localhost", updated.webauthn().rpId());
+    assertEquals("10.0.0.1", updated.serverIp());
+    assertEquals("dir", updated.storageBackend());
+  }
+
+  @Test
+  void webauthnKeysComposeIntoAConfiguredBlock() {
+    var step1 = HostConfigSetCommand.applyChange(BASE, "webauthn-rp-id", "localhost");
+    var step2 = HostConfigSetCommand.applyChange(step1, "webauthn-rp-name", "Sail devbox");
+    var step3 = HostConfigSetCommand.applyChange(step2, "webauthn-origin", "http://localhost:7070");
+
+    assertEquals(
+        new ai.singlr.sail.config.WebauthnConfig(
+            "localhost", "Sail devbox", java.util.List.of("http://localhost:7070")),
+        step3.webauthn());
+    assertTrue(step3.webauthn().isConfigured());
+  }
+
+  @Test
+  void serverIpChangePreservesTheWebauthnBlock() {
+    var withWebauthn = HostConfigSetCommand.applyChange(BASE, "webauthn-rp-id", "localhost");
+
+    var updated = HostConfigSetCommand.applyChange(withWebauthn, "server-ip", "10.0.0.2");
+
+    assertEquals("10.0.0.2", updated.serverIp());
+    assertEquals("localhost", updated.webauthn().rpId());
+  }
+
+  @Test
+  void validateAcceptsRealisticValues() {
+    HostConfigSetCommand.validate("server-ip", "192.168.1.100");
+    HostConfigSetCommand.validate("webauthn-rp-id", "sail.example.dev");
+    HostConfigSetCommand.validate("webauthn-rp-id", "localhost");
+    HostConfigSetCommand.validate("webauthn-rp-name", "anything goes");
+    HostConfigSetCommand.validate("webauthn-origin", "https://sail.example.dev");
+    HostConfigSetCommand.validate("webauthn-origin", "http://localhost:7070");
+  }
+
+  @Test
+  void validateRejectsMalformedValues() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("server-ip", "not-an-ip"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("webauthn-rp-id", "Has Spaces"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("webauthn-origin", "sail.example.dev"));
+  }
+
+  @Test
+  void validateRejectsTrailingSlashOrigin() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostConfigSetCommand.validate("webauthn-origin", "http://localhost:7070/"));
+    assertTrue(thrown.getMessage().contains("trailing slash"));
+  }
 }

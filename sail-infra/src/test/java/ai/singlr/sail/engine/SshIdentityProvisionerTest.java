@@ -59,6 +59,26 @@ class SshIdentityProvisionerTest {
   }
 
   @Test
+  void hostYamlMoveIsGuardedAndGroupReadable() {
+    var commands =
+        plan().stream()
+            .filter(SshIdentityProvisioner.Run.class::isInstance)
+            .map(s -> String.join(" ", ((SshIdentityProvisioner.Run) s).command()))
+            .toList();
+    var move =
+        commands.stream().filter(c -> c.contains("host.yaml\" \"")).findFirst().orElseThrow();
+    assertTrue(move.contains("[ -e") && move.contains("! -e"), move);
+    assertTrue(move.contains("/root/.sail/host.yaml"), move);
+    assertTrue(move.contains("/var/lib/sail/host.yaml"), move);
+    var access =
+        commands.stream()
+            .filter(c -> c.contains("chmod 640") && c.contains("host.yaml"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(access.contains("chgrp sail"), access);
+  }
+
+  @Test
   void authorizedKeysIsNeverTruncatedWhenPresent() {
     var step =
         plan().stream()

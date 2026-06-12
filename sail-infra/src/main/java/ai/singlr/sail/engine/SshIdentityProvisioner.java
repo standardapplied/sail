@@ -127,6 +127,34 @@ public final class SshIdentityProvisioner {
                     + SAIL_USER
                     + " \"$f\" && chmod 660 \"$f\"; done; true")),
         new Run(
+            "Move host.yaml into " + dataDir + " (readable by gateway commands)",
+            List.of(
+                "sh",
+                "-c",
+                "[ -e \""
+                    + source
+                    + "/host.yaml\" ] && [ ! -e \""
+                    + dataDir
+                    + "/host.yaml\" ] && mv \""
+                    + source
+                    + "/host.yaml\" \""
+                    + dataDir
+                    + "/host.yaml\"; true")),
+        new Run(
+            "Set host.yaml group access",
+            List.of(
+                "sh",
+                "-c",
+                "[ -e \""
+                    + dataDir
+                    + "/host.yaml\" ] && chgrp "
+                    + SAIL_USER
+                    + " \""
+                    + dataDir
+                    + "/host.yaml\" && chmod 640 \""
+                    + dataDir
+                    + "/host.yaml\"; true")),
+        new Run(
             "Create the systemd drop-in directory",
             List.of("install", "-d", "-m", "755", Path.of(DROP_IN).getParent().toString())),
         new WriteFile(

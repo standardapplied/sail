@@ -42,8 +42,13 @@ class SailPathsTest {
   }
 
   @Test
-  void hostConfigPathIsUnderSingDir() {
-    assertEquals(HOME.resolve(".sail/host.yaml"), SailPaths.hostConfigPath());
+  void hostConfigPathFallsBackToHomeWhenNoSharedCopy() {
+    assertEquals(HOME.resolve(".sail/host.yaml"), SailPaths.hostConfigPath(false));
+  }
+
+  @Test
+  void hostConfigPathPrefersTheSharedSystemCopy() {
+    assertEquals(Path.of("/var/lib/sail/host.yaml"), SailPaths.hostConfigPath(true));
   }
 
   @Test

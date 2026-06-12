@@ -6,12 +6,15 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -25,9 +28,14 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class HostConfigSetCommand implements Runnable {
 
-  private static final Set<String> SETTABLE_KEYS = Set.of("server-ip");
+  private static final Set<String> SETTABLE_KEYS =
+      Set.of("server-ip", "webauthn-rp-id", "webauthn-rp-name", "webauthn-origin");
+  private static final Set<String> WEBAUTHN_KEYS =
+      Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin");
+  private static final Pattern RP_ID = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
+  private static final Pattern ORIGIN = Pattern.compile("https?://\\S+[^/]");
 
-  @Parameters(index = "0", description = "Configuration key (e.g. 'server-ip').")
+  @Parameters(index = "0", description = "Configuration key (e.g. 'server-ip', 'webauthn-rp-id').")
   private String key;
 
   @Parameters(index = "1", description = "Value to set.")
@@ -57,10 +65,7 @@ public final class HostConfigSetCommand implements Runnable {
           "Unknown config key: '" + key + "'. Settable keys: " + String.join(", ", SETTABLE_KEYS));
     }
 
-    if ("server-ip".equals(key) && !NetworkDetector.isValidIpv4(value)) {
-      throw new IllegalArgumentException(
-          "Invalid IPv4 address: '" + value + "'. Expected format: 192.168.1.100");
-    }
+    validate(key, value);
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
@@ -86,24 +91,82 @@ public final class HostConfigSetCommand implements Runnable {
       return;
     }
 
-    System.out.println(Ansi.AUTO.string("  @|bold,green \u2713|@ " + key + " = " + value));
+    System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + key + " = " + value));
+    if (WEBAUTHN_KEYS.contains(key)) {
+      System.out.println(
+          Ansi.AUTO.string("  @|faint Restart to apply: sudo systemctl restart sail-api|@"));
+    }
   }
 
-  private static HostYaml applyChange(HostYaml current, String key, String value) {
+  static void validate(String key, String value) {
+    switch (key) {
+      case "server-ip" -> {
+        if (!NetworkDetector.isValidIpv4(value)) {
+          throw new IllegalArgumentException(
+              "Invalid IPv4 address: '" + value + "'. Expected format: 192.168.1.100");
+        }
+      }
+      case "webauthn-rp-id" -> {
+        if (!RP_ID.matcher(value).matches()) {
+          throw new IllegalArgumentException(
+              "Invalid RP id: '"
+                  + value
+                  + "'. Expected a lowercase hostname, e.g. sail.example.dev or localhost.");
+        }
+      }
+      case "webauthn-origin" -> {
+        if (!ORIGIN.matcher(value).matches()) {
+          throw new IllegalArgumentException(
+              "Invalid origin: '"
+                  + value
+                  + "'. Expected e.g. https://sail.example.dev (no trailing slash — browsers"
+                  + " send the origin without one, and the match is exact).");
+        }
+      }
+      default -> {}
+    }
+  }
+
+  static HostYaml applyChange(HostYaml current, String key, String value) {
+    var webauthn = current.webauthn();
     return switch (key) {
-      case "server-ip" ->
-          new HostYaml(
-              current.storageBackend(),
-              current.pool(),
-              current.poolDisk(),
-              current.bridge(),
-              current.baseProfile(),
-              current.image(),
-              current.incusVersion(),
-              value,
-              current.initializedAt(),
-              current.webauthn());
+      case "server-ip" -> withServerIp(current, value);
+      case "webauthn-rp-id" ->
+          withWebauthn(current, new WebauthnConfig(value, webauthn.rpName(), webauthn.origins()));
+      case "webauthn-rp-name" ->
+          withWebauthn(current, new WebauthnConfig(webauthn.rpId(), value, webauthn.origins()));
+      case "webauthn-origin" ->
+          withWebauthn(
+              current, new WebauthnConfig(webauthn.rpId(), webauthn.rpName(), List.of(value)));
       default -> throw new IllegalArgumentException("Unhandled key: " + key);
     };
+  }
+
+  private static HostYaml withServerIp(HostYaml current, String serverIp) {
+    return new HostYaml(
+        current.storageBackend(),
+        current.pool(),
+        current.poolDisk(),
+        current.bridge(),
+        current.baseProfile(),
+        current.image(),
+        current.incusVersion(),
+        serverIp,
+        current.initializedAt(),
+        current.webauthn());
+  }
+
+  private static HostYaml withWebauthn(HostYaml current, WebauthnConfig webauthn) {
+    return new HostYaml(
+        current.storageBackend(),
+        current.pool(),
+        current.poolDisk(),
+        current.bridge(),
+        current.baseProfile(),
+        current.image(),
+        current.incusVersion(),
+        current.serverIp(),
+        current.initializedAt(),
+        webauthn);
   }
 }

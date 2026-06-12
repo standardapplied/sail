@@ -14,6 +14,7 @@ import org.snakeyaml.engine.v2.api.Dump;
 import org.snakeyaml.engine.v2.api.DumpSettings;
 import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
+import org.snakeyaml.engine.v2.common.FlowStyle;
 
 /**
  * Thin facade over SnakeYAML Engine for parsing and emitting YAML. Also handles JSON since YAML 1.2
@@ -56,9 +57,13 @@ public final class YamlUtil {
     return result instanceof List<?> l ? (List<Map<String, Object>>) l : List.of();
   }
 
-  /** Dump a Map to a YAML string. */
+  /**
+   * Dumps in block style: these files ({@code host.yaml}, {@code config.yaml}, {@code sail.yaml})
+   * are declarative configuration the operator edits by hand, and the default flow style emits a
+   * single-line {@code {...}} map that is hostile to both editing and diffing.
+   */
   public static String dumpToString(Map<String, Object> map) {
-    var dump = new Dump(DumpSettings.builder().build());
+    var dump = new Dump(DumpSettings.builder().setDefaultFlowStyle(FlowStyle.BLOCK).build());
     return dump.dumpToString(map);
   }
 
