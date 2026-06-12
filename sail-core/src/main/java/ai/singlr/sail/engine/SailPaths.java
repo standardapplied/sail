@@ -59,6 +59,22 @@ public final class SailPaths {
     return dataDir().resolve("sail.db");
   }
 
+  /**
+   * Creates the control-plane data directory, restricting the per-user home location ({@code
+   * ~/.sail}) to owner-only ({@code 0700}) so no other local user can reach the token/session
+   * database inside it. The shared system directory ({@code /var/lib/sail}) and any explicit {@code
+   * $SAIL_DATA_DIR} are left untouched — provisioning owns their group-shared permissions
+   * deliberately (the {@code sail} gateway user needs access). Best-effort on non-POSIX systems.
+   */
+  public static void ensureDataDir(Path dir) throws IOException {
+    Files.createDirectories(dir);
+    if (dir.startsWith(SAIL_DIR)
+        && dir.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+      Files.setPosixFilePermissions(
+          dir, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    }
+  }
+
   /** Returns the projects base directory: {@code ~/.sail/projects}. */
   public static Path projectsDir() {
     return PROJECTS_DIR;

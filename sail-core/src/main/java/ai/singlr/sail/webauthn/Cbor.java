@@ -110,6 +110,9 @@ public final class Cbor {
   }
 
   private List<Object> readArray(int count) {
+    if (count > data.length - pos) {
+      throw new IllegalArgumentException("CBOR array count exceeds remaining input");
+    }
     var list = new ArrayList<>(count);
     for (var i = 0; i < count; i++) {
       list.add(readValue());

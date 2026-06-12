@@ -42,7 +42,7 @@ public final class ServerInitCommand implements Runnable {
 
   private void execute() throws Exception {
     var dbPath = SailPaths.controlPlaneDb();
-    Files.createDirectories(dbPath.getParent());
+    SailPaths.ensureDataDir(dbPath.getParent());
 
     try (var db = Sqlite.open(dbPath)) {
       var schema = new SchemaManager(db);

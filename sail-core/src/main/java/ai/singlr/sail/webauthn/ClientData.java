@@ -25,7 +25,7 @@ public record ClientData(
   public static final String TYPE_GET = "webauthn.get";
 
   public static ClientData parse(byte[] clientDataJson) {
-    var map = YamlUtil.parseMap(new String(clientDataJson, StandardCharsets.UTF_8));
+    var map = YamlUtil.parseMapStrict(new String(clientDataJson, StandardCharsets.UTF_8));
     var type = requireString(map.get("type"), "type");
     var origin = requireString(map.get("origin"), "origin");
     var challengeB64 = requireString(map.get("challenge"), "challenge");

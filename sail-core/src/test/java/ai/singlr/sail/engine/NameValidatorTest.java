@@ -248,4 +248,21 @@ class NameValidatorTest {
   void nullGitHubRepoIsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidGitHubRepo(null));
   }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"uday", "e2e-member", "Ada.Lovelace_1", "a"})
+  void validFdeHandles(String handle) {
+    assertDoesNotThrow(() -> NameValidator.requireValidFdeHandle(handle));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"a\",command=\"x", "two\nlines", "has space", "", "-lead", ".lead"})
+  void invalidFdeHandles(String handle) {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(handle));
+  }
+
+  @Test
+  void nullFdeHandleIsInvalid() {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(null));
+  }
 }

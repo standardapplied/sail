@@ -40,5 +40,7 @@ final class FixedTokenTestAuth implements ApiAuth {
     if (!MessageDigest.isEqual(expected, actual)) {
       throw new ApiException(ErrorCode.INVALID_BEARER_TOKEN, "Bearer token is invalid.");
     }
+    exchange.setAttribute("token.name", "admin");
+    exchange.setAttribute("token.role", "admin");
   }
 }

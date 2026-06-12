@@ -143,6 +143,38 @@ class CoseKeyTest {
   }
 
   @Test
+  void rsaRejectsUndersizedModulus() throws Exception {
+    var kpg = KeyPairGenerator.getInstance("RSA");
+    kpg.initialize(1024);
+    var pub = (RSAPublicKey) kpg.generateKeyPair().getPublic();
+    var map =
+        cose(
+            1L,
+            3L,
+            3L,
+            CoseKey.RS256,
+            -1L,
+            pub.getModulus().toByteArray(),
+            -2L,
+            pub.getPublicExponent().toByteArray());
+
+    var thrown = assertThrows(IllegalArgumentException.class, () -> CoseKey.parse(map));
+    assertTrue(thrown.getMessage().contains("modulus"));
+  }
+
+  @Test
+  void rsaRejectsEvenExponent() throws Exception {
+    var kpg = KeyPairGenerator.getInstance("RSA");
+    kpg.initialize(2048);
+    var pub = (RSAPublicKey) kpg.generateKeyPair().getPublic();
+    var map =
+        cose(
+            1L, 3L, 3L, CoseKey.RS256, -1L, pub.getModulus().toByteArray(), -2L, new byte[] {0x04});
+
+    assertThrows(IllegalArgumentException.class, () -> CoseKey.parse(map));
+  }
+
+  @Test
   void rsaRejectsWrongAlg() {
     assertThrows(
         IllegalArgumentException.class, () -> CoseKey.parse(cose(1L, 3L, 3L, CoseKey.ES256)));

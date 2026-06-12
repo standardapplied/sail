@@ -107,12 +107,22 @@ public record CoseKey(PublicKey publicKey, long algorithm) {
     return generate("EC", new ECPublicKeySpec(new ECPoint(x, y), P256));
   }
 
+  private static final int RSA_MIN_MODULUS_BITS = 2048;
+  private static final int RSA_MAX_MODULUS_BITS = 8192;
+
   private static PublicKey rsa(Map<?, ?> cose, long alg) {
     if (alg != RS256) {
       throw new IllegalArgumentException("RSA key requires alg RS256 (-257), got " + alg);
     }
     var n = new BigInteger(1, readBytes(cose, LABEL_CRV, "n"));
     var e = new BigInteger(1, readBytes(cose, LABEL_X_OR_N, "e"));
+    if (n.bitLength() < RSA_MIN_MODULUS_BITS || n.bitLength() > RSA_MAX_MODULUS_BITS) {
+      throw new IllegalArgumentException(
+          "RSA modulus must be " + RSA_MIN_MODULUS_BITS + "-" + RSA_MAX_MODULUS_BITS + " bits");
+    }
+    if (e.bitLength() < 2 || !e.testBit(0)) {
+      throw new IllegalArgumentException("RSA public exponent must be an odd integer >= 3");
+    }
     return generate("RSA", new RSAPublicKeySpec(n, e));
   }
 

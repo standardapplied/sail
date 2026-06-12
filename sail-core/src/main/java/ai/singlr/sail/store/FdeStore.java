@@ -48,6 +48,7 @@ public final class FdeStore {
    * the role is not one of {@code admin}, {@code member}, {@code viewer}.
    */
   public Fde add(String handle, String displayName, String email, String role) {
+    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");

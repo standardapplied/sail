@@ -123,7 +123,9 @@ public final class WebauthnAuthHandler implements HttpHandler {
     var body = JsonBody.readMap(exchange);
     var ticket = enrollmentTicket(exchange);
     if (ticket != null) {
-      requireLiveTicket(ticket);
+      if (!enrollment.consume(ticket)) {
+        throw ticketDenied();
+      }
     } else {
       requireAdmin(exchange);
     }
@@ -133,9 +135,6 @@ public final class WebauthnAuthHandler implements HttpHandler {
             decode(body, "client_data_json"),
             decode(body, "attestation_object"),
             optionalString(body, "label"));
-    if (ticket != null) {
-      enrollment.consume(ticket);
-    }
     var result = new LinkedHashMap<String, Object>();
     result.put("status", "registered");
     result.put("fde", registration.fdeHandle());
@@ -155,12 +154,6 @@ public final class WebauthnAuthHandler implements HttpHandler {
     }
     requireAdmin(exchange);
     return requireString(body, "fde");
-  }
-
-  private void requireLiveTicket(String ticket) {
-    if (enrollment.authorize(ticket).isEmpty()) {
-      throw ticketDenied();
-    }
   }
 
   private static String enrollmentTicket(HttpExchange exchange) {
@@ -239,6 +232,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
     var bytes =
         YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+    exchange.getResponseHeaders().set("Cache-Control", "no-store");
     exchange.sendResponseHeaders(response.status(), bytes.length);
     try (var output = exchange.getResponseBody()) {
       output.write(bytes);

@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
 class RoleTest {
 
   @Test
-  void missingRoleIsAdminForBackwardCompatibility() {
-    assertEquals(Role.ADMIN, Role.fromAttribute(null));
-    assertEquals(Role.ADMIN, Role.fromAttribute(""));
-    assertEquals(Role.ADMIN, Role.fromAttribute("   "));
+  void missingOrBlankRoleFailsSafeToViewer() {
+    assertEquals(Role.VIEWER, Role.fromAttribute(null));
+    assertEquals(Role.VIEWER, Role.fromAttribute(""));
+    assertEquals(Role.VIEWER, Role.fromAttribute("   "));
   }
 
   @Test

@@ -153,6 +153,48 @@ partial tampering, not a compromised release account or workflow.
 Actions currently use major-version tags such as `actions/checkout@v4`. This is conventional, but
 not a maximum supply-chain posture.
 
+## Hardening pass — 2026-06-12 (0.13.59)
+
+A six-dimension audit (secret leakage, authn/authz, injection, hand-rolled WebAuthn crypto,
+web/file-perms/SSRF, credential lifecycle) over the auth surface. Confirmed clean: SQL fully
+parameterized, command execution argv-based (no shell injection), authorized_keys fail-closed,
+tokens/sessions/tickets stored only as SHA-256 of 256-bit `SecureRandom` values, WebAuthn
+signatures genuinely verified with constant-time challenge/rpId compares, algorithm-confusion
+blocked, signCount anti-clone correct, `redirect_uri` loopback validation not bypassable, no
+reflected/DOM XSS. Fixed:
+
+- **Authorization fails safe.** `Role.fromAttribute` mapped a missing/blank role to ADMIN; now
+  every unknown value resolves to VIEWER. `TokenStore.create` validates the role. (Both role
+  columns are already `NOT NULL`+CHECK, so this is defense in depth.)
+- **Session auth requires an active FDE.** `SessionAwareAuth` now rejects a session whose FDE is
+  not `active`, matching the SSH gateway.
+- **WebAuthn parser hardening.** CBOR rejects an array whose declared count exceeds the remaining
+  input (allocation-bomb DoS); RSA COSE keys are bounded to 2048–8192-bit moduli with an odd
+  exponent ≥ 3; `clientDataJSON` is parsed strictly (duplicate keys rejected) to remove a
+  parser-divergence avenue on the signed fields.
+- **Enrollment tickets are atomically single-use.** `EnrollmentTicketStore.consume` uses
+  `UPDATE … WHERE consumed_at IS NULL RETURNING`, and the handler consumes *before* registering,
+  closing a race that could enroll multiple passkeys from one ticket.
+- **Token DB unreachable to other local users.** The per-user `~/.sail` data directory is created
+  `0700` (`SailPaths.ensureDataDir`); the group-shared `/var/lib/sail` is left to provisioning.
+- **FDE handles validated at creation** (`NameValidator.requireValidFdeHandle`), so a malformed
+  handle can never reach the `authorized_keys` renderer (where it would fail-closed the whole-file
+  regeneration and lock out key sync).
+- **Webhook SSRF resolves and range-checks bytes.** `WebhookUrlSafety` now resolves the host and
+  checks each address (incl. IPv4-mapped IPv6 like `::ffff:169.254.169.254`, full 169.254/16,
+  CGNAT 100.64/10, ULA fc00::/7) instead of string prefixes; fail-closed on resolution failure.
+- **No-store on passkey responses** so a session-token body is never cached.
+
+Open items deliberately deferred (need a product decision or larger change, tracked separately):
+- **Route privilege tiers.** The main router maps mutating verbs to WRITE, so a `member` can
+  dispatch agents and approve reviews. Whether dispatch/review-approve/spec-delete should require
+  ADMIN is a product decision, not a safe unilateral change.
+- **API token expiry/rotation** and a **background sweep** of expired sessions/tickets/challenges
+  (currently enforced on read, pruned lazily).
+- **WebAuthn `userHandle` binding** at finish (defense in depth; route-layer authz already
+  prevents takeover).
+- `--token` on the CLI is visible via `/proc`/shell history; prefer `SAIL_TOKEN`/config.
+
 ## Recommended Follow-Ups
 - Add release signing with cosign or minisign and verify signatures in `install.sh`, `sail upgrade`,
   and the auto-upgrader.

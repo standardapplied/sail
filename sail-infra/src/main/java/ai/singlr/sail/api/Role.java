@@ -12,9 +12,11 @@ import java.util.Set;
 /**
  * Authorization role attached to an API credential. Each role grants a fixed set of {@link
  * Capability}. Roles are stored as lowercase strings on the token ({@code token.role}); {@link
- * #fromAttribute} resolves the stored value, treating a missing role as {@link #ADMIN} for backward
- * compatibility with single-operator deployments created before roles were enforced, and any
- * unrecognized value as the least-privileged {@link #VIEWER} (fail-safe).
+ * #fromAttribute} resolves the stored value, failing safe to the least-privileged {@link #VIEWER}
+ * for any missing, blank, or unrecognized value so a malformed role can never silently escalate.
+ * Every credential carries an explicit role — {@code api_tokens.role} and {@code fdes.role} are
+ * both {@code NOT NULL} with a CHECK constraint — so this fallback is defense in depth, not a path
+ * any live credential travels.
  */
 public enum Role {
   ADMIN(EnumSet.allOf(Capability.class)),
@@ -32,19 +34,18 @@ public enum Role {
   }
 
   /**
-   * Resolves the role from the {@code token.role} exchange attribute. A null or blank value means a
-   * pre-roles operator token and maps to {@link #ADMIN}; an unrecognized value maps to {@link
-   * #VIEWER} so a malformed role can never silently escalate.
+   * Resolves the role from the {@code token.role} exchange attribute. Any null, blank, or
+   * unrecognized value fails safe to {@link #VIEWER} so a malformed or absent role can never
+   * silently escalate to a privileged capability.
    */
   public static Role fromAttribute(Object attribute) {
     if (attribute == null) {
-      return ADMIN;
+      return VIEWER;
     }
     var value = attribute.toString().strip().toLowerCase(Locale.ROOT);
     return switch (value) {
-      case "", "admin" -> ADMIN;
+      case "admin" -> ADMIN;
       case "member" -> MEMBER;
-      case "viewer" -> VIEWER;
       default -> VIEWER;
     };
   }

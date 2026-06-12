@@ -75,6 +75,15 @@ class WebhookUrlSafetyTest {
   }
 
   @Test
+  void isPrivateHostFlagsObfuscatedAndMappedAddresses() {
+    assertTrue(WebhookUrlSafety.isPrivateHost("2130706433"), "decimal 127.0.0.1");
+    assertTrue(WebhookUrlSafety.isPrivateHost("[::ffff:169.254.169.254]"), "IPv4-mapped metadata");
+    assertTrue(WebhookUrlSafety.isPrivateHost("[::ffff:127.0.0.1]"), "IPv4-mapped loopback");
+    assertTrue(WebhookUrlSafety.isPrivateHost("100.64.0.1"), "CGNAT 100.64/10");
+    assertTrue(WebhookUrlSafety.isPrivateHost("169.254.1.1"), "full link-local /16");
+  }
+
+  @Test
   void isPrivateHostTreatsUnresolvableAsPrivate() {
     assertTrue(WebhookUrlSafety.isPrivateHost("no-such-host.invalid"));
   }

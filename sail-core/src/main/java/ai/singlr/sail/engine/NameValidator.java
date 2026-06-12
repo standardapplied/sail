@@ -20,6 +20,7 @@ public final class NameValidator {
   private static final Pattern SNAPSHOT_LABEL = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]*$");
   private static final Pattern SERVICE_NAME = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]*$");
   private static final Pattern POSIX_USERNAME = Pattern.compile("^[a-z_][a-z0-9_-]*$");
+  private static final Pattern FDE_HANDLE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]*$");
   private static final int MAX_USERNAME_LENGTH = 32;
   private static final Pattern VERSION = Pattern.compile("^\\d+(\\.\\d+)*$");
   private static final Pattern SAFE_PATH = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
@@ -53,6 +54,24 @@ public final class NameValidator {
               + specId
               + "'. Must match [a-z0-9][a-z0-9-]*, max "
               + MAX_SPEC_ID_LENGTH
+              + " characters.");
+    }
+  }
+
+  /**
+   * Validates an FDE handle. The handle is interpolated into the {@code sail} user's {@code
+   * authorized_keys} forced command, so the conservative charset (no whitespace, quotes, or
+   * newlines) is a security boundary, not just hygiene — it is enforced at creation so a malformed
+   * handle can never reach the renderer, where it would otherwise fail the whole-file regeneration
+   * and lock out key sync for every FDE.
+   */
+  public static void requireValidFdeHandle(String handle) {
+    if (handle == null || handle.length() > MAX_LENGTH || !FDE_HANDLE.matcher(handle).matches()) {
+      throw new IllegalArgumentException(
+          "Invalid FDE handle: '"
+              + handle
+              + "'. Must match [A-Za-z0-9][A-Za-z0-9._-]*, max "
+              + MAX_LENGTH
               + " characters.");
     }
   }

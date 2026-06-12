@@ -79,4 +79,15 @@ class ClientDataTest {
                 json(
                     "{\"type\":\"webauthn.get\",\"challenge\":\"not base64!!\",\"origin\":\"https://h\"}")));
   }
+
+  @Test
+  void rejectsDuplicateChallengeKey() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ClientData.parse(
+                json(
+                    "{\"type\":\"webauthn.get\",\"origin\":\"https://h\",\"challenge\":\"AAAA\","
+                        + "\"challenge\":\"BBBB\"}")));
+  }
 }

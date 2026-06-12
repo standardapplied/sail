@@ -92,7 +92,7 @@ public final class ServerStartCommand implements Runnable {
 
   private void execute() throws Exception {
     var dbPath = SailPaths.controlPlaneDb();
-    Files.createDirectories(dbPath.getParent());
+    SailPaths.ensureDataDir(dbPath.getParent());
 
     var db = Sqlite.open(dbPath);
     var migrationResult =

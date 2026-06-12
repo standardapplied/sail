@@ -53,6 +53,7 @@ public final class SessionAwareAuth implements ApiAuth {
         sessions
             .validate(token)
             .flatMap(session -> fdes.byId(session.fdeId()))
+            .filter(f -> "active".equals(f.status()))
             .orElseThrow(
                 () ->
                     new ApiException(

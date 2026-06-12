@@ -136,6 +136,12 @@ class FdeStoreTest {
   }
 
   @Test
+  void addRejectsAnUnsafeHandle() {
+    assertThrows(
+        IllegalArgumentException.class, () -> store.add("a\",command=\"x", null, null, "member"));
+  }
+
+  @Test
   void activeAdminCountTracksRoleAndStatus() {
     assertEquals(0L, store.activeAdminCount());
     var admin = store.add("ada", null, null, "admin");

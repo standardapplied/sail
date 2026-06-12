@@ -125,4 +125,10 @@ class CborTest {
     // byte string with 8-byte length 0x80000000 (> Integer.MAX_VALUE)
     assertThrows(IllegalArgumentException.class, () -> decode("5b0000000080000000"));
   }
+
+  @Test
+  void rejectsArrayCountExceedingInput() {
+    // array header declaring 0x7fffffff elements with no element bytes (allocation bomb)
+    assertThrows(IllegalArgumentException.class, () -> decode("9a7fffffff"));
+  }
 }

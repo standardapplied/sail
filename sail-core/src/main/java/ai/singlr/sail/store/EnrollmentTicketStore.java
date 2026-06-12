@@ -69,13 +69,22 @@ public final class EnrollmentTicketStore {
     return info;
   }
 
-  /** Marks a ticket used. Returns true only if it was still live, so consumption is single-shot. */
+  /**
+   * Atomically marks a ticket used and reports whether THIS call was the one that consumed it. The
+   * {@code UPDATE ... WHERE consumed_at IS NULL RETURNING} runs as a single statement, so two
+   * concurrent callers cannot both observe the ticket as live — exactly one gets the returned row.
+   * Callers must treat {@code true} as the authorization to proceed (consume before acting), not
+   * consume after a separate liveness check.
+   */
   public boolean consume(String ticket) {
-    db.execute(
-        "UPDATE enrollment_tickets SET consumed_at = ? WHERE token_hash = ? AND consumed_at IS NULL",
-        Instant.now().toString(),
-        sha256(ticket));
-    return db.changes() > 0;
+    return db.queryOne(
+            "UPDATE enrollment_tickets SET consumed_at = ?"
+                + " WHERE token_hash = ? AND consumed_at IS NULL"
+                + " RETURNING token_hash",
+            row -> row.text(0),
+            Instant.now().toString(),
+            sha256(ticket))
+        .isPresent();
   }
 
   private static String generateTicket() {

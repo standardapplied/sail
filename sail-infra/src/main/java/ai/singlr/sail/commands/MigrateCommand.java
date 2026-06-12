@@ -78,7 +78,7 @@ public final class MigrateCommand implements Runnable {
   public static List<DataMigrator.Run> runMigrations(boolean nonInteractive, boolean jsonOutput) {
     var dbPath = SailPaths.controlPlaneDb();
     try {
-      Files.createDirectories(dbPath.getParent());
+      SailPaths.ensureDataDir(dbPath.getParent());
     } catch (Exception e) {
       throw new IllegalStateException("Could not prepare " + dbPath.getParent(), e);
     }

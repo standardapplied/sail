@@ -10,14 +10,11 @@ import com.sun.net.httpserver.HttpExchange;
 import java.util.Objects;
 
 /**
- * Validates bearer tokens against the SQLite-backed {@link TokenStore}.
- *
- * <p>Authentication only — there is no authorization tier. Every valid token is a full-access
- * operator credential; the {@code token.role} attribute is recorded for audit/display but is
- * deliberately not enforced, because the product issues a single operator token and the security
- * boundary is the server's loopback bind (see {@code ServerStartCommand}), not a role check.
- * Introducing real role enforcement would be a deliberate feature with its own token-issuance UX
- * and schema migration; until then, do not treat the role column as an access-control mechanism.
+ * Validates bearer tokens against the SQLite-backed {@link TokenStore} and stamps the token's
+ * identity and role on the exchange. Authentication only — {@link Authorizer} is the authorization
+ * tier and enforces {@code token.role} per route (it runs immediately after this in {@code
+ * ApiRouter}). The loopback bind is an additional network boundary, not a substitute for the role
+ * check.
  */
 public final class TokenAuth implements ApiAuth {
 

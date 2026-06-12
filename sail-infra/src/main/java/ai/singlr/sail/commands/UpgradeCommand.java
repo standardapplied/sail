@@ -369,7 +369,7 @@ public final class UpgradeCommand implements Runnable {
    */
   private void bootstrapAdminToken(java.nio.file.Path dbPath) {
     try {
-      Files.createDirectories(dbPath.getParent());
+      SailPaths.ensureDataDir(dbPath.getParent());
       try (var db = Sqlite.open(dbPath)) {
         new SchemaManager(db).migrate();
         var tokenStore = new TokenStore(db);

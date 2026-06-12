@@ -20,6 +20,8 @@ import java.util.Optional;
  */
 public final class TokenStore {
 
+  private static final java.util.Set<String> ROLES = java.util.Set.of("admin", "member", "viewer");
+
   private final Sqlite db;
 
   public TokenStore(Sqlite db) {
@@ -37,6 +39,10 @@ public final class TokenStore {
 
   /** Creates a token optionally owned by an FDE ({@code fdes.id}, or null for an unowned token). */
   public CreatedToken create(String name, String role, String fdeId) {
+    if (!ROLES.contains(role)) {
+      throw new IllegalArgumentException(
+          "Invalid role: " + role + ". Must be one of " + ROLES + ".");
+    }
     var token = generateToken();
     var hash = sha256(token);
     db.execute(

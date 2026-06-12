@@ -137,6 +137,13 @@ class TokenStoreTest {
   }
 
   @Test
+  void createRejectsUnknownRole() {
+    var thrown =
+        assertThrows(IllegalArgumentException.class, () -> store.create("svc", "superuser"));
+    assertTrue(thrown.getMessage().contains("Invalid role"));
+  }
+
+  @Test
   void sha256IsDeterministic() {
     var hash1 = TokenStore.sha256("test-input");
     var hash2 = TokenStore.sha256("test-input");

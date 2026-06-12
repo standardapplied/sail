@@ -35,6 +35,27 @@ public final class YamlUtil {
     return result instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
   }
 
+  /**
+   * Parses a JSON/YAML object, rejecting duplicate keys. Used for security-critical inputs (e.g.
+   * {@code clientDataJSON}) where a document carrying two values for the same field could let a
+   * verifier read one while a signature covers the other — a parser-divergence attack the default
+   * last-key-wins parse would silently allow.
+   */
+  @SuppressWarnings("unchecked")
+  public static Map<String, Object> parseMapStrict(String yamlOrJson) {
+    if (yamlOrJson == null || yamlOrJson.isBlank()) {
+      return Map.of();
+    }
+    var load = new Load(LoadSettings.builder().setAllowDuplicateKeys(false).build());
+    Object result;
+    try {
+      result = load.loadFromString(yamlOrJson);
+    } catch (org.snakeyaml.engine.v2.exceptions.YamlEngineException e) {
+      throw new IllegalArgumentException("Malformed document: " + e.getMessage(), e);
+    }
+    return result instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+  }
+
   /** Parse a YAML file into a Map. */
   public static Map<String, Object> parseFile(Path path) throws IOException {
     try (var in = Files.newInputStream(path)) {
