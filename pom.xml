@@ -6,7 +6,7 @@
 
     <groupId>ai.singlr</groupId>
     <artifactId>sail</artifactId>
-    <version>0.13.66</version>
+    <version>0.13.67</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -299,7 +299,6 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>ai.singlr.sail.engine.GitSpecSync</include>
-                                        <include>ai.singlr.sail.commands.SpecSyncCommand</include>
                                     </includes>
                                     <limits>
                                         <limit>

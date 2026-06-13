@@ -67,6 +67,7 @@ public record Event(
     public static final String GUARDRAIL_TRIGGERED = "guardrail_triggered";
     public static final String PROJECT_STARTED = "project_started";
     public static final String PROJECT_STOPPED = "project_stopped";
+    public static final String BOARD_UPDATED = "board_updated";
 
     private WellKnownTypes() {}
   }
