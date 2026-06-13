@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -116,6 +117,9 @@ public final class ProjectCreateCommand implements Runnable {
     Files.createDirectories(projectDir);
     var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     syncProjectBundle(singYamlPath, canonicalYaml);
+    if (!dryRun) {
+      ProjectCatalog.record(config.name(), Files.readString(canonicalYaml), null);
+    }
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {

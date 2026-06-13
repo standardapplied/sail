@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSpecImporter;
+import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
@@ -15,6 +16,7 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RebucketSpecsMigration;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -92,9 +94,23 @@ public final class MigrateCommand implements Runnable {
       var runs =
           applyMigrations(
               db, dbPath.toString(), importer::importAll, prompter, animate, jsonOutput);
+      importProjects(db, jsonOutput);
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       return runs;
+    }
+  }
+
+  /**
+   * Backfills the project catalog from on-disk descriptors, so projects created before the catalog
+   * existed appear in the DB (the shared, replicated source of truth). Repeatable and idempotent;
+   * quiet when nothing was imported.
+   */
+  private static void importProjects(Sqlite db, boolean jsonOutput) {
+    var report = new ProjectImporter(SailPaths.projectsDir(), new ProjectStore(db)).importAll();
+    if (!jsonOutput && report.imported() > 0) {
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
     }
   }
 

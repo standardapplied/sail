@@ -167,6 +167,7 @@ public final class ProjectPullCommand implements Runnable {
       Files.createDirectories(outputPath.getParent());
     }
     Files.writeString(outputPath, resolvedYaml);
+    ai.singlr.sail.engine.ProjectCatalog.record(name, resolvedYaml, null);
 
     var outputDir = outputPath.getParent() != null ? outputPath.getParent() : Path.of(".");
     var filesPulled = pullFilesDirectory(token, name, outputDir);

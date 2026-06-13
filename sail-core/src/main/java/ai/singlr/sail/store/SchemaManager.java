@@ -234,6 +234,15 @@ public final class SchemaManager {
               public_key TEXT NOT NULL,
               comment TEXT,
               created_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE IF NOT EXISTS projects (
+              name TEXT PRIMARY KEY,
+              definition TEXT NOT NULL,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_by TEXT,
+              updated_at TEXT NOT NULL
           )""");
 
   private final Sqlite db;
