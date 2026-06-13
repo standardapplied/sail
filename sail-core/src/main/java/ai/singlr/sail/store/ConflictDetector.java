@@ -57,9 +57,15 @@ public final class ConflictDetector {
       return new Converged();
     }
     if (localDeleted) {
+      if (base == null) {
+        return new TakeRemote();
+      }
       return equalSnapshots(base, remote) ? new KeepLocal() : new Conflict(List.of(DELETED_FIELD));
     }
     if (remoteDeleted) {
+      if (base == null) {
+        return new KeepLocal();
+      }
       return equalSnapshots(base, local) ? new TakeRemote() : new Conflict(List.of(DELETED_FIELD));
     }
 

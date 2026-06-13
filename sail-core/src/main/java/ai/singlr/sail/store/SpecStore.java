@@ -254,17 +254,44 @@ public final class SpecStore {
         });
   }
 
-  private void recordRevision(String id, String origin, boolean deleted) {
+  private String recordRevision(String id, String origin, boolean deleted) {
+    return recordRevision(id, null, origin, deleted, false);
+  }
+
+  /**
+   * Appends a revision for the current state of {@code id}. With {@code explicitRev} null the rev
+   * is minted from the current counter; otherwise the caller-supplied rev is used verbatim (sync
+   * adopting main's authoritative rev). {@code setBaseRev} records that this revision is the new
+   * synced ancestor — set only when adopting from main, never on a local edit.
+   */
+  private String recordRevision(
+      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
     var spec = findById(id).orElse(null);
     if (spec == null) {
-      return;
+      return null;
     }
-    var snapshot = snapshotJson(spec);
-    var rev = Revisions.next(currentRev(id), snapshot);
+    var map = snapshotMap(spec);
+    if (deleted) {
+      map.put("_base_rev", rawBaseRev(id));
+    }
+    var snapshot = YamlUtil.dumpJson(map);
+    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
     if (!deleted) {
-      db.execute("UPDATE specs SET rev = ? WHERE id = ?", rev, id);
+      if (setBaseRev) {
+        db.execute("UPDATE specs SET rev = ?, base_rev = ? WHERE id = ?", rev, rev, id);
+      } else {
+        db.execute("UPDATE specs SET rev = ? WHERE id = ?", rev, id);
+      }
     }
     changeLog.append(ENTITY, id, rev, spec.updatedBy(), origin, deleted, snapshot);
+    return rev;
+  }
+
+  private String rawBaseRev(String id) {
+    var value =
+        db.queryOne("SELECT COALESCE(base_rev, '') FROM specs WHERE id = ?", row -> row.text(0), id)
+            .orElse("");
+    return value.isBlank() ? null : value;
   }
 
   private String currentRev(String id) {
@@ -273,6 +300,10 @@ public final class SpecStore {
   }
 
   private String snapshotJson(SpecRow spec) {
+    return YamlUtil.dumpJson(snapshotMap(spec));
+  }
+
+  private Map<String, Object> snapshotMap(SpecRow spec) {
     var content = getContent(spec.id()).orElse(new SpecContent("", "", null));
     var map = new LinkedHashMap<String, Object>();
     map.put("id", spec.id());
@@ -293,7 +324,7 @@ public final class SpecStore {
     map.put("repos", spec.repos());
     map.put("body", content.body());
     map.put("plan", content.plan());
-    return YamlUtil.dumpJson(map);
+    return map;
   }
 
   private void applySnapshot(String id, Map<String, Object> snapshot) {
@@ -336,7 +367,7 @@ public final class SpecStore {
           spec.branch(),
           spec.priority(),
           spec.createdBy(),
-          spec.createdAt(),
+          spec.createdAt() == null || spec.createdAt().isBlank() ? now : spec.createdAt(),
           now,
           spec.updatedBy());
     }
@@ -380,6 +411,142 @@ public final class SpecStore {
   private static String text(Map<String, Object> map, String key) {
     var value = map.get(key);
     return value == null ? null : value.toString();
+  }
+
+  private static final java.util.Set<String> SYNC_FIELDS =
+      java.util.Set.of(
+          "project",
+          "title",
+          "status",
+          "assignee",
+          "agent",
+          "model",
+          "reasoning_effort",
+          "branch",
+          "priority",
+          "depends_on",
+          "repos",
+          "body",
+          "plan");
+
+  /**
+   * The subset of a snapshot that carries an FDE's actual work — everything except the surrogate
+   * key and the timestamp/attribution metadata that every replica writes locally. Conflict
+   * detection compares only these, so two boxes never falsely conflict on {@code updated_at}.
+   */
+  private static Map<String, Object> comparable(Map<String, Object> full) {
+    if (full == null) {
+      return null;
+    }
+    var m = new LinkedHashMap<String, Object>();
+    for (var field : full.keySet()) {
+      if (SYNC_FIELDS.contains(field)) {
+        m.put(field, full.get(field));
+      }
+    }
+    return m;
+  }
+
+  /** Comparable snapshot of the current state, or null if the spec is absent/deleted. */
+  public Map<String, Object> comparableSnapshot(String id) {
+    return findById(id).map(this::snapshotMap).map(SpecStore::comparable).orElse(null);
+  }
+
+  /** Comparable snapshot recorded at a given revision (the merge base), or null if not recorded. */
+  public Map<String, Object> comparableAtRev(String id, String rev) {
+    if (rev == null || rev.isBlank()) {
+      return null;
+    }
+    return changeLog
+        .at(ENTITY, id, rev)
+        .map(e -> comparable(YamlUtil.parseMap(e.snapshot())))
+        .orElse(null);
+  }
+
+  public String revOf(String id) {
+    var rev = currentRev(id);
+    return rev.isBlank() ? null : rev;
+  }
+
+  /** The latest revision recorded for an entity, including a tombstone; null if never recorded. */
+  public String latestRev(String id) {
+    var history = changeLog.history(ENTITY, id);
+    return history.isEmpty() ? null : history.getLast().rev();
+  }
+
+  /**
+   * The revision this row last synced from main. For a live row it is the {@code base_rev} column;
+   * for a locally deleted entity the row is gone, so it is recovered from the {@code _base_rev}
+   * embedded in the tombstone — without which a local delete could not be told apart from a
+   * delete-vs-edit conflict.
+   */
+  public String baseRevOf(String id) {
+    if (findById(id).isPresent()) {
+      return rawBaseRev(id);
+    }
+    var tombstone = changeLog.history(ENTITY, id);
+    if (tombstone.isEmpty()) {
+      return null;
+    }
+    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
+    return baseRev == null ? null : baseRev.toString();
+  }
+
+  /** Every entity id this replica knows of, including those only present as a tombstone. */
+  public java.util.Set<String> syncEntityIds() {
+    return new java.util.LinkedHashSet<>(
+        db.query(
+            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
+            row -> row.text(0),
+            ENTITY));
+  }
+
+  /**
+   * Writes an authoritative state from main at its exact revision (no minting), marking it the new
+   * synced ancestor ({@code base_rev = rev}). A null snapshot adopts a deletion. Used by the sync
+   * engine; the revision is journaled with origin {@code sync}.
+   */
+  public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
+    db.transaction(
+        () -> {
+          if (snapshot == null) {
+            if (findById(id).isPresent()) {
+              recordRevision(id, rev, "sync", true, false);
+              db.execute("DELETE FROM specs WHERE id = ?", id);
+            } else {
+              changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+            }
+          } else {
+            var full = new LinkedHashMap<>(snapshot);
+            full.put("id", id);
+            full.put("updated_by", "sync");
+            applySnapshot(id, full);
+            recordRevision(id, rev, "sync", false, true);
+          }
+        });
+  }
+
+  /**
+   * Commits a state as main does — minting a fresh authoritative revision — and returns the new
+   * rev. A null snapshot commits a deletion. Used by the sync engine on the main side.
+   */
+  public String commitRevision(String id, Map<String, Object> snapshot) {
+    return db.transaction(
+        () -> {
+          if (snapshot == null) {
+            if (findById(id).isEmpty()) {
+              return revOf(id);
+            }
+            var rev = recordRevision(id, null, "sync", true, false);
+            db.execute("DELETE FROM specs WHERE id = ?", id);
+            return rev;
+          }
+          var full = new LinkedHashMap<>(snapshot);
+          full.put("id", id);
+          full.put("updated_by", "sync");
+          applySnapshot(id, full);
+          return recordRevision(id, null, "sync", false, false);
+        });
   }
 
   public Optional<SpecContent> getContent(String specId) {

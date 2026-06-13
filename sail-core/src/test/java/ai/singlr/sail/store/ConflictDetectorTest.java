@@ -121,6 +121,18 @@ class ConflictDetectorTest {
   }
 
   @Test
+  void newLocalEntityAbsentOnRemotePushes() {
+    assertInstanceOf(
+        ConflictDetector.KeepLocal.class, ConflictDetector.detect(null, snap("title", "A"), null));
+  }
+
+  @Test
+  void newRemoteEntityAbsentLocallyPulls() {
+    assertInstanceOf(
+        ConflictDetector.TakeRemote.class, ConflictDetector.detect(null, null, snap("title", "A")));
+  }
+
+  @Test
   void bothDeletedConverge() {
     assertInstanceOf(
         ConflictDetector.Converged.class, ConflictDetector.detect(snap("title", "A"), null, null));

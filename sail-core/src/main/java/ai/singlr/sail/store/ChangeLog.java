@@ -69,6 +69,15 @@ public final class ChangeLog {
         entityId);
   }
 
+  /** The highest sequence recorded for an entity type; 0 if none. The sync high-water mark. */
+  public long maxSeq(String entityType) {
+    return db.queryOne(
+            "SELECT COALESCE(MAX(seq), 0) FROM change_log WHERE entity_type = ?",
+            row -> row.integer(0),
+            entityType)
+        .orElse(0L);
+  }
+
   /** Returns a specific revision of an entity, if it was ever recorded. */
   public Optional<Entry> at(String entityType, String entityId, String rev) {
     return db.queryOne(
