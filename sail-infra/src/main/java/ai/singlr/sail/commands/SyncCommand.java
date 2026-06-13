@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -24,7 +25,9 @@ import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
@@ -96,7 +99,8 @@ public final class SyncCommand implements Callable<Integer> {
               new ChangeLog(db),
               new SyncConflicts(db),
               new SyncState(db));
-      return watch ? watchLoop(local, target) : runOnce(local, target);
+      var fdes = new FdeStore(db);
+      return watch ? watchLoop(local, fdes, target) : runOnce(local, fdes, target);
     }
   }
 
@@ -132,17 +136,18 @@ public final class SyncCommand implements Callable<Integer> {
     }
   }
 
-  private int runOnce(SpecReplica local, String target) throws Exception {
-    var report = reconcile(local, target);
+  private int runOnce(SpecReplica local, FdeStore fdes, String target) throws Exception {
+    var report = reconcile(local, fdes, target);
     System.out.println(render(report, json));
     notifyBoardUpdated(report);
     return 0;
   }
 
-  private int watchLoop(SpecReplica local, String target) throws InterruptedException {
+  private int watchLoop(SpecReplica local, FdeStore fdes, String target)
+      throws InterruptedException {
     while (true) {
       try {
-        var report = reconcile(local, target);
+        var report = reconcile(local, fdes, target);
         System.out.println(render(report, json));
         notifyBoardUpdated(report);
       } catch (InterruptedException e) {
@@ -157,11 +162,50 @@ public final class SyncCommand implements Callable<Integer> {
     }
   }
 
-  private SyncEngine.Report reconcile(SpecReplica local, String target) throws Exception {
+  private SyncEngine.Report reconcile(SpecReplica local, FdeStore fdes, String target)
+      throws Exception {
     try (var channel = SshSyncChannel.open(target);
         var remote = new RemoteMainReplica(channel.reader(), channel.writer())) {
-      return new SyncEngine().reconcile(local, remote);
+      var report = new SyncEngine().reconcile(local, remote);
+      var rejected = applyFdes(fdes, remote.fetchFdes());
+      if (!rejected.isEmpty()) {
+        System.err.println(
+            Banner.errorLine(
+                "Skipped "
+                    + rejected.size()
+                    + " malformed identity entry(ies) from main: "
+                    + String.join(", ", rejected),
+                Ansi.AUTO));
+      }
+      return report;
     }
+  }
+
+  /**
+   * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
+   * for a malformed role or status — dropped, never written with a bad authorization.
+   */
+  static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
+    var rejected = new ArrayList<String>();
+    for (var entry : roster) {
+      try {
+        fdes.replicate(
+            str(entry, "handle"),
+            str(entry, "display_name"),
+            str(entry, "email"),
+            str(entry, "role"),
+            str(entry, "status"),
+            str(entry, "created_at"));
+      } catch (IllegalArgumentException invalid) {
+        rejected.add(str(entry, "handle"));
+      }
+    }
+    return List.copyOf(rejected);
+  }
+
+  private static String str(Map<String, Object> map, String key) {
+    var value = map.get(key);
+    return value == null ? null : value.toString();
   }
 
   private void notifyBoardUpdated(SyncEngine.Report report) {

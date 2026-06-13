@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -78,6 +79,15 @@ public final class RemoteMainReplica implements MainReplica, AutoCloseable {
       case SyncWire.Failed failed -> throw new SyncTransportException(failed.message());
       default -> throw new SyncTransportException("Unexpected response to commit: " + response);
     };
+  }
+
+  /** Pulls main's FDE roster over the same channel; the node mirrors it main-authoritatively. */
+  public List<Map<String, Object>> fetchFdes() {
+    var response = exchange(new SyncWire.FetchFdes());
+    if (response instanceof SyncWire.Fdes roster) {
+      return roster.fdes();
+    }
+    throw new SyncTransportException("Expected an fde roster, got: " + response);
   }
 
   @Override

@@ -9,6 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.io.Reader;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -37,6 +38,8 @@ public final class SyncWire {
   private static final String OP_FETCH = "fetch";
   private static final String OP_COMMIT = "commit";
   private static final String OP_BYE = "bye";
+  private static final String OP_FETCH_FDES = "fetch-fdes";
+  private static final String FDES = "fdes";
 
   /**
    * Hard ceiling on one framed message, bounding the memory a single read can claim. A sync message
@@ -70,10 +73,13 @@ public final class SyncWire {
     return message.isEmpty() ? null : message.toString();
   }
 
-  public sealed interface Request permits Fetch, Commit, Bye {}
+  public sealed interface Request permits Fetch, Commit, Bye, FetchFdes {}
 
   /** Ask main for its whole shared state — the merge view the engine reconciles against. */
   public record Fetch() implements Request {}
+
+  /** Ask main for its FDE roster, which the node mirrors (main-authoritative, one-way). */
+  public record FetchFdes() implements Request {}
 
   /**
    * Push one entity to main against the rev the node fetched ({@code expectedRev}, {@code null} for
@@ -85,7 +91,10 @@ public final class SyncWire {
   /** End the session; main returns nothing. */
   public record Bye() implements Request {}
 
-  public sealed interface Response permits Fetched, Committed, Rejected, Failed {}
+  public sealed interface Response permits Fetched, Committed, Rejected, Failed, Fdes {}
+
+  /** Main's FDE roster — one map of identity fields per FDE. */
+  public record Fdes(List<Map<String, Object>> fdes) implements Response {}
 
   /** Main's authoritative rev and snapshot for one entity; either may be {@code null}. */
   public record Snapshot(String rev, Map<String, Object> snapshot) {}
@@ -115,6 +124,7 @@ public final class SyncWire {
         map.put(EXPECTED, commit.expectedRev());
       }
       case Bye ignored -> map.put(OP, OP_BYE);
+      case FetchFdes ignored -> map.put(OP, OP_FETCH_FDES);
     }
     return YamlUtil.dumpJson(map);
   }
@@ -147,6 +157,7 @@ public final class SyncWire {
         map.put(SNAPSHOT, rejected.currentSnapshot());
       }
       case Failed failed -> map.put(ERROR, failed.message());
+      case Fdes roster -> map.put(FDES, roster.fdes());
     }
     return YamlUtil.dumpJson(map);
   }
@@ -158,6 +169,7 @@ public final class SyncWire {
       case OP_FETCH -> new Fetch();
       case OP_COMMIT -> new Commit(string(map, ID), snapshot(map, SNAPSHOT), string(map, EXPECTED));
       case OP_BYE -> new Bye();
+      case OP_FETCH_FDES -> new FetchFdes();
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
     };
   }
@@ -169,6 +181,9 @@ public final class SyncWire {
     }
     if (map.containsKey(STALE)) {
       return new Rejected(string(map, REV), snapshot(map, SNAPSHOT));
+    }
+    if (map.containsKey(FDES)) {
+      return new Fdes(fdeList(map));
     }
     if (map.containsKey(ENTITIES)) {
       return new Fetched(string(map, ID), longValue(map, MAX_SEQ), entities(map));
@@ -186,6 +201,11 @@ public final class SyncWire {
       raw.forEach((id, value) -> entities.put(id, snapshot(value)));
     }
     return entities;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<Map<String, Object>> fdeList(Map<String, Object> map) {
+    return map.get(FDES) instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
   }
 
   @SuppressWarnings("unchecked")

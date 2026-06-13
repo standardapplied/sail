@@ -152,4 +152,16 @@ class SyncServerCommandTest {
     assertThrows(SyncTransportException.class, () -> syncWithToken(null));
     assertTrue(mainSpecs.findById("auth").isEmpty());
   }
+
+  @Test
+  void rosterExposesMainsFdesAsMaps() {
+    new ai.singlr.sail.store.FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
+
+    var roster = SyncServerCommand.roster(mainDb);
+
+    var ada = roster.stream().filter(m -> "ada".equals(m.get("handle"))).findFirst().orElseThrow();
+    assertEquals("admin", ada.get("role"));
+    assertEquals("active", ada.get("status"));
+    assertEquals("Ada", ada.get("display_name"));
+  }
 }

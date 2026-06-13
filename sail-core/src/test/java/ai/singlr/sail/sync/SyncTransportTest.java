@@ -59,6 +59,36 @@ class SyncTransportTest {
     return syncOverWire(node, true);
   }
 
+  @Test
+  void aNodePullsMainsFdeRosterOverTheSameSession() throws Exception {
+    var roster =
+        java.util.List.<java.util.Map<String, Object>>of(
+            java.util.Map.of("handle", "ada", "role", "admin"));
+    var toServer = new PipedWriter();
+    var serverIn = new BufferedReader(new PipedReader(toServer));
+    var toClient = new PipedWriter();
+    var clientIn = new BufferedReader(new PipedReader(toClient));
+    var serverThread =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    new SyncRpcServer(main.replica, true, () -> roster).serve(serverIn, toClient);
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                });
+
+    try (var remote = new RemoteMainReplica(clientIn, toServer)) {
+      engine.reconcile(nodeA.replica, remote);
+      var pulled = remote.fetchFdes();
+      assertEquals(1, pulled.size());
+      assertEquals("ada", pulled.getFirst().get("handle"));
+    } finally {
+      serverThread.join();
+    }
+  }
+
   private SyncEngine.Report syncOverWire(SyncBox node, boolean writable) throws Exception {
     var toServer = new PipedWriter();
     var serverIn = new BufferedReader(new PipedReader(toServer));

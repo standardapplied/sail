@@ -13,6 +13,7 @@ import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,22 @@ class RemoteMainReplicaTest {
   void anUnexpectedReplyToCommitIsRejected() {
     var replica = replica(SyncWire.encode(new SyncWire.Fetched("m", 1, Map.of())));
     assertThrows(SyncTransportException.class, () -> replica.commit("x", Map.of(), null));
+  }
+
+  @Test
+  void fetchFdesReturnsMainsRoster() {
+    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
+    var replica = replica(SyncWire.encode(new SyncWire.Fdes(roster)));
+
+    var pulled = replica.fetchFdes();
+    assertEquals(1, pulled.size());
+    assertEquals("ada", pulled.getFirst().get("handle"));
+  }
+
+  @Test
+  void aNonRosterReplyToFetchFdesIsRejected() {
+    var replica = replica(SyncWire.encode(new SyncWire.Committed("1-a", 1)));
+    assertThrows(SyncTransportException.class, replica::fetchFdes);
   }
 
   @Test

@@ -23,10 +23,16 @@ public final class SyncRpcServer {
 
   private final MainReplica main;
   private final boolean writable;
+  private final FdeRoster fdeRoster;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
+    this(main, writable, FdeRoster.EMPTY);
+  }
+
+  public SyncRpcServer(MainReplica main, boolean writable, FdeRoster fdeRoster) {
     this.main = Objects.requireNonNull(main, "main");
     this.writable = writable;
+    this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
   }
 
   public void serve(Reader in, Writer out) throws IOException {
@@ -36,6 +42,7 @@ public final class SyncRpcServer {
           return;
         }
         case SyncWire.Fetch ignored -> reply(out, fetched());
+        case SyncWire.FetchFdes ignored -> reply(out, new SyncWire.Fdes(fdeRoster.entries()));
         case SyncWire.Commit commit -> reply(out, onCommit(commit));
       }
     }

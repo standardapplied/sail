@@ -24,6 +24,9 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 
@@ -55,8 +58,23 @@ public final class SyncServerCommand implements Callable<Integer> {
     var main =
         new SpecReplica(
             mainId, new SpecStore(db), new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
-    new SyncRpcServer(main, canWrite(db, token)).serve(in, out);
+    new SyncRpcServer(main, canWrite(db, token), () -> roster(db)).serve(in, out);
     return 0;
+  }
+
+  static List<Map<String, Object>> roster(Sqlite db) {
+    return new FdeStore(db).list().stream().map(SyncServerCommand::fdeToMap).toList();
+  }
+
+  private static Map<String, Object> fdeToMap(FdeStore.Fde fde) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("handle", fde.handle());
+    map.put("display_name", fde.displayName());
+    map.put("email", fde.email());
+    map.put("role", fde.role());
+    map.put("status", fde.status());
+    map.put("created_at", fde.createdAt());
+    return map;
   }
 
   private static boolean canWrite(Sqlite db, String token) {

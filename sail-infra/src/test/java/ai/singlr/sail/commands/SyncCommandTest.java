@@ -9,8 +9,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncEngine;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SyncCommandTest {
 
@@ -79,6 +86,24 @@ class SyncCommandTest {
     assertFalse(
         SyncCommand.shouldNotify(new SyncEngine.Report(0, 5, 0, 0)), "a pure push is local");
     assertFalse(SyncCommand.shouldNotify(new SyncEngine.Report(0, 0, 0, 0)));
+  }
+
+  @Test
+  void applyFdesMirrorsValidEntriesAndReportsRejectedOnes(@TempDir Path tempDir) {
+    try (var db = Sqlite.open(tempDir.resolve("test.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      var roster =
+          List.<Map<String, Object>>of(
+              Map.of("handle", "ada", "role", "admin", "status", "active"),
+              Map.of("handle", "bad", "role", "superuser", "status", "active"));
+
+      var rejected = SyncCommand.applyFdes(fdes, roster);
+
+      assertEquals(List.of("bad"), rejected);
+      assertEquals("admin", fdes.byHandle("ada").orElseThrow().role());
+      assertTrue(fdes.byHandle("bad").isEmpty());
+    }
   }
 
   @Test

@@ -40,6 +40,38 @@ class SyncWireTest {
   }
 
   @Test
+  void fetchFdesRequestRoundTrips() {
+    var line = SyncWire.encode(new SyncWire.FetchFdes());
+    assertEquals(new SyncWire.FetchFdes(), SyncWire.decodeRequest(line));
+  }
+
+  @Test
+  void fdesResponseRoundTripsTheRoster() {
+    var roster =
+        List.<Map<String, Object>>of(
+            Map.of("handle", "ada", "role", "admin", "status", "active"),
+            Map.of("handle", "uday", "role", "member", "status", "disabled"));
+    var line = SyncWire.encode(new SyncWire.Fdes(roster));
+
+    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse(line);
+    assertEquals(2, decoded.fdes().size());
+    assertEquals("ada", decoded.fdes().getFirst().get("handle"));
+    assertEquals("disabled", decoded.fdes().get(1).get("status"));
+  }
+
+  @Test
+  void anEmptyFdesResponseDecodesToAnEmptyRoster() {
+    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse("{\"fdes\": []}");
+    assertTrue(decoded.fdes().isEmpty());
+  }
+
+  @Test
+  void aMalformedFdesValueDecodesToAnEmptyRoster() {
+    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse("{\"fdes\": null}");
+    assertTrue(decoded.fdes().isEmpty());
+  }
+
+  @Test
   void commitRequestRoundTripsWithNestedSnapshotOnOneLine() {
     var line = SyncWire.encode(new SyncWire.Commit("auth", snapshot(), "2-base"));
 

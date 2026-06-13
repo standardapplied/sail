@@ -28,6 +28,7 @@ public final class FdeStore {
 
   public static final String DEFAULT_ROLE = "member";
   private static final Set<String> ROLES = Set.of("admin", "member", "viewer");
+  private static final Set<String> STATUSES = Set.of("active", "disabled");
 
   public record Fde(
       String id,
@@ -66,6 +67,45 @@ public final class FdeStore {
         fde.status(),
         fde.createdAt());
     return fde;
+  }
+
+  /**
+   * Mirrors an identity from the main devbox into this box's roster, keyed by the stable {@code
+   * handle}: a new handle is inserted, an existing one has its display name, email, role, and
+   * status updated while its local surrogate id — and the tokens, keys, and sessions that reference
+   * it — are preserved. This is the one-way, main-authoritative pull; nodes never push identities
+   * back. Revocation propagates as a {@code disabled} status (which the gateway already refuses),
+   * never as a destructive delete. Role and status are validated, so a malformed roster entry is
+   * rejected rather than written with a bad authorization.
+   */
+  public void replicate(
+      String handle,
+      String displayName,
+      String email,
+      String role,
+      String status,
+      String createdAt) {
+    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
+    if (!ROLES.contains(role)) {
+      throw new IllegalArgumentException(
+          "Invalid role: " + role + ". Must be one of " + ROLES + ".");
+    }
+    if (!STATUSES.contains(status)) {
+      throw new IllegalArgumentException(
+          "Invalid status: " + status + ". Must be one of " + STATUSES + ".");
+    }
+    db.execute(
+        "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?)"
+            + " ON CONFLICT(handle) DO UPDATE SET display_name = excluded.display_name,"
+            + " email = excluded.email, role = excluded.role, status = excluded.status",
+        generateId(),
+        handle,
+        displayName,
+        email,
+        role,
+        status,
+        createdAt == null || createdAt.isBlank() ? Instant.now().toString() : createdAt);
   }
 
   public Optional<Fde> byHandle(String handle) {

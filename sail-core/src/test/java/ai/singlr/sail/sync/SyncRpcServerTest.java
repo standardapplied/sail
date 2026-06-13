@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -75,5 +76,21 @@ class SyncRpcServerTest {
   @Test
   void aReadOnlyServerRefusesACommit() throws Exception {
     assertInstanceOf(SyncWire.Failed.class, serve(false, new SyncWire.Commit("a", Map.of(), null)));
+  }
+
+  @Test
+  void fetchFdesReturnsTheInjectedRoster() throws Exception {
+    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
+    var out = new StringWriter();
+    new SyncRpcServer(new FakeMain(), false, () -> roster)
+        .serve(new StringReader(SyncWire.encode(new SyncWire.FetchFdes()) + "\n"), out);
+
+    var response = (SyncWire.Fdes) SyncWire.decodeResponse(out.toString().strip());
+    assertEquals("ada", response.fdes().getFirst().get("handle"));
+  }
+
+  @Test
+  void fetchFdesDefaultsToAnEmptyRoster() throws Exception {
+    assertInstanceOf(SyncWire.Fdes.class, serve(true, new SyncWire.FetchFdes()));
   }
 }
