@@ -153,4 +153,54 @@ class FileStoreTest {
     assertTrue(files.isKnownContent(id("a.txt"), "v2"));
     assertFalse(files.isKnownContent(id("a.txt"), "a local human edit"));
   }
+
+  @Test
+  void resolveTakeTheirsAdoptsMainAndCannotReRaise() {
+    files.put("acme", "a.txt", "mine");
+
+    var rev =
+        files.resolveConflict(
+            id("a.txt"), Map.of("content", "theirs"), Map.of("content", "theirs"));
+
+    assertEquals("theirs", files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals(rev, files.baseRevOf(id("a.txt")), "base now equals theirs, so no re-raise");
+  }
+
+  @Test
+  void resolveKeepMineRebasesOntoTheirsAndPushesMineForward() {
+    files.put("acme", "a.txt", "mine");
+
+    files.resolveConflict(id("a.txt"), Map.of("content", "mine"), Map.of("content", "theirs"));
+
+    assertEquals("mine", files.find("acme", "a.txt").orElseThrow().content());
+    assertTrue(files.isKnownContent(id("a.txt"), "theirs"), "theirs is journaled as the base");
+  }
+
+  @Test
+  void resolveTakeTheirsWhereTheirsIsADeleteRemovesTheRow() {
+    files.put("acme", "a.txt", "mine");
+
+    files.resolveConflict(id("a.txt"), null, null);
+
+    assertTrue(files.find("acme", "a.txt").isEmpty());
+  }
+
+  @Test
+  void resolveKeepMineWhereTheirsIsADeleteRestoresMine() {
+    files.applyRevision(id("a.txt"), Map.of("content", "base"), "1-base");
+    files.put("acme", "a.txt", "mine");
+
+    files.resolveConflict(id("a.txt"), Map.of("content", "mine"), null);
+
+    assertEquals("mine", files.find("acme", "a.txt").orElseThrow().content());
+  }
+
+  @Test
+  void resolveDeleteMineWhereTheirsEditsTombstonesTheRow() {
+    files.applyRevision(id("a.txt"), Map.of("content", "base"), "1-base");
+
+    files.resolveConflict(id("a.txt"), null, Map.of("content", "theirs"));
+
+    assertTrue(files.find("acme", "a.txt").isEmpty());
+  }
 }

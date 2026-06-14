@@ -24,7 +24,7 @@ import java.util.Optional;
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
  * guarantee). {@code specs.rev} tracks the current revision.
  */
-public final class SpecStore {
+public final class SpecStore implements ConflictResolver {
 
   private static final String ENTITY = "spec";
 

@@ -9,11 +9,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -98,7 +100,7 @@ class ConflictsCommandTest {
         conflicts.record("spec", "auth", json(base), json(mine), json(theirs), List.of("title"));
     var conflict = conflicts.pendingFor("spec", "auth").orElseThrow();
 
-    ConflictsCommand.Resolve.apply(specs, conflicts, conflict, mine, theirs);
+    ConflictsCommand.Resolve.apply(specs, conflicts, conflict, mine);
 
     assertTrue(conflicts.pending().isEmpty(), "the conflict is marked resolved");
     assertEquals("Mine", specs.findById("auth").orElseThrow().title());
@@ -181,5 +183,97 @@ class ConflictsCommandTest {
     assertTrue(rendered.contains("Mine"));
     assertTrue(rendered.contains("Theirs"));
     assertTrue(rendered.contains("in_progress"));
+  }
+
+  private static String b64(String text) {
+    return Base64.getEncoder().encodeToString(text.getBytes());
+  }
+
+  @Test
+  void renderListJsonCarriesEntityType() {
+    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
+    var out = ConflictsCommand.renderList(conflicts.pending(), true);
+    assertTrue(out.contains("\"type\": \"file\""));
+  }
+
+  @Test
+  void findUniqueResolvesByIdAcrossTypesAndReportsAbsenceAndAmbiguity() {
+    assertNull(ConflictsCommand.findUnique(conflicts, "ghost"));
+
+    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
+    var found = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
+    assertEquals("file", found.entityType());
+
+    conflicts.record("spec", "acme/x.txt", "{}", "{}", "{}", List.of("title"));
+    assertNull(
+        ConflictsCommand.findUnique(conflicts, "acme/x.txt"), "a cross-type clash is ambiguous");
+  }
+
+  @Test
+  void resolverForDispatchesOnEntityType() {
+    assertInstanceOf(FileStore.class, ConflictsCommand.resolverFor(db, "file"));
+    assertInstanceOf(SpecStore.class, ConflictsCommand.resolverFor(db, "spec"));
+  }
+
+  @Test
+  void applyResolvesAFileConflictThroughTheFileStore() {
+    var files = new FileStore(db);
+    files.put("acme", "x.txt", b64("mine"));
+    var base = Map.<String, Object>of("content", b64("base"));
+    var mine = Map.<String, Object>of("content", b64("mine"));
+    var theirs = Map.<String, Object>of("content", b64("theirs"));
+    conflicts.record(
+        "file", "acme/x.txt", json(base), json(mine), json(theirs), List.of("content"));
+    var conflict = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
+
+    ConflictsCommand.Resolve.apply(
+        ConflictsCommand.resolverFor(db, conflict.entityType()), conflicts, conflict, theirs);
+
+    assertTrue(conflicts.pending().isEmpty());
+    assertEquals(b64("theirs"), files.find("acme", "x.txt").orElseThrow().content());
+  }
+
+  @Test
+  void fileConflictsAreNeverFieldMergeable() {
+    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
+    assertFalse(
+        ConflictsCommand.Resolve.mergeable(ConflictsCommand.findUnique(conflicts, "acme/x.txt")));
+  }
+
+  @Test
+  void showDecodesFileContentAndSummarizesBinary() {
+    assertEquals("hello", ConflictsCommand.Show.show(b64("hello"), true));
+    assertEquals("\nline1\nline2", ConflictsCommand.Show.show(b64("line1\nline2\n"), true));
+    assertEquals(
+        "Theirs", ConflictsCommand.Show.show("Theirs", false), "spec values render verbatim");
+
+    var binary = Base64.getEncoder().encodeToString(new byte[] {1, 2, 0, 3});
+    assertTrue(ConflictsCommand.Show.show(binary, true).startsWith("<binary, 4 bytes>"));
+    assertEquals("", ConflictsCommand.Show.show("", true), "blank content renders empty");
+    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0}));
+    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0x08}));
+    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0x1f}));
+    assertFalse(ConflictsCommand.Show.looksBinary("tab\tnewline\r\n".getBytes()));
+  }
+
+  @Test
+  void showRendersAFileConflictWithDecodedContent() {
+    var conflict =
+        new SyncConflicts.Conflict(
+            1,
+            "file",
+            "acme/x.txt",
+            json(Map.of("content", b64("base"))),
+            json(Map.of("content", b64("mine"))),
+            json(Map.of("content", b64("theirs"))),
+            List.of("content"),
+            "now",
+            "pending",
+            null);
+
+    var rendered = ConflictsCommand.Show.render(conflict);
+    assertTrue(rendered.contains("acme/x.txt"));
+    assertTrue(rendered.contains("mine"));
+    assertTrue(rendered.contains("theirs"));
   }
 }

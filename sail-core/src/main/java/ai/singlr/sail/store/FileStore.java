@@ -25,7 +25,7 @@ import java.util.Optional;
  * entity type {@code file} within one transaction — the same revision/CAS/conflict machinery {@link
  * SpecStore} uses — so files get history, restore, and bidirectional conflict resolution for free.
  */
-public final class FileStore {
+public final class FileStore implements ConflictResolver {
 
   private static final String ENTITY = "file";
 
@@ -184,6 +184,66 @@ public final class FileStore {
           writeRow(row);
           return new PushOutcome.Accepted(recordRevision(row, null, "sync", false, false));
         });
+  }
+
+  /**
+   * Resolves an open file conflict locally: rebases the row onto main's conflicting content {@code
+   * remote} as the new merge base — so the next sync can never re-raise the same conflict — then
+   * writes {@code chosen} as the resolved state. Take-theirs ({@code chosen} equals {@code remote})
+   * simply adopts main's value; keep-mine writes a forward local edit the next sync pushes. A
+   * {@code null} side is a deletion. Every state stays in the {@link ChangeLog}, so no choice loses
+   * work.
+   */
+  @Override
+  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
+    return db.transaction(
+        () -> {
+          var baseRev = adoptBase(id, remote);
+          if (Objects.equals(contentOf(chosen), contentOf(remote))) {
+            return baseRev;
+          }
+          return writeChosen(id, chosen);
+        });
+  }
+
+  private String adoptBase(String id, Map<String, Object> remote) {
+    if (remote == null) {
+      return adoptBaseDeletion(id);
+    }
+    var row = rowFrom(id, remote);
+    writeRow(row);
+    return recordRevision(row, null, "sync", false, true);
+  }
+
+  private String adoptBaseDeletion(String id) {
+    var present = findRow(id).orElse(null);
+    if (present == null) {
+      var rev = Revisions.next(currentRev(id), "{}");
+      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+      return rev;
+    }
+    var rev = recordRevision(present, null, "sync", true, false);
+    db.execute("DELETE FROM project_files WHERE id = ?", id);
+    return rev;
+  }
+
+  private String writeChosen(String id, Map<String, Object> chosen) {
+    if (chosen == null) {
+      var present = findRow(id).orElse(null);
+      if (present == null) {
+        return latestRev(id);
+      }
+      var rev = recordRevision(present, null, "resolve", true, false);
+      db.execute("DELETE FROM project_files WHERE id = ?", id);
+      return rev;
+    }
+    var row = rowFrom(id, chosen);
+    writeRow(row);
+    return recordRevision(row, null, "resolve", false, false);
+  }
+
+  private static String contentOf(Map<String, Object> snapshot) {
+    return snapshot == null ? null : (String) snapshot.get("content");
   }
 
   private void adoptDeletion(String id, String rev) {
