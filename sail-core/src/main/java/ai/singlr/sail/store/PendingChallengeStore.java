@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,7 +40,7 @@ public final class PendingChallengeStore {
    */
   public String issue(String ceremony, byte[] challenge, String fdeId, Duration ttl) {
     var id = generateId();
-    var now = Instant.now();
+    var now = DateTimeUtils.now();
     db.execute(
         "INSERT INTO webauthn_challenges (id, challenge, ceremony, fde_id, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?, ?, ?)",
@@ -73,7 +74,7 @@ public final class PendingChallengeStore {
     db.execute("DELETE FROM webauthn_challenges WHERE id = ?", id);
     var resolved = row.get();
     if (!ceremony.equals(resolved.challenge().ceremony())
-        || Instant.parse(resolved.expiresAt()).isBefore(Instant.now())) {
+        || Instant.parse(resolved.expiresAt()).isBefore(DateTimeUtils.now())) {
       return Optional.empty();
     }
     return Optional.of(resolved.challenge());

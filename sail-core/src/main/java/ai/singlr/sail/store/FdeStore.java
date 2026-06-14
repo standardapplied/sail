@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -55,7 +55,14 @@ public final class FdeStore {
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
     var fde =
-        new Fde(generateId(), handle, displayName, email, role, "active", Instant.now().toString());
+        new Fde(
+            generateId(),
+            handle,
+            displayName,
+            email,
+            role,
+            "active",
+            DateTimeUtils.now().toString());
     db.execute(
         "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at)"
             + " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -105,7 +112,7 @@ public final class FdeStore {
         email,
         role,
         status,
-        createdAt == null || createdAt.isBlank() ? Instant.now().toString() : createdAt);
+        createdAt == null || createdAt.isBlank() ? DateTimeUtils.now().toString() : createdAt);
   }
 
   public Optional<Fde> byHandle(String handle) {

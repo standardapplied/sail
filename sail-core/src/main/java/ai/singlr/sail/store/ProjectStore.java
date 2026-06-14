@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import java.time.Instant;
+import ai.singlr.sail.common.DateTimeUtils;
 import java.util.List;
 import java.util.Optional;
 
@@ -41,7 +41,7 @@ public final class ProjectStore {
    * beyond bumping {@code updated_at}.
    */
   public void upsert(String name, String definition, String actor) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           var existing = findByName(name);

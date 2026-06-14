@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import java.time.Instant;
+import ai.singlr.sail.common.DateTimeUtils;
 
 /**
  * Per-peer sync checkpoint: the highest main sequence this node has applied from a given peer (the
@@ -38,6 +38,6 @@ public final class SyncState {
             updated_at = excluded.updated_at""",
         peer,
         checkpoint,
-        Instant.now().toString());
+        DateTimeUtils.now().toString());
   }
 }

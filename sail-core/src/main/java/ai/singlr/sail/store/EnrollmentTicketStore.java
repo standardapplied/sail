@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.webauthn.Hashes;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -37,7 +38,7 @@ public final class EnrollmentTicketStore {
 
   public CreatedTicket issue(String fdeId, Duration ttl) {
     var ticket = generateTicket();
-    var now = Instant.now();
+    var now = DateTimeUtils.now();
     var expiresAt = now.plus(ttl).toString();
     db.execute(
         "INSERT INTO enrollment_tickets (token_hash, fde_id, created_at, expires_at)"
@@ -62,7 +63,7 @@ public final class EnrollmentTicketStore {
     if (info.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(info.get().expiresAt()).isBefore(Instant.now())) {
+    if (Instant.parse(info.get().expiresAt()).isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM enrollment_tickets WHERE token_hash = ?", hash);
       return Optional.empty();
     }
@@ -82,7 +83,7 @@ public final class EnrollmentTicketStore {
                 + " WHERE token_hash = ? AND consumed_at IS NULL"
                 + " RETURNING token_hash",
             row -> row.text(0),
-            Instant.now().toString(),
+            DateTimeUtils.now().toString(),
             sha256(ticket))
         .isPresent();
   }

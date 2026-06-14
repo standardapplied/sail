@@ -6,7 +6,6 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -48,7 +47,7 @@ public final class ReviewStore {
         id,
         specId,
         iteration,
-        Instant.now().toString());
+        DateTimeUtils.now().toString());
     return id;
   }
 
@@ -82,7 +81,7 @@ public final class ReviewStore {
   public void approve(String reviewId, String decidedBy) {
     db.execute(
         "UPDATE reviews SET status = 'passed', completed_at = ?, decided_by = ? WHERE id = ?",
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         decidedBy,
         reviewId);
   }
@@ -90,7 +89,7 @@ public final class ReviewStore {
   public void updateReviewStatus(String reviewId, String status) {
     var completedAt =
         "passed".equals(status) || "failed".equals(status) || "escalated".equals(status)
-            ? Instant.now().toString()
+            ? DateTimeUtils.now().toString()
             : null;
     db.execute(
         "UPDATE reviews SET status = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
@@ -132,7 +131,7 @@ public final class ReviewStore {
     db.execute(
         "UPDATE review_stages SET status = 'running', reviewer = ?, started_at = ? WHERE id = ?",
         reviewer,
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         stageId);
   }
 
@@ -140,7 +139,7 @@ public final class ReviewStore {
     db.execute(
         "UPDATE review_stages SET status = ?, completed_at = ? WHERE id = ?",
         status,
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         stageId);
   }
 

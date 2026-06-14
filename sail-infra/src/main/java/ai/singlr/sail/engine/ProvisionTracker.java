@@ -5,12 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -95,7 +95,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
         throw new IllegalStateException("Cannot regress from " + current + " to " + completedPhase);
       }
     }
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     this.state =
         new ProvisionState(
             completedPhase.name(), state.startedAt() != null ? state.startedAt() : now, now, null);
@@ -107,7 +107,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
    * field is NOT updated — it still reflects the last successfully completed phase.
    */
   public void recordFailure(P failedPhase, String message) throws IOException {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     this.state =
         new ProvisionState(
             state.completedPhase(),

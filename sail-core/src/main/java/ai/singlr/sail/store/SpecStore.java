@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -73,7 +73,7 @@ public final class SpecStore implements ConflictResolver {
       String nextReadyId) {}
 
   public void create(SpecRow spec) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -162,7 +162,7 @@ public final class SpecStore implements ConflictResolver {
   }
 
   public void update(SpecRow spec) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -197,7 +197,7 @@ public final class SpecStore implements ConflictResolver {
           db.execute(
               "UPDATE specs SET status = ?, updated_at = ? WHERE id = ?",
               status.wire(),
-              Instant.now().toString(),
+              DateTimeUtils.now().toString(),
               id);
           recordRevision(id, "local", false);
         });
@@ -212,7 +212,7 @@ public final class SpecStore implements ConflictResolver {
   }
 
   public void setContent(String specId, String body, String plan) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -331,7 +331,7 @@ public final class SpecStore implements ConflictResolver {
 
   private void applySnapshot(String id, Map<String, Object> snapshot) {
     var spec = specFromSnapshot(snapshot);
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     if (findById(id).isPresent()) {
       db.execute(
           """

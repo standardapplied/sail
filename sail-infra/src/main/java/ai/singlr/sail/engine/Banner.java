@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecStatus;
@@ -922,7 +923,7 @@ public final class Banner {
     }
     if (!info.startedAt().isBlank()) {
       out.println(amber(ansi, "    @|bold Started:|@    " + formatTimestamp(info.startedAt())));
-      var elapsed = formatElapsed(info.startedAt(), Instant.now());
+      var elapsed = formatElapsed(info.startedAt(), DateTimeUtils.now());
       if (!elapsed.isEmpty()) {
         out.println(amber(ansi, "    @|bold Elapsed:|@    " + elapsed));
       }

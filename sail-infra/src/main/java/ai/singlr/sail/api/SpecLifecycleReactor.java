@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecAuditEvent;
 import ai.singlr.sail.config.SpecStatus;
@@ -15,7 +16,6 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SpecAudit;
 import ai.singlr.sail.engine.SpecWorkspace;
 import java.nio.file.Files;
-import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -113,17 +113,17 @@ public final class SpecLifecycleReactor implements EventSubscriber {
 
   private static SpecAuditEvent startedEvent(Event event) {
     return new SpecAuditEvent(
-        Instant.now(), "started", event.agent(), pidOf(event), event.host(), null);
+        DateTimeUtils.now(), "started", event.agent(), pidOf(event), event.host(), null);
   }
 
   private static SpecAuditEvent stoppedEvent(Event event) {
     return new SpecAuditEvent(
-        Instant.now(), "stopped", event.agent(), pidOf(event), event.host(), noteOf(event));
+        DateTimeUtils.now(), "stopped", event.agent(), pidOf(event), event.host(), noteOf(event));
   }
 
   private static SpecAuditEvent completedEvent(Event event) {
     return new SpecAuditEvent(
-        Instant.now(), "completed", event.agent(), null, event.host(), noteOf(event));
+        DateTimeUtils.now(), "completed", event.agent(), null, event.host(), noteOf(event));
   }
 
   private static Integer pidOf(Event event) {

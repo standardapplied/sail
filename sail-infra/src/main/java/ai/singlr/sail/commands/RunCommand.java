@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
@@ -357,7 +358,7 @@ public final class RunCommand implements Runnable {
   private void autoRollback(ShellExecutor shell, String snapshotLabel, int exitCode) {
     try {
       var rollbackMap = new LinkedHashMap<String, Object>();
-      rollbackMap.put("rolled_back_at", java.time.Instant.now().toString());
+      rollbackMap.put("rolled_back_at", DateTimeUtils.now().toString());
       rollbackMap.put("exit_code", exitCode);
       rollbackMap.put("snapshot_restored", snapshotLabel);
       rollbackMap.put("task", task);

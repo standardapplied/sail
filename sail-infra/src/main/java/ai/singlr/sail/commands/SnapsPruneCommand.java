@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -80,7 +81,7 @@ public final class SnapsPruneCommand implements Runnable {
       throw new IllegalArgumentException("--keep must be 0 or greater.");
     }
     Duration maxAge = olderThan != null ? parseAge(olderThan) : null;
-    Instant cutoff = maxAge != null ? Instant.now().minus(maxAge) : null;
+    Instant cutoff = maxAge != null ? DateTimeUtils.now().minus(maxAge) : null;
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);

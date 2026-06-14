@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.webauthn.Hashes;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -34,7 +35,7 @@ public final class AuthSessionStore {
 
   public CreatedSession create(String fdeId, Duration ttl) {
     var token = generateToken();
-    var now = Instant.now();
+    var now = DateTimeUtils.now();
     var expiresAt = now.plus(ttl).toString();
     db.execute(
         "INSERT INTO sessions (token_hash, fde_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -56,13 +57,13 @@ public final class AuthSessionStore {
     if (result.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(result.get().expiresAt()).isBefore(Instant.now())) {
+    if (Instant.parse(result.get().expiresAt()).isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM sessions WHERE token_hash = ?", hash);
       return Optional.empty();
     }
     db.execute(
         "UPDATE sessions SET last_used_at = ? WHERE token_hash = ?",
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         hash);
     return result;
   }

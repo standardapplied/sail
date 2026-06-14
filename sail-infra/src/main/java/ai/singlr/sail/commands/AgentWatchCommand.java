@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventStreamClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.SailYaml;
@@ -153,7 +154,8 @@ public final class AgentWatchCommand implements Runnable {
       if (!(result instanceof GuardrailChecker.GuardrailResult.Triggered triggered)) {
         continue;
       }
-      var elapsed = GuardrailChecker.formatDuration(Duration.between(startedAt, Instant.now()));
+      var elapsed =
+          GuardrailChecker.formatDuration(Duration.between(startedAt, DateTimeUtils.now()));
       var snapshotLabel = applyTriggerAction(triggered, shell, agentSession);
       reportTrigger(triggered, elapsed, snapshotLabel);
       notifyTriggered(notifier, notifications, triggered);
@@ -188,12 +190,12 @@ public final class AgentWatchCommand implements Runnable {
 
   static Instant parseStartedAt(String iso) {
     if (iso == null || iso.isBlank()) {
-      return Instant.now();
+      return DateTimeUtils.now();
     }
     try {
       return Instant.parse(iso);
     } catch (java.time.format.DateTimeParseException e) {
-      return Instant.now();
+      return DateTimeUtils.now();
     }
   }
 
@@ -213,7 +215,7 @@ public final class AgentWatchCommand implements Runnable {
     if (guardrailFired || deadline.equals(Instant.MAX)) {
       return Long.MAX_VALUE;
     }
-    var remaining = Duration.between(Instant.now(), deadline).toMillis();
+    var remaining = Duration.between(DateTimeUtils.now(), deadline).toMillis();
     return Math.max(0, remaining);
   }
 
@@ -346,7 +348,7 @@ public final class AgentWatchCommand implements Runnable {
       GuardrailChecker.GuardrailResult.Triggered triggered)
       throws Exception {
     var map = new LinkedHashMap<String, Object>();
-    map.put("triggered_at", Instant.now().toString());
+    map.put("triggered_at", DateTimeUtils.now().toString());
     map.put("reason", triggered.reason());
     map.put("detail", triggered.detail());
     map.put("action", triggered.action());

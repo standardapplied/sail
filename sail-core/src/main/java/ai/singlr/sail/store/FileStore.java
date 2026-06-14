@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -288,7 +288,7 @@ public final class FileStore implements ConflictResolver {
         row.project(),
         row.path(),
         row.content(),
-        Instant.now().toString());
+        DateTimeUtils.now().toString());
   }
 
   private static FileRow rowFrom(String id, Map<String, Object> snapshot) {

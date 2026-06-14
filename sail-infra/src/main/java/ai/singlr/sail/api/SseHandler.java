@@ -52,6 +52,8 @@ public final class SseHandler implements HttpHandler {
   /** Heartbeat interval. SSE comments keep idle connections alive through proxies. */
   public static final long HEARTBEAT_MILLIS = 15_000L;
 
+  private static final long HEARTBEAT_NANOS = HEARTBEAT_MILLIS * 1_000_000L;
+
   /** Poll timeout when draining the per-connection queue. */
   static final long POLL_MILLIS = 1_000L;
 
@@ -129,7 +131,7 @@ public final class SseHandler implements HttpHandler {
     exchange.sendResponseHeaders(200, 0);
     try (var out = exchange.getResponseBody()) {
       writeComment(out, "subscribed");
-      var lastHeartbeat = System.currentTimeMillis();
+      var lastHeartbeat = System.nanoTime();
       while (true) {
         Event event;
         try {
@@ -141,9 +143,9 @@ public final class SseHandler implements HttpHandler {
         if (event != null) {
           writeEvent(out, event);
         }
-        if (System.currentTimeMillis() - lastHeartbeat > HEARTBEAT_MILLIS) {
+        if (System.nanoTime() - lastHeartbeat > HEARTBEAT_NANOS) {
           writeComment(out, "keepalive");
-          lastHeartbeat = System.currentTimeMillis();
+          lastHeartbeat = System.nanoTime();
         }
       }
     } catch (IOException disconnected) {

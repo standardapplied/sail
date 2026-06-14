@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
@@ -103,7 +104,7 @@ public final class AgentStatusCommand implements Runnable {
         if (!info.startedAt().isBlank()) {
           try {
             var started = Instant.parse(info.startedAt());
-            elapsed = formatElapsed(Duration.between(started, Instant.now()));
+            elapsed = formatElapsed(Duration.between(started, DateTimeUtils.now()));
             var repoPaths = resolveRepoPaths(projectName);
             for (var repoPath : repoPaths) {
               try {
@@ -184,12 +185,14 @@ public final class AgentStatusCommand implements Runnable {
       try {
         var checker = new GuardrailChecker(shell);
         var repoPaths = config != null ? config.repoPaths() : List.of("/home/dev/workspace");
-        var since = !info.startedAt().isBlank() ? Instant.parse(info.startedAt()) : Instant.now();
+        var since =
+            !info.startedAt().isBlank() ? Instant.parse(info.startedAt()) : DateTimeUtils.now();
         for (var repoPath : repoPaths) {
           var activity = checker.queryGitActivity(name, repoPath, since);
           commitCount += activity.commitCount();
           if (activity.lastCommitEpoch() > 0) {
-            var minutesAgo = (Instant.now().getEpochSecond() - activity.lastCommitEpoch()) / 60;
+            var minutesAgo =
+                (DateTimeUtils.now().getEpochSecond() - activity.lastCommitEpoch()) / 60;
             if (lastCommitMinutesAgo < 0 || minutesAgo < lastCommitMinutesAgo) {
               lastCommitMinutesAgo = minutesAgo;
             }

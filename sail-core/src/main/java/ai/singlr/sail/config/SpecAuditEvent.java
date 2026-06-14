@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
@@ -50,27 +51,27 @@ public record SpecAuditEvent(
 
   /** Convenience factory for {@code dispatched}. */
   public static SpecAuditEvent dispatched(String agent, String host, String note) {
-    return new SpecAuditEvent(Instant.now(), "dispatched", agent, null, host, note);
+    return new SpecAuditEvent(DateTimeUtils.now(), "dispatched", agent, null, host, note);
   }
 
   /** Convenience factory for {@code restarted}. */
   public static SpecAuditEvent restarted(String agent, String host, String note) {
-    return new SpecAuditEvent(Instant.now(), "restarted", agent, null, host, note);
+    return new SpecAuditEvent(DateTimeUtils.now(), "restarted", agent, null, host, note);
   }
 
   /** Convenience factory for {@code started}, carrying the agent PID. */
   public static SpecAuditEvent started(String agent, int pid, String host) {
-    return new SpecAuditEvent(Instant.now(), "started", agent, pid, host, null);
+    return new SpecAuditEvent(DateTimeUtils.now(), "started", agent, pid, host, null);
   }
 
   /** Convenience factory for {@code stopped}, carrying the agent PID. */
   public static SpecAuditEvent stopped(String agent, int pid, String host, String note) {
-    return new SpecAuditEvent(Instant.now(), "stopped", agent, pid, host, note);
+    return new SpecAuditEvent(DateTimeUtils.now(), "stopped", agent, pid, host, note);
   }
 
   /** Convenience factory for {@code completed}. */
   public static SpecAuditEvent completed(String agent, String host, String note) {
-    return new SpecAuditEvent(Instant.now(), "completed", agent, null, host, note);
+    return new SpecAuditEvent(DateTimeUtils.now(), "completed", agent, null, host, note);
   }
 
   /** Serializes this event as a single-line JSON object. Field order is deterministic. */

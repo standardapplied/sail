@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.gen.AgentAuditFiles;
@@ -13,7 +14,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -1162,7 +1162,7 @@ public final class ProjectProvisioner {
             name: %s
             created_at: %s
             """
-            .formatted(name, Instant.now());
+            .formatted(name, DateTimeUtils.now());
     pushFileToContainer(name, "/etc/sail/project.yaml", yaml);
 
     tracker.advance(currentPhase);
