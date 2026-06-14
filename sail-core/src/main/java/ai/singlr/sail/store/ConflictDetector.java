@@ -103,7 +103,7 @@ public final class ConflictDetector {
       LinkedHashSet<String> localChanged,
       LinkedHashSet<String> remoteChanged) {
     var result = new LinkedHashMap<String, Object>();
-    for (var field : allKeys(base, local, remote)) {
+    for (var field : workKeys(base, local, remote)) {
       if (localChanged.contains(field)) {
         result.put(field, local.get(field));
       } else if (remoteChanged.contains(field)) {
@@ -112,13 +112,19 @@ public final class ConflictDetector {
         result.put(field, base.get(field));
       }
     }
+    local.forEach(
+        (key, value) -> {
+          if (isMetadata(key)) {
+            result.put(key, value);
+          }
+        });
     return result;
   }
 
   private static LinkedHashSet<String> changedFields(
       Map<String, Object> base, Map<String, Object> side) {
     var changed = new LinkedHashSet<String>();
-    for (var key : allKeys(base, side)) {
+    for (var key : workKeys(base, side)) {
       if (!Objects.equals(base.get(key), side.get(key))) {
         changed.add(key);
       }
@@ -129,7 +135,7 @@ public final class ConflictDetector {
   private static boolean equalSnapshots(Map<String, Object> a, Map<String, Object> b) {
     var left = a == null ? Map.<String, Object>of() : a;
     var right = b == null ? Map.<String, Object>of() : b;
-    for (var key : allKeys(left, right)) {
+    for (var key : workKeys(left, right)) {
       if (!Objects.equals(left.get(key), right.get(key))) {
         return false;
       }
@@ -137,12 +143,26 @@ public final class ConflictDetector {
     return true;
   }
 
+  /**
+   * Keys carrying an FDE's work, excluding reserved metadata ({@code _}-prefixed, e.g. {@code
+   * _actor} — who authored the revision). Metadata rides with a snapshot so it propagates, but it
+   * never counts toward a conflict and never becomes a clashing field; a merge keeps the local
+   * box's metadata since the local box produced the merged result.
+   */
   @SafeVarargs
-  private static LinkedHashSet<String> allKeys(Map<String, Object>... maps) {
+  private static LinkedHashSet<String> workKeys(Map<String, Object>... maps) {
     var keys = new LinkedHashSet<String>();
     for (var map : maps) {
-      keys.addAll(map.keySet());
+      for (var key : map.keySet()) {
+        if (!isMetadata(key)) {
+          keys.add(key);
+        }
+      }
     }
     return keys;
+  }
+
+  private static boolean isMetadata(String key) {
+    return key.startsWith("_");
   }
 }

@@ -173,6 +173,57 @@ class TwoNodeSyncTest {
     assertTrue(main.specs.findById("local").isEmpty());
   }
 
+  private SpecStore.SpecRow specBy(String id, String title, String author) {
+    return new SpecStore.SpecRow(
+        id,
+        "proj",
+        title,
+        SpecStatus.fromWire("pending"),
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        author,
+        "",
+        "",
+        author,
+        List.of(),
+        List.of());
+  }
+
+  @Test
+  void theAuthorOfASyncedSpecPropagatesInsteadOfBecomingSync() {
+    nodeA.specs.create(specBy("auth", "Auth", "ada"));
+
+    syncToMain(nodeA);
+    assertEquals(
+        "ada",
+        main.specs.findById("auth").orElseThrow().updatedBy(),
+        "main attributes the row to its real author, not 'sync'");
+
+    syncToMain(nodeB);
+    assertEquals(
+        "ada",
+        nodeB.specs.findById("auth").orElseThrow().updatedBy(),
+        "the author reaches the other node too");
+  }
+
+  @Test
+  void aSyncedEditCarriesTheEditorNotTheOriginalAuthor() {
+    nodeA.specs.create(specBy("auth", "Auth", "ada"));
+    syncToMain(nodeA);
+    syncToMain(nodeB);
+
+    nodeB.specs.update(specBy("auth", "Auth, revised", "bob"));
+    syncToMain(nodeB);
+    syncToMain(nodeA);
+
+    assertEquals("bob", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("bob", nodeA.specs.findById("auth").orElseThrow().updatedBy());
+  }
+
   @Test
   void checkpointAdvancesToMainHighWaterMark() {
     nodeA.specs.create(spec("auth", "Auth", "pending"));

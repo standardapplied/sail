@@ -160,4 +160,43 @@ class ConflictDetectorTest {
     assertEquals("uday", merged.result().get("assignee"));
     assertEquals("A2", merged.result().get("title"));
   }
+
+  @Test
+  void differingMetadataNeverBlocksConverge() {
+    var base = snap("title", "A", "_actor", "ada");
+    var local = snap("title", "B", "_actor", "ada");
+    var remote = snap("title", "B", "_actor", "bob");
+
+    assertInstanceOf(
+        ConflictDetector.Converged.class,
+        ConflictDetector.detect(base, local, remote),
+        "identical work fields converge even though _actor differs");
+  }
+
+  @Test
+  void metadataIsNeverReportedAsAClashingField() {
+    var base = snap("title", "A", "_actor", "ada");
+    var local = snap("title", "B", "_actor", "ada");
+    var remote = snap("title", "C", "_actor", "bob");
+
+    var conflict =
+        assertInstanceOf(
+            ConflictDetector.Conflict.class, ConflictDetector.detect(base, local, remote));
+    assertEquals(java.util.List.of("title"), conflict.fields(), "_actor is never a clashing field");
+  }
+
+  @Test
+  void aMergeKeepsTheLocalBoxsMetadata() {
+    var base = snap("title", "A", "status", "pending", "_actor", "base");
+    var local = snap("title", "A2", "status", "pending", "_actor", "ada");
+    var remote = snap("title", "A", "status", "in_progress", "_actor", "bob");
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class, ConflictDetector.detect(base, local, remote));
+    assertEquals("A2", merged.result().get("title"));
+    assertEquals("in_progress", merged.result().get("status"));
+    assertEquals(
+        "ada", merged.result().get("_actor"), "the merging box authored the merged result");
+  }
 }

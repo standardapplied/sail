@@ -446,7 +446,24 @@ public final class SpecStore implements ConflictResolver {
         m.put(field, full.get(field));
       }
     }
+    var author = full.get("updated_by");
+    if (author != null) {
+      m.put(ACTOR, author);
+    }
     return m;
+  }
+
+  /**
+   * Reserved metadata key carrying the author of a revision through the sync protocol. It rides
+   * inside the comparable snapshot but {@link ConflictDetector} ignores reserved ({@code
+   * _}-prefixed) keys, so attribution propagates without ever causing a false conflict. The
+   * receiving side reads it to attribute the synced row to its real author instead of {@code sync}.
+   */
+  private static final String ACTOR = "_actor";
+
+  private static String authorOf(Map<String, Object> snapshot) {
+    var author = snapshot.get(ACTOR);
+    return author == null ? "sync" : author.toString();
   }
 
   /** Comparable snapshot of the current state, or null if the spec is absent/deleted. */
@@ -521,7 +538,7 @@ public final class SpecStore implements ConflictResolver {
           } else {
             var full = new LinkedHashMap<>(snapshot);
             full.put("id", id);
-            full.put("updated_by", "sync");
+            full.put("updated_by", authorOf(snapshot));
             applySnapshot(id, full);
             recordRevision(id, rev, "sync", false, true);
           }
@@ -551,7 +568,7 @@ public final class SpecStore implements ConflictResolver {
           }
           var full = new LinkedHashMap<>(snapshot);
           full.put("id", id);
-          full.put("updated_by", "sync");
+          full.put("updated_by", authorOf(snapshot));
           applySnapshot(id, full);
           return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
         });
@@ -608,7 +625,7 @@ public final class SpecStore implements ConflictResolver {
   private static Map<String, Object> withSync(String id, Map<String, Object> snapshot) {
     var full = new LinkedHashMap<>(snapshot);
     full.put("id", id);
-    full.put("updated_by", "sync");
+    full.put("updated_by", authorOf(snapshot));
     return full;
   }
 
@@ -619,7 +636,9 @@ public final class SpecStore implements ConflictResolver {
     var keys = new LinkedHashSet<String>();
     keys.addAll(a.keySet());
     keys.addAll(b.keySet());
-    return keys.stream().allMatch(key -> Objects.equals(a.get(key), b.get(key)));
+    return keys.stream()
+        .filter(key -> !key.startsWith("_"))
+        .allMatch(key -> Objects.equals(a.get(key), b.get(key)));
   }
 
   public Optional<SpecContent> getContent(String specId) {
