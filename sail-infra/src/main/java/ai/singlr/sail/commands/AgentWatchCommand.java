@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.WebhookNotifier;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -195,7 +196,7 @@ public final class AgentWatchCommand implements Runnable {
     }
     try {
       return Instant.parse(iso);
-    } catch (java.time.format.DateTimeParseException e) {
+    } catch (DateTimeParseException e) {
       return DateTimeUtils.now();
     }
   }

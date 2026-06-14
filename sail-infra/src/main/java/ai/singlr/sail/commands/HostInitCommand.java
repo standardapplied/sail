@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import picocli.CommandLine.Command;
@@ -224,7 +225,7 @@ public final class HostInitCommand implements Runnable {
 
   private void enableLingerForUser(ShellExec shell, String user) {
     try {
-      var result = shell.exec(java.util.List.of("loginctl", "enable-linger", user));
+      var result = shell.exec(List.of("loginctl", "enable-linger", user));
       if (result.ok()) {
         System.out.println(
             Ansi.AUTO.string(

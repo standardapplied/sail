@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SpecAudit;
 import ai.singlr.sail.engine.SpecWorkspace;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -170,7 +171,7 @@ public final class SpecLifecycleReactor implements EventSubscriber {
    * absent, or the YAML cannot be parsed. Extracted so tests can point at a {@code @TempDir}
    * without touching the real user-home location.
    */
-  static String lookupSpecsDirAt(String project, java.nio.file.Path path) {
+  static String lookupSpecsDirAt(String project, Path path) {
     if (path == null || !Files.exists(path)) {
       return null;
     }

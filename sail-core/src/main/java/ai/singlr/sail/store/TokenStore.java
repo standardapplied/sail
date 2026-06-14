@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * API token management. Tokens are SHA-256 hashed before storage. The plaintext is returned exactly
@@ -27,7 +28,7 @@ import java.util.Optional;
  */
 public final class TokenStore {
 
-  private static final java.util.Set<String> ROLES = java.util.Set.of("admin", "member", "viewer");
+  private static final Set<String> ROLES = Set.of("admin", "member", "viewer");
 
   /** Default lifetime the CLI applies to a newly minted token unless overridden. */
   public static final Duration DEFAULT_TTL = Duration.ofDays(90);

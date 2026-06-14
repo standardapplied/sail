@@ -15,8 +15,17 @@ import ai.singlr.sail.engine.ReviewPromptBuilder;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
+import java.net.InetAddress;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -41,11 +50,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private final Function<String, ReviewPipelineConfig> configResolver;
   private final ReviewAgentRunner agentRunner;
   private final EventBus eventBus;
-  private final java.util.concurrent.ConcurrentHashMap<
-          String, java.util.concurrent.CompletableFuture<Void>>
-      inFlight = new java.util.concurrent.ConcurrentHashMap<>();
-  private final java.util.concurrent.ExecutorService pipelineExecutor =
-      java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+  private final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight =
+      new ConcurrentHashMap<>();
+  private final ExecutorService pipelineExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
   public ReviewPipelineController(
       SpecStore specStore,
@@ -68,10 +75,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var futures = List.copyOf(inFlight.values());
     if (futures.isEmpty()) return;
     try {
-      java.util.concurrent.CompletableFuture.allOf(
-              futures.toArray(new java.util.concurrent.CompletableFuture[0]))
-          .get(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
-    } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+          .get(timeoutMillis, TimeUnit.MILLISECONDS);
+    } catch (ExecutionException | TimeoutException e) {
       Thread.currentThread().interrupt();
     }
   }
@@ -87,7 +93,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     }
   }
 
-  java.util.concurrent.ExecutorService pipelineExecutor() {
+  ExecutorService pipelineExecutor() {
     return pipelineExecutor;
   }
 
@@ -146,7 +152,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     }
 
     var future =
-        java.util.concurrent.CompletableFuture.runAsync(
+        CompletableFuture.runAsync(
             () -> executePipeline(reviewId, config, event.project(), specId), pipelineExecutor);
     inFlight.put(reviewId, future);
     future.whenComplete((v, ex) -> inFlight.remove(reviewId));
@@ -267,16 +273,13 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   private void publishEvent(String project, String specId, String type, String detail) {
     if (eventBus == null) return;
-    var data =
-        detail != null
-            ? java.util.Map.<String, Object>of("detail", detail)
-            : java.util.Map.<String, Object>of();
+    var data = detail != null ? Map.<String, Object>of("detail", detail) : Map.<String, Object>of();
     eventBus.publish(Event.of(project, specId, type, Event.SAIL_AGENT, hostname(), data));
   }
 
   private static String hostname() {
     try {
-      return java.net.InetAddress.getLocalHost().getHostName();
+      return InetAddress.getLocalHost().getHostName();
     } catch (Exception e) {
       return "unknown";
     }

@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.security.SecureRandom;
 import java.util.HexFormat;
@@ -50,7 +51,7 @@ public final class FdeStore {
    * the role is not one of {@code admin}, {@code member}, {@code viewer}.
    */
   public Fde add(String handle, String displayName, String email, String role) {
-    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
@@ -93,7 +94,7 @@ public final class FdeStore {
       String role,
       String status,
       String createdAt) {
-    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");

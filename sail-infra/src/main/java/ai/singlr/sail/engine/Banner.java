@@ -10,6 +10,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import java.io.PrintStream;
 import java.text.NumberFormat;
@@ -1047,8 +1048,8 @@ public final class Banner {
           var doneIds =
               report.specs().stream()
                   .filter(s -> s.status() == SpecStatus.DONE)
-                  .map(ai.singlr.sail.config.Spec::id)
-                  .collect(java.util.stream.Collectors.toSet());
+                  .map(Spec::id)
+                  .collect(Collectors.toSet());
           var blocked = spec.dependsOn().stream().filter(d -> !doneIds.contains(d)).toList();
           if (!blocked.isEmpty()) {
             out.println(

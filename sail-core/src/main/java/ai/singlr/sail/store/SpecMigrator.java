@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -88,7 +89,7 @@ public final class SpecMigrator {
     var skipped = 0;
     var errors = new ArrayList<String>();
     var created = new ArrayList<SpecImport>();
-    var seenInBatch = new java.util.HashSet<String>();
+    var seenInBatch = new HashSet<String>();
 
     for (var imp : imports) {
       var spec = imp.spec();

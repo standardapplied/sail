@@ -17,10 +17,12 @@ import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.gen.ServicePresets;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -110,7 +112,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     }
 
     var applier = new ProjectApplier(shell, out);
-    var result = applier.applyServices(name, java.util.Map.of(svcName, service));
+    var result = applier.applyServices(name, Map.of(svcName, service));
 
     SailYamlUpdater.addService(singYamlPath, svcName, service);
 
@@ -136,7 +138,7 @@ public final class ProjectAddServiceCommand implements Runnable {
   }
 
   private SailYaml.Service buildServiceFromFlags() {
-    java.util.Map<String, String> env = null;
+    Map<String, String> env = null;
     if (envPairs != null && !envPairs.isEmpty()) {
       env = new LinkedHashMap<>();
       for (var pair : envPairs) {
@@ -151,7 +153,7 @@ public final class ProjectAddServiceCommand implements Runnable {
 
   private record ServiceSelection(String name, SailYaml.Service service) {}
 
-  private ServiceSelection collectServiceInteractively(java.io.PrintStream out, Ansi ansi) {
+  private ServiceSelection collectServiceInteractively(PrintStream out, Ansi ansi) {
     var presets = ServicePresets.all();
 
     out.println(ansi.string("  @|bold Choose a service (runs as a Podman container):|@"));
@@ -200,7 +202,7 @@ public final class ProjectAddServiceCommand implements Runnable {
   }
 
   private SailYaml.Service customizePresetEnv(
-      SailYaml.Service service, java.io.PrintStream out, Ansi ansi) {
+      SailYaml.Service service, PrintStream out, Ansi ansi) {
     var defaultEnv = service.environment();
     var env = new LinkedHashMap<String, String>();
     if (defaultEnv != null && !defaultEnv.isEmpty()) {
@@ -228,7 +230,7 @@ public final class ProjectAddServiceCommand implements Runnable {
         service.volumes());
   }
 
-  private ServiceSelection collectCustomService(java.io.PrintStream out, Ansi ansi) {
+  private ServiceSelection collectCustomService(PrintStream out, Ansi ansi) {
     out.println();
     out.println(ansi.string("  @|bold Custom Podman service|@"));
     var svcName =
@@ -249,7 +251,7 @@ public final class ProjectAddServiceCommand implements Runnable {
       }
       if (customPorts.isEmpty()) customPorts = null;
     }
-    java.util.Map<String, String> env = null;
+    Map<String, String> env = null;
     if (ConsoleHelper.confirmNo("Add environment variables?")) {
       env = new LinkedHashMap<>();
       do {
@@ -272,8 +274,7 @@ public final class ProjectAddServiceCommand implements Runnable {
         svcName, new SailYaml.Service(img, customPorts, env, null, customVolumes));
   }
 
-  private static String promptWithDefault(
-      java.io.PrintStream out, Ansi ansi, String label, String def) {
+  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
     if (!Strings.isEmpty(def)) {
       out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
     } else {
@@ -287,7 +288,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     return line.strip();
   }
 
-  private static String promptRequired(java.io.PrintStream out, Ansi ansi, String label) {
+  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
     while (true) {
       out.print(ansi.string("  @|bold " + label + "|@: "));
       out.flush();

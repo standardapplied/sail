@@ -32,6 +32,7 @@ import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -54,8 +55,7 @@ public final class MigrateCommand implements Runnable {
    * File-based spec discovery (see {@link ContainerSpecImporter}) deliberately runs outside this
    * registry — it's a repeatable scan, not a one-shot fix-up.
    */
-  public static final List<ai.singlr.sail.store.DataMigration> REGISTRY =
-      List.of(new RebucketSpecsMigration());
+  public static final List<DataMigration> REGISTRY = List.of(new RebucketSpecsMigration());
 
   @Option(
       names = "--non-interactive",
@@ -200,7 +200,7 @@ public final class MigrateCommand implements Runnable {
   static List<DataMigrator.Run> applyMigrations(
       Sqlite db,
       String dbPath,
-      java.util.function.Supplier<ContainerSpecImporter.Report> specImport,
+      Supplier<ContainerSpecImporter.Report> specImport,
       DataMigration.Prompter prompter,
       boolean animate,
       boolean jsonOutput) {
@@ -217,7 +217,7 @@ public final class MigrateCommand implements Runnable {
     return result.dataRuns();
   }
 
-  private static <T> T phase(boolean animate, String message, java.util.function.Supplier<T> work) {
+  private static <T> T phase(boolean animate, String message, Supplier<T> work) {
     if (!animate) {
       return work.get();
     }

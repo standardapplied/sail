@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -239,7 +240,7 @@ public final class ProjectMigrateCommand implements Runnable {
     return all ? SailPaths.resolveSailYaml(project, file).toString() : file;
   }
 
-  private static java.util.Map<String, Object> summary(List<ProjectResult> results) {
+  private static Map<String, Object> summary(List<ProjectResult> results) {
     var map = new LinkedHashMap<String, Object>();
     map.put("total", results.size());
     map.put("ok", results.stream().filter(result -> "ok".equals(result.status())).count());
@@ -432,7 +433,7 @@ public final class ProjectMigrateCommand implements Runnable {
       return new ProjectResult(name, "failed", false, 0, 0, 0, false, "unknown", List.of(), error);
     }
 
-    private java.util.Map<String, Object> toMap() {
+    private Map<String, Object> toMap() {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("status", status);

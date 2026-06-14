@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -136,7 +137,7 @@ public final class ProjectAddRepoCommand implements Runnable {
                 + " and sail.yaml updated"));
   }
 
-  private SailYaml.Repo collectRepoInteractively(java.io.PrintStream out, Ansi ansi) {
+  private SailYaml.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {
     var repoUrl = promptRequired(out, ansi, "Repo URL");
     var pathDefault = guessRepoPath(repoUrl);
     var path = promptWithDefault(out, ansi, "Local path", pathDefault);
@@ -152,8 +153,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     return repoName;
   }
 
-  private static String promptWithDefault(
-      java.io.PrintStream out, Ansi ansi, String label, String def) {
+  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
     if (!Strings.isEmpty(def)) {
       out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
     } else {
@@ -167,7 +167,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     return line.strip();
   }
 
-  private static String promptRequired(java.io.PrintStream out, Ansi ansi, String label) {
+  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
     while (true) {
       out.print(ansi.string("  @|bold " + label + "|@: "));
       out.flush();

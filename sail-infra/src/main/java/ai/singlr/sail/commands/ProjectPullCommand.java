@@ -13,6 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GitHubFetcher;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.gen.SailYamlGenerator;
@@ -168,7 +169,7 @@ public final class ProjectPullCommand implements Runnable {
       Files.createDirectories(outputPath.getParent());
     }
     Files.writeString(outputPath, resolvedYaml);
-    ai.singlr.sail.engine.ProjectCatalog.record(name, resolvedYaml, null);
+    ProjectCatalog.record(name, resolvedYaml, null);
 
     var outputDir = outputPath.getParent() != null ? outputPath.getParent() : Path.of(".");
     var filesPulled = pullFilesDirectory(token, name, outputDir);
@@ -261,7 +262,7 @@ public final class ProjectPullCommand implements Runnable {
     if (Files.exists(outputPath)) {
       var existingContent = Files.readString(outputPath);
       var existingConfig = SailYaml.fromMap(YamlUtil.parseMap(existingContent));
-      var replacements = new java.util.LinkedHashMap<String, String>();
+      var replacements = new LinkedHashMap<String, String>();
       if (existingConfig.git() != null) {
         if (existingConfig.git().name() != null) {
           replacements.put("${GIT_NAME}", existingConfig.git().name());

@@ -24,6 +24,8 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
@@ -329,8 +331,8 @@ public final class ProjectCreateCommand implements Runnable {
       Files.copy(
           sourceYaml,
           targetYaml,
-          java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-          java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+          StandardCopyOption.REPLACE_EXISTING,
+          StandardCopyOption.COPY_ATTRIBUTES);
     }
     syncFilesDirectory(
         sourceYaml.getParent().resolve("files"), targetYaml.getParent().resolve("files"));
@@ -360,8 +362,8 @@ public final class ProjectCreateCommand implements Runnable {
           Files.copy(
               path,
               destination,
-              java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-              java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+              StandardCopyOption.REPLACE_EXISTING,
+              StandardCopyOption.COPY_ATTRIBUTES);
         }
       }
     }
@@ -372,7 +374,7 @@ public final class ProjectCreateCommand implements Runnable {
       return;
     }
     try (var walk = Files.walk(dir)) {
-      for (var path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+      for (var path : walk.sorted(Comparator.reverseOrder()).toList()) {
         Files.deleteIfExists(path);
       }
     }

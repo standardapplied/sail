@@ -17,6 +17,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -47,7 +48,7 @@ public final class FdeCommand implements Runnable {
     new picocli.CommandLine(this).usage(System.out);
   }
 
-  private static java.nio.file.Path dbPath() {
+  private static Path dbPath() {
     return SailPaths.controlPlaneDb();
   }
 

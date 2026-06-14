@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -90,7 +91,7 @@ public final class AgentLogCommand implements Runnable {
                       + " --task \"...\" --background|@"));
           return;
         }
-        throw new java.io.IOException("Failed to read agent log: " + result.stderr());
+        throw new IOException("Failed to read agent log: " + result.stderr());
       }
 
       if (json) {

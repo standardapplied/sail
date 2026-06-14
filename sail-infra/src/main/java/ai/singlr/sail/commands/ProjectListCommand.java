@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -60,7 +61,7 @@ public final class ProjectListCommand implements Runnable {
   }
 
   private void printJson(List<ContainerManager.ContainerInfo> containers) {
-    var list = new ArrayList<java.util.Map<String, Object>>();
+    var list = new ArrayList<Map<String, Object>>();
     for (var c : containers) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", c.name());

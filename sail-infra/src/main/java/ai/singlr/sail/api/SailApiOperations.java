@@ -734,7 +734,7 @@ public final class SailApiOperations implements ApiOperations {
         report.rollbackSnapshot());
   }
 
-  private static SpecSummaryView summaryView(java.util.Map<String, Integer> counts) {
+  private static SpecSummaryView summaryView(Map<String, Integer> counts) {
     return new SpecSummaryView(
         counts.getOrDefault("pending", 0),
         counts.getOrDefault("in_progress", 0),

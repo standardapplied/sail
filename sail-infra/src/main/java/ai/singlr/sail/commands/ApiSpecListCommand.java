@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,10 +91,10 @@ public final class ApiSpecListCommand implements Runnable {
   @SuppressWarnings("unchecked")
   private void printGroupedByProjectAndStatus(List<Map<String, Object>> specs) {
     var statusOrder = List.of("draft", "pending", "in_progress", "review", "done");
-    var byProject = new java.util.LinkedHashMap<String, List<Map<String, Object>>>();
+    var byProject = new LinkedHashMap<String, List<Map<String, Object>>>();
     for (var spec : specs) {
       var proj = (String) spec.getOrDefault("project", "unassigned");
-      byProject.computeIfAbsent(proj, k -> new java.util.ArrayList<>()).add(spec);
+      byProject.computeIfAbsent(proj, k -> new ArrayList<>()).add(spec);
     }
     for (var projectGroup : byProject.entrySet()) {
       System.out.println(Ansi.AUTO.string("  @|bold,cyan ▸ " + projectGroup.getKey() + "|@"));

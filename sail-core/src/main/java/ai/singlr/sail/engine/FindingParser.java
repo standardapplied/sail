@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.Finding;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,8 +33,8 @@ public final class FindingParser {
   private static ParseResult parseJsonArray(String json) {
     try {
       var list = YamlUtil.parseList(json);
-      var findings = new java.util.ArrayList<Finding>();
-      var warnings = new java.util.ArrayList<String>();
+      var findings = new ArrayList<Finding>();
+      var warnings = new ArrayList<String>();
 
       for (var i = 0; i < list.size(); i++) {
         try {

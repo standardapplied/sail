@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Spec CRUD on SQLite. Every method maps to a small number of SQL statements. No caching, no lazy
@@ -416,8 +417,8 @@ public final class SpecStore implements ConflictResolver {
     return value == null ? null : value.toString();
   }
 
-  private static final java.util.Set<String> SYNC_FIELDS =
-      java.util.Set.of(
+  private static final Set<String> SYNC_FIELDS =
+      Set.of(
           "project",
           "title",
           "status",
@@ -513,8 +514,8 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /** Every entity id this replica knows of, including those only present as a tombstone. */
-  public java.util.Set<String> syncEntityIds() {
-    return new java.util.LinkedHashSet<>(
+  public Set<String> syncEntityIds() {
+    return new LinkedHashSet<>(
         db.query(
             "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
             row -> row.text(0),

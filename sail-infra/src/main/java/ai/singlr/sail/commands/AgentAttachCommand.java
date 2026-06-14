@@ -13,7 +13,9 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -81,7 +83,7 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private AgentCli resolveAgentType() throws java.io.IOException {
+  private AgentCli resolveAgentType() throws IOException {
     var sailYamlPath = SailPaths.resolveSailYaml(name, file);
     if (Files.exists(sailYamlPath)) {
       var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
@@ -100,7 +102,7 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   static List<String> buildIncusExecWithTty(String container, List<String> args) {
-    var cmd = new java.util.ArrayList<String>();
+    var cmd = new ArrayList<String>();
     cmd.add("incus");
     cmd.add("exec");
     cmd.add(container);
