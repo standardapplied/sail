@@ -291,7 +291,8 @@ public final class SchemaManager {
               base_rev TEXT,
               updated_at TEXT NOT NULL,
               UNIQUE (project, path)
-          )""");
+          )""",
+          "ALTER TABLE api_tokens ADD COLUMN expires_at TEXT");
 
   private final Sqlite db;
 

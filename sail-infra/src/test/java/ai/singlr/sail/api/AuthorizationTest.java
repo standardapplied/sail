@@ -70,6 +70,38 @@ class AuthorizationTest {
   }
 
   @Test
+  void memberCannotDispatch() throws Exception {
+    var member = tokenStore.create("m", "member").token();
+    var response = send("POST", "/v1/projects/acme/dispatch", member, "{}");
+    assertEquals(403, response.statusCode(), response.body());
+    assertTrue(response.body().contains("forbidden"), response.body());
+  }
+
+  @Test
+  void adminCanDispatch() throws Exception {
+    var admin = tokenStore.create("a", "admin").token();
+    assertNotEquals(403, send("POST", "/v1/projects/acme/dispatch", admin, "{}").statusCode());
+  }
+
+  @Test
+  void memberCannotApproveAReview() throws Exception {
+    var member = tokenStore.create("m", "member").token();
+    assertEquals(403, send("POST", "/v1/reviews/r1/approve", member, "{}").statusCode());
+  }
+
+  @Test
+  void adminCanApproveAReview() throws Exception {
+    var admin = tokenStore.create("a", "admin").token();
+    assertNotEquals(403, send("POST", "/v1/reviews/r1/approve", admin, "{}").statusCode());
+  }
+
+  @Test
+  void memberCannotDismissAFinding() throws Exception {
+    var member = tokenStore.create("m", "member").token();
+    assertEquals(403, send("POST", "/v1/reviews/r1/dismiss/f1", member, "{}").statusCode());
+  }
+
+  @Test
   void fdeOwnedTokenCanWrite() throws Exception {
     var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
     var token = tokenStore.create("uday-laptop", "admin", fde.id()).token();

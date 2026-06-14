@@ -153,6 +153,7 @@ public final class ApiRouter implements HttpHandler {
       throw methodNotAllowed();
     }
     requireMethod(request, POST);
+    Authorizer.require(exchange, Capability.ADMIN);
     return ApiResponse.from(operations.dispatch(project, JsonBody.readDispatchRequest(exchange)));
   }
 
@@ -251,6 +252,7 @@ public final class ApiRouter implements HttpHandler {
       return switch (sub) {
         case APPROVE -> {
           requireMethod(request, POST);
+          Authorizer.require(exchange, Capability.ADMIN);
           yield ApiResponse.from(operations.approveReview(reviewId, actor(exchange)));
         }
         default -> throw notFound();
@@ -262,6 +264,7 @@ public final class ApiRouter implements HttpHandler {
       var findingId = request.segments().get(4);
       if (DISMISS.equals(sub)) {
         requireMethod(request, POST);
+        Authorizer.require(exchange, Capability.ADMIN);
         return ApiResponse.from(operations.dismissFinding(reviewId, findingId));
       }
     }

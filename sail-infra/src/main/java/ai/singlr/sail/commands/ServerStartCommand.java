@@ -24,6 +24,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ExpiredRowSweeper;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
@@ -155,16 +156,18 @@ public final class ServerStartCommand implements Runnable {
         new SessionAwareAuth(new AuthSessionStore(db), new FdeStore(db), new TokenAuth(tokenStore));
 
     try (var server =
-        new SailApiServer(
-            host,
-            port,
-            operations,
-            auth,
-            bus,
-            persister,
-            SailPaths.apiSocketPath(),
-            passkeyHandler)) {
+            new SailApiServer(
+                host,
+                port,
+                operations,
+                auth,
+                bus,
+                persister,
+                SailPaths.apiSocketPath(),
+                passkeyHandler);
+        var sweeper = new ExpiredRowSweeper(dbPath)) {
       server.start();
+      sweeper.start();
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Sail server listening on http://" + host + ":" + server.port()));

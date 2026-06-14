@@ -157,4 +157,27 @@ class TokenStoreTest {
     var hash2 = TokenStore.sha256("input-b");
     assertNotEquals(hash1, hash2);
   }
+
+  @Test
+  void aTokenWithoutAnExpiryNeverExpires() {
+    var created = store.create("ci", "member");
+    assertNull(created.expiresAt());
+    assertTrue(store.validate(created.token()).isPresent());
+  }
+
+  @Test
+  void aTokenWithinItsLifetimeValidates() {
+    var created = store.create("ci", "member", null, java.time.Duration.ofDays(90));
+    assertNotNull(created.expiresAt());
+    var info = store.validate(created.token()).orElseThrow();
+    assertEquals(created.expiresAt(), info.expiresAt());
+  }
+
+  @Test
+  void anExpiredTokenIsRejectedAndPruned() {
+    var created = store.create("ci", "member", null, java.time.Duration.ofSeconds(-1));
+
+    assertTrue(store.validate(created.token()).isEmpty(), "an expired token does not validate");
+    assertTrue(store.list().isEmpty(), "validation pruned the expired row");
+  }
 }

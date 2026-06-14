@@ -49,6 +49,14 @@ public final class ServerTokenCommand implements Runnable {
     @picocli.CommandLine.Option(names = "--fde", description = "Owning FDE handle.")
     private String fde;
 
+    @picocli.CommandLine.Option(
+        names = "--ttl-days",
+        description = "Token lifetime in days (default 90).")
+    private Integer ttlDays;
+
+    @picocli.CommandLine.Option(names = "--no-expiry", description = "Token never expires.")
+    private boolean noExpiry;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -56,16 +64,41 @@ public final class ServerTokenCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
+            var ttl = resolveTtl(noExpiry, ttlDays);
             try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
               var fdeId = resolveFdeId(db);
-              var created = new TokenStore(db).create(name, role, fdeId);
+              var created = new TokenStore(db).create(name, role, fdeId, ttl);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
               System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
               System.out.println(
+                  Ansi.AUTO.string(
+                      "    @|faint "
+                          + (created.expiresAt() == null
+                              ? "Never expires."
+                              : "Expires " + created.expiresAt() + ".")
+                          + "|@"));
+              System.out.println(
                   Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
             }
           });
+    }
+
+    /** Resolves the requested lifetime; {@code null} never expires. Visible for tests. */
+    static java.time.Duration resolveTtl(boolean noExpiry, Integer ttlDays) {
+      if (noExpiry && ttlDays != null) {
+        throw new IllegalArgumentException("Pass --ttl-days or --no-expiry, not both.");
+      }
+      if (noExpiry) {
+        return null;
+      }
+      if (ttlDays == null) {
+        return TokenStore.DEFAULT_TTL;
+      }
+      if (ttlDays <= 0) {
+        throw new IllegalArgumentException("--ttl-days must be a positive number of days.");
+      }
+      return java.time.Duration.ofDays(ttlDays);
     }
 
     private String resolveFdeId(Sqlite db) {
@@ -99,8 +132,11 @@ public final class ServerTokenCommand implements Runnable {
                 return;
               }
               for (var token : tokens) {
+                var expiry =
+                    token.expiresAt() == null ? "never expires" : "expires " + token.expiresAt();
                 System.out.printf(
-                    "  %-20s  %-8s  created %s%n", token.name(), token.role(), token.createdAt());
+                    "  %-20s  %-8s  created %s  (%s)%n",
+                    token.name(), token.role(), token.createdAt(), expiry);
               }
             }
           });
