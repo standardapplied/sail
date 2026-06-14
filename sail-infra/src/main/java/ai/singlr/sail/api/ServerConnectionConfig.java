@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
@@ -19,10 +20,12 @@ import java.util.Set;
 /**
  * Resolves server connection details. Resolution order for URL: {@code --server} flag → {@code
  * SAIL_SERVER} env → config file → {@code http://localhost:7070}. Resolution order for token:
- * {@code --token} flag → {@code SAIL_TOKEN} env → config file.
+ * {@code --token} flag → {@code --token-file} → {@code SAIL_TOKEN} env → {@code SAIL_TOKEN_FILE}
+ * env → config file. The file/env paths exist so a token need never appear on the command line,
+ * where it leaks into the process list ({@code /proc}, {@code ps}) and shell history.
  *
  * <p>The config file lives at {@link SailPaths#clientConfigPath()} in production; tests pass an
- * explicit path via the three-arg {@link #resolve(String, String, Path)} overload.
+ * explicit path via the {@link #resolve(String, String, Path)} overloads.
  */
 public record ServerConnectionConfig(String serverUrl, String token) {
 
@@ -32,19 +35,20 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     return resolve(null, null, SailPaths.clientConfigPath());
   }
 
-  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag)
+  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag, Path configPath)
       throws IOException {
-    return resolve(serverFlag, tokenFlag, SailPaths.clientConfigPath());
+    return resolve(serverFlag, tokenFlag, null, configPath);
   }
 
   @SuppressWarnings("unchecked")
-  public static ServerConnectionConfig resolve(String serverFlag, String tokenFlag, Path configPath)
-      throws IOException {
+  public static ServerConnectionConfig resolve(
+      String serverFlag, String tokenFlag, Path tokenFileFlag, Path configPath) throws IOException {
     var url = serverFlag;
-    var token = tokenFlag;
+    var token = tokenFlag != null ? tokenFlag : readTokenFile(tokenFileFlag);
 
     if (url == null) url = envOrProperty("SAIL_SERVER");
     if (token == null) token = envOrProperty("SAIL_TOKEN");
+    if (token == null) token = readTokenFile(envPath("SAIL_TOKEN_FILE"));
 
     if ((url == null || token == null) && Files.exists(configPath)) {
       var config = YamlUtil.parseFile(configPath);
@@ -54,9 +58,24 @@ public record ServerConnectionConfig(String serverUrl, String token) {
 
     if (url == null) url = DEFAULT_URL;
     if (token == null) {
-      throw new IOException("No API token configured. Set SAIL_TOKEN or run 'sail init'.");
+      throw new IOException(
+          "No API token configured. Set SAIL_TOKEN, pass --token-file, or run 'sail login'.");
     }
     return new ServerConnectionConfig(url, token);
+  }
+
+  /** Reads a token from a file, trimming surrounding whitespace; {@code null} path yields null. */
+  private static String readTokenFile(Path path) throws IOException {
+    if (path == null) {
+      return null;
+    }
+    var token = Files.readString(path).strip();
+    return Strings.isEmpty(token) ? null : token;
+  }
+
+  private static Path envPath(String name) {
+    var value = envOrProperty(name);
+    return Strings.isBlank(value) ? null : Path.of(value);
   }
 
   public static void saveLocalToken(String token, Path configPath) throws IOException {

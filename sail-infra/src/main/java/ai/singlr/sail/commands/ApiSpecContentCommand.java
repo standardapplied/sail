@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.nio.file.Files;
@@ -14,6 +13,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -37,11 +37,7 @@ public final class ApiSpecContentCommand implements Runnable {
   @Option(names = "--plan-file", description = "Path to plan markdown file.")
   private Path planFile;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -55,7 +51,7 @@ public final class ApiSpecContentCommand implements Runnable {
 
   private void execute() throws Exception {
     NameValidator.requireValidSpecId(specId);
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
 
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       if (set) {

@@ -6,13 +6,13 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
@@ -42,11 +42,7 @@ public final class ApiSpecListCommand implements Runnable {
       description = "Search by ID or title.")
   private String query;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -60,7 +56,7 @@ public final class ApiSpecListCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
     var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var params = new StringBuilder("/v1/specs?");

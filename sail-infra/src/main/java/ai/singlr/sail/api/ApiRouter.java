@@ -18,6 +18,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public final class ApiRouter implements HttpHandler {
 
@@ -52,12 +53,21 @@ public final class ApiRouter implements HttpHandler {
   private static final int MAX_TAIL = 5000;
   private static final int DEFAULT_RECENT = 100;
 
+  private static final int DEFAULT_PERMITS_PER_MINUTE = 600;
+  private static final int DEFAULT_BURST = 600;
+
   private final ApiOperations operations;
   private final ApiAuth auth;
+  private final RateLimiter rateLimiter;
 
   public ApiRouter(ApiOperations operations, ApiAuth auth) {
+    this(operations, auth, RateLimiter.perMinute(DEFAULT_PERMITS_PER_MINUTE, DEFAULT_BURST));
+  }
+
+  public ApiRouter(ApiOperations operations, ApiAuth auth, RateLimiter rateLimiter) {
     this.operations = operations;
     this.auth = auth;
+    this.rateLimiter = rateLimiter;
   }
 
   @Override
@@ -94,6 +104,7 @@ public final class ApiRouter implements HttpHandler {
     }
 
     auth.require(exchange);
+    requireWithinRateLimit(exchange);
     Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
 
     if (request.hasEventsPrefix()) {
@@ -124,6 +135,21 @@ public final class ApiRouter implements HttpHandler {
       case AGENT -> routeAgent(request, project);
       default -> throw notFound();
     };
+  }
+
+  /**
+   * Throttles per credential after authentication, so one client (a token's worth of identity)
+   * cannot exhaust the server. Keyed by token name; the role gate runs next, so even a request the
+   * caller is not authorized for still counts against their budget.
+   */
+  private void requireWithinRateLimit(HttpExchange exchange) {
+    var key = Objects.toString(exchange.getAttribute("token.name"), "anonymous");
+    if (!rateLimiter.tryAcquire(key)) {
+      throw new ApiException(
+          ErrorCode.RATE_LIMITED,
+          "Rate limit exceeded. Slow down and retry shortly.",
+          "This credential exceeded " + DEFAULT_PERMITS_PER_MINUTE + " requests per minute.");
+    }
   }
 
   private ApiResponse routeProject(RouteRequest request, String project) {

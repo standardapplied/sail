@@ -216,6 +216,41 @@ class WebauthnAuthHandlerTest {
   }
 
   @Test
+  void loginFinishDecodesAndForwardsTheUserHandle() throws Exception {
+    var ceremonies = new FakeCeremonies();
+    startWith(ceremonies);
+    var body =
+        "{\"challenge_id\":\"wac_login\",\"credential_id\":\"AAAA\",\"client_data_json\":\"AAAA\","
+            + "\"authenticator_data\":\"AAAA\",\"signature\":\"AAAA\",\"user_handle\":\"AQID\"}";
+
+    assertEquals(200, post("/v1/auth/login/finish", null, body).statusCode());
+    assertArrayEquals(new byte[] {1, 2, 3}, ceremonies.lastUserHandle);
+  }
+
+  @Test
+  void loginFinishTreatsAnAbsentUserHandleAsNull() throws Exception {
+    var ceremonies = new FakeCeremonies();
+    startWith(ceremonies);
+    var body =
+        "{\"challenge_id\":\"wac_login\",\"credential_id\":\"AAAA\",\"client_data_json\":\"AAAA\","
+            + "\"authenticator_data\":\"AAAA\",\"signature\":\"AAAA\"}";
+
+    assertEquals(200, post("/v1/auth/login/finish", null, body).statusCode());
+    assertTrue(ceremonies.userHandleSeen);
+    assertNull(ceremonies.lastUserHandle);
+  }
+
+  @Test
+  void loginFinishRejectsAMalformedUserHandle() throws Exception {
+    startWith(new FakeCeremonies());
+    var body =
+        "{\"challenge_id\":\"wac_login\",\"credential_id\":\"AAAA\",\"client_data_json\":\"AAAA\","
+            + "\"authenticator_data\":\"AAAA\",\"signature\":\"AAAA\",\"user_handle\":\"!!!\"}";
+
+    assertEquals(422, post("/v1/auth/login/finish", null, body).statusCode());
+  }
+
+  @Test
   void loginFinishMapsUnauthorized() throws Exception {
     startWith(new FakeCeremonies());
     var body =
@@ -467,6 +502,9 @@ class WebauthnAuthHandlerTest {
 
   private static final class FakeCeremonies implements PasskeyCeremonies {
 
+    byte[] lastUserHandle;
+    boolean userHandleSeen;
+
     @Override
     public Ceremony startRegistration(String fdeHandle) {
       return switch (fdeHandle) {
@@ -497,10 +535,13 @@ class WebauthnAuthHandlerTest {
         byte[] credentialId,
         byte[] clientDataJson,
         byte[] authenticatorData,
-        byte[] signature) {
+        byte[] signature,
+        byte[] userHandle) {
       if ("bad".equals(challengeId)) {
         throw new PasskeyException(PasskeyException.Kind.UNAUTHORIZED, "auth failed");
       }
+      this.lastUserHandle = userHandle;
+      this.userHandleSeen = true;
       return new LoginResult("sess_fake", "uday", "2026-06-01T00:00:00Z");
     }
   }

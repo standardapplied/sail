@@ -6,11 +6,11 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
@@ -23,11 +23,7 @@ public final class ApiSpecBoardCommand implements Runnable {
       description = "Scope the board to one client project. Inferred from cwd's sail.yaml.")
   private String project;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -40,7 +36,7 @@ public final class ApiSpecBoardCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
     var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
     var path =
         resolvedProject != null ? "/v1/specs/board?project=" + resolvedProject : "/v1/specs/board";

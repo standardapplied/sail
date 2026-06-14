@@ -126,6 +126,7 @@ public final class WebauthnPageHandler implements HttpHandler {
             client_data_json: bufToB64url(r.clientDataJSON),
             authenticator_data: bufToB64url(r.authenticatorData),
             signature: bufToB64url(r.signature),
+            user_handle: r.userHandle ? bufToB64url(r.userHandle) : null,
           }));
           setStatus('Signed in as ' + out.fde + '.');
           if (!handBack(out.session_token)) {

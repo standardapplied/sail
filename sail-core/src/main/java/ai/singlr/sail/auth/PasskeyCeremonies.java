@@ -40,11 +40,16 @@ public interface PasskeyCeremonies {
   /** Begins a discoverable-credential login: issues an assertion challenge and request options. */
   Ceremony startLogin();
 
-  /** Verifies an assertion and, on success, issues a session for the credential's owner. */
+  /**
+   * Verifies an assertion and, on success, issues a session for the credential's owner. {@code
+   * userHandle} is the user id the authenticator returned (may be {@code null} when absent); when
+   * present it must identify the same owner as the credential, per WebAuthn §7.2.
+   */
   LoginResult finishLogin(
       String challengeId,
       byte[] credentialId,
       byte[] clientDataJson,
       byte[] authenticatorData,
-      byte[] signature);
+      byte[] signature,
+      byte[] userHandle);
 }

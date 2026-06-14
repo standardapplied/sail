@@ -165,6 +165,49 @@ class ServerConnectionConfigTest {
   }
 
   @Test
+  void aTokenFileSuppliesTheTokenAndIsTrimmed() throws IOException {
+    var tokenFile = tempDir.resolve("token");
+    Files.writeString(tokenFile, "  sail_fromfile\n");
+
+    var resolved = ServerConnectionConfig.resolve(null, null, tokenFile, missingConfig());
+
+    assertEquals("sail_fromfile", resolved.token());
+  }
+
+  @Test
+  void theTokenFlagWinsOverATokenFile() throws IOException {
+    var tokenFile = tempDir.resolve("token");
+    Files.writeString(tokenFile, "from-file");
+
+    var resolved = ServerConnectionConfig.resolve(null, "from-flag", tokenFile, missingConfig());
+
+    assertEquals("from-flag", resolved.token());
+  }
+
+  @Test
+  void aBlankTokenFileFallsThroughToTheNextSource() throws IOException {
+    var tokenFile = tempDir.resolve("blank");
+    Files.writeString(tokenFile, "   \n");
+
+    assertThrows(
+        IOException.class,
+        () -> ServerConnectionConfig.resolve(null, null, tokenFile, missingConfig()));
+  }
+
+  @Test
+  void sailTokenFileEnvSuppliesTheToken() throws IOException {
+    var tokenFile = tempDir.resolve("env-token");
+    Files.writeString(tokenFile, "sail_fromenvfile");
+    System.setProperty("SAIL_TOKEN_FILE", tokenFile.toString());
+    try {
+      var resolved = ServerConnectionConfig.resolve(null, null, null, missingConfig());
+      assertEquals("sail_fromenvfile", resolved.token());
+    } finally {
+      System.clearProperty("SAIL_TOKEN_FILE");
+    }
+  }
+
+  @Test
   void saveLocalTokenUsesDefaultUrl() throws IOException {
     var configFile = tempDir.resolve("token-only.yaml");
     ServerConnectionConfig.saveLocalToken("my-token", configFile);

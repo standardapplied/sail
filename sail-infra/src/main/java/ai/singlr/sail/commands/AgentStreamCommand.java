@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.ServerConnectionConfig;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -15,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -36,11 +36,7 @@ public final class AgentStreamCommand implements Runnable {
   @Option(names = "--since", description = "Resume from line number.", defaultValue = "0")
   private int since;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Spec private CommandSpec commandSpec;
 
@@ -50,7 +46,7 @@ public final class AgentStreamCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
     var path = "/v1/projects/" + project + "/agent/stream" + (since > 0 ? "?since=" + since : "");
     var uri = URI.create(config.serverUrl() + path);
 

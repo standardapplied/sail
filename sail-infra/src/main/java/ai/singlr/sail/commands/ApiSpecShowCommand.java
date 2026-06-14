@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
@@ -14,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -28,11 +28,7 @@ public final class ApiSpecShowCommand implements Runnable {
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -47,7 +43,7 @@ public final class ApiSpecShowCommand implements Runnable {
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
     NameValidator.requireValidSpecId(specId);
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var result = client.get("/v1/specs/" + specId);
 

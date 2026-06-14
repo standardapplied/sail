@@ -6,12 +6,12 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -26,11 +26,7 @@ public final class ApiSpecDeleteCommand implements Runnable {
   @Option(names = "--force", description = "Skip confirmation.")
   private boolean force;
 
-  @Option(names = "--server", description = "Server URL.")
-  private String server;
-
-  @Option(names = "--token", description = "API token.")
-  private String token;
+  @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -54,7 +50,7 @@ public final class ApiSpecDeleteCommand implements Runnable {
       }
     }
 
-    var config = ServerConnectionConfig.resolve(server, token);
+    var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var result = client.delete("/v1/specs/" + specId);
 

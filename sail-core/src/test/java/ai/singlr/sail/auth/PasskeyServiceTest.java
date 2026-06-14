@@ -86,7 +86,8 @@ class PasskeyServiceTest {
             assertion.credentialId(),
             assertion.clientDataJson(),
             assertion.authenticatorData(),
-            assertion.signature());
+            assertion.signature(),
+            null);
 
     assertEquals("uday", result.fdeHandle());
     assertTrue(result.sessionToken().startsWith("sess_"));
@@ -104,7 +105,8 @@ class PasskeyServiceTest {
           assertion.credentialId(),
           assertion.clientDataJson(),
           assertion.authenticatorData(),
-          assertion.signature());
+          assertion.signature(),
+          null);
     }
     assertEquals(
         2, credentials.findByCredentialId(authenticator.credentialId()).orElseThrow().signCount());
@@ -191,7 +193,8 @@ class PasskeyServiceTest {
                     assertion.credentialId(),
                     assertion.clientDataJson(),
                     assertion.authenticatorData(),
-                    assertion.signature()));
+                    assertion.signature(),
+                    null));
     assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
   }
 
@@ -208,7 +211,8 @@ class PasskeyServiceTest {
                     stranger.credentialId(),
                     stranger.clientDataJson(),
                     stranger.authenticatorData(),
-                    stranger.signature()));
+                    stranger.signature(),
+                    null));
     assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
   }
 
@@ -230,7 +234,47 @@ class PasskeyServiceTest {
                     assertion.credentialId(),
                     tampered,
                     assertion.authenticatorData(),
-                    assertion.signature()));
+                    assertion.signature(),
+                    null));
+    assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
+  }
+
+  @Test
+  void finishLoginAcceptsAMatchingUserHandle() {
+    enroll("uday");
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+    var fdeId = credentials.findByCredentialId(authenticator.credentialId()).orElseThrow().fdeId();
+
+    var result =
+        service.finishLogin(
+            login.challengeId(),
+            assertion.credentialId(),
+            assertion.clientDataJson(),
+            assertion.authenticatorData(),
+            assertion.signature(),
+            fdeId.getBytes(StandardCharsets.UTF_8));
+
+    assertEquals("uday", result.fdeHandle());
+  }
+
+  @Test
+  void finishLoginRejectsAUserHandleForAnotherAccount() {
+    enroll("uday");
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+
+    var e =
+        assertThrows(
+            PasskeyException.class,
+            () ->
+                service.finishLogin(
+                    login.challengeId(),
+                    assertion.credentialId(),
+                    assertion.clientDataJson(),
+                    assertion.authenticatorData(),
+                    assertion.signature(),
+                    "some-other-fde-id".getBytes(StandardCharsets.UTF_8)));
     assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
   }
 }

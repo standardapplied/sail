@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * A single reviewable issue discovered by a review agent. Immutable, evidence-based, and
@@ -98,7 +98,7 @@ public record Finding(
       Suggestion suggestion,
       double confidence) {
     return new Finding(
-        UUID.randomUUID().toString(),
+        DateTimeUtils.newId().toString(),
         severity,
         category,
         file,
@@ -115,7 +115,7 @@ public record Finding(
   @SuppressWarnings("unchecked")
   public static Finding fromMap(Map<String, Object> map) {
     return new Finding(
-        (String) map.getOrDefault("id", UUID.randomUUID().toString()),
+        (String) map.getOrDefault("id", DateTimeUtils.newId().toString()),
         Severity.parse((String) map.get("severity")),
         Category.parse((String) map.get("category")),
         (String) map.get("file"),

@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Agent session CRUD on SQLite. Tracks when agents start and stop, which spec they worked on, and
@@ -37,7 +37,7 @@ public final class SessionStore {
 
   public String create(
       String project, String specId, String agent, String branch, String task, Integer pid) {
-    var id = UUID.randomUUID().toString();
+    var id = DateTimeUtils.newId().toString();
     db.execute(
         """
         INSERT INTO agent_sessions (id, project, spec_id, agent, branch, task, pid, status, started_at)

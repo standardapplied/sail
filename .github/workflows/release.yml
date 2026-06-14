@@ -21,10 +21,13 @@ jobs:
             binary-name: sail-darwin-arm64
             checksum-cmd: shasum -a 256
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: graalvm/setup-graalvm@v1
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
         with:
           java-version: '25'
           distribution: 'graalvm'
@@ -45,33 +48,62 @@ jobs:
       - name: Generate checksum
         run: ${{ matrix.checksum-cmd }} sail-infra/target/${{ matrix.binary-name }} | awk '{print $1}' > sail-infra/target/${{ matrix.binary-name }}.sha256
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign binary (keyless)
+        run: >
+          cosign sign-blob --yes
+          --bundle sail-infra/target/${{ matrix.binary-name }}.cosign.bundle
+          sail-infra/target/${{ matrix.binary-name }}
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.binary-name }}
           path: |
             sail-infra/target/${{ matrix.binary-name }}
             sail-infra/target/${{ matrix.binary-name }}.sha256
+            sail-infra/target/${{ matrix.binary-name }}.cosign.bundle
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
 
       - name: Create short Linux alias
         run: |
           cp sail-linux-amd64/sail-linux-amd64 sail-linux-amd64/sail
           cp sail-linux-amd64/sail-linux-amd64.sha256 sail-linux-amd64/sail.sha256
+          cp sail-linux-amd64/sail-linux-amd64.cosign.bundle sail-linux-amd64/sail.cosign.bundle
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             sail-linux-amd64/sail
             sail-linux-amd64/sail.sha256
+            sail-linux-amd64/sail.cosign.bundle
             sail-linux-amd64/sail-linux-amd64
             sail-linux-amd64/sail-linux-amd64.sha256
+            sail-linux-amd64/sail-linux-amd64.cosign.bundle
             sail-darwin-arm64/sail-darwin-arm64
             sail-darwin-arm64/sail-darwin-arm64.sha256
+            sail-darwin-arm64/sail-darwin-arm64.cosign.bundle
           generate_release_notes: true
+          body: |
+            ### Verifying this release
+
+            Each binary is signed keylessly with [cosign](https://docs.sigstore.dev/) (Sigstore,
+            GitHub OIDC — no long-lived keys). Verify a download against its bundle:
+
+            ```sh
+            cosign verify-blob \
+              --bundle sail-linux-amd64.cosign.bundle \
+              --certificate-identity-regexp '^https://github.com/singlr-ai/sing/.github/workflows/release.yml@.*' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              sail-linux-amd64
+            ```
+
+            The `.sha256` files remain for a plain checksum check.

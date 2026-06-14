@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.PasskeyCeremonies;
 import ai.singlr.sail.auth.PasskeyException;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -178,7 +179,8 @@ public final class WebauthnAuthHandler implements HttpHandler {
             decode(body, "credential_id"),
             decode(body, "client_data_json"),
             decode(body, "authenticator_data"),
-            decode(body, "signature"));
+            decode(body, "signature"),
+            optionalDecode(body, "user_handle"));
     var result = new LinkedHashMap<String, Object>();
     result.put("session_token", login.sessionToken());
     result.put("fde", login.fdeHandle());
@@ -222,6 +224,19 @@ public final class WebauthnAuthHandler implements HttpHandler {
   private static byte[] decode(Map<String, Object> body, String key) {
     try {
       return B64URL.decode(requireString(body, key));
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST, "Field '" + key + "' is not valid base64url.");
+    }
+  }
+
+  private static byte[] optionalDecode(Map<String, Object> body, String key) {
+    var value = optionalString(body, key);
+    if (Strings.isBlank(value)) {
+      return null;
+    }
+    try {
+      return B64URL.decode(value);
     } catch (IllegalArgumentException e) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST, "Field '" + key + "' is not valid base64url.");

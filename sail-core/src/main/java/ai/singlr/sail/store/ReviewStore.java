@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Review, stage, and finding CRUD on SQLite. Each review belongs to a spec and tracks one pass
@@ -42,7 +42,7 @@ public final class ReviewStore {
       String completedAt) {}
 
   public String createReview(String specId, int iteration) {
-    var id = UUID.randomUUID().toString();
+    var id = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
         id,
@@ -100,7 +100,7 @@ public final class ReviewStore {
   }
 
   public String createStage(String reviewId, String name, String stageType) {
-    var id = UUID.randomUUID().toString();
+    var id = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO review_stages (id, review_id, name, stage_type, status) VALUES (?, ?, ?, ?, 'pending')",
         id,

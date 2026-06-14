@@ -13,6 +13,7 @@ import ai.singlr.sail.webauthn.RegisteredCredential;
 import ai.singlr.sail.webauthn.RelyingParty;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -107,10 +108,14 @@ public final class PasskeyService implements PasskeyCeremonies {
       byte[] credentialId,
       byte[] clientDataJson,
       byte[] authenticatorData,
-      byte[] signature) {
+      byte[] signature,
+      byte[] userHandle) {
     var pending = challenges.consume(challengeId, ASSERT).orElseThrow(PasskeyService::loginFailed);
     var credential =
         credentials.findByCredentialId(credentialId).orElseThrow(PasskeyService::loginFailed);
+    if (!userHandleMatches(userHandle, credential.fdeId())) {
+      throw loginFailed();
+    }
     long newSignCount;
     try {
       newSignCount =
@@ -129,6 +134,20 @@ public final class PasskeyService implements PasskeyCeremonies {
     credentials.recordUse(credentialId, newSignCount);
     var session = sessions.create(credential.fdeId(), SESSION_TTL);
     return new LoginResult(session.token(), handleOf(credential.fdeId()), session.expiresAt());
+  }
+
+  /**
+   * Defense in depth (WebAuthn §7.2): a discoverable credential's assertion carries the user handle
+   * the authenticator holds. When present it must equal the owner of the credential we resolved by
+   * id — registration set the handle to {@code fde.id} bytes — so a credential can never be
+   * replayed against a different account. Absent (a non-discoverable authenticator) leaves the
+   * already-proven credential-id + signature as the binding.
+   */
+  private static boolean userHandleMatches(byte[] userHandle, String fdeId) {
+    if (userHandle == null || userHandle.length == 0) {
+      return true;
+    }
+    return Arrays.equals(userHandle, fdeId.getBytes(StandardCharsets.UTF_8));
   }
 
   private static PasskeyException loginFailed() {
