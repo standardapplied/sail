@@ -13,19 +13,18 @@ import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The client side in isolation: a canned server reply drives {@link RemoteMainReplica} so its
- * caching and every protocol-violation guard are exercised without a real channel.
+ * The client side in isolation: a canned server reply drives a typed {@link RemoteMainReplica} so
+ * its caching and every protocol-violation guard are exercised without a real channel.
  */
 class RemoteMainReplicaTest {
 
   private static RemoteMainReplica replica(String serverLine) {
-    return new RemoteMainReplica(new StringReader(serverLine + "\n"), new StringWriter());
+    return new RemoteMainReplica(new StringReader(serverLine + "\n"), new StringWriter(), "spec");
   }
 
   @Test
@@ -63,46 +62,33 @@ class RemoteMainReplicaTest {
   }
 
   @Test
-  void fetchFdesReturnsMainsRoster() {
-    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
-    var replica = replica(SyncWire.encode(new SyncWire.Fdes(roster)));
-
-    var pulled = replica.fetchFdes();
-    assertEquals(1, pulled.size());
-    assertEquals("ada", pulled.getFirst().get("handle"));
-  }
-
-  @Test
-  void aNonRosterReplyToFetchFdesIsRejected() {
-    var replica = replica(SyncWire.encode(new SyncWire.Committed("1-a", 1)));
-    assertThrows(SyncTransportException.class, replica::fetchFdes);
-  }
-
-  @Test
   void aChannelClosedBeforeAReplyIsReported() {
-    var replica = new RemoteMainReplica(new StringReader(""), new StringWriter());
+    var replica = new RemoteMainReplica(new StringReader(""), new StringWriter(), "spec");
     assertThrows(SyncTransportException.class, replica::entityIds);
   }
 
   @Test
-  void closeSendsBye() {
-    var out = new StringWriter();
-    try (var replica = new RemoteMainReplica(new StringReader(""), out)) {
-      assertNotNull(replica);
-    }
-    assertEquals(new SyncWire.Bye(), SyncWire.decodeRequest(out.toString().strip()));
-  }
-
-  @Test
   void aBrokenChannelOnSendRaisesUnchecked() {
-    var replica = new RemoteMainReplica(new StringReader(""), brokenWriter());
+    var replica = new RemoteMainReplica(new StringReader(""), brokenWriter(), "spec");
     assertThrows(UncheckedIOException.class, replica::entityIds);
   }
 
   @Test
-  void aBrokenChannelOnCloseRaisesUnchecked() {
-    var replica = new RemoteMainReplica(new StringReader(""), brokenWriter());
-    assertThrows(UncheckedIOException.class, replica::close);
+  void aBrokenChannelOnReadRaisesUnchecked() {
+    var replica = new RemoteMainReplica(brokenReader(), new StringWriter(), "spec");
+    assertThrows(UncheckedIOException.class, replica::entityIds);
+  }
+
+  private static java.io.Reader brokenReader() {
+    return new java.io.Reader() {
+      @Override
+      public int read(char[] buffer, int offset, int length) throws IOException {
+        throw new IOException("channel down");
+      }
+
+      @Override
+      public void close() {}
+    };
   }
 
   private static Writer brokenWriter() {

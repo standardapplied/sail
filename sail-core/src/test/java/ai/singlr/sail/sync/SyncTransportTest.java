@@ -8,7 +8,11 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.*;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.SyncState;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PipedReader;
@@ -16,6 +20,7 @@ import java.io.PipedWriter;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,14 +84,61 @@ class SyncTransportTest {
                   }
                 });
 
-    try (var remote = new RemoteMainReplica(clientIn, toServer)) {
-      engine.reconcile(nodeA.replica, remote);
-      var pulled = remote.fetchFdes();
+    try (var session = new SyncSession(clientIn, toServer)) {
+      engine.reconcile(nodeA.replica, session.replica("spec"));
+      var pulled = session.fetchFdes();
       assertEquals(1, pulled.size());
       assertEquals("ada", pulled.getFirst().get("handle"));
     } finally {
       serverThread.join();
     }
+  }
+
+  @Test
+  void specsAndFilesReconcileOverTheWireInOneSession() throws Exception {
+    var mainFiles = new FileStore(main.db);
+    var nodeFiles = new FileStore(nodeA.db);
+    var nodeFileReplica =
+        new FileReplica(
+            "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
+    var mainFileReplica =
+        new FileReplica(
+            "main",
+            mainFiles,
+            new ChangeLog(main.db),
+            new SyncConflicts(main.db),
+            new SyncState(main.db));
+
+    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeFiles.put("acme", "scripts/deploy.sh", "ZGVwbG95");
+
+    var toServer = new PipedWriter();
+    var serverIn = new BufferedReader(new PipedReader(toServer));
+    var toClient = new PipedWriter();
+    var clientIn = new BufferedReader(new PipedReader(toClient));
+    var server =
+        new SyncRpcServer(
+            Map.of("spec", main.replica, "file", mainFileReplica), true, FdeRoster.EMPTY);
+    var serverThread =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    server.serve(serverIn, toClient);
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                });
+
+    try (var session = new SyncSession(clientIn, toServer)) {
+      engine.reconcile(nodeA.replica, session.replica("spec"));
+      engine.reconcile(nodeFileReplica, session.replica("file"));
+    } finally {
+      serverThread.join();
+    }
+
+    assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
+    assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
   }
 
   private SyncEngine.Report syncOverWire(SyncBox node, boolean writable) throws Exception {
@@ -107,8 +159,8 @@ class SyncTransportTest {
                   }
                 });
 
-    try (var remote = new RemoteMainReplica(clientIn, toServer)) {
-      return engine.reconcile(node.replica, remote);
+    try (var session = new SyncSession(clientIn, toServer)) {
+      return engine.reconcile(node.replica, session.replica("spec"));
     } finally {
       serverThread.join();
     }
@@ -245,7 +297,8 @@ class SyncTransportTest {
                   }
                 });
 
-    try (var remoteA = new RemoteMainReplica(clientIn, toServer)) {
+    try (var session = new SyncSession(clientIn, toServer)) {
+      var remoteA = session.replica("spec");
       remoteA.entityIds();
       syncToMain(nodeB);
       var report = engine.reconcile(nodeA.replica, remoteA);

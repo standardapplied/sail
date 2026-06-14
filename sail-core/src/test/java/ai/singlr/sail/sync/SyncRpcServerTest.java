@@ -64,18 +64,19 @@ class SyncRpcServerTest {
 
   @Test
   void fetchIsAnswered() throws Exception {
-    assertInstanceOf(SyncWire.Fetched.class, serve(true, new SyncWire.Fetch()));
+    assertInstanceOf(SyncWire.Fetched.class, serve(true, new SyncWire.Fetch("spec")));
   }
 
   @Test
   void aWritableServerAcceptsACommit() throws Exception {
-    var response = serve(true, new SyncWire.Commit("a", Map.of(), null));
+    var response = serve(true, new SyncWire.Commit("spec", "a", Map.of(), null));
     assertEquals("1-x", assertInstanceOf(SyncWire.Committed.class, response).rev());
   }
 
   @Test
   void aReadOnlyServerRefusesACommit() throws Exception {
-    assertInstanceOf(SyncWire.Failed.class, serve(false, new SyncWire.Commit("a", Map.of(), null)));
+    assertInstanceOf(
+        SyncWire.Failed.class, serve(false, new SyncWire.Commit("spec", "a", Map.of(), null)));
   }
 
   @Test
@@ -92,5 +93,16 @@ class SyncRpcServerTest {
   @Test
   void fetchFdesDefaultsToAnEmptyRoster() throws Exception {
     assertInstanceOf(SyncWire.Fdes.class, serve(true, new SyncWire.FetchFdes()));
+  }
+
+  @Test
+  void anUnknownEntityTypeFetchIsRefused() throws Exception {
+    assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("bogus")));
+  }
+
+  @Test
+  void anUnknownEntityTypeCommitIsRefused() throws Exception {
+    assertInstanceOf(
+        SyncWire.Failed.class, serve(true, new SyncWire.Commit("bogus", "a", Map.of(), null)));
   }
 }

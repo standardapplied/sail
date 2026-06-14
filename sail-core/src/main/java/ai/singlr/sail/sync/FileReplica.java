@@ -7,8 +7,8 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.PushOutcome;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.util.List;
@@ -17,31 +17,29 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Adapts a single box's spec stores to the sync roles. The same box can act as the node ({@link
- * LocalReplica}) when it syncs up to main, and as the authority ({@link MainReplica}) when another
- * node syncs to it — so the in-process two-node harness wires two {@code SpecReplica}s together,
- * and brick 4 swaps the {@link MainReplica} side for a transport adapter without the engine
- * changing. Pure delegation to {@link SpecStore} (revisions), {@link SyncConflicts} (parked
- * conflicts), and {@link SyncState} (checkpoint) — no logic of its own beyond serialization.
+ * Adapts one box's {@link FileStore} to the sync roles, so the {@link SyncEngine} reconciles shared
+ * project files bidirectionally with main exactly as it does specs — a different entity type
+ * ({@code file}) over the same channel. Pure delegation to {@link FileStore} (revisions), {@link
+ * SyncConflicts} (parked conflicts), and {@link SyncState} (checkpoint).
  */
-public final class SpecReplica implements LocalReplica, MainReplica {
+public final class FileReplica implements LocalReplica, MainReplica {
 
-  private static final String ENTITY = "spec";
+  private static final String ENTITY = "file";
 
   private final String id;
-  private final SpecStore specs;
+  private final FileStore files;
   private final ChangeLog changeLog;
   private final SyncConflicts conflicts;
   private final SyncState syncState;
 
-  public SpecReplica(
+  public FileReplica(
       String id,
-      SpecStore specs,
+      FileStore files,
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState) {
     this.id = Objects.requireNonNull(id, "id");
-    this.specs = Objects.requireNonNull(specs, "specs");
+    this.files = Objects.requireNonNull(files, "files");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
@@ -54,32 +52,32 @@ public final class SpecReplica implements LocalReplica, MainReplica {
 
   @Override
   public Set<String> entityIds() {
-    return specs.syncEntityIds();
+    return files.syncEntityIds();
   }
 
   @Override
   public Map<String, Object> current(String entityId) {
-    return specs.comparableSnapshot(entityId);
+    return files.comparableSnapshot(entityId);
   }
 
   @Override
   public Map<String, Object> base(String entityId) {
-    return specs.comparableAtRev(entityId, specs.baseRevOf(entityId));
+    return files.comparableAtRev(entityId, files.baseRevOf(entityId));
   }
 
   @Override
   public String currentRev(String entityId) {
-    return specs.latestRev(entityId);
+    return files.latestRev(entityId);
   }
 
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
-    specs.applyRevision(entityId, snapshot, rev);
+    files.applyRevision(entityId, snapshot, rev);
   }
 
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-    return switch (specs.commitRevision(entityId, snapshot, expectedRev)) {
+    return switch (files.commitRevision(entityId, snapshot, expectedRev)) {
       case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
       case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
     };
@@ -102,7 +100,7 @@ public final class SpecReplica implements LocalReplica, MainReplica {
 
   @Override
   public void advanceCheckpoint(String peerId, long seq) {
-    syncState.advance(peerId, seq);
+    syncState.advance(peerId + ":" + ENTITY, seq);
   }
 
   private static String json(Map<String, Object> snapshot) {

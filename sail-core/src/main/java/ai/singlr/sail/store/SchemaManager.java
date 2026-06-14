@@ -280,6 +280,17 @@ public final class SchemaManager {
               peer TEXT PRIMARY KEY,
               checkpoint INTEGER NOT NULL DEFAULT 0,
               updated_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE IF NOT EXISTS project_files (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              path TEXT NOT NULL,
+              content TEXT NOT NULL,
+              rev TEXT,
+              base_rev TEXT,
+              updated_at TEXT NOT NULL,
+              UNIQUE (project, path)
           )""");
 
   private final Sqlite db;

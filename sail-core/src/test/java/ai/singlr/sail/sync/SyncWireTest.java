@@ -28,9 +28,9 @@ class SyncWireTest {
   }
 
   @Test
-  void fetchRequestRoundTrips() {
-    var line = SyncWire.encode(new SyncWire.Fetch());
-    assertEquals(new SyncWire.Fetch(), SyncWire.decodeRequest(line));
+  void fetchRequestRoundTripsWithItsEntityType() {
+    var line = SyncWire.encode(new SyncWire.Fetch("file"));
+    assertEquals(new SyncWire.Fetch("file"), SyncWire.decodeRequest(line));
   }
 
   @Test
@@ -73,10 +73,11 @@ class SyncWireTest {
 
   @Test
   void commitRequestRoundTripsWithNestedSnapshotOnOneLine() {
-    var line = SyncWire.encode(new SyncWire.Commit("auth", snapshot(), "2-base"));
+    var line = SyncWire.encode(new SyncWire.Commit("spec", "auth", snapshot(), "2-base"));
 
     assertFalse(line.contains("\n"), "a spec body's newlines must be escaped, never framed");
     var decoded = (SyncWire.Commit) SyncWire.decodeRequest(line);
+    assertEquals("spec", decoded.entityType());
     assertEquals("auth", decoded.entityId());
     assertEquals("2-base", decoded.expectedRev());
     assertEquals("Auth", decoded.snapshot().get("title"));
@@ -87,8 +88,9 @@ class SyncWireTest {
 
   @Test
   void commitRequestCarriesDeletionAsExplicitNull() {
-    var line = SyncWire.encode(new SyncWire.Commit("auth", null, null));
+    var line = SyncWire.encode(new SyncWire.Commit("file", "acme/x", null, null));
     var decoded = (SyncWire.Commit) SyncWire.decodeRequest(line);
+    assertEquals("file", decoded.entityType());
     assertNull(decoded.snapshot());
     assertNull(decoded.expectedRev());
   }

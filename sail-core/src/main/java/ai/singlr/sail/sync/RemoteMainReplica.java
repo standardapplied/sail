@@ -5,37 +5,38 @@
 
 package ai.singlr.sail.sync;
 
-import java.io.IOException;
 import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.io.Writer;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * The {@link MainReplica} the {@link SyncEngine} drives when main is remote: it speaks {@link
- * SyncWire} over the SSH channel instead of touching a database, so the engine reconciles against a
- * box across the network with no change to its logic.
+ * The {@link MainReplica} the {@link SyncEngine} drives when main is remote, bound to one entity
+ * type ({@code spec}, {@code file}): it speaks {@link SyncWire} over the SSH channel instead of
+ * touching a database, so the engine reconciles against a box across the network with no change to
+ * its logic, and several typed replicas (created by a {@link SyncSession}) can ride one channel.
  *
- * <p>One {@link SyncWire.Fetch} pulls main's whole shared state up front; every read the engine
- * makes ({@link #entityIds}, {@link #current}, {@link #currentRev}) is then served from that
- * snapshot with no further round trip. Only {@link #commit} talks to main again, and each commit
- * carries back main's new high-water so {@link #maxSeq} — read once at the end of the round to set
- * the checkpoint — reflects this node's own pushes, exactly as the in-process engine sees it.
+ * <p>One {@link SyncWire.Fetch} pulls main's whole state for this type up front; every read the
+ * engine makes ({@link #entityIds}, {@link #current}, {@link #currentRev}) is then served from that
+ * snapshot with no further round trip. Only {@link #commit} talks to main again, and each accepted
+ * commit carries back main's new high-water so {@link #maxSeq} — read once at the end of the round
+ * to set the checkpoint — reflects this node's own pushes, exactly as the in-process engine sees
+ * it.
  */
-public final class RemoteMainReplica implements MainReplica, AutoCloseable {
+public final class RemoteMainReplica implements MainReplica {
 
   private final Reader in;
   private final Writer out;
+  private final String entityType;
 
   private SyncWire.Fetched fetched;
   private long maxSeq;
 
-  public RemoteMainReplica(Reader in, Writer out) {
+  public RemoteMainReplica(Reader in, Writer out, String entityType) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
+    this.entityType = Objects.requireNonNull(entityType, "entityType");
   }
 
   @Override
@@ -68,7 +69,8 @@ public final class RemoteMainReplica implements MainReplica, AutoCloseable {
 
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-    var response = exchange(new SyncWire.Commit(entityId, snapshot, expectedRev));
+    var response =
+        Rpc.exchange(in, out, new SyncWire.Commit(entityType, entityId, snapshot, expectedRev));
     return switch (response) {
       case SyncWire.Committed committed -> {
         maxSeq = committed.maxSeq();
@@ -81,29 +83,9 @@ public final class RemoteMainReplica implements MainReplica, AutoCloseable {
     };
   }
 
-  /** Pulls main's FDE roster over the same channel; the node mirrors it main-authoritatively. */
-  public List<Map<String, Object>> fetchFdes() {
-    var response = exchange(new SyncWire.FetchFdes());
-    if (response instanceof SyncWire.Fdes roster) {
-      return roster.fdes();
-    }
-    throw new SyncTransportException("Expected an fde roster, got: " + response);
-  }
-
-  @Override
-  public void close() {
-    try {
-      out.write(SyncWire.encode(new SyncWire.Bye()));
-      out.write('\n');
-      out.flush();
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-  }
-
   private SyncWire.Fetched fetched() {
     if (fetched == null) {
-      var response = exchange(new SyncWire.Fetch());
+      var response = Rpc.exchange(in, out, new SyncWire.Fetch(entityType));
       if (!(response instanceof SyncWire.Fetched f)) {
         throw new SyncTransportException("Expected a fetch response, got: " + response);
       }
@@ -111,20 +93,5 @@ public final class RemoteMainReplica implements MainReplica, AutoCloseable {
       maxSeq = f.maxSeq();
     }
     return fetched;
-  }
-
-  private SyncWire.Response exchange(SyncWire.Request request) {
-    try {
-      out.write(SyncWire.encode(request));
-      out.write('\n');
-      out.flush();
-      var line = SyncWire.readFramed(in);
-      if (line == null) {
-        throw new SyncTransportException("Sync channel closed before main replied.");
-      }
-      return SyncWire.decodeResponse(line);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
   }
 }

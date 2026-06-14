@@ -34,6 +34,7 @@ public final class SyncWire {
   private static final String ERROR = "error";
   private static final String EXPECTED = "expectedRev";
   private static final String STALE = "stale";
+  private static final String ENTITY_TYPE = "entityType";
 
   private static final String OP_FETCH = "fetch";
   private static final String OP_COMMIT = "commit";
@@ -75,17 +76,20 @@ public final class SyncWire {
 
   public sealed interface Request permits Fetch, Commit, Bye, FetchFdes {}
 
-  /** Ask main for its whole shared state — the merge view the engine reconciles against. */
-  public record Fetch() implements Request {}
+  /**
+   * Ask main for its whole shared state of one entity type — specs, files — to reconcile against.
+   */
+  public record Fetch(String entityType) implements Request {}
 
   /** Ask main for its FDE roster, which the node mirrors (main-authoritative, one-way). */
   public record FetchFdes() implements Request {}
 
   /**
-   * Push one entity to main against the rev the node fetched ({@code expectedRev}, {@code null} for
-   * a row new to main); a {@code null} snapshot pushes a deletion.
+   * Push one entity of {@code entityType} to main against the rev the node fetched ({@code
+   * expectedRev}, {@code null} for a row new to main); a {@code null} snapshot pushes a deletion.
    */
-  public record Commit(String entityId, Map<String, Object> snapshot, String expectedRev)
+  public record Commit(
+      String entityType, String entityId, Map<String, Object> snapshot, String expectedRev)
       implements Request {}
 
   /** End the session; main returns nothing. */
@@ -116,9 +120,13 @@ public final class SyncWire {
   public static String encode(Request request) {
     var map = new LinkedHashMap<String, Object>();
     switch (request) {
-      case Fetch ignored -> map.put(OP, OP_FETCH);
+      case Fetch fetch -> {
+        map.put(OP, OP_FETCH);
+        map.put(ENTITY_TYPE, fetch.entityType());
+      }
       case Commit commit -> {
         map.put(OP, OP_COMMIT);
+        map.put(ENTITY_TYPE, commit.entityType());
         map.put(ID, commit.entityId());
         map.put(SNAPSHOT, commit.snapshot());
         map.put(EXPECTED, commit.expectedRev());
@@ -166,8 +174,13 @@ public final class SyncWire {
     var map = YamlUtil.parseMap(line);
     var op = string(map, OP);
     return switch (op) {
-      case OP_FETCH -> new Fetch();
-      case OP_COMMIT -> new Commit(string(map, ID), snapshot(map, SNAPSHOT), string(map, EXPECTED));
+      case OP_FETCH -> new Fetch(string(map, ENTITY_TYPE));
+      case OP_COMMIT ->
+          new Commit(
+              string(map, ENTITY_TYPE),
+              string(map, ID),
+              snapshot(map, SNAPSHOT),
+              string(map, EXPECTED));
       case OP_BYE -> new Bye();
       case OP_FETCH_FDES -> new FetchFdes();
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);

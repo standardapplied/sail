@@ -24,7 +24,7 @@ import java.util.Optional;
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
  * guarantee). {@code specs.rev} tracks the current revision.
  */
-public final class SpecStore {
+public final class SpecStore implements ConflictResolver {
 
   private static final String ENTITY = "spec";
 
@@ -526,15 +526,6 @@ public final class SpecStore {
             recordRevision(id, rev, "sync", false, true);
           }
         });
-  }
-
-  /** The result of a compare-and-set {@link #commitRevision}. */
-  public sealed interface PushOutcome {
-    /** Accepted; {@code rev} is the freshly minted authoritative revision. */
-    record Accepted(String rev) implements PushOutcome {}
-
-    /** Rejected; {@code current*} is main's present state, untouched. */
-    record Stale(String currentRev, Map<String, Object> currentSnapshot) implements PushOutcome {}
   }
 
   /**

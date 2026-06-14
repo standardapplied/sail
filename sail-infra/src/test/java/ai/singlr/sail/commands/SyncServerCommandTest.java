@@ -16,9 +16,9 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.sync.RemoteMainReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -116,8 +116,8 @@ class SyncServerCommandTest {
                   }
                 });
 
-    try (var remote = new RemoteMainReplica(clientIn, toServer)) {
-      return new SyncEngine().reconcile(nodeReplica, remote);
+    try (var session = new SyncSession(clientIn, toServer)) {
+      return new SyncEngine().reconcile(nodeReplica, session.replica("spec"));
     } finally {
       serverThread.join();
     }

@@ -12,10 +12,13 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.sync.FileReplica;
+import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncRpcServer;
 import java.io.BufferedReader;
@@ -55,10 +58,14 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   static int serve(Sqlite db, String mainId, String token, BufferedReader in, Writer out)
       throws IOException {
-    var main =
-        new SpecReplica(
-            mainId, new SpecStore(db), new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
-    new SyncRpcServer(main, canWrite(db, token), () -> roster(db)).serve(in, out);
+    var changeLog = new ChangeLog(db);
+    var conflicts = new SyncConflicts(db);
+    var syncState = new SyncState(db);
+    var replicas =
+        Map.<String, MainReplica>of(
+            "spec", new SpecReplica(mainId, new SpecStore(db), changeLog, conflicts, syncState),
+            "file", new FileReplica(mainId, new FileStore(db), changeLog, conflicts, syncState));
+    new SyncRpcServer(replicas, canWrite(db, token), () -> roster(db)).serve(in, out);
     return 0;
   }
 
