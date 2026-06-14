@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSpecImporter;
+import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -15,6 +16,7 @@ import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RebucketSpecsMigration;
@@ -95,6 +97,7 @@ public final class MigrateCommand implements Runnable {
           applyMigrations(
               db, dbPath.toString(), importer::importAll, prompter, animate, jsonOutput);
       importProjects(db, jsonOutput);
+      importFiles(db, jsonOutput);
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       return runs;
@@ -111,6 +114,19 @@ public final class MigrateCommand implements Runnable {
     if (!jsonOutput && report.imported() > 0) {
       System.out.println(
           Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
+    }
+  }
+
+  /**
+   * Imports each project's on-disk {@code files/} tree into the synced {@link FileStore}, so the
+   * shared workspace files an FDE already has become replicated the moment they upgrade.
+   * Idempotent; quiet when nothing changed.
+   */
+  private static void importFiles(Sqlite db, boolean jsonOutput) {
+    var report = new FileImporter(SailPaths.projectsDir(), new FileStore(db)).importAll();
+    if (!jsonOutput && report.imported() > 0) {
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ project files: " + report.imported() + " imported"));
     }
   }
 

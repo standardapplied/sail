@@ -84,6 +84,35 @@ public final class FileStore {
     return findRow(id).map(row -> comparable(row.content())).orElse(null);
   }
 
+  /** Every file id this box has touched for a project, including tombstoned ones. */
+  public List<String> idsForProject(String project) {
+    return db.query(
+        "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ? AND entity_id LIKE ?",
+        row -> row.text(0),
+        ENTITY,
+        project + "/%");
+  }
+
+  /** Projects this box has any file for, current or tombstoned — drives materialization. */
+  public LinkedHashSet<String> projectsWithFiles() {
+    var projects = new LinkedHashSet<String>();
+    for (var id : syncEntityIds()) {
+      projects.add(id.substring(0, id.indexOf('/')));
+    }
+    return projects;
+  }
+
+  /**
+   * Whether {@code content} matches any revision this box has ever recorded for the file — i.e. a
+   * copy this box itself wrote to disk. Lets materialization tell a stale copy it may safely
+   * refresh from one a human edited locally, which it must never clobber.
+   */
+  public boolean isKnownContent(String id, String content) {
+    return changeLog.history(ENTITY, id).stream()
+        .map(e -> YamlUtil.parseMap(e.snapshot()).get("content"))
+        .anyMatch(c -> Objects.equals(c, content));
+  }
+
   public Map<String, Object> comparableAtRev(String id, String rev) {
     if (rev == null || rev.isBlank()) {
       return null;

@@ -122,4 +122,35 @@ class FileStoreTest {
     snapshot.put("content", null);
     assertThrows(RuntimeException.class, () -> files.applyRevision(id("a.txt"), snapshot, "1-x"));
   }
+
+  @Test
+  void idsForProjectIncludesTombstonedFiles() {
+    files.put("acme", "a.txt", "AAA");
+    files.put("acme", "dir/b.txt", "BBB");
+    files.put("globex", "c.txt", "CCC");
+    files.delete("acme", "a.txt");
+
+    assertEquals(
+        List.of("acme/a.txt", "acme/dir/b.txt"),
+        files.idsForProject("acme").stream().sorted().toList());
+  }
+
+  @Test
+  void projectsWithFilesSpansEveryProjectTouched() {
+    files.put("acme", "a.txt", "AAA");
+    files.put("globex", "c.txt", "CCC");
+    files.delete("globex", "c.txt");
+
+    assertEquals(java.util.Set.of("acme", "globex"), files.projectsWithFiles());
+  }
+
+  @Test
+  void isKnownContentRecognizesAnyRevisionThisBoxWrote() {
+    files.put("acme", "a.txt", "v1");
+    files.put("acme", "a.txt", "v2");
+
+    assertTrue(files.isKnownContent(id("a.txt"), "v1"), "a superseded revision is still ours");
+    assertTrue(files.isKnownContent(id("a.txt"), "v2"));
+    assertFalse(files.isKnownContent(id("a.txt"), "a local human edit"));
+  }
 }

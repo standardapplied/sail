@@ -11,6 +11,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SshSyncChannel;
@@ -98,16 +99,18 @@ public final class SyncCommand implements Callable<Integer> {
       var changeLog = new ChangeLog(db);
       var conflicts = new SyncConflicts(db);
       var syncState = new SyncState(db);
+      var fileStore = new FileStore(db);
       var boxes =
           new Boxes(
               new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
-              new FileReplica(host, new FileStore(db), changeLog, conflicts, syncState),
-              new FdeStore(db));
+              new FileReplica(host, fileStore, changeLog, conflicts, syncState),
+              new FdeStore(db),
+              fileStore);
       return watch ? watchLoop(boxes, target) : runOnce(boxes, target);
     }
   }
 
-  private record Boxes(SpecReplica spec, FileReplica file, FdeStore fdes) {}
+  private record Boxes(SpecReplica spec, FileReplica file, FdeStore fdes, FileStore files) {}
 
   /** The main target: the {@code --main} flag if given, else the configured one. */
   static String resolveMain(String flag, SyncConfig sync) {
@@ -181,7 +184,33 @@ public final class SyncCommand implements Callable<Integer> {
                     + String.join(", ", rejected),
                 Ansi.AUTO));
       }
+      materialize(boxes.files());
       return combine(specReport, fileReport);
+    }
+  }
+
+  /** Projects the synced files onto disk, warning about any local edits it deliberately left. */
+  private void materialize(FileStore files) {
+    var materializer = new FileMaterializer(files, SailPaths.projectsDir());
+    for (var project : files.projectsWithFiles()) {
+      try {
+        var report = materializer.materialize(project);
+        if (!report.skipped().isEmpty()) {
+          System.err.println(
+              Banner.errorLine(
+                  "Kept "
+                      + report.skipped().size()
+                      + " locally-modified file(s) in '"
+                      + project
+                      + "' (capture with 'sail project files add', or delete to take main's): "
+                      + String.join(", ", report.skipped()),
+                  Ansi.AUTO));
+        }
+      } catch (IOException e) {
+        System.err.println(
+            Banner.errorLine(
+                "Could not write files for '" + project + "': " + e.getMessage(), Ansi.AUTO));
+      }
     }
   }
 
