@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.sync;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.io.StringReader;
 import java.io.StringWriter;

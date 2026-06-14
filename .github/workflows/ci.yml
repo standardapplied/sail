@@ -22,6 +22,13 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Forbid wildcard imports
+        run: |
+          if grep -rEn 'import +(static +)?[a-zA-Z0-9_.]+\.\*;' --include='*.java' sail-core sail-infra sail-harness; then
+            echo "::error::Wildcard imports are forbidden. Import each symbol explicitly."
+            exit 1
+          fi
+
       - name: Verify quality gates
         run: mvn clean verify
 
