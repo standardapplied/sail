@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -59,7 +60,7 @@ class ProjectFilesCommandTest {
     assertTrue(usage.contains("ls"));
     assertTrue(usage.contains("cat"));
     assertTrue(usage.contains("rm"));
-    assertTrue(usage.contains("export"));
+    assertTrue(usage.contains("pull"));
   }
 
   @Test
@@ -72,8 +73,8 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("deploy.sh");
     Files.writeString(source, "echo hi");
 
-    var path =
-        ProjectFilesCommand.Add.share(files, projectsDir, "acme", source, "scripts/deploy.sh");
+    var path = ProjectFilesCommand.Add.store(files, "acme", source, "scripts/deploy.sh");
+    new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
     assertEquals(b64("echo hi"), files.find("acme", "scripts/deploy.sh").orElseThrow().content());
@@ -85,7 +86,7 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("notes.md");
     Files.writeString(source, "hello");
 
-    var path = ProjectFilesCommand.Add.share(files, projectsDir, "acme", source, null);
+    var path = ProjectFilesCommand.Add.store(files, "acme", source, null);
 
     assertEquals("notes.md", path);
   }
@@ -97,7 +98,7 @@ class ProjectFilesCommandTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> ProjectFilesCommand.Add.share(files, projectsDir, "acme", source, "../escape"));
+        () -> ProjectFilesCommand.Add.store(files, "acme", source, "../escape"));
   }
 
   @Test
@@ -139,7 +140,8 @@ class ProjectFilesCommandTest {
   void rmTombstonesAndRemovesTheLocalCopy() throws Exception {
     var source = tempDir.resolve("a.txt");
     Files.writeString(source, "data");
-    ProjectFilesCommand.Add.share(files, projectsDir, "acme", source, "a.txt");
+    ProjectFilesCommand.Add.store(files, "acme", source, "a.txt");
+    new FileMaterializer(files, projectsDir).materialize("acme");
     assertTrue(Files.exists(filesDir("acme").resolve("a.txt")));
 
     var removed = ProjectFilesCommand.Rm.unshare(files, projectsDir, "acme", "a.txt");

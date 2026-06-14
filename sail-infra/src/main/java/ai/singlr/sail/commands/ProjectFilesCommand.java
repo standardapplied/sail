@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.FileStore;
@@ -37,10 +38,11 @@ import picocli.CommandLine.Parameters;
  */
 @Command(
     name = "files",
-    description = "Share project files across FDEs (add, ls, cat, rm, export).",
+    description = "Share project files across FDEs (add, ls, cat, rm, pull).",
     mixinStandardHelpOptions = true,
     subcommands = {
       ProjectFilesCommand.Add.class,
+      ProjectAddFileCommand.class,
       ProjectFilesCommand.Ls.class,
       ProjectFilesCommand.Cat.class,
       ProjectFilesCommand.Rm.class,
@@ -55,14 +57,18 @@ public final class ProjectFilesCommand implements Runnable {
 
   @Command(
       name = "add",
-      description = "Share a local file with every FDE on the project.",
+      description =
+          "Share files with every FDE on the project. Give a file, or omit it to browse and pick.",
       mixinStandardHelpOptions = true)
   static final class Add implements Callable<Integer> {
 
     @Parameters(index = "0", description = "Project name.")
     private String project;
 
-    @Parameters(index = "1", description = "Local file to share.")
+    @Parameters(
+        index = "1",
+        arity = "0..1",
+        description = "Local file to share. Omit to browse and pick interactively.")
     private Path source;
 
     @Option(
@@ -70,15 +76,35 @@ public final class ProjectFilesCommand implements Runnable {
         description = "Relative path to store it under (default: the file's name).")
     private String as;
 
+    @Option(
+        names = "--from",
+        description = "Directory to browse when picking (default: the current directory).")
+    private Path from;
+
     @Override
     public Integer call() throws Exception {
       NameValidator.requireValidProjectName(project);
+      if (source != null) {
+        return addOne();
+      }
+      if (System.console() == null) {
+        System.err.println(
+            Banner.errorLine(
+                "Give a file to share, or run in a terminal to browse and pick.", Ansi.AUTO));
+        return 1;
+      }
+      return pick();
+    }
+
+    private Integer addOne() throws Exception {
       if (!Files.isRegularFile(source)) {
         System.err.println(Banner.errorLine("Not a file: " + source, Ansi.AUTO));
         return 1;
       }
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var path = share(new FileStore(db), SailPaths.projectsDir(), project, source, as);
+        var files = new FileStore(db);
+        var path = store(files, project, source, as);
+        new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Shared @|bold "
@@ -90,15 +116,63 @@ public final class ProjectFilesCommand implements Runnable {
       return 0;
     }
 
-    /**
-     * Stores {@code source} under its relative path and materializes it locally; returns the path.
-     */
-    static String share(FileStore files, Path projectsDir, String project, Path source, String as)
+    private Integer pick() throws Exception {
+      var root = (from != null ? from : Path.of("")).toAbsolutePath().normalize();
+      if (!Files.isDirectory(root)) {
+        System.err.println(Banner.errorLine("Not a directory: " + root, Ansi.AUTO));
+        return 1;
+      }
+      var state = FilePicker.State.at(root);
+      while (true) {
+        var entries = FilePicker.list(state.cwd());
+        System.out.println(FilePicker.render(state, entries));
+        System.out.print("  > ");
+        System.out.flush();
+        var line = ConsoleHelper.readLine();
+        var step = FilePicker.step(state, entries, line == null ? "q" : line);
+        state = step.state();
+        if (Strings.isNotBlank(step.message())) {
+          System.out.println("  " + step.message());
+        }
+        if (step.status() == FilePicker.Status.CANCELLED) {
+          System.out.println(Ansi.AUTO.string("  @|faint Nothing shared.|@"));
+          return 0;
+        }
+        if (step.status() == FilePicker.Status.CONFIRMED) {
+          break;
+        }
+      }
+      return shareSelected(root, FilePicker.selectedFiles(state));
+    }
+
+    private Integer shareSelected(Path root, List<Path> selected) throws Exception {
+      if (selected.isEmpty()) {
+        System.out.println(Ansi.AUTO.string("  @|faint Nothing selected.|@"));
+        return 0;
+      }
+      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+        var files = new FileStore(db);
+        for (var file : selected) {
+          store(files, project, file, root.relativize(file).toString());
+        }
+        new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
+      }
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Shared @|bold "
+                  + selected.size()
+                  + "|@ file(s) on @|bold "
+                  + project
+                  + "|@. Run @|bold sail sync|@ to propagate."));
+      return 0;
+    }
+
+    /** Stores {@code source} under its relative path (no materialization); returns the path. */
+    static String store(FileStore files, String project, Path source, String as)
         throws IOException {
       var path = Strings.isNotBlank(as) ? as : source.getFileName().toString();
       NameValidator.requireSafePath(path, "path");
       files.put(project, path, Base64.getEncoder().encodeToString(Files.readAllBytes(source)));
-      new FileMaterializer(files, projectsDir).materialize(project);
       return path;
     }
   }
@@ -229,15 +303,16 @@ public final class ProjectFilesCommand implements Runnable {
   }
 
   @Command(
-      name = "export",
-      description = "Write shared files to disk now (for the main box, which never runs sync).",
+      name = "pull",
+      aliases = "export",
+      description = "Write the shared files for a project to disk (materialize what's synced).",
       mixinStandardHelpOptions = true)
   static final class Export implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", description = "Project name. Omit with --all.")
     private String project;
 
-    @Option(names = "--all", description = "Export every project that has shared files.")
+    @Option(names = "--all", description = "Pull every project that has shared files.")
     private boolean all;
 
     @Override
@@ -256,7 +331,7 @@ public final class ProjectFilesCommand implements Runnable {
         }
         System.out.println(
             Ansi.AUTO.string(
-                "  @|green ✓|@ Exported: "
+                "  @|green ✓|@ Pulled: "
                     + report.written()
                     + " written, "
                     + report.deleted()
