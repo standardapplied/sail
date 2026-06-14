@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.net.InetAddress;
 import java.net.URI;
 
@@ -40,7 +41,7 @@ public final class WebhookUrlSafety {
     }
 
     var host = uri.getHost();
-    if (host == null || host.isBlank()) {
+    if (Strings.isBlank(host)) {
       throw new IllegalArgumentException(
           "Invalid notifications.url: '" + url + "'. No hostname found.");
     }

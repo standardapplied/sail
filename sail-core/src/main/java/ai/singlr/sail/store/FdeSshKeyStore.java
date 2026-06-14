@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.ssh.SshPublicKey;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -46,7 +46,7 @@ public final class FdeSshKeyStore {
         fdeId,
         key.line(),
         key.comment(),
-        Instant.now().toString());
+        DateTimeUtils.now().toString());
   }
 
   public Optional<SshKeyInfo> findByFingerprint(String fingerprint) {

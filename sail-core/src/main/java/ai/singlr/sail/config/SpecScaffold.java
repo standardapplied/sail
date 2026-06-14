@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.Locale;
 
@@ -14,7 +15,7 @@ public final class SpecScaffold {
   private SpecScaffold() {}
 
   public static String deriveId(String title) {
-    if (title == null || title.isBlank()) {
+    if (Strings.isBlank(title)) {
       throw new IllegalArgumentException("Spec title is required.");
     }
     var slug =
@@ -33,7 +34,7 @@ public final class SpecScaffold {
   }
 
   public static String markdownTemplate(String title) {
-    if (title == null || title.isBlank()) {
+    if (Strings.isBlank(title)) {
       throw new IllegalArgumentException("Spec title is required.");
     }
     return """

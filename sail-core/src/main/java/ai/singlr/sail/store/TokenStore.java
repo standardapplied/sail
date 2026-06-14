@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * API token management. Tokens are SHA-256 hashed before storage. The plaintext is returned exactly
@@ -26,7 +28,7 @@ import java.util.Optional;
  */
 public final class TokenStore {
 
-  private static final java.util.Set<String> ROLES = java.util.Set.of("admin", "member", "viewer");
+  private static final Set<String> ROLES = Set.of("admin", "member", "viewer");
 
   /** Default lifetime the CLI applies to a newly minted token unless overridden. */
   public static final Duration DEFAULT_TTL = Duration.ofDays(90);
@@ -66,7 +68,7 @@ public final class TokenStore {
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
     var token = generateToken();
-    var expiresAt = ttl == null ? null : Instant.now().plus(ttl).toString();
+    var expiresAt = ttl == null ? null : DateTimeUtils.now().plus(ttl).toString();
     db.execute(
         "INSERT INTO api_tokens (token_hash, name, role, fde_id, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?, ?, ?)",
@@ -74,7 +76,7 @@ public final class TokenStore {
         name,
         role,
         fdeId,
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         expiresAt);
     return new CreatedToken(name, token, role, expiresAt);
   }
@@ -87,13 +89,13 @@ public final class TokenStore {
       return Optional.empty();
     }
     var expiresAt = result.get().expiresAt();
-    if (expiresAt != null && Instant.parse(expiresAt).isBefore(Instant.now())) {
+    if (expiresAt != null && Instant.parse(expiresAt).isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM api_tokens WHERE token_hash = ?", hash);
       return Optional.empty();
     }
     db.execute(
         "UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?",
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         hash);
     return result;
   }

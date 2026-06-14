@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
@@ -20,14 +21,14 @@ public final class HostInfo {
   public static String hostname() {
     try {
       var name = InetAddress.getLocalHost().getHostName();
-      if (name != null && !name.isBlank()) {
+      if (Strings.isNotBlank(name)) {
         return name;
       }
     } catch (UnknownHostException ignored) {
       // fall through to env/unknown
     }
     var envName = System.getenv("HOSTNAME");
-    if (envName != null && !envName.isBlank()) {
+    if (Strings.isNotBlank(envName)) {
       return envName;
     }
     return "unknown";

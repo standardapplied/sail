@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -93,7 +95,7 @@ public record Event(
    */
   public static Event of(String project, String spec, String type, String agent, String host) {
     return new Event(
-        CURRENT_VERSION, 0L, Instant.now(), project, spec, type, agent, host, Map.of());
+        CURRENT_VERSION, 0L, DateTimeUtils.now(), project, spec, type, agent, host, Map.of());
   }
 
   /** As {@link #of(String, String, String, String, String)} but with a data payload. */
@@ -104,7 +106,8 @@ public record Event(
       String agent,
       String host,
       Map<String, Object> data) {
-    return new Event(CURRENT_VERSION, 0L, Instant.now(), project, spec, type, agent, host, data);
+    return new Event(
+        CURRENT_VERSION, 0L, DateTimeUtils.now(), project, spec, type, agent, host, data);
   }
 
   /** Returns a copy of this event with the given bus-assigned id. */
@@ -129,7 +132,7 @@ public record Event(
     }
     map.put("ts", ts.toString());
     map.put("project", project);
-    if (spec != null && !spec.isBlank()) {
+    if (Strings.isNotBlank(spec)) {
       map.put("spec", spec);
     }
     map.put("type", type);
@@ -223,7 +226,7 @@ public record Event(
   }
 
   private static void requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
+    if (Strings.isBlank(value)) {
       throw new IllegalArgumentException(name + " is required");
     }
   }

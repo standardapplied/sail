@@ -6,6 +6,8 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * A one-shot fix-up applied to existing data after a schema change. Schema migrations add columns;
@@ -26,9 +28,9 @@ public interface DataMigration {
   Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter);
 
   /** Per-migration outcome surfaced back to the CLI for printing. */
-  record Report(int applied, int ambiguous, int skipped, java.util.List<String> notes) {
+  record Report(int applied, int ambiguous, int skipped, List<String> notes) {
     public static Report empty() {
-      return new Report(0, 0, 0, java.util.List.of());
+      return new Report(0, 0, 0, List.of());
     }
   }
 
@@ -41,9 +43,9 @@ public interface DataMigration {
      * Asks the operator to pick one of {@code candidates} for {@code context}. Returns the chosen
      * value or empty to leave the row alone.
      */
-    java.util.Optional<String> choose(String context, java.util.List<String> candidates);
+    Optional<String> choose(String context, List<String> candidates);
 
     /** Non-interactive prompter — never asks, always declines. */
-    Prompter NON_INTERACTIVE = (context, candidates) -> java.util.Optional.empty();
+    Prompter NON_INTERACTIVE = (context, candidates) -> Optional.empty();
   }
 }

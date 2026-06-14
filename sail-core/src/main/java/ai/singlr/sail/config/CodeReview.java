@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +55,7 @@ public record CodeReview(boolean enabled, String auditor) {
    * @throws IllegalArgumentException if the explicit auditor is invalid
    */
   public String resolveAuditor(String primaryType, List<String> installList, Set<String> exclude) {
-    if (auditor != null && !auditor.isBlank()) {
+    if (Strings.isNotBlank(auditor)) {
       if (!KNOWN_AGENTS.contains(auditor)) {
         throw new IllegalArgumentException(
             "Unknown code review auditor '"

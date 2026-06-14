@@ -1,5 +1,6 @@
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -223,7 +224,7 @@ public final class GitSpecSync {
     }
     var copy = new ArrayList<String>();
     for (var token : command) {
-      if (token == null || token.isBlank()) {
+      if (Strings.isBlank(token)) {
         throw new IllegalArgumentException("git command tokens must not be blank.");
       }
       copy.add(token);
@@ -255,11 +256,11 @@ public final class GitSpecSync {
   }
 
   private static String blankToNull(String value) {
-    return value == null || value.isBlank() ? null : value;
+    return Strings.isBlank(value) ? null : value;
   }
 
   private static String defaultBranch(String branch) {
-    return branch == null || branch.isBlank() ? "main" : branch;
+    return Strings.isBlank(branch) ? "main" : branch;
   }
 
   private static String requireSafeRemote(String remote) {

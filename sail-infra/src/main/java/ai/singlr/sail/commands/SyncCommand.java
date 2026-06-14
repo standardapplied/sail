@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -114,7 +115,7 @@ public final class SyncCommand implements Callable<Integer> {
 
   /** The main target: the {@code --main} flag if given, else the configured one. */
   static String resolveMain(String flag, SyncConfig sync) {
-    if (flag != null && !flag.isBlank()) {
+    if (Strings.isNotBlank(flag)) {
       return flag;
     }
     if (sync.isMain()) {

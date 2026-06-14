@@ -5,10 +5,12 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import java.time.Duration;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -85,7 +87,7 @@ public final class ServerTokenCommand implements Runnable {
     }
 
     /** Resolves the requested lifetime; {@code null} never expires. Visible for tests. */
-    static java.time.Duration resolveTtl(boolean noExpiry, Integer ttlDays) {
+    static Duration resolveTtl(boolean noExpiry, Integer ttlDays) {
       if (noExpiry && ttlDays != null) {
         throw new IllegalArgumentException("Pass --ttl-days or --no-expiry, not both.");
       }
@@ -98,11 +100,11 @@ public final class ServerTokenCommand implements Runnable {
       if (ttlDays <= 0) {
         throw new IllegalArgumentException("--ttl-days must be a positive number of days.");
       }
-      return java.time.Duration.ofDays(ttlDays);
+      return Duration.ofDays(ttlDays);
     }
 
     private String resolveFdeId(Sqlite db) {
-      if (fde == null || fde.isBlank()) {
+      if (Strings.isBlank(fde)) {
         return null;
       }
       return new FdeStore(db)

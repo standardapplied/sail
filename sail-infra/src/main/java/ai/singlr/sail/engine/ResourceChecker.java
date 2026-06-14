@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -44,7 +45,7 @@ public final class ResourceChecker {
    * null, blank, or unparseable values.
    */
   public static long parseMemoryMb(String memory) {
-    if (memory == null || memory.isBlank()) {
+    if (Strings.isBlank(memory)) {
       return 0;
     }
     var matcher = MEMORY_PATTERN.matcher(memory.trim());

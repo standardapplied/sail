@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -76,7 +77,7 @@ public final class EventStore {
         db.query(
             "SELECT type, COUNT(*) FROM events GROUP BY type ORDER BY COUNT(*) DESC",
             row -> new Object[] {row.text(0), row.integer(1)});
-    var typeMap = new java.util.LinkedHashMap<String, Long>();
+    var typeMap = new LinkedHashMap<String, Long>();
     typeMap.put("total", total);
     for (var row : types) {
       typeMap.put((String) row[0], (long) row[1]);

@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import java.time.Instant;
+import ai.singlr.sail.common.DateTimeUtils;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,7 +54,7 @@ public final class ChangeLog {
         entityId,
         rev,
         actor,
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         origin,
         deleted ? 1 : 0,
         snapshot);

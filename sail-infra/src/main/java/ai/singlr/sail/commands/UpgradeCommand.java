@@ -24,9 +24,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -367,7 +369,7 @@ public final class UpgradeCommand implements Runnable {
    * was introduced, so the OLD binary is safe to do this. Everything else (new schema migrations,
    * new data migrations) is handled by the sub-process that runs the NEW binary.
    */
-  private void bootstrapAdminToken(java.nio.file.Path dbPath) {
+  private void bootstrapAdminToken(Path dbPath) {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
       try (var db = Sqlite.open(dbPath)) {
@@ -395,13 +397,13 @@ public final class UpgradeCommand implements Runnable {
    * NEW code — that's the whole point. Inherits stdio so the operator sees what migrated. Tolerates
    * non-zero exits; the {@code sail-api} restart afterwards is a second chance.
    */
-  private void runNewBinaryMigrate(java.nio.file.Path binaryPath) {
+  private void runNewBinaryMigrate(Path binaryPath) {
     try {
       var process =
           new ProcessBuilder(binaryPath.toString(), "migrate", "--non-interactive")
               .inheritIO()
               .start();
-      var finished = process.waitFor(2, java.util.concurrent.TimeUnit.MINUTES);
+      var finished = process.waitFor(2, TimeUnit.MINUTES);
       if (!finished) {
         process.destroyForcibly();
         if (!json) {
@@ -484,7 +486,7 @@ public final class UpgradeCommand implements Runnable {
 
   /** Re-executes the current command with sudo, inheriting stdin/stdout/stderr. */
   private void reExecWithSudo() throws IOException, InterruptedException {
-    var args = new java.util.ArrayList<String>();
+    var args = new ArrayList<String>();
     args.add("sudo");
     args.add(SailPaths.binaryPath().toString());
     args.add("upgrade");

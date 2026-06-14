@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import java.time.Instant;
+import ai.singlr.sail.common.DateTimeUtils;
 import java.util.List;
 import java.util.Optional;
 
@@ -63,7 +63,7 @@ public final class SyncConflicts {
               localSnapshot,
               remoteSnapshot,
               String.join("\n", fields),
-              Instant.now().toString(),
+              DateTimeUtils.now().toString(),
               PENDING);
           return db.queryOne("SELECT last_insert_rowid()", row -> row.integer(0)).orElseThrow();
         });

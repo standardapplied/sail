@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Capability;
 import ai.singlr.sail.api.Role;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -85,7 +86,7 @@ public final class SyncServerCommand implements Callable<Integer> {
   }
 
   private static boolean canWrite(Sqlite db, String token) {
-    if (token == null || token.isBlank()) {
+    if (Strings.isBlank(token)) {
       return false;
     }
     return new AuthSessionStore(db)

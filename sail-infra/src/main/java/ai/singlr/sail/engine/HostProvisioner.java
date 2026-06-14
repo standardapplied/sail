@@ -5,13 +5,13 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
@@ -78,7 +78,7 @@ public final class HostProvisioner {
             HostYaml.DEFAULT_IMAGE,
             incusVersion,
             serverIp,
-            Instant.now().toString());
+            DateTimeUtils.now().toString());
 
     writeHostYaml(hostYaml, hostYamlPath);
     return hostYaml;

@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.PrintStream;
 import java.net.URI;
@@ -154,7 +155,7 @@ public final class EventsCommand implements Runnable {
 
   private URI streamUri() {
     var params = new LinkedHashMap<String, String>();
-    if (projectFilter != null && !projectFilter.isBlank()) {
+    if (Strings.isNotBlank(projectFilter)) {
       params.put("project", projectFilter);
     }
     if (typeFilter != null && !typeFilter.isEmpty()) {

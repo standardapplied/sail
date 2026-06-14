@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,7 +28,7 @@ public final class YamlUtil {
   /** Parse a YAML or JSON string into a Map. Returns empty map for null/blank input. */
   @SuppressWarnings("unchecked")
   public static Map<String, Object> parseMap(String yamlOrJson) {
-    if (yamlOrJson == null || yamlOrJson.isBlank()) {
+    if (Strings.isBlank(yamlOrJson)) {
       return Map.of();
     }
     var load = new Load(LoadSettings.builder().build());
@@ -43,7 +44,7 @@ public final class YamlUtil {
    */
   @SuppressWarnings("unchecked")
   public static Map<String, Object> parseMapStrict(String yamlOrJson) {
-    if (yamlOrJson == null || yamlOrJson.isBlank()) {
+    if (Strings.isBlank(yamlOrJson)) {
       return Map.of();
     }
     var load = new Load(LoadSettings.builder().setAllowDuplicateKeys(false).build());
@@ -70,7 +71,7 @@ public final class YamlUtil {
   /** Parse a JSON array string into a list of Maps. Returns empty list for null/blank input. */
   @SuppressWarnings("unchecked")
   public static List<Map<String, Object>> parseList(String json) {
-    if (json == null || json.isBlank()) {
+    if (Strings.isBlank(json)) {
       return List.of();
     }
     var load = new Load(LoadSettings.builder().build());

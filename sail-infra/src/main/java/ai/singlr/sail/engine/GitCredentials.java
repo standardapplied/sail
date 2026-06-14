@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -36,7 +37,7 @@ public final class GitCredentials {
     var sb = new StringBuilder();
     for (var host : hosts) {
       var resolved = resolveTokenForHost(host, tokens);
-      if (resolved != null && !resolved.isBlank()) {
+      if (Strings.isNotBlank(resolved)) {
         sb.append("https://oauth2:").append(resolved).append('@').append(host).append('\n');
       }
     }
@@ -70,11 +71,11 @@ public final class GitCredentials {
   public static String resolveTokenForHost(String host, Map<String, String> tokens) {
     if (tokens != null) {
       var explicit = tokens.get(host);
-      if (explicit != null && !explicit.isBlank()) {
+      if (Strings.isNotBlank(explicit)) {
         return explicit;
       }
       var wildcard = tokens.get("*");
-      if (wildcard != null && !wildcard.isBlank()) {
+      if (Strings.isNotBlank(wildcard)) {
         return wildcard;
       }
     }
@@ -96,7 +97,7 @@ public final class GitCredentials {
 
   /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */
   public static Map<String, String> singleTokenMap(String token) {
-    if (token == null || token.isBlank()) return Map.of();
+    if (Strings.isBlank(token)) return Map.of();
     return Map.of("*", token);
   }
 
@@ -162,7 +163,7 @@ public final class GitCredentials {
   public static Path resolveHostPath(String path) {
     if (path.startsWith("~/")) {
       var sudoUser = System.getenv("SUDO_USER");
-      if (sudoUser != null && !sudoUser.isBlank()) {
+      if (Strings.isNotBlank(sudoUser)) {
         return Path.of("/home", sudoUser, path.substring(2));
       }
       return Path.of(System.getProperty("user.home"), path.substring(2));

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -20,8 +21,8 @@ public record SyncConfig(String role, String main) {
   public static final String ROLE_NODE = "node";
 
   public SyncConfig {
-    role = role == null || role.isBlank() ? null : role;
-    main = main == null || main.isBlank() ? null : main;
+    role = Strings.isBlank(role) ? null : role;
+    main = Strings.isBlank(main) ? null : main;
   }
 
   /** An undeclared box: neither main nor pointed at one. */

@@ -1,5 +1,6 @@
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.SpecStatus;
@@ -20,7 +21,7 @@ public final class SpecWorkspace {
   public SpecWorkspace(ShellExec shell, String containerName, String specsDir) {
     this.shell = Objects.requireNonNull(shell);
     NameValidator.requireValidProjectName(containerName);
-    if (specsDir == null || specsDir.isBlank()) {
+    if (Strings.isBlank(specsDir)) {
       throw new IllegalArgumentException("specsDir is required.");
     }
     this.containerName = containerName;

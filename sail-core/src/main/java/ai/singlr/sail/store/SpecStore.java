@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Spec CRUD on SQLite. Every method maps to a small number of SQL statements. No caching, no lazy
@@ -73,7 +75,7 @@ public final class SpecStore implements ConflictResolver {
       String nextReadyId) {}
 
   public void create(SpecRow spec) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -162,7 +164,7 @@ public final class SpecStore implements ConflictResolver {
   }
 
   public void update(SpecRow spec) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -197,7 +199,7 @@ public final class SpecStore implements ConflictResolver {
           db.execute(
               "UPDATE specs SET status = ?, updated_at = ? WHERE id = ?",
               status.wire(),
-              Instant.now().toString(),
+              DateTimeUtils.now().toString(),
               id);
           recordRevision(id, "local", false);
         });
@@ -212,7 +214,7 @@ public final class SpecStore implements ConflictResolver {
   }
 
   public void setContent(String specId, String body, String plan) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           db.execute(
@@ -331,7 +333,7 @@ public final class SpecStore implements ConflictResolver {
 
   private void applySnapshot(String id, Map<String, Object> snapshot) {
     var spec = specFromSnapshot(snapshot);
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     if (findById(id).isPresent()) {
       db.execute(
           """
@@ -415,8 +417,8 @@ public final class SpecStore implements ConflictResolver {
     return value == null ? null : value.toString();
   }
 
-  private static final java.util.Set<String> SYNC_FIELDS =
-      java.util.Set.of(
+  private static final Set<String> SYNC_FIELDS =
+      Set.of(
           "project",
           "title",
           "status",
@@ -473,7 +475,7 @@ public final class SpecStore implements ConflictResolver {
 
   /** Comparable snapshot recorded at a given revision (the merge base), or null if not recorded. */
   public Map<String, Object> comparableAtRev(String id, String rev) {
-    if (rev == null || rev.isBlank()) {
+    if (Strings.isBlank(rev)) {
       return null;
     }
     return changeLog
@@ -512,8 +514,8 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /** Every entity id this replica knows of, including those only present as a tombstone. */
-  public java.util.Set<String> syncEntityIds() {
-    return new java.util.LinkedHashSet<>(
+  public Set<String> syncEntityIds() {
+    return new LinkedHashSet<>(
         db.query(
             "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
             row -> row.text(0),

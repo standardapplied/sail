@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.store.Finding;
 import java.util.List;
 import java.util.Map;
 
@@ -21,7 +23,7 @@ public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) 
     @SuppressWarnings("unchecked")
     public static StageConfig fromMap(Map<String, Object> map) {
       var name = (String) map.get("name");
-      if (name == null || name.isBlank()) {
+      if (Strings.isBlank(name)) {
         throw new IllegalArgumentException("review_pipeline stage requires a name");
       }
       var type = StageType.parse((String) map.getOrDefault("type", "agent"));
@@ -53,19 +55,18 @@ public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) 
       return valueOf(value.strip().toUpperCase());
     }
 
-    public boolean passes(List<ai.singlr.sail.store.Finding> findings) {
+    public boolean passes(List<Finding> findings) {
       return switch (this) {
         case NO_CRITICAL ->
             findings.stream()
-                .filter(f -> f.resolution() == ai.singlr.sail.store.Finding.Resolution.OPEN)
-                .noneMatch(f -> f.severity() == ai.singlr.sail.store.Finding.Severity.CRITICAL);
+                .filter(f -> f.resolution() == Finding.Resolution.OPEN)
+                .noneMatch(f -> f.severity() == Finding.Severity.CRITICAL);
         case NO_CRITICAL_OR_HIGH ->
             findings.stream()
-                .filter(f -> f.resolution() == ai.singlr.sail.store.Finding.Resolution.OPEN)
-                .noneMatch(f -> f.severity().isAtLeast(ai.singlr.sail.store.Finding.Severity.HIGH));
+                .filter(f -> f.resolution() == Finding.Resolution.OPEN)
+                .noneMatch(f -> f.severity().isAtLeast(Finding.Severity.HIGH));
         case ALL_CLEAR ->
-            findings.stream()
-                .noneMatch(f -> f.resolution() == ai.singlr.sail.store.Finding.Resolution.OPEN);
+            findings.stream().noneMatch(f -> f.resolution() == Finding.Resolution.OPEN);
       };
     }
   }

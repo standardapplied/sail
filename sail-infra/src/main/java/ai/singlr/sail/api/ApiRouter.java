@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.SpecStore;
@@ -384,7 +385,7 @@ public final class ApiRouter implements HttpHandler {
 
   private static String cleanPath(URI uri) {
     var path = uri.getPath();
-    return path == null || path.isBlank() ? "/" : path;
+    return Strings.isBlank(path) ? "/" : path;
   }
 
   private static ApiException notFound() {
@@ -421,7 +422,7 @@ public final class ApiRouter implements HttpHandler {
       return;
     }
     var ifMatch = ifMatchHeaders.getFirst();
-    if (ifMatch == null || ifMatch.isBlank() || "*".equals(ifMatch.trim())) {
+    if (Strings.isBlank(ifMatch) || "*".equals(ifMatch.trim())) {
       return;
     }
     var detail = operations.globalSpec(specId);
@@ -439,7 +440,7 @@ public final class ApiRouter implements HttpHandler {
   }
 
   private static String etagOf(String updatedAt) {
-    if (updatedAt == null || updatedAt.isBlank()) {
+    if (Strings.isBlank(updatedAt)) {
       return null;
     }
     return "\"" + updatedAt + "\"";
@@ -522,7 +523,7 @@ public final class ApiRouter implements HttpHandler {
   private record QueryParameters(Map<String, String> values) {
     static QueryParameters from(URI uri) {
       var query = uri.getRawQuery();
-      if (query == null || query.isBlank()) {
+      if (Strings.isBlank(query)) {
         return new QueryParameters(Map.of());
       }
       var values = new LinkedHashMap<String, String>();

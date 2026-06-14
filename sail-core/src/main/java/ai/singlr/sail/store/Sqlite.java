@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Thin Panama FFI wrapper over the system {@code libsqlite3.so.0}. Opens a database with WAL mode,
@@ -144,7 +145,7 @@ public final class Sqlite implements AutoCloseable {
         });
   }
 
-  public <T> T transaction(java.util.function.Supplier<T> work) {
+  public <T> T transaction(Supplier<T> work) {
     execute("BEGIN");
     try {
       var result = work.get();

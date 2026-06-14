@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -438,7 +439,7 @@ public final class DispatchCommand implements Runnable {
    */
   static Map<String, Object> dispatchedEventData(String branchName, boolean background) {
     var data = new LinkedHashMap<String, Object>();
-    if (branchName != null && !branchName.isBlank()) {
+    if (Strings.isNotBlank(branchName)) {
       data.put("branch", branchName);
     }
     data.put("mode", background ? "background" : "foreground");

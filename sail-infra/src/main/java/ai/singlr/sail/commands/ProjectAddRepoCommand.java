@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SailYamlUpdater;
 import ai.singlr.sail.config.YamlUtil;
@@ -16,6 +17,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -106,7 +108,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     }
 
     var sshUser = config.sshUser();
-    var token = gitToken != null && !gitToken.isBlank() ? gitToken : null;
+    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
     var applier = new ProjectApplier(shell, out);
     var result =
         applier.applyRepos(
@@ -135,7 +137,7 @@ public final class ProjectAddRepoCommand implements Runnable {
                 + " and sail.yaml updated"));
   }
 
-  private SailYaml.Repo collectRepoInteractively(java.io.PrintStream out, Ansi ansi) {
+  private SailYaml.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {
     var repoUrl = promptRequired(out, ansi, "Repo URL");
     var pathDefault = guessRepoPath(repoUrl);
     var path = promptWithDefault(out, ansi, "Local path", pathDefault);
@@ -151,27 +153,26 @@ public final class ProjectAddRepoCommand implements Runnable {
     return repoName;
   }
 
-  private static String promptWithDefault(
-      java.io.PrintStream out, Ansi ansi, String label, String def) {
-    if (def != null && !def.isEmpty()) {
+  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
+    if (!Strings.isEmpty(def)) {
       out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
     } else {
       out.print(ansi.string("  @|bold " + label + "|@: "));
     }
     out.flush();
     var line = ConsoleHelper.readLine();
-    if (line == null || line.isBlank()) {
+    if (Strings.isBlank(line)) {
       return Objects.requireNonNullElse(def, "");
     }
     return line.strip();
   }
 
-  private static String promptRequired(java.io.PrintStream out, Ansi ansi, String label) {
+  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
     while (true) {
       out.print(ansi.string("  @|bold " + label + "|@: "));
       out.flush();
       var line = ConsoleHelper.readLine();
-      if (line != null && !line.isBlank()) {
+      if (Strings.isNotBlank(line)) {
         return line.strip();
       }
       out.println(ansi.string("    @|yellow Required field. Please enter a value.|@"));

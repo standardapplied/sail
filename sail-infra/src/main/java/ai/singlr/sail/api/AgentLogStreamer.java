@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -24,7 +25,7 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private static final String LOG_PATH = "/home/dev/.sail/agent.log";
   private static final byte[] HEARTBEAT = ": heartbeat\n\n".getBytes(StandardCharsets.UTF_8);
-  private static final long HEARTBEAT_INTERVAL_MS = 15_000;
+  private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
 
   private final ApiAuth auth;
   private final ShellExec shell;
@@ -86,7 +87,7 @@ public final class AgentLogStreamer implements HttpHandler {
                 new InputStreamReader(tailProcess.getInputStream(), StandardCharsets.UTF_8))) {
       writeComment(out, "streaming " + project);
       var lineNumber = since > 0 ? since : 1;
-      var lastHeartbeat = System.currentTimeMillis();
+      var lastHeartbeat = System.nanoTime();
 
       while (true) {
         if (reader.ready()) {
@@ -94,12 +95,12 @@ public final class AgentLogStreamer implements HttpHandler {
           if (line == null) break;
           writeSseData(out, lineNumber, line);
           lineNumber++;
-          lastHeartbeat = System.currentTimeMillis();
+          lastHeartbeat = System.nanoTime();
         } else {
-          if (System.currentTimeMillis() - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
+          if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
             out.write(HEARTBEAT);
             out.flush();
-            lastHeartbeat = System.currentTimeMillis();
+            lastHeartbeat = System.nanoTime();
           }
           Thread.sleep(100);
         }

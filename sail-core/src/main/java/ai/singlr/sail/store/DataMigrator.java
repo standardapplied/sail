@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectRegistry;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -45,7 +45,7 @@ public final class DataMigrator {
       db.execute(
           "INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)",
           migration.name(),
-          Instant.now().toString());
+          DateTimeUtils.now().toString());
       runs.add(new Run(migration.name(), false, report));
     }
     return List.copyOf(runs);

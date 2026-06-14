@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -73,7 +74,7 @@ public final class PlaceholderResolver {
       System.out.print("  " + prompt + ": ");
       System.out.flush();
       var value = readLine(reader);
-      if (value == null || value.isBlank()) {
+      if (Strings.isBlank(value)) {
         throw new IllegalArgumentException("Value required for ${" + name + "} (" + prompt + ")");
       }
       resolved.put(name, value.strip());

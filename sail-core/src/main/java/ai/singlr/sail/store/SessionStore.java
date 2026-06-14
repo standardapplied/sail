@@ -6,7 +6,6 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -49,7 +48,7 @@ public final class SessionStore {
         branch,
         task,
         pid != null ? pid.longValue() : null,
-        Instant.now().toString());
+        DateTimeUtils.now().toString());
     return id;
   }
 
@@ -102,7 +101,7 @@ public final class SessionStore {
     db.execute(
         "UPDATE agent_sessions SET status = ?, completed_at = ? WHERE id = ?",
         status,
-        Instant.now().toString(),
+        DateTimeUtils.now().toString(),
         id);
   }
 

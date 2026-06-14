@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.ZfsQuery;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
+import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -81,7 +82,7 @@ public final class HostStatusCommand implements Runnable {
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
-      java.util.List<ContainerManager.ContainerInfo> containers) {
+      List<ContainerManager.ContainerInfo> containers) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
     map.put("os", hostInfo.osPrettyName());

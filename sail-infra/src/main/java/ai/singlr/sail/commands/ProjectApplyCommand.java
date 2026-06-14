@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -110,7 +111,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var applier = new ProjectApplier(shell, System.out);
     var sshUser = config.sshUser();
-    var token = gitToken != null && !gitToken.isBlank() ? gitToken : null;
+    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
     var totalAdded = 0;
     var totalRemoved = 0;

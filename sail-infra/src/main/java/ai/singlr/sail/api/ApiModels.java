@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
@@ -82,7 +83,7 @@ record DispatchRequest(String specId, String mode, boolean dryRun, List<String> 
   }
 
   DispatchRequest {
-    mode = mode == null || mode.isBlank() ? "background" : mode;
+    mode = Strings.isBlank(mode) ? "background" : mode;
     repos = repos == null ? List.of() : List.copyOf(repos);
   }
 }

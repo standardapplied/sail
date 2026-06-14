@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -66,7 +67,7 @@ public final class DownCommand implements Runnable {
         }
         mgr.stop(projectName);
         if (json) {
-          printJson(java.util.List.of(projectName));
+          printJson(List.of(projectName));
           return;
         }
         Banner.printContainerStatus(
@@ -74,7 +75,7 @@ public final class DownCommand implements Runnable {
       }
       case ContainerState.Stopped ignored -> {
         if (json) {
-          printJson(java.util.List.of());
+          printJson(List.of());
           return;
         }
         Banner.printBranding(System.out, Ansi.AUTO);
@@ -95,7 +96,7 @@ public final class DownCommand implements Runnable {
 
     if (running.isEmpty()) {
       if (json) {
-        printJson(java.util.List.of());
+        printJson(List.of());
         return;
       }
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -136,7 +137,7 @@ public final class DownCommand implements Runnable {
                 + " stopped."));
   }
 
-  private static void printJson(java.util.List<String> stopped) {
+  private static void printJson(List<String> stopped) {
     var map = new LinkedHashMap<String, Object>();
     map.put("stopped", stopped);
     System.out.println(YamlUtil.dumpJson(map));

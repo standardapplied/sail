@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,7 +40,7 @@ public record ClientConfig(String host, String user) {
 
   public static ClientConfig fromMap(Map<String, Object> map) {
     var host = (String) map.get("host");
-    if (host == null || host.isBlank()) {
+    if (Strings.isBlank(host)) {
       throw new IllegalArgumentException(
           "client config 'host' is required."
               + "\n  Set the host in ~/.sail/config.yaml: host: <server-ip-or-ssh-alias>");
@@ -57,7 +58,7 @@ public record ClientConfig(String host, String user) {
 
   /** Returns true when FDE-gateway forwarding is configured (a non-blank gateway user). */
   public boolean gatewayEnabled() {
-    return user != null && !user.isBlank();
+    return Strings.isNotBlank(user);
   }
 
   /** The SSH destination for gateway-forwarded commands, e.g. {@code sail@devbox}. */

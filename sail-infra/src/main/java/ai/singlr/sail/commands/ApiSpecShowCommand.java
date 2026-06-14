@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
@@ -75,7 +76,7 @@ public final class ApiSpecShowCommand implements Runnable {
       }
 
       var body = (String) result.get("body");
-      if (body != null && !body.isBlank()) {
+      if (Strings.isNotBlank(body)) {
         System.out.println();
         System.out.println(body);
       }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -256,7 +257,7 @@ public final class ProjectDemoCommand implements Runnable {
       out.print(ansi.string("  @|bold Git name (for commits)|@: "));
       out.flush();
       gitName = ConsoleHelper.readLine();
-      if (gitName == null || gitName.isBlank()) {
+      if (Strings.isBlank(gitName)) {
         throw new IllegalArgumentException(
             "Git name is required."
                 + "\n  Set it with: git config --global user.name \"Your Name\"");
@@ -267,7 +268,7 @@ public final class ProjectDemoCommand implements Runnable {
       out.print(ansi.string("  @|bold Git email|@: "));
       out.flush();
       gitEmail = ConsoleHelper.readLine();
-      if (gitEmail == null || gitEmail.isBlank()) {
+      if (Strings.isBlank(gitEmail)) {
         throw new IllegalArgumentException(
             "Git email is required."
                 + "\n  Set it with: git config --global user.email you@example.com");
@@ -298,7 +299,7 @@ public final class ProjectDemoCommand implements Runnable {
     try {
       var sudoUser = System.getenv("SUDO_USER");
       var pb =
-          sudoUser != null && !sudoUser.isBlank()
+          Strings.isNotBlank(sudoUser)
               ? new ProcessBuilder("su", "-", sudoUser, "-c", "git config --global " + key)
               : new ProcessBuilder("git", "config", "--global", key);
       pb.redirectErrorStream(true);
@@ -315,7 +316,7 @@ public final class ProjectDemoCommand implements Runnable {
   static String detectSshPublicKey() {
     var sudoUser = System.getenv("SUDO_USER");
     Path sshDir;
-    if (sudoUser != null && !sudoUser.isBlank()) {
+    if (Strings.isNotBlank(sudoUser)) {
       sshDir = Path.of("/home", sudoUser, ".ssh");
     } else {
       sshDir = Path.of(System.getProperty("user.home"), ".ssh");

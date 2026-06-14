@@ -5,10 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +28,7 @@ import java.util.concurrent.TimeoutException;
 public final class SnapshotManager {
 
   private static final DateTimeFormatter LABEL_FORMAT =
-      DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+      DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
   /** Default timeout for snapshot mutations (create/restore/delete). */
   public static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
@@ -122,7 +123,7 @@ public final class SnapshotManager {
 
   /** Generates a default snapshot label from the current timestamp. */
   public static String defaultLabel() {
-    return "snap-" + LocalDateTime.now().format(LABEL_FORMAT);
+    return "snap-" + LABEL_FORMAT.format(DateTimeUtils.now());
   }
 
   private ShellExec.Result execMutation(List<String> cmd, Duration timeout, String description)

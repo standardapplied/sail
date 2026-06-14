@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
@@ -51,6 +52,8 @@ public final class SseHandler implements HttpHandler {
 
   /** Heartbeat interval. SSE comments keep idle connections alive through proxies. */
   public static final long HEARTBEAT_MILLIS = 15_000L;
+
+  private static final long HEARTBEAT_NANOS = HEARTBEAT_MILLIS * 1_000_000L;
 
   /** Poll timeout when draining the per-connection queue. */
   static final long POLL_MILLIS = 1_000L;
@@ -129,7 +132,7 @@ public final class SseHandler implements HttpHandler {
     exchange.sendResponseHeaders(200, 0);
     try (var out = exchange.getResponseBody()) {
       writeComment(out, "subscribed");
-      var lastHeartbeat = System.currentTimeMillis();
+      var lastHeartbeat = System.nanoTime();
       while (true) {
         Event event;
         try {
@@ -141,9 +144,9 @@ public final class SseHandler implements HttpHandler {
         if (event != null) {
           writeEvent(out, event);
         }
-        if (System.currentTimeMillis() - lastHeartbeat > HEARTBEAT_MILLIS) {
+        if (System.nanoTime() - lastHeartbeat > HEARTBEAT_NANOS) {
           writeComment(out, "keepalive");
-          lastHeartbeat = System.currentTimeMillis();
+          lastHeartbeat = System.nanoTime();
         }
       }
     } catch (IOException disconnected) {
@@ -189,17 +192,17 @@ public final class SseHandler implements HttpHandler {
 
   static Predicate<Event> parseFilter(URI uri) {
     var query = uri.getRawQuery();
-    if (query == null || query.isBlank()) {
+    if (Strings.isBlank(query)) {
       return EventSubscriber.all();
     }
     var values = parseQuery(query);
     Predicate<Event> result = EventSubscriber.all();
     var projectFilter = values.get("project");
-    if (projectFilter != null && !projectFilter.isBlank()) {
+    if (Strings.isNotBlank(projectFilter)) {
       result = result.and(EventSubscriber.byProject(projectFilter));
     }
     var typeFilter = values.get("type");
-    if (typeFilter != null && !typeFilter.isBlank()) {
+    if (Strings.isNotBlank(typeFilter)) {
       var types = Set.of(typeFilter.split(","));
       result = result.and(e -> types.contains(e.type()));
     }

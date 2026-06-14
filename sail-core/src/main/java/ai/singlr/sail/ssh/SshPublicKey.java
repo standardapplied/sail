@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.ssh;
 
+import ai.singlr.sail.common.Strings;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -30,7 +31,7 @@ public record SshPublicKey(String type, String blob, String comment, String fing
 
   /** Parses an {@code authorized_keys}-style line. Throws {@link IllegalArgumentException}. */
   public static SshPublicKey parse(String input) {
-    if (input == null || input.isBlank()) {
+    if (Strings.isBlank(input)) {
       throw new IllegalArgumentException("SSH public key is empty.");
     }
     var parts = input.strip().split("\\s+", 3);
@@ -60,9 +61,7 @@ public record SshPublicKey(String type, String blob, String comment, String fing
 
   /** The canonical single-line form for an {@code authorized_keys} entry. */
   public String line() {
-    return comment == null || comment.isBlank()
-        ? type + " " + blob
-        : type + " " + blob + " " + comment;
+    return Strings.isBlank(comment) ? type + " " + blob : type + " " + blob + " " + comment;
   }
 
   private static boolean declaredTypeMatchesBlob(String type, byte[] blob) {

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Strings;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -30,7 +31,7 @@ public final class Revisions {
 
   /** Extracts the monotonic counter from a revision id; 0 for null/blank/malformed. */
   public static long counterOf(String rev) {
-    if (rev == null || rev.isBlank()) {
+    if (Strings.isBlank(rev)) {
       return 0;
     }
     var dash = rev.indexOf('-');

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.gen;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentCli;
 import java.util.ArrayList;
@@ -647,7 +648,7 @@ public final class AgentContextGenerator {
   }
 
   private static String capitalize(String s) {
-    if (s == null || s.isEmpty()) return s;
+    if (Strings.isEmpty(s)) return s;
     return Character.toUpperCase(s.charAt(0)) + s.substring(1);
   }
 }

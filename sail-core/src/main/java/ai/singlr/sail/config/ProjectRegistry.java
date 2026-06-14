@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Snapshot of every project descriptor under {@code ~/.sail/projects/}. Holds enough to back the
@@ -65,8 +66,8 @@ public final class ProjectRegistry {
   }
 
   /** Returns the project info for {@code name}, or empty if no descriptor matches. */
-  public java.util.Optional<ProjectInfo> find(String name) {
-    return java.util.Optional.ofNullable(byName.get(name));
+  public Optional<ProjectInfo> find(String name) {
+    return Optional.ofNullable(byName.get(name));
   }
 
   /**

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
+
 /**
  * Pure resolver for the git branch name a dispatched spec should run on. Replaces the inline
  * duplicates that lived in {@code SailApiOperations.branchName} (HTTP dispatch path) and {@code
@@ -40,7 +42,7 @@ public final class BranchPolicy {
       return spec.branch();
     }
     var prefix = config.agent().branchPrefix();
-    if (prefix == null || prefix.isBlank()) {
+    if (Strings.isBlank(prefix)) {
       prefix = DEFAULT_PREFIX;
     }
     return prefix + spec.id();

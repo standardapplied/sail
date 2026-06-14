@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -180,7 +181,7 @@ public final class ProjectAddFileCommand implements Runnable {
         out.print(ansi.string("  @|bold Search or path|@: "));
         out.flush();
         var input = ConsoleHelper.readLine();
-        if (input == null || input.isBlank()) {
+        if (Strings.isBlank(input)) {
           return List.of();
         }
         input = input.strip();
@@ -219,7 +220,7 @@ public final class ProjectAddFileCommand implements Runnable {
         out.print(ansi.string("  @|bold Pattern|@ @|faint (e.g. *.json, setup.*)|@: "));
         out.flush();
         var patternInput = ConsoleHelper.readLine();
-        if (patternInput == null || patternInput.isBlank()) {
+        if (Strings.isBlank(patternInput)) {
           return List.of();
         }
         searchPattern = patternInput.strip();
@@ -231,7 +232,7 @@ public final class ProjectAddFileCommand implements Runnable {
         out.print(ansi.string("  @|bold File path|@ @|faint (relative to ~/workspace)|@: "));
         out.flush();
         var pathInput = ConsoleHelper.readLine();
-        if (pathInput == null || pathInput.isBlank()) {
+        if (Strings.isBlank(pathInput)) {
           return List.of();
         }
         return collectManualPaths(out, ansi, pathInput.strip());
@@ -255,7 +256,7 @@ public final class ProjectAddFileCommand implements Runnable {
       out.print(ansi.string("  @|bold File path|@ @|faint (relative to ~/workspace)|@: "));
       out.flush();
       var pathInput = ConsoleHelper.readLine();
-      if (pathInput != null && !pathInput.isBlank()) {
+      if (Strings.isNotBlank(pathInput)) {
         manualPaths.add(pathInput.strip());
       }
     }
@@ -304,7 +305,7 @@ public final class ProjectAddFileCommand implements Runnable {
   }
 
   static List<String> parseDiscoveryOutput(String output, String workspaceDir) {
-    if (output == null || output.isBlank()) return List.of();
+    if (Strings.isBlank(output)) return List.of();
     var prefix = workspaceDir + "/";
     return output
         .lines()

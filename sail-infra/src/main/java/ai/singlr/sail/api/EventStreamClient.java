@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -157,7 +158,7 @@ public final class EventStreamClient implements AutoCloseable {
             .append(port)
             .append("/v1/events/stream");
     var params = new LinkedHashMap<String, String>();
-    if (project != null && !project.isBlank()) {
+    if (Strings.isNotBlank(project)) {
       params.put("project", project);
     }
     if (!params.isEmpty()) {

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
@@ -36,7 +37,7 @@ final class HostServiceInstallers {
 
   static String currentUsername() {
     var name = System.getProperty("user.name");
-    if (name == null || name.isBlank()) {
+    if (Strings.isBlank(name)) {
       throw new IllegalStateException(
           "Could not determine current username (user.name system property is empty).");
     }

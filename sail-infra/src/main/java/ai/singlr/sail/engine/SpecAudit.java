@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecAuditEvent;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,7 +37,7 @@ public final class SpecAudit {
   public SpecAudit(ShellExec shell, String containerName, String specsDir) {
     this.shell = Objects.requireNonNull(shell, "shell");
     NameValidator.requireValidProjectName(containerName);
-    if (specsDir == null || specsDir.isBlank()) {
+    if (Strings.isBlank(specsDir)) {
       throw new IllegalArgumentException("specsDir is required.");
     }
     this.containerName = containerName;

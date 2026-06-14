@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -76,7 +77,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
   private void handle(HttpExchange exchange) throws IOException {
     var query = parseQuery(exchange.getRequestURI().getRawQuery());
     var received = query.get("token");
-    var accepted = state.equals(query.get("state")) && received != null && !received.isBlank();
+    var accepted = state.equals(query.get("state")) && Strings.isNotBlank(received);
     var body = accepted ? DONE_PAGE : ERROR_PAGE;
     var bytes = body.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
@@ -97,7 +98,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
 
   private static Map<String, String> parseQuery(String raw) {
     var values = new LinkedHashMap<String, String>();
-    if (raw == null || raw.isBlank()) {
+    if (Strings.isBlank(raw)) {
       return values;
     }
     for (var part : raw.split("&")) {

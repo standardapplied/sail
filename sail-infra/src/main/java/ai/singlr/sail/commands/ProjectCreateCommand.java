@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -23,6 +24,8 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
@@ -222,7 +225,7 @@ public final class ProjectCreateCommand implements Runnable {
       return Map.of();
     }
 
-    if (gitToken != null && !gitToken.isBlank()) {
+    if (Strings.isNotBlank(gitToken)) {
       return GitCredentials.singleTokenMap(gitToken);
     }
 
@@ -234,7 +237,7 @@ public final class ProjectCreateCommand implements Runnable {
     var tokens = new LinkedHashMap<String, String>();
     for (var host : hosts) {
       var envToken = GitCredentials.resolveTokenForHost(host, null);
-      if (envToken != null && !envToken.isBlank()) {
+      if (Strings.isNotBlank(envToken)) {
         tokens.put(host, envToken);
       }
     }
@@ -248,7 +251,7 @@ public final class ProjectCreateCommand implements Runnable {
       try {
         var prompted =
             ConsoleHelper.readPassword("  Git access token for " + host + " (blank to skip): ");
-        if (prompted != null && !prompted.isBlank()) {
+        if (Strings.isNotBlank(prompted)) {
           tokens.put(host, prompted);
         }
       } catch (EchoDisabledUnavailableException e) {
@@ -328,8 +331,8 @@ public final class ProjectCreateCommand implements Runnable {
       Files.copy(
           sourceYaml,
           targetYaml,
-          java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-          java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+          StandardCopyOption.REPLACE_EXISTING,
+          StandardCopyOption.COPY_ATTRIBUTES);
     }
     syncFilesDirectory(
         sourceYaml.getParent().resolve("files"), targetYaml.getParent().resolve("files"));
@@ -359,8 +362,8 @@ public final class ProjectCreateCommand implements Runnable {
           Files.copy(
               path,
               destination,
-              java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-              java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+              StandardCopyOption.REPLACE_EXISTING,
+              StandardCopyOption.COPY_ATTRIBUTES);
         }
       }
     }
@@ -371,7 +374,7 @@ public final class ProjectCreateCommand implements Runnable {
       return;
     }
     try (var walk = Files.walk(dir)) {
-      for (var path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+      for (var path : walk.sorted(Comparator.reverseOrder()).toList()) {
         Files.deleteIfExists(path);
       }
     }

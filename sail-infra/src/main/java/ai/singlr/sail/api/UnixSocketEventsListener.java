@@ -17,6 +17,8 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.EnumSet;
 import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -81,13 +83,13 @@ public final class UnixSocketEventsListener implements AutoCloseable {
     try {
       Files.setPosixFilePermissions(
           socketPath,
-          java.util.EnumSet.of(
-              java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-              java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
-              java.nio.file.attribute.PosixFilePermission.GROUP_READ,
-              java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
-              java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
-              java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE));
+          EnumSet.of(
+              PosixFilePermission.OWNER_READ,
+              PosixFilePermission.OWNER_WRITE,
+              PosixFilePermission.GROUP_READ,
+              PosixFilePermission.GROUP_WRITE,
+              PosixFilePermission.OTHERS_READ,
+              PosixFilePermission.OTHERS_WRITE));
     } catch (UnsupportedOperationException | IOException permError) {
       System.err.println(
           "  [sail-uds] Warning: could not chmod 0666 "

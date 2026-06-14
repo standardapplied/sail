@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -49,13 +51,20 @@ public final class FdeStore {
    * the role is not one of {@code admin}, {@code member}, {@code viewer}.
    */
   public Fde add(String handle, String displayName, String email, String role) {
-    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
     var fde =
-        new Fde(generateId(), handle, displayName, email, role, "active", Instant.now().toString());
+        new Fde(
+            generateId(),
+            handle,
+            displayName,
+            email,
+            role,
+            "active",
+            DateTimeUtils.now().toString());
     db.execute(
         "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at)"
             + " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -85,7 +94,7 @@ public final class FdeStore {
       String role,
       String status,
       String createdAt) {
-    ai.singlr.sail.engine.NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
@@ -105,7 +114,7 @@ public final class FdeStore {
         email,
         role,
         status,
-        createdAt == null || createdAt.isBlank() ? Instant.now().toString() : createdAt);
+        Strings.isBlank(createdAt) ? DateTimeUtils.now().toString() : createdAt);
   }
 
   public Optional<Fde> byHandle(String handle) {

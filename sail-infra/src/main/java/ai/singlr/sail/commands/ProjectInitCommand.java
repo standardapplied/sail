@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -12,11 +13,13 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -102,7 +105,7 @@ public final class ProjectInitCommand implements Runnable {
     return "sail project create " + name + " -f " + outputPath;
   }
 
-  private SailYaml collectInputs(java.io.PrintStream out, Ansi ansi) {
+  private SailYaml collectInputs(PrintStream out, Ansi ansi) {
     var dirName = sanitizeProjectName(Path.of("").toAbsolutePath().getFileName().toString());
     var name = promptWithDefault(out, ansi, "Project name", dirName);
     NameValidator.requireValidProjectName(name);
@@ -169,7 +172,7 @@ public final class ProjectInitCommand implements Runnable {
 
     out.println();
     out.println(ansi.string("  @|bold Infrastructure services (Podman containers)|@"));
-    java.util.Map<String, SailYaml.Service> services = new LinkedHashMap<>();
+    Map<String, SailYaml.Service> services = new LinkedHashMap<>();
     for (var preset : ServicePresets.all()) {
       var ports =
           preset.service().ports().stream()
@@ -241,7 +244,7 @@ public final class ProjectInitCommand implements Runnable {
   }
 
   private static SailYaml.Service customizePresetEnv(
-      SailYaml.Service service, java.io.PrintStream out, Ansi ansi) {
+      SailYaml.Service service, PrintStream out, Ansi ansi) {
     var defaultEnv = service.environment();
     var env = new LinkedHashMap<String, String>();
     if (defaultEnv != null && !defaultEnv.isEmpty()) {
@@ -269,34 +272,33 @@ public final class ProjectInitCommand implements Runnable {
         service.volumes());
   }
 
-  private static String promptWithDefault(
-      java.io.PrintStream out, Ansi ansi, String label, String def) {
-    if (def != null && !def.isEmpty()) {
+  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
+    if (!Strings.isEmpty(def)) {
       out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
     } else {
       out.print(ansi.string("  @|bold " + label + "|@: "));
     }
     out.flush();
     var line = ConsoleHelper.readLine();
-    if (line == null || line.isBlank()) {
+    if (Strings.isBlank(line)) {
       return Objects.requireNonNullElse(def, "");
     }
     return line.strip();
   }
 
-  private static String promptRequired(java.io.PrintStream out, Ansi ansi, String label) {
+  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
     while (true) {
       out.print(ansi.string("  @|bold " + label + "|@: "));
       out.flush();
       var line = ConsoleHelper.readLine();
-      if (line != null && !line.isBlank()) {
+      if (Strings.isNotBlank(line)) {
         return line.strip();
       }
       out.println(ansi.string("    @|yellow Required field. Please enter a value.|@"));
     }
   }
 
-  private static int promptInt(java.io.PrintStream out, Ansi ansi, String label, int def) {
+  private static int promptInt(PrintStream out, Ansi ansi, String label, int def) {
     var raw = promptWithDefault(out, ansi, label, String.valueOf(def));
     try {
       return Integer.parseInt(raw);
@@ -340,7 +342,7 @@ public final class ProjectInitCommand implements Runnable {
    * services map.
    */
   private static void collectCustomServices(
-      java.io.PrintStream out, Ansi ansi, java.util.Map<String, SailYaml.Service> services) {
+      PrintStream out, Ansi ansi, Map<String, SailYaml.Service> services) {
     do {
       out.println();
       out.println(ansi.string("  @|bold Custom Podman service|@"));
@@ -362,7 +364,7 @@ public final class ProjectInitCommand implements Runnable {
         }
         if (ports.isEmpty()) ports = null;
       }
-      java.util.Map<String, String> env = null;
+      Map<String, String> env = null;
       if (ConsoleHelper.confirmNo("Add environment variables?")) {
         env = new LinkedHashMap<>();
         do {
@@ -416,7 +418,7 @@ public final class ProjectInitCommand implements Runnable {
     }
 
     if (config.repos() != null && !config.repos().isEmpty()) {
-      var reposList = new ArrayList<java.util.Map<String, Object>>();
+      var reposList = new ArrayList<Map<String, Object>>();
       for (var repo : config.repos()) {
         var r = new LinkedHashMap<String, Object>();
         r.put("url", repo.url());

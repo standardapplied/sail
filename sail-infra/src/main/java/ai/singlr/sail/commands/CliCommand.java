@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import java.io.PrintStream;
 import java.util.Objects;
@@ -35,7 +36,7 @@ final class CliCommand {
     } catch (Exception e) {
       var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
       err.println(Banner.errorLine(message, Ansi.AUTO));
-      if (failureHint != null && !failureHint.isBlank()) {
+      if (Strings.isNotBlank(failureHint)) {
         err.println(failureHint);
       }
       throw new CommandLine.ExecutionException(commandSpec.commandLine(), message, e);

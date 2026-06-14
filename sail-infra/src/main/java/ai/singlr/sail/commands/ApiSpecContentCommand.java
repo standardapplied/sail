@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.nio.file.Files;
@@ -72,15 +73,15 @@ public final class ApiSpecContentCommand implements Runnable {
         }
         var bodyText = (String) result.get("body");
         var planText = (String) result.get("plan");
-        if (bodyText != null && !bodyText.isBlank()) {
+        if (Strings.isNotBlank(bodyText)) {
           System.out.println(bodyText);
         }
-        if (planText != null && !planText.isBlank()) {
+        if (Strings.isNotBlank(planText)) {
           System.out.println();
           System.out.println(Ansi.AUTO.string("@|bold --- Plan ---|@"));
           System.out.println(planText);
         }
-        if ((bodyText == null || bodyText.isBlank()) && (planText == null || planText.isBlank())) {
+        if ((Strings.isBlank(bodyText)) && (Strings.isBlank(planText))) {
           System.out.println(Ansi.AUTO.string("  @|faint No content for " + specId + ".|@"));
         }
       }

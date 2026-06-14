@@ -90,7 +90,7 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     var serverUrl = DEFAULT_URL;
     if (Files.exists(configPath)) {
       var existing = (String) YamlUtil.parseFile(configPath).get("server");
-      if (existing != null && !existing.isBlank()) {
+      if (Strings.isNotBlank(existing)) {
         serverUrl = existing;
       }
     }

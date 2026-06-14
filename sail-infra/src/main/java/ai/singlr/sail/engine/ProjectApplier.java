@@ -177,7 +177,7 @@ public final class ProjectApplier {
   }
 
   private static List<String> rootExec(String containerName, List<String> args) {
-    var full = new java.util.ArrayList<>(List.of("incus", "exec", containerName, "--"));
+    var full = new ArrayList<>(List.of("incus", "exec", containerName, "--"));
     full.addAll(args);
     return List.copyOf(full);
   }

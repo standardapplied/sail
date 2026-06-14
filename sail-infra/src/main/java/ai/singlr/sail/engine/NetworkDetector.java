@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.net.Inet4Address;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -71,7 +72,7 @@ public final class NetworkDetector {
    * @return true if the string is a valid dotted-quad IPv4 address
    */
   public static boolean isValidIpv4(String ip) {
-    if (ip == null || ip.isBlank()) {
+    if (Strings.isBlank(ip)) {
       return false;
     }
     var parts = ip.split("\\.");

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -18,6 +19,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import picocli.CommandLine.Command;
@@ -212,7 +214,7 @@ public final class HostInitCommand implements Runnable {
     var sudoUser = System.getenv("SUDO_USER");
     System.out.println();
     System.out.println(Ansi.AUTO.string("  @|bold Next step:|@ enable the sail API service."));
-    if (sudoUser != null && !sudoUser.isBlank() && !"root".equals(sudoUser)) {
+    if (Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser)) {
       enableLingerForUser(shell, sudoUser);
       System.out.println(Ansi.AUTO.string("    Run as @|bold " + sudoUser + "|@ (without sudo):"));
     } else {
@@ -223,7 +225,7 @@ public final class HostInitCommand implements Runnable {
 
   private void enableLingerForUser(ShellExec shell, String user) {
     try {
-      var result = shell.exec(java.util.List.of("loginctl", "enable-linger", user));
+      var result = shell.exec(List.of("loginctl", "enable-linger", user));
       if (result.ok()) {
         System.out.println(
             Ansi.AUTO.string(
@@ -296,7 +298,7 @@ public final class HostInitCommand implements Runnable {
     System.out.print("  Select disk [1-" + candidates.size() + "]: ");
     System.out.flush();
     var line = ConsoleHelper.readLine();
-    if (line == null || line.isBlank()) {
+    if (Strings.isBlank(line)) {
       System.out.println("  Aborted.");
       return null;
     }

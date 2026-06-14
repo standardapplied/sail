@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ public record Notifications(String url, List<String> events) {
   @SuppressWarnings("unchecked")
   public static Notifications fromMap(Map<String, Object> map) {
     var url = (String) map.get("url");
-    if (url == null || url.isBlank()) {
+    if (Strings.isBlank(url)) {
       throw new IllegalArgumentException("notifications.url is required.");
     }
     WebhookUrlSafety.requireSafe(url);

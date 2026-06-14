@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
@@ -114,7 +115,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     }
     try {
       var name = (String) YamlUtil.parseFile(yaml).get("name");
-      return name == null || name.isBlank() ? null : name;
+      return Strings.isBlank(name) ? null : name;
     } catch (Exception e) {
       return null;
     }

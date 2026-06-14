@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
@@ -85,7 +86,7 @@ public record Spec(
   @SuppressWarnings("unchecked")
   public static Spec fromMap(Map<String, Object> map) {
     var id = (String) map.get("id");
-    if (id == null || id.isBlank()) {
+    if (Strings.isBlank(id)) {
       throw new IllegalArgumentException("spec.id is required");
     }
     NameValidator.requireValidSpecId(id);
@@ -171,7 +172,7 @@ public record Spec(
   }
 
   private static String validatedAgent(String agent) {
-    if (agent == null || agent.isBlank()) {
+    if (Strings.isBlank(agent)) {
       return null;
     }
     AgentCli.fromYamlName(agent);
@@ -180,7 +181,7 @@ public record Spec(
 
   /** Validates a model id (or returns null when blank). Throws on shell-unsafe values. */
   public static String validatedModel(String model) {
-    if (model == null || model.isBlank()) {
+    if (Strings.isBlank(model)) {
       return null;
     }
     if (!MODEL_PATTERN.matcher(model).matches()) {
@@ -192,7 +193,7 @@ public record Spec(
 
   /** Validates a reasoning-effort value (or returns null when blank). Throws if not allowed. */
   public static String validatedReasoningEffort(String reasoningEffort) {
-    if (reasoningEffort == null || reasoningEffort.isBlank()) {
+    if (Strings.isBlank(reasoningEffort)) {
       return null;
     }
     if (!REASONING_EFFORTS.contains(reasoningEffort)) {

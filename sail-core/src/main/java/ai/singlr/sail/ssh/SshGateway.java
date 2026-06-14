@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.ssh;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import java.time.Duration;
@@ -59,7 +60,7 @@ public final class SshGateway {
 
   public static Decision authorize(
       String originalCommand, String fdeHandle, FdeStore fdes, AuthSessionStore sessions) {
-    if (originalCommand == null || originalCommand.isBlank()) {
+    if (Strings.isBlank(originalCommand)) {
       return new Rejected(
           "No command supplied. Interactive shells are not permitted; run a 'sail' command.");
     }

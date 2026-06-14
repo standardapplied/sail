@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
+
 /**
  * Known AI coding agent CLIs that can be installed inside a project container. Each constant
  * carries the metadata needed to install and invoke the agent: the YAML config name, the binary
@@ -118,9 +120,7 @@ public enum AgentCli {
         requireNoModelOptions(model, reasoningEffort);
         var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
         var settings =
-            claudeSettingsPath == null || claudeSettingsPath.isBlank()
-                ? ""
-                : " --settings " + claudeSettingsPath;
+            Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
         yield binaryName + " --print" + settings + perm + " -p " + task;
       }
       case CODEX -> {

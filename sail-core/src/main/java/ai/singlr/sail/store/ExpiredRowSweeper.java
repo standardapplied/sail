@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -64,7 +64,7 @@ public final class ExpiredRowSweeper implements AutoCloseable {
    * Deletes every row whose expiry has passed; returns how many were removed. Visible for tests.
    */
   static int sweep(Sqlite db) {
-    var now = Instant.now().toString();
+    var now = DateTimeUtils.now().toString();
     var deleted = 0;
     db.execute("DELETE FROM sessions WHERE expires_at < ?", now);
     deleted += db.changes();

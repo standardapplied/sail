@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -33,7 +34,7 @@ public interface EventSubscriber {
 
   /** Filter accepting only events whose type matches one of the given names. */
   static Predicate<Event> byType(String... types) {
-    var set = java.util.Set.of(types);
+    var set = Set.of(types);
     return e -> set.contains(e.type());
   }
 

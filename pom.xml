@@ -6,7 +6,7 @@
 
     <groupId>ai.singlr</groupId>
     <artifactId>sail</artifactId>
-    <version>0.13.73</version>
+    <version>0.13.74</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -132,26 +132,33 @@
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
+                                    <!--
+                                        Ratchet: each minimum sits just under the weakest module's
+                                        actual for that counter (line/branch/method bound by
+                                        sail-infra ~0.54/0.46/0.73; class bound by sail-harness 0.89)
+                                        so the current bar is locked in and any regression fails the
+                                        build. Raise these as coverage climbs toward 100%.
+                                    -->
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.44</minimum>
+                                            <minimum>0.53</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.67</minimum>
+                                            <minimum>0.72</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.36</minimum>
+                                            <minimum>0.45</minimum>
                                         </limit>
                                         <limit>
                                             <counter>CLASS</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.86</minimum>
+                                            <minimum>0.88</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

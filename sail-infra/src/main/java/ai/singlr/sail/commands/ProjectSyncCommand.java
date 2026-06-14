@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ClaudeCodeHookConfig;
@@ -53,11 +54,11 @@ public final class ProjectSyncCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    if (!all && (name == null || name.isBlank())) {
+    if (!all && (Strings.isBlank(name))) {
       throw new IllegalArgumentException(
           "Provide a project name or pass --all to sync every project.");
     }
-    if (all && name != null && !name.isBlank()) {
+    if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
 

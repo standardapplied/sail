@@ -159,7 +159,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
 
   private static String enrollmentTicket(HttpExchange exchange) {
     var value = exchange.getRequestHeaders().getFirst(TICKET_HEADER);
-    return value == null || value.isBlank() ? null : value;
+    return Strings.isBlank(value) ? null : value;
   }
 
   private static ApiException ticketDenied() {

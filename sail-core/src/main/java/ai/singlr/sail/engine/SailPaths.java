@@ -5,9 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Optional;
 
 /**
  * Centralized path constants for CLI state files. All state lives under {@code ~/.sail/}: project
@@ -45,7 +48,7 @@ public final class SailPaths {
 
   /** Pure resolver; visible for tests so resolution can be exercised without the environment. */
   static Path dataDir(String configured, boolean provisionedSystemDb) {
-    if (configured != null && !configured.isBlank()) {
+    if (Strings.isNotBlank(configured)) {
       return Path.of(configured);
     }
     if (provisionedSystemDb) {
@@ -70,8 +73,7 @@ public final class SailPaths {
     Files.createDirectories(dir);
     if (dir.startsWith(SAIL_DIR)
         && dir.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-      Files.setPosixFilePermissions(
-          dir, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
     }
   }
 
@@ -157,20 +159,20 @@ public final class SailPaths {
    * filesystem root or the user's home directory (whichever comes first). Pure I/O-free helper for
    * callers that pull additional metadata out of the descriptor.
    */
-  public static java.util.Optional<Path> findSailYamlUpward(Path start) {
+  public static Optional<Path> findSailYamlUpward(Path start) {
     var home = Path.of(System.getProperty("user.home"));
     var dir = start.toAbsolutePath().normalize();
     while (dir != null) {
       var candidate = dir.resolve(PROJECT_DESCRIPTOR);
       if (Files.isRegularFile(candidate)) {
-        return java.util.Optional.of(candidate);
+        return Optional.of(candidate);
       }
       if (dir.equals(home)) {
-        return java.util.Optional.empty();
+        return Optional.empty();
       }
       dir = dir.getParent();
     }
-    return java.util.Optional.empty();
+    return Optional.empty();
   }
 
   /**
@@ -206,7 +208,7 @@ public final class SailPaths {
     if (root) {
       return Path.of("/run/sail/api.sock");
     }
-    if (xdgRuntimeDir != null && !xdgRuntimeDir.isBlank()) {
+    if (Strings.isNotBlank(xdgRuntimeDir)) {
       return Path.of(xdgRuntimeDir, "sail", "api.sock");
     }
     return SAIL_DIR.resolve("run/api.sock");

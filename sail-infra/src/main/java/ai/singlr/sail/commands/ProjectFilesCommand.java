@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
@@ -94,7 +95,7 @@ public final class ProjectFilesCommand implements Runnable {
      */
     static String share(FileStore files, Path projectsDir, String project, Path source, String as)
         throws IOException {
-      var path = as != null && !as.isBlank() ? as : source.getFileName().toString();
+      var path = Strings.isNotBlank(as) ? as : source.getFileName().toString();
       NameValidator.requireSafePath(path, "path");
       files.put(project, path, Base64.getEncoder().encodeToString(Files.readAllBytes(source)));
       new FileMaterializer(files, projectsDir).materialize(project);
@@ -241,7 +242,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
-      if (all == (project != null && !project.isBlank())) {
+      if (all == (Strings.isNotBlank(project))) {
         System.err.println(Banner.errorLine("Pass a project name OR --all, not both.", Ansi.AUTO));
         return 1;
       }

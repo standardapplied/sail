@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -144,7 +145,7 @@ public final class ProjectDestroyCommand implements Runnable {
                 try {
                   Files.delete(path);
                 } catch (IOException e) {
-                  throw new java.io.UncheckedIOException(e);
+                  throw new UncheckedIOException(e);
                 }
               });
     }

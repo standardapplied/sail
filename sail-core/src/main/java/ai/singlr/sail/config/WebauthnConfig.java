@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,12 +32,12 @@ public record WebauthnConfig(String rpId, String rpName, List<String> origins) {
 
   /** True when an {@code rpId} and at least one origin are present, so login can be served. */
   public boolean isConfigured() {
-    return rpId != null && !rpId.isBlank() && !origins.isEmpty();
+    return Strings.isNotBlank(rpId) && !origins.isEmpty();
   }
 
   /** The display name, falling back to the {@code rpId} when none was configured. */
   public String resolvedRpName() {
-    return rpName == null || rpName.isBlank() ? rpId : rpName;
+    return Strings.isBlank(rpName) ? rpId : rpName;
   }
 
   @SuppressWarnings("unchecked")

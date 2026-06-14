@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.SailPaths;
@@ -324,6 +325,6 @@ public final class ConflictsCommand implements Callable<Integer> {
   }
 
   static Map<String, Object> parse(String json) {
-    return json == null || json.isBlank() ? null : YamlUtil.parseMap(json);
+    return Strings.isBlank(json) ? null : YamlUtil.parseMap(json);
   }
 }

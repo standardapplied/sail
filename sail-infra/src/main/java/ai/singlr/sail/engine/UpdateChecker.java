@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,7 +40,7 @@ public final class UpdateChecker {
     var cached = readCache(cacheFile);
     if (cached != null) {
       var lastChecked = Instant.ofEpochMilli((Long) cached.get("last_checked"));
-      if (Instant.now().minus(CHECK_INTERVAL).isBefore(lastChecked)) {
+      if (DateTimeUtils.now().minus(CHECK_INTERVAL).isBefore(lastChecked)) {
         return (String) cached.get("latest_version");
       }
     }
@@ -66,7 +67,7 @@ public final class UpdateChecker {
     try {
       Files.createDirectories(cacheFile.getParent());
       var map = new LinkedHashMap<String, Object>();
-      map.put("last_checked", Instant.now().toEpochMilli());
+      map.put("last_checked", DateTimeUtils.now().toEpochMilli());
       map.put("latest_version", latestVersion);
       var tmpFile = cacheFile.resolveSibling("update-check.yaml.tmp");
       YamlUtil.dumpToFile(map, tmpFile);

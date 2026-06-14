@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,7 @@ public record ApiError(String code, String message, String action, List<FieldErr
   }
 
   public ApiError {
-    action = action == null || action.isBlank() ? null : action;
+    action = Strings.isBlank(action) ? null : action;
     fieldErrors = fieldErrors == null ? List.of() : List.copyOf(fieldErrors);
   }
 
