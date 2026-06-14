@@ -9,12 +9,11 @@ import picocli.CommandLine.Command;
 
 @Command(
     name = "add",
-    description = "Add services, repos, or files to a running project.",
+    description = "Add services or repos to a running project.",
     mixinStandardHelpOptions = true,
     subcommands = {
       ProjectAddServiceCommand.class,
       ProjectAddRepoCommand.class,
-      ProjectAddFileCommand.class,
     })
 public final class ProjectAddCommand implements Runnable {
 

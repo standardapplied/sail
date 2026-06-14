@@ -33,8 +33,8 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "file",
-    description = "Capture workspace files from a running project for sharing.",
+    name = "capture",
+    description = "Capture workspace files from a running project container into the shared set.",
     mixinStandardHelpOptions = true)
 public final class ProjectAddFileCommand implements Runnable {
 

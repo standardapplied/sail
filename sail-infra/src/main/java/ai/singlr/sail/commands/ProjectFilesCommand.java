@@ -42,6 +42,7 @@ import picocli.CommandLine.Parameters;
     mixinStandardHelpOptions = true,
     subcommands = {
       ProjectFilesCommand.Add.class,
+      ProjectAddFileCommand.class,
       ProjectFilesCommand.Ls.class,
       ProjectFilesCommand.Cat.class,
       ProjectFilesCommand.Rm.class,
