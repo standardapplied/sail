@@ -14,9 +14,9 @@ jobs:
     name: Verify, security scan, and native build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: graalvm/setup-graalvm@v1
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
         with:
           java-version: '25'
           distribution: 'graalvm'
@@ -26,7 +26,7 @@ jobs:
         run: mvn clean verify
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: jacoco-reports
@@ -35,7 +35,7 @@ jobs:
             **/target/site/jacoco.xml
 
       - name: Cache OWASP Dependency-Check data
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/dependency-check-data
           key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-${{ github.run_id }}
@@ -55,7 +55,7 @@ jobs:
           -DdataDirectory=${{ runner.temp }}/dependency-check-data
 
       - name: Upload dependency check reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: dependency-check-reports
