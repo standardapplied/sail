@@ -93,15 +93,16 @@ public final class FilePicker {
    * Applies one line of input against the {@code entries} of the current directory. A lone
    * directory number descends; any other number(s) toggle the referenced files/folders; {@code a}
    * picks the whole current folder; {@code ..} goes up; {@code done} confirms; {@code q} cancels.
+   * Confirm and cancel accept common synonyms so a guessed word still does the obvious thing.
    */
   public static Step step(State state, List<Entry> entries, String input) {
-    var in = input == null ? "" : input.strip();
+    var in = input == null ? "" : input.strip().toLowerCase();
     if (in.isEmpty()) {
       return browsing(state, "");
     }
     return switch (in) {
-      case "q" -> new Step(state, Status.CANCELLED, "");
-      case "done", "d" -> new Step(state, Status.CONFIRMED, "");
+      case "q", "quit", "cancel", "exit" -> new Step(state, Status.CANCELLED, "");
+      case "done", "d", "share", "ok" -> new Step(state, Status.CONFIRMED, "");
       case ".." -> up(state);
       case "a" -> pick(state, List.of(state.cwd()), "Selected this folder.");
       default -> numbers(state, entries, in);
@@ -158,6 +159,7 @@ public final class FilePicker {
   /** Renders the current folder as a numbered listing with picked entries marked. */
   public static String render(State state, List<Entry> entries) {
     var here = state.root().relativize(state.cwd()).toString();
+    var count = state.picked().size();
     var out = new StringBuilder();
     out.append("  ").append(here.isEmpty() ? "." : here).append("  —  pick files to share\n");
     for (var i = 0; i < entries.size(); i++) {
@@ -167,14 +169,18 @@ public final class FilePicker {
       var detail = e.directory() ? "" : "  " + humanSize(e.size());
       out.append(String.format("  %s [%d] %-28s%s%n", mark, i + 1, name, detail));
     }
-    out.append("    number(s) toggle · a = this folder · .. up · done · q quit");
-    if (!state.picked().isEmpty()) {
-      out.append("   (").append(state.picked().size()).append(" picked)");
-    }
+    out.append("  Type a command, then Enter (arrow keys don't work here):\n");
+    out.append(
+        "    a number  pick a file, or open a folder   ·   a  pick everything here   ·   ..  go up\n");
+    var finish =
+        count == 0
+            ? "done  finish (nothing picked yet)"
+            : "done  share the " + count + " picked file(s)";
+    out.append("    ").append(finish).append("   ·   q  cancel");
     return out.toString();
   }
 
-  private static String humanSize(long bytes) {
+  static String humanSize(long bytes) {
     if (bytes < 1024) {
       return bytes + " B";
     }

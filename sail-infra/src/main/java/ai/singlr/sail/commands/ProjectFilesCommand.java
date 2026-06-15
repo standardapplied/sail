@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -98,6 +100,11 @@ public final class ProjectFilesCommand implements Runnable {
         description = "Directory to browse when picking (default: the current directory).")
     private Path from;
 
+    @Option(
+        names = "--plain",
+        description = "Use the typed picker instead of the arrow-key checkbox UI.")
+    private boolean plain;
+
     @Override
     public Integer call() throws Exception {
       project = CurrentProject.require(project);
@@ -146,24 +153,44 @@ public final class ProjectFilesCommand implements Runnable {
       return 0;
     }
 
+    private record Browse(FileSource source, Path root) {}
+
     private Integer pick() throws Exception {
-      FileSource fileSource;
-      Path root;
+      var browse = resolveBrowse();
+      if (browse == null) {
+        return 1;
+      }
+      var picked =
+          TerminalFilePicker.isAvailable() && !plain
+              ? new TerminalFilePicker(browse.source(), browse.root()).run()
+              : typedPick(browse.source(), browse.root());
+      if (picked.isEmpty()) {
+        System.out.println(Ansi.AUTO.string("  @|faint Nothing shared.|@"));
+        return 0;
+      }
+      var state = new FilePicker.State(browse.root(), browse.root(), picked.get());
+      return shareSelected(
+          browse.source(), browse.root(), FilePicker.selectedFiles(browse.source(), state));
+    }
+
+    private Browse resolveBrowse() {
       if (from != null) {
-        fileSource = new HostFileSource();
-        root = from.toAbsolutePath().normalize();
+        var root = from.toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) {
           System.err.println(Banner.errorLine("Not a directory: " + root, Ansi.AUTO));
-          return 1;
+          return null;
         }
-      } else {
-        var workspace = ContainerWorkspace.resolve(project);
-        if (workspace.isEmpty()) {
-          return 1;
-        }
-        fileSource = new ContainerFileSource(new ShellExecutor(false), project);
-        root = workspace.get();
+        return new Browse(new HostFileSource(), root);
       }
+      var workspace = ContainerWorkspace.resolve(project);
+      if (workspace.isEmpty()) {
+        return null;
+      }
+      return new Browse(
+          new ContainerFileSource(new ShellExecutor(false), project), workspace.get());
+    }
+
+    private Optional<LinkedHashSet<Path>> typedPick(FileSource fileSource, Path root) {
       var state = FilePicker.State.at(root);
       while (true) {
         List<FilePicker.Entry> entries;
@@ -176,7 +203,7 @@ public final class ProjectFilesCommand implements Runnable {
           continue;
         }
         System.out.println(FilePicker.render(state, entries));
-        System.out.print("  > ");
+        System.out.print("  type a command > ");
         System.out.flush();
         var line = ConsoleHelper.readLine();
         var step = FilePicker.step(state, entries, line == null ? "q" : line);
@@ -185,14 +212,12 @@ public final class ProjectFilesCommand implements Runnable {
           System.out.println("  " + step.message());
         }
         if (step.status() == FilePicker.Status.CANCELLED) {
-          System.out.println(Ansi.AUTO.string("  @|faint Nothing shared.|@"));
-          return 0;
+          return Optional.empty();
         }
         if (step.status() == FilePicker.Status.CONFIRMED) {
-          break;
+          return Optional.of(state.picked());
         }
       }
-      return shareSelected(fileSource, root, FilePicker.selectedFiles(fileSource, state));
     }
 
     private Integer shareSelected(FileSource fileSource, Path root, List<Path> selected)
