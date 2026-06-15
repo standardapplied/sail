@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
@@ -106,6 +109,28 @@ class ApiCoverageEdgesTest {
         assertSame(persister, server.auditPersister());
         assertNotNull(server.sseHandler());
         assertNotNull(server.socketListener());
+      }
+    }
+  }
+
+  @Test
+  void sailApiServerWiresSpecLifecycleReactorWhenSpecStorePresent(@TempDir Path tmp)
+      throws Exception {
+    try (var bus = new EventBus();
+        var db = Sqlite.open(tmp.resolve("control.db"))) {
+      new SchemaManager(db).migrate();
+      try (var server =
+          new SailApiServer(
+              "127.0.0.1",
+              0,
+              new SailApiOperations(),
+              new FixedTokenTestAuth("tok"),
+              bus,
+              null,
+              tmp.resolve("api.sock"),
+              null,
+              new SpecStore(db))) {
+        assertSame(bus, server.eventBus());
       }
     }
   }

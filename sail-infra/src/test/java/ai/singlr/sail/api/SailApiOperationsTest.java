@@ -10,7 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,61 +54,6 @@ class SailApiOperationsTest {
       """;
 
   private static final String EMPTY_JSON = "[]";
-
-  private static final String SPEC_PATHS =
-      """
-      /home/dev/workspace/specs/auth/spec.yaml
-      /home/dev/workspace/specs/billing/spec.yaml
-      /home/dev/workspace/specs/setup/spec.yaml
-      """;
-
-  private static final String SETUP_SPEC_YAML =
-      """
-      id: setup
-      title: Setup project
-      status: done
-      """;
-
-  private static final String AUTH_SPEC_YAML =
-      """
-      id: auth
-      title: Add auth
-      status: pending
-      depends_on: [setup]
-      """;
-
-  private static final String BILLING_SPEC_YAML =
-      """
-      id: billing
-      title: Add billing
-      status: pending
-      depends_on: [missing]
-      """;
-
-  private static final String AUTH_BRANCH_SPEC_YAML =
-      """
-      id: auth
-      title: Add auth
-      status: pending
-      branch: feat/custom
-      """;
-
-  private static final String AUTH_CODEX_SPEC_YAML =
-      """
-      id: auth
-      title: Add auth
-      status: pending
-      agent: codex
-      model: gpt-5.5
-      reasoning_effort: high
-      """;
-
-  private static final String DONE_SPEC_YAML =
-      """
-      id: done
-      title: Done
-      status: done
-      """;
 
   @TempDir Path tempDir;
 
@@ -162,7 +111,11 @@ class SailApiOperationsTest {
 
   @Test
   void specsReturnsBoardSummary() throws Exception {
-    var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON).withSpecs());
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            SailApiOperationsTest::seedAuthBillingSetup);
 
     var result = operations.specs("acme");
 
@@ -172,13 +125,26 @@ class SailApiOperationsTest {
   }
 
   @Test
+  void specsWorkEvenWhenTheContainerIsStopped() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", STOPPED_JSON),
+            SailApiOperationsTest::seedAuthBillingSetup);
+
+    var result = operations.specs("acme");
+
+    assertEquals("acme", get(result, "name"));
+    assertTrue(get(result, "specs") instanceof List<?>);
+  }
+
+  @Test
   void specReturnsContentWhenPresent() throws Exception {
     var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "# Auth"));
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            store -> seedSpec(store, "auth", "Add auth", "pending", List.of(), "# Auth"));
 
     var result = operations.spec("acme", "auth");
 
@@ -188,7 +154,11 @@ class SailApiOperationsTest {
 
   @Test
   void specReturnsNotFoundForUnknownSpec() throws Exception {
-    var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON).withSpecs());
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            SailApiOperationsTest::seedAuthBillingSetup);
 
     var error = operations.spec("acme", "missing");
 
@@ -198,13 +168,10 @@ class SailApiOperationsTest {
   @Test
   void specAllowsMissingContent() throws Exception {
     var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .withSpecs()
-                .on(
-                    "cat /home/dev/workspace/specs/auth/spec.md",
-                    new ShellExec.Result(1, "", "No such file")));
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            store -> seedSpec(store, "auth", "Add auth", "pending", List.of(), ""));
 
     var result = operations.spec("acme", "auth");
 
@@ -214,7 +181,11 @@ class SailApiOperationsTest {
 
   @Test
   void dispatchReturnsNoPendingSpecs() throws Exception {
-    var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON).withDoneSpec());
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            store -> seedSpec(store, "done", "Done", "done", List.of(), ""));
 
     var result = operations.dispatch("acme", request());
 
@@ -225,14 +196,12 @@ class SailApiOperationsTest {
   @Test
   void dispatchDryRunUpdatesSpecAndReturnsStructuredResult() throws Exception {
     var operations =
-        operations(
+        operationsWithStore(
+            baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", ""));
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            SailApiOperationsTest::seedAuthBillingSetup);
 
     var result = operations.dispatch("acme", request("auth", "background", true));
 
@@ -244,11 +213,12 @@ class SailApiOperationsTest {
   @Test
   void dispatchRejectsBlockedSpec() throws Exception {
     var operations =
-        operations(
+        operationsWithStore(
+            baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs());
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            SailApiOperationsTest::seedAuthBillingSetup);
 
     var error = operations.dispatch("acme", request("billing"));
 
@@ -267,11 +237,12 @@ class SailApiOperationsTest {
   @Test
   void dispatchRejectsUnknownSpec() throws Exception {
     var operations =
-        operations(
+        operationsWithStore(
+            baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs());
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            SailApiOperationsTest::seedAuthBillingSetup);
 
     var error = operations.dispatch("acme", request("missing"));
 
@@ -291,15 +262,6 @@ class SailApiOperationsTest {
     var error = operations.dispatch("acme", request());
 
     assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
-  }
-
-  @Test
-  void projectStoppedMapsToConflict() throws Exception {
-    var operations = operations(shell().on("incus list ^acme$", STOPPED_JSON));
-
-    var error = operations.specs("acme");
-
-    assertError(ErrorCode.PROJECT_STOPPED, error);
   }
 
   @Test
@@ -338,15 +300,6 @@ class SailApiOperationsTest {
     var error = operations.agentStatus("acme");
 
     assertError(ErrorCode.CONTAINER_ERROR, error);
-  }
-
-  @Test
-  void specsRequireConfiguredAgentDirectory() throws Exception {
-    var operations = operations(noAgentYaml(), shell().on("incus list ^acme$", RUNNING_JSON));
-
-    var error = operations.specs("acme");
-
-    assertError(ErrorCode.SPECS_NOT_CONFIGURED, error);
   }
 
   @Test
@@ -456,8 +409,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("mkdir -p /home/dev/.sail", "")
@@ -475,13 +426,26 @@ class SailApiOperationsTest {
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-            .withCodexSpec()
-            .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("mkdir -p /home/dev/.sail", "")
             .on("codex exec --dangerously-bypass-approvals-and-sandbox --model gpt-5.5", "");
-    var operations = operations(baseYaml(), shell);
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell,
+            store ->
+                seedSpec(
+                    store,
+                    "auth",
+                    "Add auth",
+                    "pending",
+                    List.of(),
+                    "Do auth",
+                    "codex",
+                    "gpt-5.5",
+                    "high",
+                    null));
 
     var result = operations.dispatch("acme", request("auth"));
 
@@ -511,8 +475,6 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", "123")
                 .on("kill -0 123", new ShellExec.Result(1, "", "missing"))
                 .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("mkdir -p /home/dev/.sail", "")
@@ -541,8 +503,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("-- mkdir -p /home/dev/.sail", "")
@@ -562,8 +522,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("-- mkdir -p /home/dev/.sail", "")
@@ -587,8 +545,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("-- mkdir -p /home/dev/.sail", "")
@@ -619,8 +575,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("test -d /home/dev/workspace/app/.git", "")
@@ -635,17 +589,27 @@ class SailApiOperationsTest {
   @Test
   void dispatchUsesSpecBranchWhenProvided() throws Exception {
     var operations =
-        operations(
+        operationsWithStore(
             branchYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withAuthBranchSpec()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("test -d /home/dev/workspace/app/.git", "")
-                .on("git -C /home/dev/workspace/app checkout -b feat/custom", ""));
+                .on("git -C /home/dev/workspace/app checkout -b feat/custom", ""),
+            store ->
+                seedSpec(
+                    store,
+                    "auth",
+                    "Add auth",
+                    "pending",
+                    List.of(),
+                    "Do auth",
+                    null,
+                    null,
+                    null,
+                    "feat/custom"));
 
     var result = operations.dispatch("acme", request("auth", "background", true));
 
@@ -660,8 +624,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on(
@@ -681,8 +643,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("test -d /home/dev/workspace/app/.git", "")
@@ -703,8 +663,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("incus snapshot list acme --format json", "[]")
@@ -724,8 +682,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("incus snapshot list acme --format json", snapshots));
@@ -743,8 +699,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on(
@@ -765,8 +719,6 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .on("cat /home/dev/workspace/specs/auth/spec.md", "Do auth")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("incus snapshot list acme --format json", "[]")
@@ -819,8 +771,7 @@ class SailApiOperationsTest {
         operations(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs());
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
     var result = operations.agentReport("acme");
 
@@ -872,50 +823,6 @@ class SailApiOperationsTest {
     var error = operations.project("acme");
 
     assertError(ErrorCode.PROJECT_LOAD_FAILED, error);
-  }
-
-  @Test
-  void specIndexFailuresMapToApiErrors() throws Exception {
-    var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on(
-                    "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                    new ShellExec.Result(1, "", "denied")));
-
-    var error = operations.specs("acme");
-
-    assertError(ErrorCode.SPECS_READ_FAILED, error);
-  }
-
-  @Test
-  void specBodyFailuresMapToApiErrors() throws Exception {
-    var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .withSpecs()
-                .throwOn("cat /home/dev/workspace/specs/auth/spec.md", new IOException("denied")));
-
-    var error = operations.spec("acme", "auth");
-
-    assertError(ErrorCode.SPEC_READ_FAILED, error);
-  }
-
-  @Test
-  void statusUpdateFailuresMapToApiErrors() throws Exception {
-    var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .withSpecs()
-                .throwOn("mkdir -p /home/dev/workspace/specs", new IOException("denied")));
-
-    var error = operations.dispatch("acme", request("auth"));
-
-    assertError(ErrorCode.SPEC_STATUS_UPDATE_FAILED, error);
   }
 
   @Test
@@ -1024,17 +931,88 @@ class SailApiOperationsTest {
   }
 
   private SailApiOperations operations(String yamlContent, FakeShell shell) throws Exception {
+    return operationsWithStore(yamlContent, shell, SailApiOperationsTest::seedAuthBillingSetup);
+  }
+
+  /** Builds operations backed by a migrated spec database seeded with {@code seed}. */
+  private SailApiOperations operationsWithStore(
+      String yamlContent, FakeShell shell, java.util.function.Consumer<SpecStore> seed)
+      throws Exception {
+    return operationsWithStore(yamlContent, shell, seed, null);
+  }
+
+  private SailApiOperations operationsWithStore(
+      String yamlContent,
+      FakeShell shell,
+      java.util.function.Consumer<SpecStore> seed,
+      SailApiOperations.WatcherLauncher watcher)
+      throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
-    return new SailApiOperations(shell, yaml.toString());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var store = new SpecStore(db);
+    seed.accept(store);
+    return watcher == null
+        ? new SailApiOperations(shell, yaml.toString(), null, (EventSubscriber) null, store)
+        : new SailApiOperations(shell, yaml.toString(), watcher, null, null, store, null);
+  }
+
+  /**
+   * Seeds setup (done), auth (pending, ready because setup is done, body "Do auth"), and billing
+   * (pending but blocked because it depends on the still-pending auth). The DB enforces that a
+   * dependency references a real spec, so "blocked" is modelled with a real not-done dependency.
+   */
+  private static void seedAuthBillingSetup(SpecStore store) {
+    seedSpec(store, "setup", "Setup project", "done", List.of(), "");
+    seedSpec(store, "auth", "Add auth", "pending", List.of("setup"), "Do auth");
+    seedSpec(store, "billing", "Add billing", "pending", List.of("auth"), "");
+  }
+
+  private static void seedSpec(
+      SpecStore store, String id, String title, String status, List<String> deps, String body) {
+    seedSpec(store, id, title, status, deps, body, null, null, null, null);
+  }
+
+  private static void seedSpec(
+      SpecStore store,
+      String id,
+      String title,
+      String status,
+      List<String> deps,
+      String body,
+      String agent,
+      String model,
+      String effort,
+      String branch) {
+    store.create(
+        new SpecStore.SpecRow(
+            id,
+            "acme",
+            title,
+            SpecStatus.fromWire(status),
+            null,
+            agent,
+            model,
+            effort,
+            branch,
+            0,
+            "me",
+            null,
+            null,
+            "me",
+            deps,
+            List.of()));
+    if (!body.isEmpty()) {
+      store.setContent(id, body, "");
+    }
   }
 
   private SailApiOperations operations(
       String yamlContent, FakeShell shell, SailApiOperations.WatcherLauncher watcherLauncher)
       throws Exception {
-    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, yamlContent);
-    return new SailApiOperations(shell, yaml.toString(), watcherLauncher);
+    return operationsWithStore(
+        yamlContent, shell, SailApiOperationsTest::seedAuthBillingSetup, watcherLauncher);
   }
 
   private static String baseYaml() {
@@ -1099,9 +1077,7 @@ class SailApiOperationsTest {
   }
 
   private SailApiOperations operations(FakeShell shell) throws Exception {
-    var yaml = tempDir.resolve("sail.yaml");
-    Files.writeString(yaml, baseYaml());
-    return new SailApiOperations(shell, yaml.toString());
+    return operations(baseYaml(), shell);
   }
 
   private static FakeShell shell() {
@@ -1125,36 +1101,6 @@ class SailApiOperationsTest {
     FakeShell throwOn(String pattern, Exception failure) {
       failures.put(pattern, failure);
       return this;
-    }
-
-    FakeShell withSpecs() {
-      return on(
-              "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-              SPEC_PATHS)
-          .on("cat /home/dev/workspace/specs/auth/spec.yaml", AUTH_SPEC_YAML)
-          .on("cat /home/dev/workspace/specs/billing/spec.yaml", BILLING_SPEC_YAML)
-          .on("cat /home/dev/workspace/specs/setup/spec.yaml", SETUP_SPEC_YAML);
-    }
-
-    FakeShell withAuthBranchSpec() {
-      return on(
-              "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-              "/home/dev/workspace/specs/auth/spec.yaml\n")
-          .on("cat /home/dev/workspace/specs/auth/spec.yaml", AUTH_BRANCH_SPEC_YAML);
-    }
-
-    FakeShell withCodexSpec() {
-      return on(
-              "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-              "/home/dev/workspace/specs/auth/spec.yaml\n")
-          .on("cat /home/dev/workspace/specs/auth/spec.yaml", AUTH_CODEX_SPEC_YAML);
-    }
-
-    FakeShell withDoneSpec() {
-      return on(
-              "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-              "/home/dev/workspace/specs/done/spec.yaml\n")
-          .on("cat /home/dev/workspace/specs/done/spec.yaml", DONE_SPEC_YAML);
     }
 
     @Override

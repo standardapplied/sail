@@ -11,6 +11,7 @@ import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
@@ -22,12 +23,10 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.engine.SpecWorkspace;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
@@ -198,8 +197,8 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private SpecsResponse specsValue(String project) {
-    var loaded = loadRunningProject(project);
-    var specs = readSpecs(workspace(loaded));
+    requireProjectExists(project);
+    var specs = specStore.projectSpecs(project);
     var summary = SpecDirectory.summarize(specs);
     return new SpecsResponse(
         project,
@@ -209,20 +208,19 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private SpecResponse specValue(String project, String specId) {
-    var loaded = loadRunningProject(project);
-    var workspace = workspace(loaded);
-    var specs = readSpecs(workspace);
+    requireProjectExists(project);
+    var specs = specStore.projectSpecs(project);
     var spec = SpecDirectory.findById(specs, specId);
     if (spec == null) {
       throw new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
     }
-    var content = readSpecBody(workspace, specId);
-    return new SpecResponse(
-        project,
-        specView(specs, spec),
-        workspace.specMarkdownPath(specId),
-        content != null,
-        content);
+    var content =
+        specStore
+            .getContent(specId)
+            .map(SpecStore.SpecContent::body)
+            .filter(body -> !body.isBlank())
+            .orElse(null);
+    return new SpecResponse(project, specView(specs, spec), null, content != null, content);
   }
 
   private DispatchResponse dispatchValue(String project, DispatchRequest request) {
@@ -241,8 +239,7 @@ public final class SailApiOperations implements ApiOperations {
           "Stop the active agent before dispatching another spec.");
     }
 
-    var workspace = workspace(loaded);
-    var specs = readSpecs(workspace);
+    var specs = specStore.projectSpecs(project);
     var nextSpec = resolveSpec(specs, request.specId());
     if (nextSpec == null) {
       return new DispatchResponse(project, false, "no_pending_specs", null, null, "", false);
@@ -250,8 +247,8 @@ public final class SailApiOperations implements ApiOperations {
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    updateStatus(workspace, nextSpec.id(), "in_progress");
-    var specBody = Objects.requireNonNullElse(readSpecBody(workspace, nextSpec.id()), "");
+    specStore.updateStatus(nextSpec.id(), SpecStatus.IN_PROGRESS);
+    var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
     var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
     var branch = branchName(loaded.config(), nextSpec);
@@ -395,31 +392,6 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
-  private static List<Spec> readSpecs(SpecWorkspace workspace) {
-    try {
-      return workspace.readSpecs();
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.SPECS_READ_FAILED, "Failed to read spec metadata.", e);
-    }
-  }
-
-  private static String readSpecBody(SpecWorkspace workspace, String specId) {
-    try {
-      return workspace.readSpecBody(specId);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.SPEC_READ_FAILED, "Failed to read spec content.", e);
-    }
-  }
-
-  private static void updateStatus(SpecWorkspace workspace, String specId, String status) {
-    try {
-      workspace.updateStatus(specId, status);
-    } catch (Exception e) {
-      throw new ApiException(
-          ErrorCode.SPEC_STATUS_UPDATE_FAILED, "Failed to update spec status.", e);
-    }
-  }
-
   private static String statusName(ContainerState state) {
     return switch (state) {
       case ContainerState.Running ignored -> "running";
@@ -473,22 +445,6 @@ public final class SailApiOperations implements ApiOperations {
     if (state instanceof ContainerState.Error error) {
       throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
     }
-  }
-
-  private SpecWorkspace workspace(LoadedProject loaded) {
-    return new SpecWorkspace(shell, loaded.config().name(), specsDir(loaded.config()));
-  }
-
-  private static String specsDir(SailYaml config) {
-    if (config.agent() == null || config.agent().specsDir() == null) {
-      throw new ApiException(
-          ErrorCode.SPECS_NOT_CONFIGURED,
-          "No specs_dir configured in the project agent block.",
-          "Add specs_dir to sail.yaml.");
-    }
-    NameValidator.requireSafePath(config.agent().specsDir(), "agent.specs_dir");
-    NameValidator.requireValidSshUser(config.sshUser());
-    return "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
   }
 
   private static Spec resolveSpec(List<Spec> specs, String specId) {

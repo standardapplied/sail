@@ -18,7 +18,8 @@ import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SpecWorkspace;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
@@ -207,10 +208,8 @@ public final class AgentStatusCommand implements Runnable {
         && config.agent() != null
         && config.agent().specsDir() != null
         && info != null) {
-      try {
-        var specsDir = "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
-        var specs = new SpecWorkspace(shell, name, specsDir).readSpecs();
-        taskCounts = SpecDirectory.statusCounts(specs);
+      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+        taskCounts = SpecDirectory.statusCounts(new SpecStore(db).projectSpecs(name));
       } catch (Exception ignored) {
       }
     }

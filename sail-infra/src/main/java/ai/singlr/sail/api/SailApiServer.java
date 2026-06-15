@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -124,6 +125,23 @@ public final class SailApiServer implements AutoCloseable {
       Path socketPath,
       HttpHandler passkeyHandler)
       throws IOException {
+    this(host, port, operations, auth, eventBus, auditSubscriber, socketPath, passkeyHandler, null);
+  }
+
+  /**
+   * Full constructor; {@code specStore} wires the DB-backed spec-lifecycle reactor when present.
+   */
+  public SailApiServer(
+      String host,
+      int port,
+      ApiOperations operations,
+      ApiAuth auth,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      Path socketPath,
+      HttpHandler passkeyHandler,
+      SpecStore specStore)
+      throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
     this.persisterSubscription =
@@ -131,7 +149,9 @@ public final class SailApiServer implements AutoCloseable {
     this.webhookSubscription =
         eventBus != null ? eventBus.subscribe(WebhookReactor.withDefaultResolver()) : null;
     this.specLifecycleSubscription =
-        eventBus != null ? eventBus.subscribe(SpecLifecycleReactor.withDefaults()) : null;
+        eventBus != null && specStore != null
+            ? eventBus.subscribe(new SpecLifecycleReactor(specStore))
+            : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
     server.createContext("/", new ApiRouter(operations, auth));

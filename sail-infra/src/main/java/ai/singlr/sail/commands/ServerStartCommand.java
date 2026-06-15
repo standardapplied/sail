@@ -164,7 +164,8 @@ public final class ServerStartCommand implements Runnable {
                 bus,
                 persister,
                 SailPaths.apiSocketPath(),
-                passkeyHandler);
+                passkeyHandler,
+                specStore);
         var sweeper = new ExpiredRowSweeper(dbPath)) {
       server.start();
       sweeper.start();

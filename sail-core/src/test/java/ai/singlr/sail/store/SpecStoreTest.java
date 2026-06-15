@@ -75,6 +75,21 @@ class SpecStoreTest {
   }
 
   @Test
+  void projectSpecsReturnsOnlyTheBucketAsConfigValues() {
+    store.create(spec("mine", "acme", "OAuth", "pending"));
+    store.create(spec("other", "zenith", "Search", "pending"));
+
+    var specs = store.projectSpecs("acme");
+
+    assertEquals(1, specs.size());
+    var first = specs.getFirst();
+    assertEquals("mine", first.id());
+    assertEquals("acme", first.project());
+    assertEquals("OAuth", first.title());
+    assertEquals(SpecStatus.PENDING, first.status());
+  }
+
+  @Test
   void createWithDependenciesAndRepos() {
     store.create(spec("base", "Base feature", "done"));
     var spec =

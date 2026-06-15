@@ -349,7 +349,7 @@ public final class DispatchCommand implements Runnable {
   private Prepared prepareDispatch(String project, String specId, boolean restart) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       var store = new SpecStore(db);
-      var specs = projectSpecs(store, project);
+      var specs = store.projectSpecs(project);
       if (specs.isEmpty()) {
         return null;
       }
@@ -362,28 +362,6 @@ public final class DispatchCommand implements Runnable {
           store.getContent(resolution.spec().id()).map(SpecStore.SpecContent::body).orElse("");
       return new Prepared(resolution, body);
     }
-  }
-
-  /** Every spec bucketed to this project, mapped from its stored row to the config value type. */
-  static List<Spec> projectSpecs(SpecStore store, String project) {
-    return store.list(new SpecStore.SpecFilter(project, null, null, null, null)).stream()
-        .map(DispatchCommand::toSpec)
-        .toList();
-  }
-
-  private static Spec toSpec(SpecStore.SpecRow row) {
-    return new Spec(
-        row.id(),
-        row.project(),
-        row.title(),
-        row.status(),
-        row.assignee(),
-        row.dependsOn(),
-        row.repos(),
-        row.agent(),
-        row.model(),
-        row.reasoningEffort(),
-        row.branch());
   }
 
   /**

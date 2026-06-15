@@ -279,7 +279,7 @@ class DispatchCommandTest {
     store.create(row("mine", "acme", SpecStatus.PENDING));
     store.create(row("other", "zenith", SpecStatus.PENDING));
 
-    var specs = DispatchCommand.projectSpecs(store, "acme");
+    var specs = store.projectSpecs("acme");
 
     assertEquals(List.of("mine"), specs.stream().map(Spec::id).toList());
   }

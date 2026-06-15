@@ -20,10 +20,11 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.engine.SpecWorkspace;
 import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -198,29 +199,30 @@ public final class RunCommand implements Runnable {
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null && config.agent().specsDir() != null) {
-      var specsDir = "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
-      var workspace = new SpecWorkspace(shell, name, specsDir);
-      var specs = workspace.readSpecs();
-      var nextSpec = SpecDirectory.nextReady(specs);
-      if (nextSpec != null) {
-        var specBody = Objects.requireNonNullElse(workspace.readSpecBody(nextSpec.id()), "");
-        var description = !specBody.isBlank() ? specBody : nextSpec.title();
-        task =
-            "Your current spec: \""
-                + nextSpec.title()
-                + "\" (id: "
-                + nextSpec.id()
-                + ").\n\n"
-                + description
-                + "\n\nWhen complete, run `sail spec status "
-                + name
-                + " "
-                + nextSpec.id()
-                + " done`. Then pick up the next pending spec and continue working.";
-        if (!json) {
-          System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
-          System.out.println(Ansi.AUTO.string("  @|faint " + nextSpec.title() + "|@"));
-          System.out.println();
+      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+        var store = new SpecStore(db);
+        var nextSpec = SpecDirectory.nextReady(store.projectSpecs(name));
+        if (nextSpec != null) {
+          var specBody =
+              store.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
+          var description = !specBody.isBlank() ? specBody : nextSpec.title();
+          task =
+              "Your current spec: \""
+                  + nextSpec.title()
+                  + "\" (id: "
+                  + nextSpec.id()
+                  + ").\n\n"
+                  + description
+                  + "\n\nWhen complete, run `sail spec status "
+                  + name
+                  + " "
+                  + nextSpec.id()
+                  + " done`. Then pick up the next pending spec and continue working.";
+          if (!json) {
+            System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
+            System.out.println(Ansi.AUTO.string("  @|faint " + nextSpec.title() + "|@"));
+            System.out.println();
+          }
         }
       }
     }

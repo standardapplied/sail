@@ -55,7 +55,7 @@ class DispatchCommandResolveSpecTest {
   }
 
   private List<Spec> specsOf(SpecStore store) {
-    return DispatchCommand.projectSpecs(store, PROJECT);
+    return store.projectSpecs(PROJECT);
   }
 
   @Test

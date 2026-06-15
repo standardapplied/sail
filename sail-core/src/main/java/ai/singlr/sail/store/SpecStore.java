@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
@@ -54,7 +55,24 @@ public final class SpecStore implements ConflictResolver {
       String updatedAt,
       String updatedBy,
       List<String> dependsOn,
-      List<String> repos) {}
+      List<String> repos) {
+
+    /** Projects this stored row onto the storage-agnostic {@link Spec} value type. */
+    public Spec toSpec() {
+      return new Spec(
+          id,
+          project,
+          title,
+          status,
+          assignee,
+          dependsOn,
+          repos,
+          agent,
+          model,
+          reasoningEffort,
+          branch);
+    }
+  }
 
   public record SpecContent(String body, String plan, String updatedAt) {}
 
@@ -160,6 +178,17 @@ public final class SpecStore implements ConflictResolver {
 
     return db.query(sql.toString(), this::mapSpec, params.toArray()).stream()
         .map(this::hydrate)
+        .toList();
+  }
+
+  /**
+   * Every spec bucketed to {@code project}, as storage-agnostic {@link Spec} values. The single
+   * seam the CLI, the API, and the agent-facing commands all read project specs through — one
+   * source of truth, no container files.
+   */
+  public List<Spec> projectSpecs(String project) {
+    return list(new SpecFilter(project, null, null, null, null)).stream()
+        .map(SpecRow::toSpec)
         .toList();
   }
 

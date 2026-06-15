@@ -16,7 +16,8 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SpecWorkspace;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -175,10 +176,8 @@ public final class ProjectConfigCommand implements Runnable {
     if (config.agent() == null || config.agent().specsDir() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
-    var specsDir = "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
-    try {
-      var summary = SpecDirectory.summarize(new SpecWorkspace(shell, name, specsDir).readSpecs());
-      return SpecSnapshot.available(summary);
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return SpecSnapshot.available(SpecDirectory.summarize(new SpecStore(db).projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");
     }
