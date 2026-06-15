@@ -6,12 +6,16 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -24,6 +28,35 @@ import java.util.stream.Stream;
  * file's path is always meaningful relative to that root.
  */
 public final class FilePicker {
+
+  /**
+   * Build outputs, dependency caches, and VCS metadata are never the workspace files an FDE means
+   * to share, and recursively walking them (a {@code .git} or {@code node_modules}) would bloat the
+   * synced database. They are hidden from the listing and skipped when a folder is expanded.
+   */
+  static final Set<String> IGNORED_DIRS =
+      Set.of(
+          ".git",
+          ".hg",
+          ".svn",
+          "node_modules",
+          "target",
+          "build",
+          "dist",
+          "out",
+          "bin",
+          ".gradle",
+          ".mvn",
+          ".idea",
+          ".vscode",
+          ".venv",
+          "venv",
+          "__pycache__",
+          ".next",
+          ".nuxt",
+          "coverage",
+          "vendor",
+          ".terraform");
 
   private FilePicker() {}
 
@@ -46,10 +79,11 @@ public final class FilePicker {
   /** The outcome of applying one line of input: the next state, the status, and a message. */
   public record Step(State state, Status status, String message) {}
 
-  /** Lists a directory: sub-folders first, then files, each alphabetical. */
+  /** Lists a directory: sub-folders first, then files, each alphabetical; junk folders hidden. */
   public static List<Entry> list(Path dir) throws IOException {
     try (Stream<Path> entries = Files.list(dir)) {
       return entries
+          .filter(p -> !isIgnoredDir(p))
           .map(FilePicker::toEntry)
           .sorted(
               Comparator.comparing(Entry::directory)
@@ -57,6 +91,10 @@ public final class FilePicker {
                   .thenComparing(e -> e.path().getFileName().toString()))
           .toList();
     }
+  }
+
+  private static boolean isIgnoredDir(Path p) {
+    return Files.isDirectory(p) && IGNORED_DIRS.contains(p.getFileName().toString());
   }
 
   private static Entry toEntry(Path p) {
@@ -168,19 +206,64 @@ public final class FilePicker {
   }
 
   /**
-   * Expands the picked set to concrete regular files (folders walked recursively), de-duplicated.
+   * Expands the picked set to concrete regular files, de-duplicated and sorted. A picked folder is
+   * walked recursively, skipping {@link #IGNORED_DIRS} and tolerating unreadable subtrees (skipped,
+   * never fatal) so one permission error cannot abort a whole selection.
    */
   public static List<Path> selectedFiles(State state) throws IOException {
     var files = new LinkedHashSet<Path>();
     for (var picked : state.picked()) {
       if (Files.isDirectory(picked)) {
-        try (Stream<Path> walk = Files.walk(picked)) {
-          walk.filter(Files::isRegularFile).forEach(files::add);
-        }
+        Files.walkFileTree(picked, new CollectingVisitor(files));
       } else if (Files.isRegularFile(picked)) {
         files.add(picked);
       }
     }
     return files.stream().sorted().toList();
+  }
+
+  private record CollectingVisitor(Set<Path> files) implements FileVisitor<Path> {
+    @Override
+    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+      return IGNORED_DIRS.contains(dir.getFileName().toString())
+          ? FileVisitResult.SKIP_SUBTREE
+          : FileVisitResult.CONTINUE;
+    }
+
+    @Override
+    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+      if (attrs.isRegularFile()) {
+        files.add(file);
+      }
+      return FileVisitResult.CONTINUE;
+    }
+
+    @Override
+    public FileVisitResult visitFileFailed(Path file, IOException exc) {
+      return FileVisitResult.CONTINUE;
+    }
+
+    @Override
+    public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
+      return FileVisitResult.CONTINUE;
+    }
+  }
+
+  /**
+   * Whether a relative path is safe to share: not blank, not absolute, with no {@code ..} segment
+   * and no control characters. Deliberately permits spaces and Unicode — real filenames have them —
+   * since traversal, not the character set, is the security boundary (the materializer additionally
+   * fences every write to the project's files directory).
+   */
+  public static boolean isShareablePath(String path) {
+    if (path == null || path.isBlank() || path.startsWith("/")) {
+      return false;
+    }
+    for (var segment : path.split("/")) {
+      if (segment.equals("..")) {
+        return false;
+      }
+    }
+    return path.chars().noneMatch(c -> c < 0x20);
   }
 }

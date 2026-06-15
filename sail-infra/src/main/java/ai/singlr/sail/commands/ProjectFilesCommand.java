@@ -62,6 +62,18 @@ public final class ProjectFilesCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Add implements Callable<Integer> {
 
+    /**
+     * Cap on a single shared file. Shared files are configs, scripts, and docs replicated through
+     * SQLite as base64 — large binaries belong in a real artifact store, and bulk-grabbing one
+     * would bloat every FDE's synced database. 5 MiB is far above any legitimate workspace file.
+     */
+    static final long MAX_SHARE_BYTES = 5L * 1024 * 1024;
+
+    /**
+     * A bulk share above this many files asks for confirmation — a guard against a stray folder.
+     */
+    static final int CONFIRM_OVER = 100;
+
     @Parameters(index = "0", description = "Project name.")
     private String project;
 
@@ -97,13 +109,15 @@ public final class ProjectFilesCommand implements Runnable {
     }
 
     private Integer addOne() throws Exception {
-      if (!Files.isRegularFile(source)) {
-        System.err.println(Banner.errorLine("Not a file: " + source, Ansi.AUTO));
+      var path = Strings.isNotBlank(as) ? as : source.getFileName().toString();
+      var problem = shareProblem(source, path);
+      if (problem != null) {
+        System.err.println(Banner.errorLine("Cannot share " + source + ": " + problem, Ansi.AUTO));
         return 1;
       }
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var files = new FileStore(db);
-        var path = store(files, project, source, as);
+        store(files, project, source, path);
         new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
         System.out.println(
             Ansi.AUTO.string(
@@ -124,7 +138,15 @@ public final class ProjectFilesCommand implements Runnable {
       }
       var state = FilePicker.State.at(root);
       while (true) {
-        var entries = FilePicker.list(state.cwd());
+        List<FilePicker.Entry> entries;
+        try {
+          entries = FilePicker.list(state.cwd());
+        } catch (IOException unreadable) {
+          System.out.println(
+              Ansi.AUTO.string("  @|yellow ⚠|@ Can't read that folder; returning to the top."));
+          state = FilePicker.State.at(root);
+          continue;
+        }
         System.out.println(FilePicker.render(state, entries));
         System.out.print("  > ");
         System.out.flush();
@@ -150,28 +172,80 @@ public final class ProjectFilesCommand implements Runnable {
         System.out.println(Ansi.AUTO.string("  @|faint Nothing selected.|@"));
         return 0;
       }
+      if (selected.size() > CONFIRM_OVER
+          && !ConsoleHelper.confirmNo("Share " + selected.size() + " files?")) {
+        System.out.println(Ansi.AUTO.string("  @|faint Nothing shared.|@"));
+        return 0;
+      }
+      var skipped = new ArrayList<String>();
+      var shared = 0;
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var files = new FileStore(db);
         for (var file : selected) {
-          store(files, project, file, root.relativize(file).toString());
+          var path = root.relativize(file).toString();
+          var problem = shareProblem(file, path);
+          if (problem != null) {
+            skipped.add(path + " (" + problem + ")");
+            continue;
+          }
+          try {
+            store(files, project, file, path);
+            shared++;
+          } catch (IOException vanished) {
+            skipped.add(path + " (" + vanished.getMessage() + ")");
+          }
         }
-        new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
+        if (shared > 0) {
+          new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
+        }
+      }
+      for (var skip : skipped) {
+        System.err.println(Ansi.AUTO.string("  @|yellow ⚠|@ skipped " + skip));
       }
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Shared @|bold "
-                  + selected.size()
+                  + shared
                   + "|@ file(s) on @|bold "
                   + project
                   + "|@. Run @|bold sail sync|@ to propagate."));
       return 0;
     }
 
-    /** Stores {@code source} under its relative path (no materialization); returns the path. */
-    static String store(FileStore files, String project, Path source, String as)
+    /**
+     * Why {@code file} cannot be shared at {@code relPath}, or {@code null} if it can: a guard for
+     * the things real project trees throw at us — non-regular files, oversized blobs, unreadable
+     * entries, and paths that would escape the project's files directory.
+     */
+    static String shareProblem(Path file, String relPath) {
+      if (!Files.isRegularFile(file)) {
+        return "not a regular file";
+      }
+      if (!FilePicker.isShareablePath(relPath)) {
+        return "unsafe path";
+      }
+      try {
+        if (Files.size(file) > MAX_SHARE_BYTES) {
+          return "larger than " + (MAX_SHARE_BYTES / (1024 * 1024)) + " MiB";
+        }
+      } catch (IOException e) {
+        return "unreadable";
+      }
+      return null;
+    }
+
+    /**
+     * Stores {@code source} at {@code path} (no materialization). Caller validates with {@link
+     * #shareProblem}; this re-checks defensively. Returns the path.
+     */
+    static String store(FileStore files, String project, Path source, String path)
         throws IOException {
-      var path = Strings.isNotBlank(as) ? as : source.getFileName().toString();
-      NameValidator.requireSafePath(path, "path");
+      if (!FilePicker.isShareablePath(path)) {
+        throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
+      }
+      if (Files.size(source) > MAX_SHARE_BYTES) {
+        throw new IllegalArgumentException("File exceeds the " + MAX_SHARE_BYTES + "-byte limit.");
+      }
       files.put(project, path, Base64.getEncoder().encodeToString(Files.readAllBytes(source)));
       return path;
     }

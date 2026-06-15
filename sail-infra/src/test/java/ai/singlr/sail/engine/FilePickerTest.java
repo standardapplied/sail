@@ -119,6 +119,45 @@ class FilePickerTest {
   }
 
   @Test
+  void junkDirectoriesAreHiddenFromTheListing() throws Exception {
+    Files.createDirectories(root.resolve("node_modules/pkg"));
+    Files.createDirectories(root.resolve(".git"));
+    Files.writeString(root.resolve("node_modules/pkg/index.js"), "junk");
+    Files.writeString(root.resolve(".git/config"), "[core]");
+
+    var names = FilePicker.list(root).stream().map(e -> e.path().getFileName().toString()).toList();
+
+    assertFalse(names.contains("node_modules"));
+    assertFalse(names.contains(".git"));
+    assertTrue(names.contains("src"));
+  }
+
+  @Test
+  void selectedFilesSkipsJunkDirectoriesWhenExpandingAFolder() throws Exception {
+    Files.createDirectories(root.resolve("node_modules/pkg"));
+    Files.writeString(root.resolve("node_modules/pkg/index.js"), "junk");
+    var picked = new java.util.LinkedHashSet<Path>();
+    picked.add(root);
+
+    var files = FilePicker.selectedFiles(new FilePicker.State(root, root, picked));
+
+    assertTrue(files.contains(root.resolve("README.md")));
+    assertFalse(
+        files.contains(root.resolve("node_modules/pkg/index.js")), "node_modules is not walked");
+  }
+
+  @Test
+  void isShareablePathAllowsRealNamesButBlocksTraversal() {
+    assertTrue(FilePicker.isShareablePath("scripts/My Deploy (final).sh"));
+    assertTrue(FilePicker.isShareablePath("docs/café.md"));
+    assertFalse(FilePicker.isShareablePath("../escape"));
+    assertFalse(FilePicker.isShareablePath("a/../../b"));
+    assertFalse(FilePicker.isShareablePath("/etc/passwd"));
+    assertFalse(FilePicker.isShareablePath(""));
+    assertFalse(FilePicker.isShareablePath("with\ttab"), "control characters are rejected");
+  }
+
+  @Test
   void renderNumbersEntriesAndMarksPicks() throws Exception {
     var picked = new java.util.LinkedHashSet<Path>();
     picked.add(root.resolve("README.md"));
