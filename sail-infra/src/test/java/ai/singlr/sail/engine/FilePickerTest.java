@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -104,6 +105,36 @@ class FilePickerTest {
     assertEquals(FilePicker.Status.CONFIRMED, FilePicker.step(start(), entries, "done").status());
     assertEquals(FilePicker.Status.CONFIRMED, FilePicker.step(start(), entries, "d").status());
     assertEquals(FilePicker.Status.CANCELLED, FilePicker.step(start(), entries, "q").status());
+  }
+
+  @Test
+  void confirmAndCancelAcceptSynonymsAndAnyCase() throws Exception {
+    var entries = FilePicker.list(source, root);
+    for (var confirm : List.of("share", "ok", "DONE", "Done")) {
+      assertEquals(
+          FilePicker.Status.CONFIRMED,
+          FilePicker.step(start(), entries, confirm).status(),
+          confirm + " should confirm");
+    }
+    for (var cancel : List.of("quit", "cancel", "exit", "Q")) {
+      assertEquals(
+          FilePicker.Status.CANCELLED,
+          FilePicker.step(start(), entries, cancel).status(),
+          cancel + " should cancel");
+    }
+  }
+
+  @Test
+  void footerShowsHowToConfirmAndThePickedCount() throws Exception {
+    var entries = FilePicker.list(source, root);
+    var empty = FilePicker.render(start(), entries);
+    assertTrue(empty.contains("Type a command"));
+    assertTrue(empty.contains("nothing picked yet"));
+    assertTrue(empty.contains("q  cancel"));
+
+    var withOne = FilePicker.step(start(), entries, "3");
+    var rendered = FilePicker.render(withOne.state(), entries);
+    assertTrue(rendered.contains("share the 1 picked file(s)"));
   }
 
   @Test

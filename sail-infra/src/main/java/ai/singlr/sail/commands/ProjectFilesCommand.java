@@ -176,7 +176,7 @@ public final class ProjectFilesCommand implements Runnable {
           continue;
         }
         System.out.println(FilePicker.render(state, entries));
-        System.out.print("  > ");
+        System.out.print("  type a command > ");
         System.out.flush();
         var line = ConsoleHelper.readLine();
         var step = FilePicker.step(state, entries, line == null ? "q" : line);
