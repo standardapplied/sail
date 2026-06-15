@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.YamlUtil;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,31 +20,34 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Listens on a Unix domain socket and accepts {@code POST /v1/events} requests from project
- * containers (which see the same socket via an Incus disk bind-mount). Filesystem permissions are
- * the authentication — clients that can {@code write(2)} the socket can publish events, no bearer
- * token required.
+ * Listens on a Unix domain socket and serves the small local API ({@link LocalApiRouter}) to
+ * project containers, which see the same socket via an Incus disk bind-mount. Filesystem
+ * permissions are the authentication — a container that can {@code write(2)} the socket is trusted,
+ * no bearer token.
  *
- * <p>Implements a minimal HTTP/1.1 server scoped to a single endpoint. We do not embed {@code
- * com.sun.net.httpserver.HttpServer} because it cannot bind a {@link UnixDomainSocketAddress};
- * keeping a small ad-hoc parser is simpler than dragging in a third-party HTTP library.
+ * <p>Implements a minimal HTTP/1.1 server: it parses the request line, the {@code Content-Length},
+ * and the body, hands a {@link LocalApiRequest} to the {@link LocalApiHandler}, and serializes the
+ * {@link ApiResponse} back as JSON. We do not embed {@code com.sun.net.httpserver.HttpServer}
+ * because it cannot bind a {@link UnixDomainSocketAddress}; a small ad-hoc parser is simpler than a
+ * third-party HTTP library.
  *
- * <p>Each connection is handled on a bounded virtual thread. Excess connections are rejected with
- * {@code HTTP/1.1 503 Service Unavailable} so a buggy client cannot exhaust file descriptors.
+ * <p>Each connection runs on a bounded virtual thread. Excess connections are rejected with {@code
+ * 503 Service Unavailable} so a buggy client cannot exhaust file descriptors.
  */
-public final class UnixSocketEventsListener implements AutoCloseable {
+public final class LocalApiSocket implements AutoCloseable {
 
   private static final int MAX_HEADER_BYTES = 8 * 1024;
-  private static final int MAX_BODY_BYTES = 64 * 1024;
+  private static final int MAX_BODY_BYTES = 1024 * 1024;
   private static final int DEFAULT_MAX_IN_FLIGHT = 64;
-  private static final String EVENTS_PATH = "/v1/events";
   private static final String CONTENT_LENGTH = "content-length";
 
-  private final EventBus bus;
+  private final LocalApiHandler handler;
   private final Path socketPath;
   private final BoundedVirtualExecutor acceptExecutor;
   private final LongAdder accepted = new LongAdder();
@@ -53,12 +57,12 @@ public final class UnixSocketEventsListener implements AutoCloseable {
   private volatile Thread acceptLoop;
   private volatile boolean closed;
 
-  public UnixSocketEventsListener(EventBus bus, Path socketPath) {
-    this(bus, socketPath, DEFAULT_MAX_IN_FLIGHT);
+  public LocalApiSocket(EventBus bus, ApiOperations operations, Path socketPath) {
+    this(new LocalApiRouter(bus, operations), socketPath, DEFAULT_MAX_IN_FLIGHT);
   }
 
-  public UnixSocketEventsListener(EventBus bus, Path socketPath, int maxInFlight) {
-    this.bus = Objects.requireNonNull(bus, "bus");
+  LocalApiSocket(LocalApiHandler handler, Path socketPath, int maxInFlight) {
+    this.handler = Objects.requireNonNull(handler, "handler");
     this.socketPath = Objects.requireNonNull(socketPath, "socketPath");
     this.acceptExecutor = new BoundedVirtualExecutor(maxInFlight);
   }
@@ -74,12 +78,17 @@ public final class UnixSocketEventsListener implements AutoCloseable {
     Files.deleteIfExists(socketPath);
     var channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     channel.bind(UnixDomainSocketAddress.of(socketPath));
-    // Unprivileged Incus containers bind-mount this socket and connect from inside, where their
-    // UID is host-shifted (e.g. host uid 1000000 maps to container root). Linux requires WRITE
-    // permission on the socket file to connect(), so the default umask-derived 0755 blocks every
-    // container process that isn't host-root. World-writable (0666) is the standard answer:
-    // access is gated by the bind-mount itself (only sail-provisioned containers see the socket)
-    // and at the application layer by the events-only HTTP routes the listener serves.
+    makeWorldWritable();
+    this.server = channel;
+    this.acceptLoop = Thread.ofVirtual().name("sail-uds-accept").start(this::runAcceptLoop);
+  }
+
+  private void makeWorldWritable() {
+    // Unprivileged Incus containers connect from inside, where their UID is host-shifted (host uid
+    // 1000000 maps to container root). Linux requires WRITE permission on the socket file to
+    // connect(), so the default 0755 blocks every container process that isn't host-root. 0666 is
+    // the standard answer: access is gated by the bind-mount (only sail-provisioned containers see
+    // the socket) and at the application layer by the small route surface the router serves.
     try {
       Files.setPosixFilePermissions(
           socketPath,
@@ -98,8 +107,6 @@ public final class UnixSocketEventsListener implements AutoCloseable {
               + permError.getMessage()
               + "). Unprivileged containers may fail to connect.");
     }
-    this.server = channel;
-    this.acceptLoop = Thread.ofVirtual().name("sail-uds-accept").start(this::runAcceptLoop);
   }
 
   /** Absolute path of the bound socket. */
@@ -117,7 +124,7 @@ public final class UnixSocketEventsListener implements AutoCloseable {
     return rejectedOverflow.sum();
   }
 
-  /** Requests rejected because they were malformed (bad HTTP, bad JSON, etc). */
+  /** Requests rejected because they were malformed (bad HTTP, missing length, etc). */
   public long badRequestCount() {
     return badRequests.sum();
   }
@@ -160,18 +167,11 @@ public final class UnixSocketEventsListener implements AutoCloseable {
       if (!submitted) {
         rejectedOverflow.increment();
         try (var sock = pending) {
-          writeStatus(sock, "503 Service Unavailable", "Retry-After: 1\r\n");
+          writeStatus(sock, 503, "Retry-After: 1\r\n");
         } catch (IOException ignored) {
           // client closed
         }
       }
-    }
-  }
-
-  private static void writeStatus(SocketChannel channel, String status, String extraHeaders)
-      throws IOException {
-    try (var out = Channels.newOutputStream(channel)) {
-      writeStatus(out, status, extraHeaders);
     }
   }
 
@@ -182,88 +182,64 @@ public final class UnixSocketEventsListener implements AutoCloseable {
       var requestLine = readLine(in, MAX_HEADER_BYTES);
       if (requestLine == null) {
         badRequests.increment();
-        writeStatus(out, "400 Bad Request", null);
+        writeStatus(out, 400, null);
         return;
       }
       var parts = requestLine.split(" ");
       if (parts.length < 3) {
         badRequests.increment();
-        writeStatus(out, "400 Bad Request", null);
+        writeStatus(out, 400, null);
         return;
       }
-      var method = parts[0];
-      var path = parts[1];
-      if (!"POST".equalsIgnoreCase(method)) {
-        writeStatus(out, "405 Method Not Allowed", "Allow: POST\r\n");
-        return;
-      }
-      var queryStart = path.indexOf('?');
-      var rawPath = queryStart >= 0 ? path.substring(0, queryStart) : path;
-      if (!EVENTS_PATH.equals(rawPath)) {
-        writeStatus(out, "404 Not Found", null);
-        return;
-      }
-
+      var method = parts[0].toUpperCase();
+      var target = parts[1];
       var contentLength = readContentLength(in);
-      if (contentLength < 0) {
-        badRequests.increment();
-        writeStatus(out, "411 Length Required", null);
-        return;
-      }
       if (contentLength > MAX_BODY_BYTES) {
         badRequests.increment();
-        writeStatus(out, "413 Payload Too Large", null);
+        writeStatus(out, 413, null);
         return;
       }
 
-      var body = in.readNBytes(contentLength);
-      if (body.length != contentLength) {
+      byte[] body = contentLength <= 0 ? new byte[0] : in.readNBytes(contentLength);
+      if (body.length != Math.max(0, contentLength)) {
         badRequests.increment();
-        writeStatus(out, "400 Bad Request", null);
+        writeStatus(out, 400, null);
         return;
       }
 
-      Event event;
-      try {
-        event = Event.fromJsonLine(new String(body, StandardCharsets.UTF_8));
-      } catch (Exception parseFailure) {
-        badRequests.increment();
-        writeStatus(out, "400 Bad Request", null);
-        return;
-      }
-
-      var stamped = bus.publish(event);
-      var responseBody = "{\"id\":" + stamped.id() + "}";
-      writeResponse(out, "202 Accepted", responseBody);
+      var queryStart = target.indexOf('?');
+      var path = queryStart >= 0 ? target.substring(0, queryStart) : target;
+      var query =
+          queryStart >= 0
+              ? LocalApiRequest.decode(target.substring(queryStart + 1))
+              : Map.<String, String>of();
+      var response = handler.handle(new LocalApiRequest(method, path, query, body));
+      writeResponse(out, response);
     } catch (IOException io) {
-      // client disconnected mid-stream — best-effort, nothing to do
+      // client disconnected mid-stream
     } catch (RuntimeException unexpected) {
       System.err.println("sail-uds: handler error: " + unexpected.getMessage());
     }
   }
 
   private static int readContentLength(InputStream in) throws IOException {
-    int total = -1;
+    var length = 0;
     while (true) {
       var line = readLine(in, MAX_HEADER_BYTES);
-      if (line == null) {
-        return -1;
-      }
-      if (line.isEmpty()) {
-        return total;
+      if (line == null || line.isEmpty()) {
+        return length;
       }
       var colon = line.indexOf(':');
       if (colon <= 0) {
         continue;
       }
-      var name = line.substring(0, colon).toLowerCase();
-      if (!CONTENT_LENGTH.equals(name)) {
+      if (!CONTENT_LENGTH.equals(line.substring(0, colon).toLowerCase())) {
         continue;
       }
       try {
-        total = Integer.parseInt(line.substring(colon + 1).strip());
+        length = Integer.parseInt(line.substring(colon + 1).strip());
       } catch (NumberFormatException ignored) {
-        return -1;
+        length = -1;
       }
     }
   }
@@ -286,26 +262,58 @@ public final class UnixSocketEventsListener implements AutoCloseable {
     return null;
   }
 
-  private static void writeStatus(OutputStream out, String status, String extraHeaders)
+  private static void writeStatus(SocketChannel channel, int status, String extraHeaders)
+      throws IOException {
+    try (var out = Channels.newOutputStream(channel)) {
+      writeStatus(out, status, extraHeaders);
+    }
+  }
+
+  private static void writeStatus(OutputStream out, int status, String extraHeaders)
       throws IOException {
     var headers = extraHeaders == null ? "" : extraHeaders;
-    var response = "HTTP/1.1 " + status + "\r\nContent-Length: 0\r\n" + headers + "\r\n";
+    var response =
+        "HTTP/1.1 "
+            + status
+            + " "
+            + reason(status)
+            + "\r\nContent-Length: 0\r\n"
+            + headers
+            + "\r\n";
     out.write(response.getBytes(StandardCharsets.UTF_8));
     out.flush();
   }
 
-  private static void writeResponse(OutputStream out, String status, String jsonBody)
-      throws IOException {
-    var body = jsonBody.getBytes(StandardCharsets.UTF_8);
-    var response =
+  private static void writeResponse(OutputStream out, ApiResponse response) throws IOException {
+    var json = YamlUtil.dumpJson(new LinkedHashMap<>(response.body()));
+    var body = json.getBytes(StandardCharsets.UTF_8);
+    var head =
         "HTTP/1.1 "
-            + status
+            + response.status()
+            + " "
+            + reason(response.status())
             + "\r\nContent-Type: application/json\r\nContent-Length: "
             + body.length
             + "\r\n\r\n";
-    out.write(response.getBytes(StandardCharsets.UTF_8));
+    out.write(head.getBytes(StandardCharsets.UTF_8));
     out.write(body);
     out.flush();
+  }
+
+  private static String reason(int status) {
+    return switch (status) {
+      case 200 -> "OK";
+      case 201 -> "Created";
+      case 202 -> "Accepted";
+      case 400 -> "Bad Request";
+      case 404 -> "Not Found";
+      case 405 -> "Method Not Allowed";
+      case 409 -> "Conflict";
+      case 413 -> "Payload Too Large";
+      case 500 -> "Internal Server Error";
+      case 503 -> "Service Unavailable";
+      default -> "Status";
+    };
   }
 
   private static void closeQuietly(AutoCloseable resource) {

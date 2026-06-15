@@ -59,6 +59,7 @@ public final class ContainerSailSetup {
       return Result.ALREADY_PRESENT;
     }
     new SailEventHelper(shell).install(container);
+    new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
     return Result.BACKFILLED;
@@ -75,6 +76,8 @@ public final class ContainerSailSetup {
                     "-c",
                     "test -f "
                         + SailEventHelper.SCRIPT_PATH
+                        + " && test -f "
+                        + SpecCliHelper.SCRIPT_PATH
                         + " && test -f "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && test -f "

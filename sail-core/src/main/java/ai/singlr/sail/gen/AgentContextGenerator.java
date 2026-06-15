@@ -448,17 +448,17 @@ public final class AgentContextGenerator {
     sb.append(
         """
         This project uses spec-driven development. Specs live in the **Sail database** — the shared,
-        synced source of truth — and you manage them with the `sail spec` CLI, never by editing
+        synced source of truth — and you manage them with the `spec` CLI, never by editing
         files. What you create syncs to every devbox on the project.
 
         ### Working with specs
-        - `sail spec board` — kanban summary; `sail spec list [--status pending] [--assignee me]`
-        - `sail spec show <id>` — metadata, dependencies, and the full body
-        - `sail spec create --id <id> --title "<title>" --body-file <file>` — create one; add
+        - `spec board` — kanban summary; `spec list [--status pending] [--assignee me]`
+        - `spec show <id>` — metadata, dependencies, and the full body
+        - `spec create --id <id> --title "<title>" --body-file <file>` — create one; add
           `--depends-on a,b`, `--repos api,web`, `--agent codex|claude-code`, `--model <id>`,
           `--reasoning-effort none|low|medium|high|xhigh` as the work warrants
-        - `sail spec edit <id> --status <status>` — change metadata;
-          `sail spec content <id> --set --body-file <file>` — revise the body
+        - `spec update <id> --status <status>` — change metadata;
+          `spec content <id> --body-file <file>` — revise the body
 
         Repo, agent, and model values must match `sail.yaml` (`repos[].path`, installed agents). In
         a multi-repo project, set `--repos` before dispatch or `sail spec dispatch` will not
@@ -476,7 +476,7 @@ public final class AgentContextGenerator {
 
         ### Interactive Mode
         When the engineer asks you to brainstorm or write specs, draft each body to a temporary
-        markdown file and run `sail spec create ...`. There is no `specs/` directory to edit.
+        markdown file and run `spec create ...`. There is no `specs/` directory to edit.
         """);
   }
 

@@ -172,7 +172,7 @@
                                         (NIO accept failures, half-closed sockets, slow-client
                                         write timeouts) that can only be exercised by injecting
                                         kernel-level faults. They're covered end-to-end by
-                                        SseHandlerTest and UnixSocketEventsListenerTest with real
+                                        SseHandlerTest and LocalApiSocketTest with real
                                         sockets; full line coverage of every defensive catch is
                                         not achievable without fault injection infrastructure.
                                         Tracked separately below with relaxed thresholds.
@@ -180,7 +180,7 @@
                                     <excludes>
                                         <exclude>ai.singlr.sail.api.SseHandler</exclude>
                                         <exclude>ai.singlr.sail.api.SseHandler.StreamSubscriber</exclude>
-                                        <exclude>ai.singlr.sail.api.UnixSocketEventsListener</exclude>
+                                        <exclude>ai.singlr.sail.api.LocalApiSocket</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiOperations</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiClient</exclude>
                                         <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
@@ -206,7 +206,7 @@
                                     <includes>
                                         <include>ai.singlr.sail.api.SseHandler</include>
                                         <include>ai.singlr.sail.api.SseHandler.StreamSubscriber</include>
-                                        <include>ai.singlr.sail.api.UnixSocketEventsListener</include>
+                                        <include>ai.singlr.sail.api.LocalApiSocket</include>
                                     </includes>
                                     <limits>
                                         <limit>

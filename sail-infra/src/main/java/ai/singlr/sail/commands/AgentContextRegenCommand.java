@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
@@ -137,6 +138,8 @@ public final class AgentContextRegenCommand implements Runnable {
           System.out.println(Ansi.AUTO.string("  @|faint Kept existing " + s + " from repo|@"));
         }
       }
+
+      installSpecCli(shell);
     }
 
     if (json) {
@@ -154,6 +157,24 @@ public final class AgentContextRegenCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|bold,green \u2713 Agent context regenerated:|@ " + file.remotePath()));
+    }
+  }
+
+  /**
+   * Installs (or refreshes) the in-container {@code spec} CLI so regen doubles as the retrofit for
+   * projects created before specs moved to the database. Best-effort: the context files are the
+   * primary deliverable, so a failure here only warns.
+   */
+  private void installSpecCli(ShellExecutor shell) {
+    try {
+      new SpecCliHelper(shell).install(name);
+      if (!json) {
+        System.out.println(
+            Ansi.AUTO.string("  @|faint Installed the spec CLI (~/.sail/bin/spec)|@"));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine("Could not install the spec CLI: " + e.getMessage(), Ansi.AUTO));
     }
   }
 

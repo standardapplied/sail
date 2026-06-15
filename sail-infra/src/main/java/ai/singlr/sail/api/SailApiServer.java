@@ -25,7 +25,7 @@ public final class SailApiServer implements AutoCloseable {
   private final EventBus.Subscription webhookSubscription;
   private final EventBus.Subscription specLifecycleSubscription;
   private final SseHandler sseHandler;
-  private final UnixSocketEventsListener socketListener;
+  private final LocalApiSocket socketListener;
 
   /**
    * Construct with database-backed token auth. Used by the control plane server ({@code sail server
@@ -145,7 +145,7 @@ public final class SailApiServer implements AutoCloseable {
       sseHandler = new SseHandler(eventBus, auth);
       server.createContext("/v1/events/stream", sseHandler);
       socketListener =
-          socketPath == null ? null : new UnixSocketEventsListener(eventBus, socketPath);
+          socketPath == null ? null : new LocalApiSocket(eventBus, operations, socketPath);
     } else {
       sseHandler = null;
       socketListener = null;
@@ -179,8 +179,8 @@ public final class SailApiServer implements AutoCloseable {
     return sseHandler;
   }
 
-  /** Returns the Unix-socket events listener, or {@code null} when no bus was configured. */
-  public UnixSocketEventsListener socketListener() {
+  /** Returns the local Unix-socket API, or {@code null} when no bus was configured. */
+  public LocalApiSocket socketListener() {
     return socketListener;
   }
 

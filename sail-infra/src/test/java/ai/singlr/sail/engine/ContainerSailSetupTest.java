@@ -75,7 +75,7 @@ class ContainerSailSetupTest {
   }
 
   @Test
-  void probeCommandChecksAllThreeFilePaths() throws Exception {
+  void probeCommandChecksEveryHelperFilePath() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("config device get " + CONTAINER, "Device not found")
@@ -86,6 +86,7 @@ class ContainerSailSetupTest {
     var probe =
         shell.invocations().stream().filter(c -> c.contains("test -f")).findFirst().orElseThrow();
     assertTrue(probe.contains(SailEventHelper.SCRIPT_PATH));
+    assertTrue(probe.contains(SpecCliHelper.SCRIPT_PATH));
     assertTrue(probe.contains(ClaudeCodeHookConfig.SETTINGS_PATH));
     assertTrue(probe.contains(CodexHookConfig.SETTINGS_PATH));
   }
@@ -104,6 +105,9 @@ class ContainerSailSetupTest {
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail/bin")),
         "should re-install sail-event.sh helper");
+    assertTrue(
+        commands.stream().anyMatch(c -> c.contains("/home/dev/.sail/bin/spec")),
+        "should re-install the spec CLI");
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail")),
         "should re-install claude-settings.json");

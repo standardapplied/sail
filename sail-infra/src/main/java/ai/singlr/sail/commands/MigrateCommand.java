@@ -6,14 +6,10 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerSpecImporter;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
@@ -22,7 +18,6 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RebucketSpecsMigration;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -53,8 +48,6 @@ public final class MigrateCommand implements Runnable {
 
   /**
    * Every one-shot data migration tracked in {@code data_migrations}. Add new ones at the bottom.
-   * File-based spec discovery (see {@link ContainerSpecImporter}) deliberately runs outside this
-   * registry — it's a repeatable scan, not a one-shot fix-up.
    */
   public static final List<DataMigration> REGISTRY = List.of(new RebucketSpecsMigration());
 
@@ -90,19 +83,8 @@ public final class MigrateCommand implements Runnable {
     }
     try (var db = Sqlite.open(dbPath)) {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
-      var shell = new ShellExecutor(false);
-      var importer =
-          new ContainerSpecImporter(
-              shell, new ContainerManager(shell), new SpecStore(db), SailPaths.projectsDir());
       var animate = !jsonOutput && System.console() != null;
-      var runs =
-          applyMigrations(
-              db,
-              dbPath.toString(),
-              specImportStep(importer, dbPath.resolveSibling("spec-import.done")),
-              prompter,
-              animate,
-              jsonOutput);
+      var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
       importProjects(db, jsonOutput);
       importFiles(db, jsonOutput);
       relocateHostConfig(jsonOutput);
@@ -197,16 +179,13 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Applies schema migrations first, then imports specs from project containers. The order is
-   * load-bearing: the spec importer queries {@code specs} through {@link SpecStore}, whose SELECT
-   * lists the running binary's columns, so the on-disk schema must be brought current before the
-   * import runs — otherwise an upgrade that added a spec column fails the import with an "unknown
-   * column" error before the schema catches up. Visible for tests to lock that ordering.
+   * Applies all pending schema + data migrations. Specs are no longer scanned from project
+   * containers here: the database is the source of truth and agents write to it directly through
+   * the in-container {@code spec} CLI, so an upgrade never probes a container. Visible for tests.
    */
   static List<DataMigrator.Run> applyMigrations(
       Sqlite db,
       String dbPath,
-      Supplier<ContainerSpecImporter.Report> specImport,
       DataMigration.Prompter prompter,
       boolean animate,
       boolean jsonOutput) {
@@ -215,44 +194,10 @@ public final class MigrateCommand implements Runnable {
             animate,
             "Migrating database schema",
             () -> MigrationRunner.applyAll(db, REGISTRY, prompter));
-    var importReport = phase(animate, "Probing project containers for specs", specImport);
     if (!jsonOutput) {
-      printSummary(
-          dbPath, result.schemaBefore(), result.schemaAfter(), importReport, result.dataRuns());
+      printSummary(dbPath, result.schemaBefore(), result.schemaAfter(), result.dataRuns());
     }
     return result.dataRuns();
-  }
-
-  /**
-   * Gates the container spec scan: it runs only on a standalone box that has not run it before. A
-   * main or node never scans — its specs arrive over sync (node) or are authored in its own DB
-   * (main) — and the {@code spec-import.done} marker makes even a standalone box a one-time
-   * backfill, not a per-upgrade re-probe. The DB is the source of truth; this only rescues pre-DB
-   * file specs.
-   */
-  static Supplier<ContainerSpecImporter.Report> specImportStep(
-      ContainerSpecImporter importer, Path marker) {
-    return specImportStep(importer, marker, HostSync.config());
-  }
-
-  static Supplier<ContainerSpecImporter.Report> specImportStep(
-      ContainerSpecImporter importer, Path marker, SyncConfig sync) {
-    if (!HostSync.isStandalone(sync) || Files.exists(marker)) {
-      return ContainerSpecImporter.Report::empty;
-    }
-    return () -> {
-      var report = importer.importAll();
-      markImportDone(marker);
-      return report;
-    };
-  }
-
-  private static void markImportDone(Path marker) {
-    try {
-      Files.writeString(marker, "done");
-    } catch (Exception ignored) {
-      return;
-    }
   }
 
   private static <T> T phase(boolean animate, String message, Supplier<T> work) {
@@ -265,11 +210,7 @@ public final class MigrateCommand implements Runnable {
   }
 
   private static void printSummary(
-      String dbPath,
-      int beforeSchema,
-      int afterSchema,
-      ContainerSpecImporter.Report importReport,
-      List<DataMigrator.Run> runs) {
+      String dbPath, int beforeSchema, int afterSchema, List<DataMigrator.Run> runs) {
     System.out.println(Ansi.AUTO.string("  @|green ✓|@ Database: " + dbPath));
     if (afterSchema > beforeSchema) {
       System.out.println(
@@ -278,20 +219,6 @@ public final class MigrateCommand implements Runnable {
     } else {
       System.out.println(
           Ansi.AUTO.string("    @|faint Schema up to date (version " + afterSchema + ")|@"));
-    }
-    if (importReport.imported() > 0
-        || importReport.skipped() > 0
-        || !importReport.notes().isEmpty()) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ spec import: "
-                  + importReport.imported()
-                  + " imported, "
-                  + importReport.skipped()
-                  + " skipped (already present)"));
-      for (var note : importReport.notes()) {
-        System.out.println(note);
-      }
     }
     for (var run : runs) {
       if (run.alreadyApplied()) {

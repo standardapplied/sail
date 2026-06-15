@@ -157,6 +157,15 @@ public final class ProjectProvisioner {
               + e.getMessage());
     }
     try {
+      new SpecCliHelper(shell).install(container);
+    } catch (Exception e) {
+      System.err.println(
+          "  [provision] Warning: failed to install the spec CLI in "
+              + container
+              + ": "
+              + e.getMessage());
+    }
+    try {
       new ClaudeCodeHookConfig(shell).install(container);
     } catch (Exception e) {
       System.err.println(

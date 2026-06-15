@@ -12,9 +12,10 @@ import java.util.List;
 /**
  * Generates the spec-board skill for AI coding agents. Specs live in the Sail database — the
  * shared, synced source of truth — so the skill teaches the agent to manage them through the {@code
- * sail spec} CLI ({@code create}/{@code list}/{@code board}/{@code show}/{@code edit}), never by
- * editing YAML files on disk. The CLI reaches the control-plane API over the socket already mounted
- * in the container, so what the agent creates here syncs to every other box.
+ * spec} command ({@code create}/{@code list}/{@code board}/{@code show}/{@code update}), never by
+ * editing YAML files on disk. {@code spec} is a tiny in-container helper that reaches the host API
+ * over the bind-mounted Unix socket; the agent never needs the {@code sail} binary or a token, and
+ * what it creates syncs to every other box.
  *
  * <ul>
  *   <li>Claude Code: {@code .claude/skills/spec-board/SKILL.md} + a spec body template
@@ -63,7 +64,7 @@ public final class SpecSkillGenerator {
         ## Spec Management
 
         You are the spec manager for this project. Specs live in the Sail database, not in files. \
-        When the engineer asks you to create, list, update, or show specs, use the `sail spec` CLI \
+        When the engineer asks you to create, list, update, or show specs, use the `spec` CLI \
         exactly as described below.
 
         """
@@ -91,7 +92,7 @@ public final class SpecSkillGenerator {
         ---
 
         You are the spec manager for this project. Specs live in the Sail database — the shared,
-        synced source of truth — so you manage them with the `sail spec` CLI, never by editing
+        synced source of truth — so you manage them with the `spec` CLI, never by editing
         files. Anything you create here syncs to every other devbox on the project.
 
         ## Commands
@@ -135,7 +136,7 @@ public final class SpecSkillGenerator {
 
   private static String listInstructions() {
     return """
-        Run `sail spec board` for the kanban summary, or `sail spec list` for the full set (add
+        Run `spec board` for the kanban summary, or `spec list` for the full set (add
         `--status pending` or `--assignee me` to filter). Render the result as status columns:
 
         ```
@@ -162,7 +163,7 @@ public final class SpecSkillGenerator {
         `/tmp/<id>.md`.
         3. Create the spec in the database:
            ```sh
-           sail spec create --id <id> --title "<title>" --body-file /tmp/<id>.md
+           spec create --id <id> --title "<title>" --body-file /tmp/<id>.md
            ```
            Add options as the conversation warrants:
            - `--depends-on a,b` — spec ids that must be `done` first
@@ -180,7 +181,7 @@ public final class SpecSkillGenerator {
 
   private static String showInstructions() {
     return """
-        Run `sail spec show <id>` — it prints the metadata, dependencies, and the full body. Use
+        Run `spec show <id>` — it prints the metadata, dependencies, and the full body. Use
         `--json` if you need to parse fields.
         """;
   }
@@ -190,11 +191,11 @@ public final class SpecSkillGenerator {
         Valid statuses: `pending`, `in_progress`, `review`, `done`.
 
         ```sh
-        sail spec edit <id> --status <new-status>
+        spec update <id> --status <new-status>
         ```
 
         Confirm: "Updated `<id>` → `<new-status>`". To revise the body, write the new markdown to a
-        temp file and run `sail spec content <id> --set --body-file /tmp/<id>.md`.
+        temp file and run `spec content <id> --body-file /tmp/<id>.md`.
         """;
   }
 
@@ -206,8 +207,8 @@ public final class SpecSkillGenerator {
         1. Extract each distinct unit of work from the conversation.
         2. For each, derive an id and title and write a body file.
         3. Infer dependencies from the natural ordering discussed and pass them via `--depends-on`.
-        4. Run one `sail spec create` per unit.
-        5. Show the resulting board with `sail spec board`.
+        4. Run one `spec create` per unit.
+        5. Show the resulting board with `spec board`.
 
         This is the primary daytime workflow: brainstorm with the engineer, then materialize \
         the plan into specs with one confirmation.
@@ -218,7 +219,7 @@ public final class SpecSkillGenerator {
     return """
         ### Creating a spec
         ```sh
-        sail spec create --id oauth-flow --title "OAuth 2.0 authorization code flow" \\
+        spec create --id oauth-flow --title "OAuth 2.0 authorization code flow" \\
           --body-file /tmp/oauth-flow.md --depends-on data-model --repos app --agent codex \\
           --model gpt-5.5 --reasoning-effort high
         ```
@@ -233,7 +234,7 @@ public final class SpecSkillGenerator {
         During autonomous execution Sail manages status itself — do not change it. The engineer's
         `/spec-board update` is the exception, when they explicitly ask to move a spec.
 
-        ### Fields (set at create or via `sail spec edit`)
+        ### Fields (set at create or via `spec update`)
         - **id** (required): stable identifier, lowercase with hyphens
         - **title** (required): short human-readable description
         - **status**: one of pending, in_progress, review, done
@@ -254,7 +255,7 @@ public final class SpecSkillGenerator {
 
         ### Where specs live
         Specs are rows in the Sail database, replicated across devboxes by `sail sync`. There is no
-        `specs/` directory to edit — always go through `sail spec`.
+        `specs/` directory to edit — always go through `spec`.
         """;
   }
 

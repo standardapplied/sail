@@ -1201,8 +1201,8 @@ class AgentContextGeneratorTest {
 
     assertTrue(md.contains("## Spec-Driven Development"));
     assertTrue(md.contains("Sail database"));
-    assertTrue(md.contains("sail spec create"));
-    assertTrue(md.contains("sail spec board"));
+    assertTrue(md.contains("spec create"));
+    assertTrue(md.contains("spec board"));
     assertTrue(md.contains("Status Lifecycle"));
     assertTrue(md.contains("pending"));
     assertTrue(md.contains("in_progress"));

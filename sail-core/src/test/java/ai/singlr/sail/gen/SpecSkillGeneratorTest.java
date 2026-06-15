@@ -48,9 +48,9 @@ class SpecSkillGeneratorTest {
     var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, "my-specs", BASE);
     var content = files.get(0).content();
 
-    assertTrue(content.contains("sail spec create"));
-    assertTrue(content.contains("sail spec board"));
-    assertTrue(content.contains("sail spec edit"));
+    assertTrue(content.contains("spec create"));
+    assertTrue(content.contains("spec board"));
+    assertTrue(content.contains("spec update"));
     assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
   }
 
@@ -113,7 +113,7 @@ class SpecSkillGeneratorTest {
 
     assertFalse(instructions.isEmpty());
     assertTrue(instructions.contains("Spec Management"));
-    assertTrue(instructions.contains("sail spec create"));
+    assertTrue(instructions.contains("spec create"));
     assertFalse(instructions.contains("spec.yaml"), "specs are DB rows, not files");
   }
 
@@ -147,11 +147,11 @@ class SpecSkillGeneratorTest {
   @Test
   void specsDirOnlyGatesGenerationItDoesNotLeakIntoContent() {
     var claude = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, "work-items", BASE);
-    assertTrue(claude.get(0).content().contains("sail spec create"));
+    assertTrue(claude.get(0).content().contains("spec create"));
     assertFalse(claude.get(0).content().contains("work-items"));
 
     var codex = SpecSkillGenerator.codexInstructions("work-items");
-    assertTrue(codex.contains("sail spec create"));
+    assertTrue(codex.contains("spec create"));
     assertFalse(codex.contains("work-items"));
   }
 
