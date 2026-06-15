@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -82,13 +83,14 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void addDefaultsTheStoredPathToTheSourceFileName() throws Exception {
+  void storeUsesTheGivenRelativePath() throws Exception {
     var source = tempDir.resolve("notes.md");
     Files.writeString(source, "hello");
 
-    var path = ProjectFilesCommand.Add.store(files, "acme", source, null);
+    var path = ProjectFilesCommand.Add.store(files, "acme", source, "docs/notes.md");
 
-    assertEquals("notes.md", path);
+    assertEquals("docs/notes.md", path);
+    assertTrue(files.find("acme", "docs/notes.md").isPresent());
   }
 
   @Test
@@ -99,6 +101,32 @@ class ProjectFilesCommandTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ProjectFilesCommand.Add.store(files, "acme", source, "../escape"));
+  }
+
+  @Test
+  void shareProblemAcceptsRealFilesAndFlagsTheRest() throws Exception {
+    var ok = tempDir.resolve("ok.txt");
+    Files.writeString(ok, "hi");
+    assertNull(ProjectFilesCommand.Add.shareProblem(ok, "ok.txt"));
+
+    assertEquals("unsafe path", ProjectFilesCommand.Add.shareProblem(ok, "../escape"));
+    assertEquals("not a regular file", ProjectFilesCommand.Add.shareProblem(tempDir, "dir"));
+    assertEquals(
+        "not a regular file",
+        ProjectFilesCommand.Add.shareProblem(tempDir.resolve("gone"), "gone"));
+  }
+
+  @Test
+  void shareProblemRejectsAnOversizedFile() throws Exception {
+    var big = tempDir.resolve("big.bin");
+    try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
+      raf.setLength(ProjectFilesCommand.Add.MAX_SHARE_BYTES + 1);
+    }
+
+    assertTrue(ProjectFilesCommand.Add.shareProblem(big, "big.bin").contains("larger than"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ProjectFilesCommand.Add.store(files, "acme", big, "big.bin"));
   }
 
   @Test
