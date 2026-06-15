@@ -23,8 +23,10 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "restart",
-    description = "Restart or switch to a project, warning if resources overcommit.",
+    name = "switch",
+    aliases = "restart",
+    description =
+        "Switch to a project (start it, make it current), warning if resources overcommit.",
     mixinStandardHelpOptions = true)
 public final class SwitchCommand implements Runnable {
 
@@ -56,6 +58,10 @@ public final class SwitchCommand implements Runnable {
     }
     if (state instanceof ContainerState.Error e) {
       throw new IllegalStateException("Container error: " + e.message());
+    }
+
+    if (!dryRun) {
+      CurrentProject.set(name);
     }
 
     if (!json) {

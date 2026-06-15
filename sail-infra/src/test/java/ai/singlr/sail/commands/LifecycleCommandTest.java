@@ -114,7 +114,7 @@ class LifecycleCommandTest {
     var output = sw.toString();
     assertTrue(output.contains("--dry-run"));
     assertTrue(output.contains("--json"));
-    assertTrue(output.contains("Restart or switch to a project"));
+    assertTrue(output.contains("Switch to a project"));
   }
 
   @Test

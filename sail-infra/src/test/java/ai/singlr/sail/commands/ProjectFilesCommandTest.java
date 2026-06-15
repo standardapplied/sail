@@ -133,7 +133,7 @@ class ProjectFilesCommandTest {
   void addReportsExitOneWhenTheSourceIsMissing() {
     var cmd = new CommandLine(new ProjectFilesCommand.Add());
     cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
-    assertEquals(1, cmd.execute("acme", tempDir.resolve("nope").toString()));
+    assertEquals(1, cmd.execute("-p", "acme", tempDir.resolve("nope").toString()));
   }
 
   @Test
@@ -202,13 +202,6 @@ class ProjectFilesCommandTest {
   void exportRejectsBothProjectAndAll() {
     var cmd = new CommandLine(new ProjectFilesCommand.Export());
     cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
-    assertEquals(1, cmd.execute("acme", "--all"));
-  }
-
-  @Test
-  void exportRejectsNeitherProjectNorAll() {
-    var cmd = new CommandLine(new ProjectFilesCommand.Export());
-    cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
-    assertEquals(1, cmd.execute());
+    assertEquals(1, cmd.execute("-p", "acme", "--all"));
   }
 }

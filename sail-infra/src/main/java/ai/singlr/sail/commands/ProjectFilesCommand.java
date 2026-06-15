@@ -74,11 +74,13 @@ public final class ProjectFilesCommand implements Runnable {
      */
     static final int CONFIRM_OVER = 100;
 
-    @Parameters(index = "0", description = "Project name.")
+    @Option(
+        names = {"-p", "--project"},
+        description = "Project (default: the current project from 'sail switch').")
     private String project;
 
     @Parameters(
-        index = "1",
+        index = "0",
         arity = "0..1",
         description = "Local file to share. Omit to browse and pick interactively.")
     private Path source;
@@ -95,6 +97,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       if (source != null) {
         return addOne();
@@ -257,7 +260,9 @@ public final class ProjectFilesCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Ls implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Project name.")
+    @Option(
+        names = {"-p", "--project"},
+        description = "Project (default: the current project from 'sail switch').")
     private String project;
 
     @Option(names = "--json", description = "Output as JSON.")
@@ -265,6 +270,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() {
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         System.out.println(render(new FileStore(db).list(project), project, json));
@@ -308,14 +314,17 @@ public final class ProjectFilesCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Cat implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Project name.")
+    @Option(
+        names = {"-p", "--project"},
+        description = "Project (default: the current project from 'sail switch').")
     private String project;
 
-    @Parameters(index = "1", description = "Relative path of the file.")
+    @Parameters(index = "0", description = "Relative path of the file.")
     private String path;
 
     @Override
     public Integer call() throws Exception {
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var bytes = read(new FileStore(db), project, path).orElse(null);
@@ -341,14 +350,17 @@ public final class ProjectFilesCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Rm implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Project name.")
+    @Option(
+        names = {"-p", "--project"},
+        description = "Project (default: the current project from 'sail switch').")
     private String project;
 
-    @Parameters(index = "1", description = "Relative path of the file.")
+    @Parameters(index = "0", description = "Relative path of the file.")
     private String path;
 
     @Override
     public Integer call() throws Exception {
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         if (!unshare(new FileStore(db), SailPaths.projectsDir(), project, path)) {
@@ -383,7 +395,9 @@ public final class ProjectFilesCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Export implements Callable<Integer> {
 
-    @Parameters(index = "0", arity = "0..1", description = "Project name. Omit with --all.")
+    @Option(
+        names = {"-p", "--project"},
+        description = "Project (default: the current project from 'sail switch').")
     private String project;
 
     @Option(names = "--all", description = "Pull every project that has shared files.")
@@ -391,13 +405,13 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
-      if (all == (Strings.isNotBlank(project))) {
-        System.err.println(Banner.errorLine("Pass a project name OR --all, not both.", Ansi.AUTO));
+      if (all && Strings.isNotBlank(project)) {
+        System.err.println(Banner.errorLine("Pass --project OR --all, not both.", Ansi.AUTO));
         return 1;
       }
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var files = new FileStore(db);
-        var targets = all ? files.projectsWithFiles() : List.of(project);
+        var targets = all ? files.projectsWithFiles() : List.of(CurrentProject.require(project));
         var report = export(files, SailPaths.projectsDir(), targets);
         for (var skip : report.skipped()) {
           System.err.println(
