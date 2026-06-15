@@ -27,6 +27,8 @@ import picocli.CommandLine.Command;
       ShellCommand.class,
       ConnectCommand.class,
       ProjectSnapshotCommand.class,
+      ProjectServiceCommand.class,
+      ProjectRepoCommand.class,
       ProjectAddCommand.class,
       ProjectRemoveCommand.class,
       ProjectResourcesCommand.class,

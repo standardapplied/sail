@@ -32,7 +32,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "service",
+    name = "add",
     description = "Add an infrastructure service to a running project.",
     mixinStandardHelpOptions = true)
 public final class ProjectAddServiceCommand implements Runnable {

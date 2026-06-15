@@ -14,22 +14,23 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
-class ProjectRemoveCommandTest {
+class ProjectAddCommandTest {
 
   @Test
-  void deprecatedShimPointsToTheServiceGroup() {
+  void deprecatedShimPointsToTheServiceAndRepoGroups() {
     var captured = new ByteArrayOutputStream();
     var original = System.err;
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
     int exit;
     try {
-      exit = new CommandLine(new ProjectRemoveCommand()).execute("service", "redpanda");
+      exit = new CommandLine(new ProjectAddCommand()).execute("service", "redpanda");
     } finally {
       System.setErr(original);
     }
 
     var err = captured.toString(StandardCharsets.UTF_8);
     assertEquals(2, exit, "deprecated path signals it did not run");
-    assertTrue(err.contains("project service remove"), err);
+    assertTrue(err.contains("project service add"), err);
+    assertTrue(err.contains("project repo add"), err);
   }
 }
