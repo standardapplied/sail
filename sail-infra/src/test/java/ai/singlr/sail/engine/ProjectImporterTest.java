@@ -59,16 +59,20 @@ class ProjectImporterTest {
   }
 
   @Test
-  void isIdempotentAndPicksUpDefinitionChanges() throws IOException {
+  void leavesAlreadyCataloguedProjectsUntouched() throws IOException {
     writeProject("acme", "name: acme\nv: 1\n");
     new ProjectImporter(projectsDir, store).importAll();
 
     writeProject("acme", "name: acme\nv: 2\n");
     var report = new ProjectImporter(projectsDir, store).importAll();
 
-    assertEquals(1, report.imported());
+    assertEquals(0, report.imported(), "a catalogued project is not re-imported on later runs");
+    assertEquals(1, report.skipped());
     assertEquals(1, store.list().size());
-    assertEquals("name: acme\nv: 2\n", store.findByName("acme").orElseThrow().definition());
+    assertEquals(
+        "name: acme\nv: 1\n",
+        store.findByName("acme").orElseThrow().definition(),
+        "the database is the source of truth — a disk edit never overwrites it");
   }
 
   @Test

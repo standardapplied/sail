@@ -14,12 +14,12 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Imports on-disk project descriptors ({@code ~/.sail/projects/<name>/sail.yaml}) into the
- * control-plane catalog. Repeatable and idempotent — {@code sail migrate} runs it every time so a
- * project created before the catalog existed (or by any path that wrote only the file) is brought
- * into the DB, while {@code ProjectStore.upsert} keeps an already-catalogued project a no-op beyond
- * its timestamp. This is the read-from-disk counterpart to {@code ProjectCatalog}'s write path,
- * mirroring how {@link ContainerSpecImporter} reconciles specs.
+ * Backfills the control-plane catalog from on-disk project descriptors ({@code
+ * ~/.sail/projects/<name>/sail.yaml}). Its only job is to catch a project that exists on disk but
+ * not yet in the database, so it imports a name <em>only when it is absent from the catalog</em> —
+ * an already-catalogued project is left untouched, never re-read from disk (which would overwrite a
+ * definition another box may have changed and synced). The database is the source of truth; this is
+ * the read-from-disk fallback for projects created before the catalog existed.
  */
 public final class ProjectImporter {
 
@@ -51,6 +51,10 @@ public final class ProjectImporter {
           continue;
         }
         var name = dir.getFileName().toString();
+        if (store.findByName(name).isPresent()) {
+          skipped++;
+          continue;
+        }
         try {
           store.upsert(name, Files.readString(descriptor), null);
           imported++;

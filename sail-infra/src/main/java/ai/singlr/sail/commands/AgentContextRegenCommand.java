@@ -86,6 +86,8 @@ public final class AgentContextRegenCommand implements Runnable {
               + "\n  Add an 'agent:' section to generate context files.");
     }
 
+    var pushed = new ArrayList<String>();
+
     if (dryRun) {
       for (var file : contextFiles) {
         System.out.println(
@@ -111,7 +113,6 @@ public final class AgentContextRegenCommand implements Runnable {
       shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", workspacePath)));
 
       var existingFiles = listWorkspaceFiles(shell, name, workspacePath);
-      var pushed = new ArrayList<String>();
       var skipped = new ArrayList<String>();
 
       for (var file : contextFiles) {
@@ -151,12 +152,19 @@ public final class AgentContextRegenCommand implements Runnable {
       return;
     }
 
+    if (dryRun) {
+      return;
+    }
     Banner.printBranding(System.out, Ansi.AUTO);
     System.out.println();
-    for (var file : contextFiles) {
+    if (pushed.isEmpty()) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|bold,green \u2713 Agent context regenerated:|@ " + file.remotePath()));
+              "  @|faint Nothing to regenerate \u2014 kept every engineer-owned file.|@"));
+    }
+    for (var path : pushed) {
+      System.out.println(
+          Ansi.AUTO.string("  @|bold,green \u2713 Agent context regenerated:|@ " + path));
     }
   }
 
