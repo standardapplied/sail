@@ -34,7 +34,8 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "migrate",
+    name = "relayout",
+    aliases = "migrate",
     description = "Bring existing project containers up to the current SAIL layout.",
     mixinStandardHelpOptions = true)
 public final class ProjectMigrateCommand implements Runnable {

@@ -25,7 +25,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "service",
+    name = "remove",
     description = "Remove an infrastructure service from a running project.",
     mixinStandardHelpOptions = true)
 public final class ProjectRemoveServiceCommand implements Runnable {

@@ -30,7 +30,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "repo",
+    name = "add",
     description = "Add a git repository to a running project.",
     mixinStandardHelpOptions = true)
 public final class ProjectAddRepoCommand implements Runnable {

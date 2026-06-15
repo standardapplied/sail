@@ -27,7 +27,8 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 @Command(
-    name = "sync",
+    name = "reconfigure",
+    aliases = "sync",
     description =
         "Backfill host-side configuration (currently: sail-api event socket) onto existing"
             + " project containers. Idempotent.",
