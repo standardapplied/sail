@@ -13,6 +13,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -63,6 +64,47 @@ class BannerTest {
     assertTrue(text.contains("admin"));
     assertTrue(text.contains("mady"));
     assertTrue(text.contains("-"), "missing name/email render as a dash");
+  }
+
+  @Test
+  void fdeKeyTableShowsHandleCommentAndFingerprint() {
+    var out = new ByteArrayOutputStream();
+    var keys =
+        List.of(
+            new FdeSshKeyStore.SshKeyInfo(
+                "SHA256:abc", "id1", "uday", "ssh-ed25519 AAAA", "laptop", "t"),
+            new FdeSshKeyStore.SshKeyInfo(
+                "SHA256:xyz", "id2", "mady", "ssh-ed25519 BBBB", null, "t"));
+
+    Banner.printFdeKeyTable(keys, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
+    var text = out.toString(StandardCharsets.UTF_8);
+
+    assertTrue(text.contains("HANDLE"));
+    assertTrue(text.contains("FINGERPRINT"));
+    assertTrue(text.contains("uday"));
+    assertTrue(text.contains("laptop"));
+    assertTrue(text.contains("SHA256:abc"));
+    assertTrue(text.contains("-"), "a missing comment renders as a dash");
+  }
+
+  @Test
+  void agentSessionsTableShowsStatusAgentSpecAndStarted() {
+    var out = new ByteArrayOutputStream();
+    var sessions =
+        List.<Map<String, Object>>of(
+            Map.of("status", "running", "agent", "claude-code", "spec_id", "auth"),
+            Map.of("status", "stopped", "agent", "codex", "started_at", "2026-06-16T00:00:00Z"));
+
+    Banner.printAgentSessionsTable(
+        sessions, "acme", new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
+    var text = out.toString(StandardCharsets.UTF_8);
+
+    assertTrue(text.contains("Agent Sessions: acme"));
+    assertTrue(text.contains("STATUS"));
+    assertTrue(text.contains("running"));
+    assertTrue(text.contains("claude-code"));
+    assertTrue(text.contains("auth"));
+    assertTrue(text.contains("-"), "a missing field renders as a dash");
   }
 
   @Test

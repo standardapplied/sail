@@ -12,11 +12,14 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -627,6 +630,42 @@ public final class Banner {
 
   private static String orDash(String value) {
     return value == null || value.isBlank() ? "-" : value;
+  }
+
+  /** Prints a bordered table of an FDE's registered SSH keys. */
+  public static void printFdeKeyTable(
+      List<FdeSshKeyStore.SshKeyInfo> keys, PrintStream out, Ansi ansi) {
+    var table = new TableFormatter(" SSH Keys ", List.of("HANDLE", "COMMENT", "FINGERPRINT"));
+    for (var key : keys) {
+      table.addRow(key.fdeHandle(), orDash(key.comment()), key.fingerprint());
+    }
+    table.render(out, ansi);
+  }
+
+  /** Prints a bordered table of a project's shared files. */
+  public static void printProjectFilesTable(
+      List<FileStore.FileRow> rows, String project, PrintStream out, Ansi ansi) {
+    var table = new TableFormatter(" Files: " + project + " ", List.of("PATH", "SIZE"));
+    for (var row : rows) {
+      table.addRow(row.path(), Base64.getDecoder().decode(row.content()).length + " B");
+    }
+    table.render(out, ansi);
+  }
+
+  /** Prints a bordered table of a project's agent sessions. */
+  public static void printAgentSessionsTable(
+      List<Map<String, Object>> sessions, String project, PrintStream out, Ansi ansi) {
+    var table =
+        new TableFormatter(
+            " Agent Sessions: " + project + " ", List.of("STATUS", "AGENT", "SPEC", "STARTED"));
+    for (var session : sessions) {
+      table.addRow(
+          Objects.toString(session.get("status"), "-"),
+          Objects.toString(session.get("agent"), "-"),
+          Objects.toString(session.get("spec_id"), "-"),
+          Objects.toString(session.get("started_at"), "-"));
+    }
+    table.render(out, ansi);
   }
 
   /** Prints a success line for container destruction. */

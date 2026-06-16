@@ -363,13 +363,7 @@ public final class FdeCommand implements Runnable {
                   System.out.println("  No SSH keys. Register one with 'sail fde key add'.");
                   return;
                 }
-                for (var key : keys) {
-                  System.out.printf(
-                      "  %-16s  %-12s  %s%n",
-                      key.fdeHandle(),
-                      key.comment() == null ? "" : key.comment(),
-                      key.fingerprint());
-                }
+                Banner.printFdeKeyTable(keys, System.out, Ansi.AUTO);
               }
             });
       }

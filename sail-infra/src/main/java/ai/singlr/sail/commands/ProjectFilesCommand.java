@@ -315,11 +315,17 @@ public final class ProjectFilesCommand implements Runnable {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        System.out.println(render(new FileStore(db).list(project), project, json));
+        var rows = new FileStore(db).list(project);
+        if (json || rows.isEmpty()) {
+          System.out.println(render(rows, project, json));
+        } else {
+          Banner.printProjectFilesTable(rows, project, System.out, Ansi.AUTO);
+        }
         return 0;
       }
     }
 
+    /** Renders the JSON list, or the empty-state message for the human path. */
     static String render(List<FileStore.FileRow> rows, String project, boolean json) {
       if (json) {
         var list =
@@ -334,19 +340,7 @@ public final class ProjectFilesCommand implements Runnable {
                 .toList();
         return YamlUtil.dumpJson(list);
       }
-      if (rows.isEmpty()) {
-        return Ansi.AUTO.string(
-            "  @|faint No shared files on |@@|bold " + project + "|@@|faint .|@");
-      }
-      var out = new StringBuilder();
-      out.append(
-          Ansi.AUTO.string("  @|bold " + rows.size() + "|@ shared file(s) on " + project + ":\n"));
-      for (var r : rows) {
-        out.append(
-            Ansi.AUTO.string(
-                "    @|green " + r.path() + "|@ @|faint (" + decodedSize(r.content()) + " B)|@\n"));
-      }
-      return out.toString().stripTrailing();
+      return Ansi.AUTO.string("  @|faint No shared files on |@@|bold " + project + "|@@|faint .|@");
     }
   }
 

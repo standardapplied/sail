@@ -12,10 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -25,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class ProjectFilesCommandTest {
 
@@ -142,11 +147,18 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void lsRendersHumanAndJson() {
+  void lsRendersHumanTableAndJson() {
     files.put("acme", "a.txt", b64("AAAA"));
     files.put("acme", "b.txt", b64("B"));
 
-    var human = ProjectFilesCommand.Ls.render(files.list("acme"), "acme", false);
+    var captured = new ByteArrayOutputStream();
+    Banner.printProjectFilesTable(
+        files.list("acme"),
+        "acme",
+        new PrintStream(captured, true, StandardCharsets.UTF_8),
+        Ansi.OFF);
+    var human = captured.toString(StandardCharsets.UTF_8);
+    assertTrue(human.contains("PATH"));
     assertTrue(human.contains("a.txt"));
     assertTrue(human.contains("4 B"));
 

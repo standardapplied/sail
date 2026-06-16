@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Banner;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,26 +57,7 @@ public final class AgentSessionsCommand implements Runnable {
         return;
       }
 
-      System.out.println(Ansi.AUTO.string("  @|bold Agent Sessions:|@ " + project));
-      System.out.println();
-      for (var session : sessions) {
-        var status = (String) session.get("status");
-        var agent = (String) session.get("agent");
-        var specId = session.get("spec_id");
-        var startedAt = (String) session.get("started_at");
-        var color = "running".equals(status) ? "green" : "faint";
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|"
-                    + color
-                    + " "
-                    + status
-                    + "|@  "
-                    + agent
-                    + (specId != null ? "  spec=" + specId : "")
-                    + "  "
-                    + startedAt));
-      }
+      Banner.printAgentSessionsTable(sessions, project, System.out, Ansi.AUTO);
     }
   }
 }
