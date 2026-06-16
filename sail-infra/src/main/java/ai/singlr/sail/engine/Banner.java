@@ -12,6 +12,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.FdeStore;
 import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.time.Duration;
@@ -612,6 +613,20 @@ public final class Banner {
       table.addRow(c.name(), status, ip, cpu, mem);
     }
     table.render(out, ansi);
+  }
+
+  /** Prints a bordered FDE list table. */
+  public static void printFdeTable(List<FdeStore.Fde> fdes, PrintStream out, Ansi ansi) {
+    var table = new TableFormatter(" FDEs ", List.of("HANDLE", "NAME", "EMAIL", "ROLE", "STATUS"));
+    for (var fde : fdes) {
+      table.addRow(
+          fde.handle(), orDash(fde.displayName()), orDash(fde.email()), fde.role(), fde.status());
+    }
+    table.render(out, ansi);
+  }
+
+  private static String orDash(String value) {
+    return value == null || value.isBlank() ? "-" : value;
   }
 
   /** Prints a success line for container destruction. */

@@ -9,6 +9,7 @@ import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.EnrollmentTicketStore;
@@ -219,14 +220,7 @@ public final class FdeCommand implements Runnable {
                 System.out.println("  No FDEs. Add one with 'sail fde add <handle>'.");
                 return;
               }
-              for (var fde : fdes) {
-                System.out.printf(
-                    "  %-16s  %-20s  %-8s  %s%n",
-                    fde.handle(),
-                    fde.displayName() == null ? "" : fde.displayName(),
-                    fde.role(),
-                    fde.status());
-              }
+              Banner.printFdeTable(fdes, System.out, Ansi.AUTO);
             }
           });
     }

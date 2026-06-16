@@ -13,6 +13,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.FdeStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +41,28 @@ class BannerTest {
     assertTrue(output.contains("6 cores / 12 threads"));
     assertTrue(output.contains("31,868 MB"));
     assertTrue(output.contains("Host Detection"));
+  }
+
+  @Test
+  void fdeTableShowsHeadersDataAndDashesForMissingFields() {
+    var out = new ByteArrayOutputStream();
+    var fdes =
+        List.of(
+            new FdeStore.Fde("id1", "uday", "Uday Chandra", "uday@x.ai", "admin", "active", "t"),
+            new FdeStore.Fde("id2", "mady", null, null, "member", "active", "t"));
+
+    Banner.printFdeTable(fdes, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
+    var text = out.toString(StandardCharsets.UTF_8);
+
+    assertTrue(text.contains("FDEs"));
+    assertTrue(text.contains("HANDLE"));
+    assertTrue(text.contains("EMAIL"));
+    assertTrue(text.contains("STATUS"));
+    assertTrue(text.contains("uday"));
+    assertTrue(text.contains("Uday Chandra"));
+    assertTrue(text.contains("admin"));
+    assertTrue(text.contains("mady"));
+    assertTrue(text.contains("-"), "missing name/email render as a dash");
   }
 
   @Test
