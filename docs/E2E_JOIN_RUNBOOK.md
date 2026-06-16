@@ -37,12 +37,27 @@ sail host sync                       # verify: "This box is main."
 
 ## 2. NODE — one-command join
 
+If the box **already runs sail** (it has a `~/.sail` / control plane from prior use),
+`sail join` is the *only* step — do **not** re-run `host init`:
+
 ```bash
-# NODE
-sudo sail host init                  # one-time control plane (no ssh-identity needed —
-                                     # a node only syncs outbound to main)
-sail join sail@<main-ip>             # generates the sync key, points this box at main,
-                                     # and prints the exact line for MAIN to authorize
+# NODE (existing sail box) — bare host is fine; the sail@ user is implied
+sail join <main-ip>                  # generates the sync key, points this box at main,
+                                     # then prompts: "Authorise this node as which handle
+                                     # on main? [mady]" — type the FDE handle you created
+                                     # on MAIN. It prints the exact line for MAIN to run.
+```
+
+`sail join` never assumes `root`: the prompt defaults to this box's own FDE or
+`$SUDO_USER`. Use `--handle mady` to skip the prompt (required with `--json`).
+
+Only a **brand-new** box needs the one-time control plane first (a node syncs outbound
+to main, so it does **not** need `host ssh-identity`):
+
+```bash
+# NODE (brand-new box only)
+sudo sail host init
+sail join <main-ip> --handle mady
 ```
 
 `sail join` prints something like:

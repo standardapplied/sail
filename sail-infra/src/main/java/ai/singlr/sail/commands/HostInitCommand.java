@@ -18,7 +18,9 @@ import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -213,6 +215,13 @@ public final class HostInitCommand implements Runnable {
   private void printApiServiceNextSteps(ShellExec shell) {
     var sudoUser = System.getenv("SUDO_USER");
     System.out.println();
+    if (apiServiceInstalled(targetHome(sudoUser))) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ sail API service already installed — nothing to do here;"
+                  + " 'sail upgrade' keeps it current."));
+      return;
+    }
     System.out.println(Ansi.AUTO.string("  @|bold Next step:|@ enable the sail API service."));
     if (Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser)) {
       enableLingerForUser(shell, sudoUser);
@@ -221,6 +230,37 @@ public final class HostInitCommand implements Runnable {
       System.out.println("    Run as your dev user (without sudo):");
     }
     System.out.println(Ansi.AUTO.string("      @|bold sail host service install|@"));
+  }
+
+  /**
+   * Resolves the home of the engineer who will own the user-level API service: the {@code
+   * SUDO_USER} when {@code init} runs under sudo, otherwise the current user's home.
+   */
+  private static Path targetHome(String sudoUser) {
+    if (Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser)) {
+      return Path.of("/home/" + sudoUser);
+    }
+    return Path.of(System.getProperty("user.home"));
+  }
+
+  /**
+   * True when the per-user {@code sail-api} unit already exists under {@code userHome}. Lets {@code
+   * init} skip the install prompt on a box that was set up before (an idempotent re-init), since
+   * the service is purely file-state that root can read for any user.
+   */
+  static boolean apiServiceInstalled(Path userHome) {
+    if (userHome == null) {
+      return false;
+    }
+    return new SystemdServiceInstaller(
+            new ShellExecutor(false),
+            SystemdServiceInstaller.Mode.USER,
+            userHome,
+            SailPaths.binaryPath(),
+            "127.0.0.1",
+            7070,
+            "sail")
+        .isInstalled();
   }
 
   private void enableLingerForUser(ShellExec shell, String user) {

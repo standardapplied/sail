@@ -26,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 class JoinCommandTest {
 
   private static final String PUB =
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync@node";
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";
 
   private static final HostYaml BASE =
       new HostYaml(
@@ -98,16 +98,125 @@ class JoinCommandTest {
   }
 
   @Test
-  void defaultHandleFallsBackWhenUsernameIsAbsent() {
-    var original = System.getProperty("user.name");
-    try {
-      System.setProperty("user.name", "");
-      assertEquals("your-handle", JoinCommand.defaultHandle());
-      System.setProperty("user.name", "mady");
-      assertEquals("mady", JoinCommand.defaultHandle());
-    } finally {
-      System.setProperty("user.name", original);
-    }
+  void normalizeTargetPrependsTheImpliedSailUserForABareHost() {
+    assertEquals("sail@maindevbox", JoinCommand.normalizeTarget("maindevbox"));
+    assertEquals("sail@10.0.0.1", JoinCommand.normalizeTarget("  10.0.0.1 "));
+  }
+
+  @Test
+  void normalizeTargetRespectsAnExplicitUser() {
+    assertEquals("sail@host", JoinCommand.normalizeTarget("sail@host"));
+    assertEquals("mady@host", JoinCommand.normalizeTarget("mady@host"));
+  }
+
+  @Test
+  void nonSailUserWarningFiresOnlyForANonSailUser() {
+    assertTrue(JoinCommand.nonSailUserWarning("mady@host").isPresent());
+    assertTrue(JoinCommand.nonSailUserWarning("root@host").get().contains("sail@host"));
+    assertTrue(JoinCommand.nonSailUserWarning("sail@host").isEmpty());
+    assertTrue(JoinCommand.nonSailUserWarning("maindevbox").isEmpty());
+  }
+
+  @Test
+  void hostForProbeStripsTheUserAndPort() {
+    assertEquals("host", JoinCommand.hostForProbe("sail@host"));
+    assertEquals("10.0.0.1", JoinCommand.hostForProbe("sail@10.0.0.1:2222"));
+    assertEquals("maindevbox", JoinCommand.hostForProbe("maindevbox"));
+  }
+
+  @Test
+  void defaultHandlePrefersThisBoxesSoleFde() {
+    assertEquals("mady", JoinCommand.defaultHandle(List.of("mady"), "ignored", "ignored"));
+  }
+
+  @Test
+  void defaultHandleFallsBackToSudoUserButNeverRoot() {
+    assertEquals("mady", JoinCommand.defaultHandle(List.of(), "mady", null));
+    assertEquals("alice", JoinCommand.defaultHandle(List.of("a", "b"), "alice", null));
+  }
+
+  @Test
+  void defaultHandleUsesGitLocalPartWhenThereIsNoUsableSudoUser() {
+    assertEquals("mady", JoinCommand.defaultHandle(List.of(), "root", "mady"));
+    assertEquals("mady", JoinCommand.defaultHandle(List.of(), null, "mady"));
+  }
+
+  @Test
+  void defaultHandleIsNullWhenNothingUsableAndNeverRoot() {
+    assertEquals(null, JoinCommand.defaultHandle(List.of(), "root", "root"));
+    assertEquals(null, JoinCommand.defaultHandle(List.of("a", "b"), null, null));
+    assertEquals(null, JoinCommand.defaultHandle(List.of(), "", "  "));
+  }
+
+  @Test
+  void handleChoiceUsesAnExplicitFlagAboveEverything() {
+    var choice = JoinCommand.handleChoice("mady", false, true, "ignored");
+    assertEquals(new JoinCommand.HandleChoice.Resolved("mady"), choice);
+  }
+
+  @Test
+  void handleChoiceFailsWhenJsonHasNoHandle() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class, () -> JoinCommand.handleChoice(null, true, true, "x"));
+    assertTrue(error.getMessage().contains("--json requires --handle"));
+  }
+
+  @Test
+  void handleChoiceUsesTheFallbackWhenThereIsNoConsole() {
+    assertEquals(
+        new JoinCommand.HandleChoice.Resolved("mady"),
+        JoinCommand.handleChoice(null, false, false, "mady"));
+  }
+
+  @Test
+  void handleChoiceFailsWithoutAConsoleOrFallback() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> JoinCommand.handleChoice(null, false, false, null));
+    assertTrue(error.getMessage().contains("No terminal to prompt"));
+  }
+
+  @Test
+  void handleChoiceAsksToPromptWhenInteractive() {
+    assertEquals(
+        new JoinCommand.HandleChoice.NeedsPrompt("mady"),
+        JoinCommand.handleChoice(null, false, true, "mady"));
+  }
+
+  @Test
+  void chosenHandleTakesTheTypedLineOverTheFallback() {
+    assertEquals("alice", JoinCommand.chosenHandle("  alice ", "mady"));
+  }
+
+  @Test
+  void chosenHandleFallsBackOnAnEmptyLine() {
+    assertEquals("mady", JoinCommand.chosenHandle("", "mady"));
+    assertEquals("mady", JoinCommand.chosenHandle(null, "mady"));
+  }
+
+  @Test
+  void chosenHandleRejectsAnEmptyResult() {
+    assertThrows(IllegalArgumentException.class, () -> JoinCommand.chosenHandle("", null));
+  }
+
+  @Test
+  void renderJsonEmitsTheAuthorizeCommand() {
+    var out = JoinCommand.render(new JoinCommand.Plan("sail@host", "mady", PUB), true);
+
+    assertTrue(out.contains("\"target\""));
+    assertTrue(out.contains("\"authorize_command\""));
+    assertTrue(out.contains("sail fde add mady --role member --key"));
+  }
+
+  @Test
+  void renderHumanShowsTheTargetAndAuthorizeLine() {
+    var out = JoinCommand.render(new JoinCommand.Plan("sail@host", "mady", PUB), false);
+
+    assertTrue(out.contains("sail@host"));
+    assertTrue(out.contains("sail fde add mady --role member"));
+    assertTrue(out.contains("sail sync"));
   }
 
   private final class StubKeygen implements ShellExec {
