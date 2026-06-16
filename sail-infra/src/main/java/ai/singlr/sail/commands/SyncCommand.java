@@ -18,15 +18,18 @@ import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
+import ai.singlr.sail.sync.ProjectReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,17 +101,26 @@ public final class SyncCommand implements Callable<Integer> {
       var conflicts = new SyncConflicts(db);
       var syncState = new SyncState(db);
       var fileStore = new FileStore(db);
+      var projectStore = new ProjectStore(db);
       var boxes =
           new Boxes(
               new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
               new FileReplica(host, fileStore, changeLog, conflicts, syncState),
+              new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
               new FdeStore(db),
-              fileStore);
+              fileStore,
+              projectStore);
       return watch ? watchLoop(boxes, target) : runOnce(boxes, target);
     }
   }
 
-  private record Boxes(SpecReplica spec, FileReplica file, FdeStore fdes, FileStore files) {}
+  private record Boxes(
+      SpecReplica spec,
+      FileReplica file,
+      ProjectReplica project,
+      FdeStore fdes,
+      FileStore files,
+      ProjectStore projects) {}
 
   /**
    * Where this box syncs to. A non-null {@link MainTarget#target()} means reconcile against it; a
@@ -163,6 +175,7 @@ public final class SyncCommand implements Callable<Integer> {
         var session = new SyncSession(channel.reader(), channel.writer())) {
       var specReport = new SyncEngine().reconcile(boxes.spec(), session.replica("spec"));
       var fileReport = new SyncEngine().reconcile(boxes.file(), session.replica("file"));
+      var projectReport = new SyncEngine().reconcile(boxes.project(), session.replica("project"));
       var rejected = applyFdes(boxes.fdes(), session.fetchFdes());
       if (!rejected.isEmpty()) {
         System.err.println(
@@ -174,8 +187,47 @@ public final class SyncCommand implements Callable<Integer> {
                 Ansi.AUTO));
       }
       materialize(boxes.files());
-      return combine(specReport, fileReport);
+      materializeProjects(boxes.projects());
+      return combine(combine(specReport, fileReport), projectReport);
     }
+  }
+
+  /**
+   * Writes a freshly-synced project's descriptor to its canonical {@code
+   * ~/.sail/projects/<name>/sail.yaml}, next to the {@code files/} bundle the file sync
+   * materialized, so the provisioner sees the whole project together. Only writes when the
+   * descriptor is absent — it never clobbers a local copy; the database stays the source of truth,
+   * and a project that already exists on this box keeps its file. Reports the names it newly
+   * materialized so the caller can point the engineer at provisioning.
+   */
+  private List<String> materializeProjects(ProjectStore projects) {
+    var created = new ArrayList<String>();
+    for (var project : projects.list()) {
+      var descriptor = SailPaths.projectDir(project.name()).resolve(SailPaths.PROJECT_DESCRIPTOR);
+      if (Files.exists(descriptor)) {
+        continue;
+      }
+      try {
+        Files.createDirectories(descriptor.getParent());
+        Files.writeString(descriptor, project.definition());
+        created.add(project.name());
+      } catch (IOException e) {
+        System.err.println(
+            Banner.errorLine(
+                "Could not write descriptor for '" + project.name() + "': " + e.getMessage(),
+                Ansi.AUTO));
+      }
+    }
+    if (!created.isEmpty()) {
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|faint "
+                  + created.size()
+                  + " new project(s) synced from main: "
+                  + String.join(", ", created)
+                  + ". Provision with 'sudo sail project create <name>'.|@"));
+    }
+    return created;
   }
 
   /** Projects the synced files onto disk, warning about any local edits it deliberately left. */
