@@ -122,6 +122,21 @@ public final class SailPaths {
   }
 
   /**
+   * Private SSH key this box presents when syncing to main: {@code ~/.sail/sync_ed25519}. A
+   * sail-managed identity distinct from the engineer's personal keys, used only for the {@code ssh
+   * sail@main sail _sync} lane so its public half is deterministic at join time and {@code sail
+   * sync --watch} authenticates without a forwarded agent.
+   */
+  public static Path syncKeyPath() {
+    return SAIL_DIR.resolve("sync_ed25519");
+  }
+
+  /** Public half of {@link #syncKeyPath()}: {@code ~/.sail/sync_ed25519.pub}. */
+  public static Path syncPublicKeyPath() {
+    return SAIL_DIR.resolve("sync_ed25519.pub");
+  }
+
+  /**
    * Resolves the project descriptor path for a project. Checks in order:
    *
    * <ol>

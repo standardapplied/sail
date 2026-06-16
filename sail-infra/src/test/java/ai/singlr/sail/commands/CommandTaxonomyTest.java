@@ -39,7 +39,8 @@ class CommandTaxonomyTest {
             "migrate",
             "upgrade",
             "sync",
-            "conflicts"),
+            "conflicts",
+            "join"),
         userFacing);
   }
 

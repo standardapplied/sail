@@ -11,6 +11,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,7 +37,7 @@ public final class SshSyncChannel implements AutoCloseable {
 
   /** Opens a sync channel to {@code target} (e.g. {@code sail@maindevbox}). */
   public static SshSyncChannel open(String target) throws IOException {
-    var builder = new ProcessBuilder(sshCommand(target));
+    var builder = new ProcessBuilder(sshCommand(target, SyncIdentity.resolve().orElse(null)));
     builder.redirectError(ProcessBuilder.Redirect.INHERIT);
     return new SshSyncChannel(builder.start());
   }
@@ -43,18 +45,25 @@ public final class SshSyncChannel implements AutoCloseable {
   /**
    * The {@code ssh} argument vector for a sync session. Like the rest of the gateway lane it
    * forbids password and keyboard-interactive auth, so a missing key fails fast rather than
-   * dangling a prompt for the locked {@code sail} account.
+   * dangling a prompt for the locked {@code sail} account. When {@code identity} is non-null the
+   * lane pins {@code sail join}'s managed key with {@code IdentitiesOnly} so it never silently
+   * falls back to an unrelated agent key.
    */
-  static List<String> sshCommand(String target) {
-    return List.of(
-        "ssh",
-        "-o",
-        "PasswordAuthentication=no",
-        "-o",
-        "KbdInteractiveAuthentication=no",
-        target,
-        "sail",
-        "_sync");
+  static List<String> sshCommand(String target, Path identity) {
+    var command =
+        new ArrayList<>(
+            List.of(
+                "ssh", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no"));
+    if (identity != null) {
+      command.add("-o");
+      command.add("IdentitiesOnly=yes");
+      command.add("-i");
+      command.add(identity.toString());
+    }
+    command.add(target);
+    command.add("sail");
+    command.add("_sync");
+    return List.copyOf(command);
   }
 
   public BufferedReader reader() {

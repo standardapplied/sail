@@ -12,6 +12,7 @@ import ai.singlr.sail.commands.EventsCommand;
 import ai.singlr.sail.commands.FdeCommand;
 import ai.singlr.sail.commands.GatewayCommand;
 import ai.singlr.sail.commands.HostCommand;
+import ai.singlr.sail.commands.JoinCommand;
 import ai.singlr.sail.commands.LoginCommand;
 import ai.singlr.sail.commands.MigrateCommand;
 import ai.singlr.sail.commands.ProjectCommand;
@@ -46,6 +47,7 @@ import picocli.CommandLine.Help.Ansi;
       SyncCommand.class,
       SyncServerCommand.class,
       ConflictsCommand.class,
+      JoinCommand.class,
     })
 public final class Sail implements Runnable {
 
