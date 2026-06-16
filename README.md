@@ -23,18 +23,15 @@ sudo sail host init
 `host init` installs Incus, creates a storage pool (dir by default, ZFS with `--storage zfs --disk /dev/sdX`), configures networking, and caches the base Ubuntu 24.04 image.
 
 ```bash
-# Pull project descriptor from shared repo (team projects)
-export GITHUB_TOKEN=ghp_...
-sail project pull acme-health
-
-# Or generate a new sail.yaml interactively
+# Generate a new sail.yaml interactively
 sail project init
 
 # Create the environment
 sail project create acme-health
 ```
 
-`project pull` stores the project bundle under `~/.sail/projects/<name>/` by default.
+Team projects are coordinated through the control-plane database and replicated to each
+engineer's box with `sail sync` (see the db-sync model) — not pulled from a git repo.
 
 `project create` provisions an Incus container with everything declared in `sail.yaml` — installs runtimes, starts Podman services, clones repos, configures git identity, generates agent context files, and sets up the harness.
 

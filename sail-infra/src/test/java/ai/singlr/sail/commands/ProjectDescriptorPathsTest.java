@@ -22,13 +22,6 @@ class ProjectDescriptorPathsTest {
   @TempDir Path tempDir;
 
   @Test
-  void pullDefaultOutputPathUsesCanonicalProjectDir() {
-    assertEquals(
-        SailPaths.projectDir("acme-health").resolve("sail.yaml"),
-        ProjectPullCommand.defaultOutputPath("acme-health"));
-  }
-
-  @Test
   void initDefaultOutputPathUsesCanonicalProjectDir() {
     assertEquals(
         SailPaths.projectDir("acme-health").resolve("sail.yaml"),
@@ -58,18 +51,6 @@ class ProjectDescriptorPathsTest {
     assertEquals(
         "sail project create acme-health -f " + outputPath,
         ProjectInitCommand.nextCreateCommand("acme-health", outputPath));
-  }
-
-  @Test
-  void pullOptionDescriptionMentionsCanonicalDefaultPath() throws Exception {
-    var description =
-        ProjectPullCommand.class
-            .getDeclaredField("output")
-            .getAnnotation(Option.class)
-            .description()[0];
-
-    assertTrue(description.contains(".sail/projects"));
-    assertTrue(description.contains("sail.yaml"));
   }
 
   @Test

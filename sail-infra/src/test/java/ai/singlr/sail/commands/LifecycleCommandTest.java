@@ -713,35 +713,7 @@ class LifecycleCommandTest {
   }
 
   @Test
-  void projectPullHelpShowsDescription() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("project", "pull", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("Pull a project descriptor"));
-    assertTrue(output.contains("--github-token"));
-    assertTrue(output.contains("--repo"));
-    assertTrue(output.contains("--ref"));
-    assertTrue(output.contains("--output"));
-  }
-
-  @Test
-  void projectPullMissingArgsFails() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setErr(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("project", "pull");
-
-    assertNotEquals(0, exitCode);
-  }
-
-  @Test
-  void projectHelpListsPullSubcommand() {
+  void projectHelpListsCoreSubcommands() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
@@ -750,7 +722,7 @@ class LifecycleCommandTest {
 
     assertEquals(0, exitCode);
     var output = sw.toString();
-    assertTrue(output.contains("pull"), "Should list 'pull' subcommand");
+    assertTrue(output.contains("create"), "Should list 'create' subcommand");
     assertTrue(output.contains("apply"), "Should list 'apply' subcommand");
   }
 

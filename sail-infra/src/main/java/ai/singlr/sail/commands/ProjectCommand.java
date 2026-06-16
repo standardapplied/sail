@@ -29,8 +29,6 @@ import picocli.CommandLine.Command;
       ProjectServiceCommand.class,
       ProjectRepoCommand.class,
       ProjectResourcesCommand.class,
-      ProjectPullCommand.class,
-      ProjectPushCommand.class,
       ProjectDestroyCommand.class,
       ProjectInstallAgentCommand.class,
       ProjectDemoCommand.class,
