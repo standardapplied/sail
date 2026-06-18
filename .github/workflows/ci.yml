@@ -60,6 +60,9 @@ jobs:
           -DskipTestScope=true
           -DnvdApiKey=${{ secrets.NVD_API_KEY }}
           -DdataDirectory=${{ runner.temp }}/dependency-check-data
+          -DnvdValidForHours=168
+          -DnvdApiDelay=4000
+          -DnvdMaxRetryCount=30
 
       - name: Upload dependency check reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
