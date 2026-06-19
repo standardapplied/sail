@@ -87,6 +87,7 @@ public final class MigrateCommand implements Runnable {
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
       importProjects(db, jsonOutput);
+      backfillProjectRevisions(db, jsonOutput);
       importFiles(db, jsonOutput);
       seedDemo(db, jsonOutput);
       relocateHostConfig(jsonOutput);
@@ -105,6 +106,19 @@ public final class MigrateCommand implements Runnable {
     if (!jsonOutput && report.imported() > 0) {
       System.out.println(
           Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
+    }
+  }
+
+  /**
+   * Journals a baseline revision for catalogued projects that predate the sync machinery, so a
+   * project sitting in the catalog without a change-log entry becomes visible to {@code sail sync}.
+   * Quiet when nothing needed it.
+   */
+  private static void backfillProjectRevisions(Sqlite db, boolean jsonOutput) {
+    var backfilled = new ProjectStore(db).backfillRevisions();
+    if (!jsonOutput && backfilled > 0) {
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ project catalog: " + backfilled + " made syncable"));
     }
   }
 
