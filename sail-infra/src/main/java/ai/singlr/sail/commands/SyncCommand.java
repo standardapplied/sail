@@ -317,13 +317,11 @@ public final class SyncCommand implements Callable<Integer> {
       publisher.publish(boardUpdatedEvent(HostInfo.hostname(), report));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-    } catch (Exception e) {
+    } catch (Exception ignored) {
       System.err.println(
-          Banner.errorLine(
-              "Could not publish board_updated event ("
-                  + e.getMessage()
-                  + "). sail-api may be unreachable; the sync itself is unaffected.",
-              Ansi.AUTO));
+          Ansi.AUTO.string(
+              "  @|faint Board notification skipped — sail-api isn't running here; the sync is"
+                  + " unaffected.|@"));
     }
   }
 

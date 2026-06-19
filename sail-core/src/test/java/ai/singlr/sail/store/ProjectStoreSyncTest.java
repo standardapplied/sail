@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -126,6 +127,26 @@ class ProjectStoreSyncTest {
     store.resolveConflict("acme", def("theirs"), def("theirs"));
 
     assertEquals(def("theirs"), store.comparableSnapshot("acme"));
+  }
+
+  @Test
+  void backfillMakesACataloguedButUnjournaledProjectSyncable() {
+    db.execute(
+        "INSERT INTO projects (name, definition, created_at, updated_at)"
+            + " VALUES ('legacy', 'name: legacy\n', '2026-01-01', '2026-01-01')");
+    assertFalse(store.syncEntityIds().contains("legacy"), "no change-log entry yet");
+
+    assertEquals(1, store.backfillRevisions());
+
+    assertTrue(store.syncEntityIds().contains("legacy"), "now visible to sync");
+    assertEquals(def("name: legacy\n"), store.comparableSnapshot("legacy"));
+  }
+
+  @Test
+  void backfillIsIdempotentAndSkipsAlreadyJournaledProjects() {
+    store.upsert("acme", "v1", "uday");
+
+    assertEquals(0, store.backfillRevisions(), "an already-journaled project is left untouched");
   }
 
   @Test

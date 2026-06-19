@@ -126,6 +126,22 @@ public final class ProjectStore implements ConflictResolver {
   }
 
   /**
+   * Records a baseline revision for every catalogued project that has none yet. A project written
+   * before this store journaled its mutations has a row but no change-log entry, so it is invisible
+   * to sync until journaled. Idempotent — a project already in the change log is left untouched.
+   * Returns how many were backfilled.
+   */
+  public int backfillRevisions() {
+    var journaled = syncEntityIds();
+    var pending = list().stream().filter(row -> !journaled.contains(row.name())).toList();
+    for (var row : pending) {
+      db.transaction(
+          () -> recordRevision(row.name(), row.definition(), null, "local", false, false));
+    }
+    return pending.size();
+  }
+
+  /**
    * Adopts main's authoritative state at its exact rev (no minting), as the new synced ancestor.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
