@@ -607,7 +607,7 @@ public final class Banner {
           switch (c.state()) {
             case ContainerState.Running ignored -> "Running";
             case ContainerState.Stopped ignored -> "Stopped";
-            case ContainerState.NotCreated ignored -> "N/A";
+            case ContainerState.NotCreated ignored -> "Not provisioned";
             case ContainerState.Error ignored -> "Error";
           };
       var ip = c.state() instanceof ContainerState.Running r && r.ipv4() != null ? r.ipv4() : "-";
