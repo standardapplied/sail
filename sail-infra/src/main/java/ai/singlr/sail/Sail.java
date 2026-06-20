@@ -12,6 +12,7 @@ import ai.singlr.sail.commands.EventsCommand;
 import ai.singlr.sail.commands.FdeCommand;
 import ai.singlr.sail.commands.GatewayCommand;
 import ai.singlr.sail.commands.HostCommand;
+import ai.singlr.sail.commands.InitCommand;
 import ai.singlr.sail.commands.JoinCommand;
 import ai.singlr.sail.commands.LoginCommand;
 import ai.singlr.sail.commands.MigrateCommand;
@@ -32,6 +33,7 @@ import picocli.CommandLine.Help.Ansi;
     versionProvider = SailVersion.class,
     mixinStandardHelpOptions = true,
     subcommands = {
+      InitCommand.class,
       ClientInitCommand.class,
       HostCommand.class,
       ProjectCommand.class,

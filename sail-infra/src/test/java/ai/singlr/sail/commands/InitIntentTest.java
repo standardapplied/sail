@@ -26,15 +26,13 @@ class InitIntentTest {
   @Test
   void bothFlagsAreRejected() {
     var error =
-        assertThrows(
-            IllegalArgumentException.class, () -> InitIntent.resolve(true, "sail@host"));
+        assertThrows(IllegalArgumentException.class, () -> InitIntent.resolve(true, "sail@host"));
     assertTrue(error.getMessage().contains("not both"));
   }
 
   @Test
   void neitherFlagIsRejected() {
-    var error =
-        assertThrows(IllegalArgumentException.class, () -> InitIntent.resolve(false, "  "));
+    var error = assertThrows(IllegalArgumentException.class, () -> InitIntent.resolve(false, "  "));
     assertTrue(error.getMessage().contains("--as-main"));
   }
 }

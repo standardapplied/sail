@@ -29,7 +29,8 @@ import picocli.CommandLine.Spec;
  *
  * <p>It orchestrates the granular commands ({@code host init}, {@code host service install}, {@code
  * host ssh-identity}, {@code host sync}, {@code join}), which remain available on their own. The
- * sail-api install adapts to the box: a system service when run as root, a per-user service for the
+ * step sequence is decided by {@link InitPlan}; this class only runs each step. The sail-api
+ * install adapts to the box: a system service when run as root directly, a per-user service for the
  * {@code sudo} user otherwise.
  */
 @Command(
@@ -69,17 +70,30 @@ public final class InitCommand implements Runnable {
     var intent = InitIntent.resolve(asMain, main);
     requireRoot();
 
-    System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
-    ensureProvisioned();
-    ensureSailApi();
+    var sudoUser = System.getenv("SUDO_USER");
+    var perUserService = Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser);
+    var plan = InitPlan.plan(intent, Files.exists(SailPaths.hostConfigPath()), perUserService);
 
-    switch (intent) {
-      case InitIntent.Main ignored -> {
-        runCommand(new HostSshIdentityCommand());
-        runCommand(new HostSyncCommand(), "--as-main");
-        printMainNextSteps();
-      }
-      case InitIntent.Node node -> joinMain(node.target());
+    System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
+    if (Files.exists(SailPaths.hostConfigPath())) {
+      System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
+    }
+    for (var step : plan) {
+      runStep(step, sudoUser);
+    }
+    if (intent instanceof InitIntent.Main) {
+      printMainNextSteps();
+    }
+  }
+
+  private void runStep(InitPlan.Step step, String sudoUser) {
+    switch (step) {
+      case PROVISION -> runCommand(new HostInitCommand(), "--yes");
+      case INSTALL_API_SYSTEM -> runCommand(new HostServiceInstallCommand());
+      case INSTALL_API_USER -> installApiForUser(sudoUser);
+      case SSH_IDENTITY -> runCommand(new HostSshIdentityCommand());
+      case SYNC_AS_MAIN -> runCommand(new HostSyncCommand(), "--as-main");
+      case JOIN_MAIN -> joinMain();
     }
   }
 
@@ -92,25 +106,11 @@ public final class InitCommand implements Runnable {
             + (asMain ? "--as-main" : "--main " + main));
   }
 
-  private void ensureProvisioned() {
-    if (Files.exists(SailPaths.hostConfigPath())) {
-      System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
-      return;
-    }
-    runCommand(new HostInitCommand(), "--yes");
-  }
-
   /**
-   * Installs and starts sail-api. As root with no {@code sudo} user it is a system service; under
-   * {@code sudo} it is a per-user service for the invoking user (which needs linger to survive
-   * logout), installed by re-running {@code host service install} as that user.
+   * Installs sail-api as a per-user service for the invoking {@code sudo} user, which needs linger
+   * to survive logout and must be installed as that user.
    */
-  private void ensureSailApi() {
-    var sudoUser = System.getenv("SUDO_USER");
-    if (Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
-      runCommand(new HostServiceInstallCommand());
-      return;
-    }
+  private void installApiForUser(String sudoUser) {
     var shell = new ShellExecutor(false);
     try {
       shell.exec(List.of("loginctl", "enable-linger", sudoUser));
@@ -131,9 +131,9 @@ public final class InitCommand implements Runnable {
     }
   }
 
-  private void joinMain(String target) {
+  private void joinMain() {
     var args = new ArrayList<String>();
-    args.add(target);
+    args.add(main);
     if (Strings.isNotBlank(handle)) {
       args.add("--handle");
       args.add(handle);
