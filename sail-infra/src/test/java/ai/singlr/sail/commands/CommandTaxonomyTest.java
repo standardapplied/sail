@@ -28,6 +28,7 @@ class CommandTaxonomyTest {
     assertEquals(
         Set.of(
             "init",
+            "client",
             "host",
             "project",
             "server",

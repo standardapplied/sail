@@ -11,9 +11,12 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.ProjectResourceReconciler;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
@@ -203,7 +206,32 @@ public final class SyncCommand implements Callable<Integer> {
       }
       materialize(boxes.files());
       materializeProjects(boxes.projects());
+      reconcileLiveResources(boxes.projects(), projectReport);
       return combine(combine(specReport, fileReport), projectReport);
+    }
+  }
+
+  /**
+   * After a sync that changed projects, resizes each project's live container to the synced
+   * definition — CPU, memory, and disk, in place — so a resource edit on another box expands or
+   * contracts this box's container without anyone re-provisioning. Best-effort and never fatal:
+   * when incus is unreachable (an unprivileged sync) it is a quiet no-op, and a disk shrink the
+   * backend refuses is reported and skipped. Only runs when the round actually pulled or merged a
+   * project, so an unchanged sync touches no containers.
+   */
+  private void reconcileLiveResources(ProjectStore projects, SyncEngine.Report projectReport) {
+    if (projectReport.pulled() + projectReport.merged() == 0) {
+      return;
+    }
+    var reconciler = new ProjectResourceReconciler(new ContainerManager(new ShellExecutor(false)));
+    var outcome = reconciler.reconcileCatalog(projects.list());
+    for (var skipped : outcome.diskSkipped()) {
+      System.err.println(Banner.errorLine("Kept disk size for " + skipped, Ansi.AUTO));
+    }
+    if (!outcome.resized().isEmpty()) {
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|faint resized to match main: " + String.join(", ", outcome.resized()) + "|@"));
     }
   }
 

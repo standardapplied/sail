@@ -31,7 +31,7 @@ import picocli.CommandLine.Help.Ansi;
 public final class RemoteCommandRunner {
 
   private static final Set<String> LOCAL_COMMANDS =
-      Set.of("--version", "-V", "upgrade", "init", "login");
+      Set.of("--version", "-V", "upgrade", "init", "client", "login");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
   private static final Set<String> GATEWAY_COMMANDS =
@@ -51,8 +51,9 @@ public final class RemoteCommandRunner {
    * <p>Routes commands into three categories:
    *
    * <ul>
-   *   <li>Local: {@code --version}, {@code upgrade}, {@code init}, {@code login} — run on the
-   *       client, not forwarded ({@code login} drives the client's browser and a loopback callback)
+   *   <li>Local: {@code --version}, {@code upgrade}, {@code init}, {@code client}, {@code login} —
+   *       run on the client, not forwarded ({@code login} drives the client's browser and a
+   *       loopback callback; {@code client} writes this machine's client config)
    *   <li>Host-only: {@code host init}, {@code host config} — error with guidance
    *   <li>Everything else: forwarded to the remote host via SSH, as {@code sail@host} when the FDE
    *       gateway accepts the command and as the plain host otherwise

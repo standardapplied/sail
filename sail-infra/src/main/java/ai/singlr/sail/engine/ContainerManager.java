@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -124,6 +125,17 @@ public final class ContainerManager {
     }
     throw new IOException(
         "Failed to set disk quota for container '" + name + "': " + result.stderr());
+  }
+
+  /** Reads a container's current root disk quota, empty when it is unset or cannot be read. */
+  public Optional<String> queryDiskQuota(String name)
+      throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(List.of("incus", "config", "device", "get", name, "root", "size"));
+    if (!result.ok()) {
+      return Optional.empty();
+    }
+    var value = result.stdout().strip();
+    return value.isEmpty() ? Optional.empty() : Optional.of(value);
   }
 
   /** Force-deletes a container (stops it first if running). Throws on failure. */

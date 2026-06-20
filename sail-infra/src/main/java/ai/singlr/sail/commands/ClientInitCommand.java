@@ -20,11 +20,12 @@ import picocli.CommandLine.Spec;
 
 /**
  * Initializes the client config on the engineer's Mac. Creates {@code ~/.sail/config.yaml} with the
- * host connection details. The host can be an IP, hostname, or SSH config alias.
+ * host connection details. The host can be an IP, hostname, or SSH config alias. Top-level {@code
+ * init} is box onboarding ({@link InitCommand}); a thin client connects with {@code sail client}.
  */
 @Command(
-    name = "init",
-    description = "Initialize sail client — connect to a remote host.",
+    name = "client",
+    description = "Connect this thin client to a remote sail host.",
     mixinStandardHelpOptions = true)
 public final class ClientInitCommand implements Runnable {
 
