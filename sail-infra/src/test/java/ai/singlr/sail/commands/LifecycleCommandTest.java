@@ -139,7 +139,7 @@ class LifecycleCommandTest {
     assertEquals(0, exitCode);
     var output = sw.toString();
     assertTrue(output.contains("--json"));
-    assertTrue(output.contains("List all project containers"));
+    assertTrue(output.contains("List all projects in the catalog"));
   }
 
   @Test
