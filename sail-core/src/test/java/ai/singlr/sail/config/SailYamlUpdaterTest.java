@@ -11,14 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.file.Files;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class SailYamlUpdaterTest {
-
-  @TempDir java.nio.file.Path tempDir;
 
   private static final String BASE_YAML =
       """
@@ -49,51 +45,51 @@ class SailYamlUpdaterTest {
       image: ubuntu/24.04
       """;
 
-  @Test
-  void addServiceToExistingServicesSection() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
-    var redis = new SailYaml.Service("redis:7", List.of(6379), null, null, null);
-    var updated = SailYamlUpdater.addService(path, "redis", redis);
-
-    assertEquals(2, updated.services().size());
-    assertNotNull(updated.services().get("postgres"));
-    assertNotNull(updated.services().get("redis"));
-    assertEquals("redis:7", updated.services().get("redis").image());
-
-    var reloaded = SailYaml.fromMap(YamlUtil.parseFile(path));
-    assertEquals(2, reloaded.services().size());
+  private static SailYaml parse(String yaml) {
+    return SailYaml.fromMap(YamlUtil.parseMap(yaml));
   }
 
   @Test
-  void addServiceCreatesServicesSectionWhenMissing() throws Exception {
-    var path = writeTempYaml(MINIMAL_YAML);
+  void addServiceToExistingServicesSection() {
+    var redis = new SailYaml.Service("redis:7", List.of(6379), null, null, null);
+    var updated = SailYamlUpdater.addService(parse(BASE_YAML), "redis", redis);
 
+    assertEquals(2, updated.services().size());
+    assertNotNull(updated.services().get("postgres"));
+    assertEquals("redis:7", updated.services().get("redis").image());
+  }
+
+  @Test
+  void addServiceCreatesServicesSectionWhenMissing() {
     var pg = new SailYaml.Service("postgres:16", List.of(5432), null, null, null);
-    var updated = SailYamlUpdater.addService(path, "postgres", pg);
+    var updated = SailYamlUpdater.addService(parse(MINIMAL_YAML), "postgres", pg);
 
     assertEquals(1, updated.services().size());
     assertEquals("postgres:16", updated.services().get("postgres").image());
   }
 
   @Test
-  void addServiceThrowsOnDuplicate() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
+  void addServiceThrowsOnDuplicate() {
     var pg = new SailYaml.Service("postgres:17", List.of(5432), null, null, null);
     var ex =
         assertThrows(
-            IllegalStateException.class, () -> SailYamlUpdater.addService(path, "postgres", pg));
-
+            IllegalStateException.class,
+            () -> SailYamlUpdater.addService(parse(BASE_YAML), "postgres", pg));
     assertTrue(ex.getMessage().contains("already exists"));
   }
 
   @Test
-  void addServicePreservesOtherSections() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
+  void addServiceDoesNotMutateTheInput() {
+    var input = parse(BASE_YAML);
+    SailYamlUpdater.addService(
+        input, "redis", new SailYaml.Service("redis:7", null, null, null, null));
+    assertEquals(1, input.services().size(), "the original definition is untouched");
+  }
 
+  @Test
+  void addServicePreservesOtherSections() {
     var redis = new SailYaml.Service("redis:7", List.of(6379), null, null, null);
-    var updated = SailYamlUpdater.addService(path, "redis", redis);
+    var updated = SailYamlUpdater.addService(parse(BASE_YAML), "redis", redis);
 
     assertEquals("my-project", updated.name());
     assertEquals(2, updated.resources().cpu());
@@ -102,7 +98,7 @@ class SailYamlUpdaterTest {
   }
 
   @Test
-  void removeServiceFromExistingSection() throws Exception {
+  void removeServiceFromExistingSection() {
     var yaml =
         """
         name: my-project
@@ -114,130 +110,73 @@ class SailYamlUpdaterTest {
         services:
           postgres:
             image: postgres:16
-            ports: [5432]
           redis:
             image: redis:7
-            ports: [6379]
-        ssh:
-          user: dev
         """;
-    var path = writeTempYaml(yaml);
-
-    var updated = SailYamlUpdater.removeService(path, "redis");
+    var updated = SailYamlUpdater.removeService(parse(yaml), "redis");
 
     assertEquals(1, updated.services().size());
     assertNotNull(updated.services().get("postgres"));
     assertNull(updated.services().get("redis"));
-
-    var reloaded = SailYaml.fromMap(YamlUtil.parseFile(path));
-    assertEquals(1, reloaded.services().size());
   }
 
   @Test
-  void removeServiceNullsOutSectionWhenLastRemoved() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
-    var updated = SailYamlUpdater.removeService(path, "postgres");
-
+  void removeServiceNullsOutSectionWhenLastRemoved() {
+    var updated = SailYamlUpdater.removeService(parse(BASE_YAML), "postgres");
     assertNull(updated.services());
   }
 
   @Test
-  void removeServiceThrowsWhenNotFound() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
+  void removeServiceThrowsWhenNotFound() {
     var ex =
         assertThrows(
-            IllegalStateException.class, () -> SailYamlUpdater.removeService(path, "nonexistent"));
+            IllegalStateException.class,
+            () -> SailYamlUpdater.removeService(parse(BASE_YAML), "nonexistent"));
     assertTrue(ex.getMessage().contains("not found"));
   }
 
   @Test
-  void removeServiceThrowsWhenNoServicesSection() throws Exception {
-    var path = writeTempYaml(MINIMAL_YAML);
-
+  void removeServiceThrowsWhenNoServicesSection() {
     var ex =
         assertThrows(
-            IllegalStateException.class, () -> SailYamlUpdater.removeService(path, "postgres"));
+            IllegalStateException.class,
+            () -> SailYamlUpdater.removeService(parse(MINIMAL_YAML), "postgres"));
     assertTrue(ex.getMessage().contains("not found"));
   }
 
   @Test
-  void removeServicePreservesOtherSections() throws Exception {
-    var yaml =
-        """
-        name: my-project
-        resources:
-          cpu: 2
-          memory: 8GB
-          disk: 50GB
-        image: ubuntu/24.04
-        services:
-          postgres:
-            image: postgres:16
-            ports: [5432]
-          redis:
-            image: redis:7
-            ports: [6379]
-        repos:
-          - url: "https://github.com/org/backend.git"
-            path: backend
-        ssh:
-          user: dev
-        """;
-    var path = writeTempYaml(yaml);
-
-    var updated = SailYamlUpdater.removeService(path, "redis");
-
-    assertEquals("my-project", updated.name());
-    assertEquals(2, updated.resources().cpu());
-    assertEquals(1, updated.repos().size());
-    assertEquals("dev", updated.ssh().user());
-  }
-
-  @Test
-  void addRepoToExistingReposSection() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
+  void addRepoToExistingReposSection() {
     var repo = new SailYaml.Repo("https://github.com/org/frontend.git", "frontend", "main");
-    var updated = SailYamlUpdater.addRepo(path, repo);
+    var updated = SailYamlUpdater.addRepo(parse(BASE_YAML), repo);
 
     assertEquals(2, updated.repos().size());
     assertEquals("backend", updated.repos().get(0).path());
     assertEquals("frontend", updated.repos().get(1).path());
     assertEquals("main", updated.repos().get(1).branch());
-
-    var reloaded = SailYaml.fromMap(YamlUtil.parseFile(path));
-    assertEquals(2, reloaded.repos().size());
   }
 
   @Test
-  void addRepoCreatesReposSectionWhenMissing() throws Exception {
-    var path = writeTempYaml(MINIMAL_YAML);
-
+  void addRepoCreatesReposSectionWhenMissing() {
     var repo = new SailYaml.Repo("https://github.com/org/app.git", "app", null);
-    var updated = SailYamlUpdater.addRepo(path, repo);
+    var updated = SailYamlUpdater.addRepo(parse(MINIMAL_YAML), repo);
 
     assertEquals(1, updated.repos().size());
     assertEquals("app", updated.repos().getFirst().path());
   }
 
   @Test
-  void addRepoThrowsOnDuplicatePath() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
+  void addRepoThrowsOnDuplicatePath() {
     var repo = new SailYaml.Repo("https://github.com/other/backend.git", "backend", null);
-    var ex = assertThrows(IllegalStateException.class, () -> SailYamlUpdater.addRepo(path, repo));
-
+    var ex =
+        assertThrows(
+            IllegalStateException.class, () -> SailYamlUpdater.addRepo(parse(BASE_YAML), repo));
     assertTrue(ex.getMessage().contains("already exists"));
   }
 
   @Test
-  void addRepoPreservesOtherSections() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
+  void addRepoPreservesOtherSections() {
     var repo = new SailYaml.Repo("https://github.com/org/frontend.git", "frontend", null);
-    var updated = SailYamlUpdater.addRepo(path, repo);
+    var updated = SailYamlUpdater.addRepo(parse(BASE_YAML), repo);
 
     assertEquals("my-project", updated.name());
     assertEquals(1, updated.services().size());
@@ -245,30 +184,8 @@ class SailYamlUpdaterTest {
   }
 
   @Test
-  void addServiceThrowsWhenFileNotFound() {
-    var path = tempDir.resolve("nonexistent.yaml");
-    var svc = new SailYaml.Service("redis:7", List.of(6379), null, null, null);
-
-    var ex =
-        assertThrows(
-            IllegalStateException.class, () -> SailYamlUpdater.addService(path, "redis", svc));
-    assertTrue(ex.getMessage().contains("not found"));
-  }
-
-  @Test
-  void addRepoThrowsWhenFileNotFound() {
-    var path = tempDir.resolve("nonexistent.yaml");
-    var repo = new SailYaml.Repo("https://github.com/org/app.git", "app", null);
-
-    var ex = assertThrows(IllegalStateException.class, () -> SailYamlUpdater.addRepo(path, repo));
-    assertTrue(ex.getMessage().contains("not found"));
-  }
-
-  @Test
-  void updateResourcesChangesRequestedFieldsAndPreservesOtherSections() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
-    var updated = SailYamlUpdater.updateResources(path, 4, "16GB", null);
+  void updateResourcesChangesRequestedFieldsAndPreservesOtherSections() {
+    var updated = SailYamlUpdater.updateResources(parse(BASE_YAML), 4, "16GB", null);
 
     assertEquals(4, updated.resources().cpu());
     assertEquals("16GB", updated.resources().memory());
@@ -276,18 +193,11 @@ class SailYamlUpdaterTest {
     assertEquals("my-project", updated.name());
     assertEquals("dev", updated.ssh().user());
     assertEquals(1, updated.services().size());
-
-    var reloaded = SailYaml.fromMap(YamlUtil.parseFile(path));
-    assertEquals(4, reloaded.resources().cpu());
-    assertEquals("16GB", reloaded.resources().memory());
-    assertEquals("50GB", reloaded.resources().disk());
   }
 
   @Test
-  void updateResourcesNormalizesBareSizes() throws Exception {
-    var path = writeTempYaml(BASE_YAML);
-
-    var updated = SailYamlUpdater.updateResources(path, null, "32", "120");
+  void updateResourcesNormalizesBareSizes() {
+    var updated = SailYamlUpdater.updateResources(parse(BASE_YAML), null, "32", "120");
 
     assertEquals("32GB", updated.resources().memory());
     assertEquals("120GB", updated.resources().disk());
@@ -314,11 +224,5 @@ class SailYamlUpdaterTest {
             IllegalArgumentException.class,
             () -> SailYamlUpdater.mergeResources(current, null, null, " "));
     assertTrue(diskEx.getMessage().contains("disk"));
-  }
-
-  private java.nio.file.Path writeTempYaml(String content) throws Exception {
-    var path = tempDir.resolve("sail.yaml");
-    Files.writeString(path, content);
-    return path;
   }
 }

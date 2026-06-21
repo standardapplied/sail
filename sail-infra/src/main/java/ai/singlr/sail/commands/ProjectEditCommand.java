@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -73,8 +72,7 @@ public final class ProjectEditCommand implements Runnable {
     }
 
     validate(name, edited);
-    ProjectCatalog.record(name, edited, actor());
-    ProjectDefinitions.materialize(name, edited);
+    ProjectDefinitions.persist(name, null, edited, Actor.current());
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -127,14 +125,5 @@ public final class ProjectEditCommand implements Runnable {
     } finally {
       Files.deleteIfExists(tmp);
     }
-  }
-
-  private static String actor() {
-    var sudoUser = System.getenv("SUDO_USER");
-    if (sudoUser != null && !sudoUser.isBlank() && !"root".equals(sudoUser)) {
-      return sudoUser;
-    }
-    var user = System.getProperty("user.name");
-    return user == null || user.isBlank() ? "local" : user;
   }
 }

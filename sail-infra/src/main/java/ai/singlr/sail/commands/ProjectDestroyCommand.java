@@ -12,6 +12,9 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -39,6 +42,13 @@ public final class ProjectDestroyCommand implements Runnable {
 
   @Option(names = "--yes", description = "Skip confirmation prompts.")
   private boolean yes;
+
+  @Option(
+      names = "--purge",
+      description =
+          "Also remove the project from the org catalog. This propagates the deletion to every box"
+              + " on the next sync — by default destroy only tears down this box's container.")
+  private boolean purge;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -68,73 +78,110 @@ public final class ProjectDestroyCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
+    var projectDir = SailPaths.projectDir(name);
+    var containerPresent = !(state instanceof ContainerState.NotCreated);
+    var dirPresent = Files.exists(projectDir);
 
-    if (state instanceof ContainerState.NotCreated) {
-      var projectDir = SailPaths.projectDir(name);
-      if (Files.exists(projectDir)) {
-        if (!dryRun) {
-          deleteDirectory(projectDir);
-        }
-        if (json) {
-          var map = new LinkedHashMap<String, Object>();
-          map.put("destroyed", name);
-          map.put("status", "state_cleaned");
-          System.out.println(YamlUtil.dumpJson(map));
-          return;
-        }
-        var msg = "  @|faint Container '" + name + "' already absent — cleaned up stale state.|@";
-        System.out.println(Ansi.AUTO.string(msg));
-        return;
-      }
-      if (json) {
-        var map = new LinkedHashMap<String, Object>();
-        map.put("destroyed", name);
-        map.put("status", "already_absent");
-        System.out.println(YamlUtil.dumpJson(map));
-        return;
-      }
-      System.out.println(
-          Ansi.AUTO.string("  @|faint Project '" + name + "' does not exist. Nothing to do.|@"));
+    if (!containerPresent && !dirPresent && !purge) {
+      emitNothingToDo();
       return;
     }
 
-    if (!json) {
+    if (!json && containerPresent) {
       System.out.println();
       Banner.printContainerStatus(name, state, System.out, Ansi.AUTO);
     }
 
-    if (!yes && !dryRun) {
-      System.out.println();
-      if (!ConsoleHelper.confirm("Destroy project " + name + "? This cannot be undone.")) {
-        System.out.println("  Aborted.");
-        return;
+    if ((containerPresent || purge)
+        && !yes
+        && !dryRun
+        && !ConsoleHelper.confirm(confirmPrompt(name, purge))) {
+      System.out.println("  Aborted.");
+      return;
+    }
+
+    if (containerPresent) {
+      if (!json) {
+        System.out.println();
+        System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + name + "..."));
       }
+      mgr.forceDelete(name);
     }
-
-    if (!json) {
-      System.out.println();
-      System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + name + "..."));
-    }
-    mgr.forceDelete(name);
-
-    var projectDir = SailPaths.projectDir(name);
-    if (Files.exists(projectDir)) {
+    if (dirPresent) {
       if (dryRun) {
         System.out.println("[dry-run] rm -rf " + projectDir);
       } else {
         deleteDirectory(projectDir);
       }
     }
+    var purged = purge && purgeFromCatalog();
 
+    emitResult(containerPresent, dirPresent, purged);
+  }
+
+  static String confirmPrompt(String name, boolean purge) {
+    if (purge) {
+      return "Destroy project "
+          + name
+          + " and remove it from the org catalog? It disappears from every box on the next sync,"
+          + " and this cannot be undone.";
+    }
+    return "Destroy project " + name + "? This cannot be undone.";
+  }
+
+  /** Tombstones the project in the catalog so the removal replicates. Idempotent if absent. */
+  private boolean purgeFromCatalog() {
+    if (dryRun) {
+      System.out.println(
+          "[dry-run] remove '" + name + "' from the catalog (propagates to other boxes on sync)");
+      return false;
+    }
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(db).migrate();
+      return new ProjectStore(db).delete(name);
+    }
+  }
+
+  private void emitNothingToDo() {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("destroyed", name);
+      map.put("status", "already_absent");
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
+    System.out.println(
+        Ansi.AUTO.string("  @|faint Project '" + name + "' does not exist. Nothing to do.|@"));
+  }
 
+  private void emitResult(boolean containerPresent, boolean dirPresent, boolean purged) {
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("destroyed", name);
+      if (!containerPresent) {
+        map.put("status", dirPresent ? "state_cleaned" : "catalog_only");
+      }
+      if (purge) {
+        map.put("purged", purged);
+      }
+      System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
     System.out.println();
-    Banner.printProjectDestroyed(name, System.out, Ansi.AUTO);
+    if (containerPresent) {
+      Banner.printProjectDestroyed(name, System.out, Ansi.AUTO);
+    } else if (dirPresent) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Container '" + name + "' already absent — cleaned up stale state.|@"));
+    }
+    if (purged) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Removed '"
+                  + name
+                  + "' from the org catalog — it disappears from other boxes on the next sync."));
+    }
   }
 
   private static void deleteDirectory(Path dir) throws IOException {

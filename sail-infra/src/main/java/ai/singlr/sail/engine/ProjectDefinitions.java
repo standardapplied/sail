@@ -114,6 +114,24 @@ public final class ProjectDefinitions {
     return path;
   }
 
+  /**
+   * Persists an edited definition so it cannot diverge from the catalog. When an explicit {@code
+   * -f} file was given, the engineer is operating on that file directly, so the edit is written
+   * there and the catalog is left untouched. Otherwise the catalog (the replicated source of truth)
+   * is recorded first and the canonical descriptor re-materialized from it — exactly how {@code
+   * project edit} saves — so the change survives the next sync and re-materialize instead of being
+   * silently overwritten.
+   */
+  public static void persist(String name, Path explicitFile, String definition, String actor)
+      throws IOException {
+    if (explicitFile != null) {
+      Files.writeString(explicitFile, definition);
+      return;
+    }
+    ProjectCatalog.record(name, definition, actor);
+    materialize(name, definition);
+  }
+
   private static Optional<String> read(Path path) {
     try {
       return path != null && Files.exists(path)

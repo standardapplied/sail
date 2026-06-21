@@ -5,96 +5,65 @@
 
 package ai.singlr.sail.config;
 
-import ai.singlr.sail.gen.SailYamlGenerator;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Updates an existing {@code sail.yaml} by adding services or repos. Reads the current file, merges
- * the new entry, and writes back via {@link SailYamlGenerator} to preserve the standard commented
- * format.
- *
- * <p>Note: user-added comments are not preserved across updates — the generator produces its own
- * standard inline comments.
+ * Pure transforms over a {@link SailYaml} definition: add a service or repo, remove a service, or
+ * update resources, each returning a new definition. Persistence is deliberately not this class's
+ * concern — the database catalog is the source of truth, so callers route the result through {@code
+ * ProjectDefinitions.persist} rather than writing a file here. Keeping these transforms pure lets a
+ * mutation read the current definition catalog-first, transform it, and record the result, so an
+ * edit can never diverge from the catalog or be lost on the next sync.
  */
 public final class SailYamlUpdater {
 
   private SailYamlUpdater() {}
 
-  /**
-   * Adds a service to the sail.yaml at the given path. If the services section doesn't exist, it is
-   * created. If the service name already exists, throws.
-   */
-  public static SailYaml addService(Path singYamlPath, String serviceName, SailYaml.Service service)
-      throws IOException {
-    var config = readConfig(singYamlPath);
+  /** Returns a copy of {@code config} with the service added. Throws if the name already exists. */
+  public static SailYaml addService(SailYaml config, String serviceName, SailYaml.Service service) {
     var services =
         config.services() != null
             ? new LinkedHashMap<>(config.services())
             : new LinkedHashMap<String, SailYaml.Service>();
     if (services.containsKey(serviceName)) {
-      throw new IllegalStateException(
-          "Service '" + serviceName + "' already exists in " + singYamlPath);
+      throw new IllegalStateException("Service '" + serviceName + "' already exists.");
     }
     services.put(serviceName, service);
-    var updated = withServices(config, Map.copyOf(services));
-    writeConfig(singYamlPath, updated);
-    return updated;
+    return withServices(config, Map.copyOf(services));
   }
 
-  /**
-   * Removes a service from the sail.yaml at the given path. Throws if the service doesn't exist.
-   */
-  public static SailYaml removeService(Path singYamlPath, String serviceName) throws IOException {
-    var config = readConfig(singYamlPath);
+  /** Returns a copy of {@code config} with the service removed. Throws if it does not exist. */
+  public static SailYaml removeService(SailYaml config, String serviceName) {
     var services =
         config.services() != null
             ? new LinkedHashMap<>(config.services())
             : new LinkedHashMap<String, SailYaml.Service>();
     if (!services.containsKey(serviceName)) {
-      throw new IllegalStateException("Service '" + serviceName + "' not found in " + singYamlPath);
+      throw new IllegalStateException("Service '" + serviceName + "' not found.");
     }
     services.remove(serviceName);
-    var updated = withServices(config, services.isEmpty() ? null : Map.copyOf(services));
-    writeConfig(singYamlPath, updated);
-    return updated;
+    return withServices(config, services.isEmpty() ? null : Map.copyOf(services));
   }
 
-  /**
-   * Adds a repo to the sail.yaml at the given path. If the repos section doesn't exist, it is
-   * created. If a repo with the same path already exists, throws.
-   */
-  public static SailYaml addRepo(Path singYamlPath, SailYaml.Repo repo) throws IOException {
-    var config = readConfig(singYamlPath);
+  /** Returns a copy of {@code config} with the repo added. Throws if its path already exists. */
+  public static SailYaml addRepo(SailYaml config, SailYaml.Repo repo) {
     var repos =
         config.repos() != null ? new ArrayList<>(config.repos()) : new ArrayList<SailYaml.Repo>();
     for (var existing : repos) {
       if (existing.path().equals(repo.path())) {
-        throw new IllegalStateException(
-            "Repo with path '" + repo.path() + "' already exists in " + singYamlPath);
+        throw new IllegalStateException("Repo with path '" + repo.path() + "' already exists.");
       }
     }
     repos.add(repo);
-    var updated = withRepos(config, List.copyOf(repos));
-    writeConfig(singYamlPath, updated);
-    return updated;
+    return withRepos(config, List.copyOf(repos));
   }
 
-  /**
-   * Updates the resources block in the sail.yaml at the given path. Any null argument preserves the
-   * existing value.
-   */
-  public static SailYaml updateResources(Path singYamlPath, Integer cpu, String memory, String disk)
-      throws IOException {
-    var config = readConfig(singYamlPath);
-    var updated = withResources(config, mergeResources(config.resources(), cpu, memory, disk));
-    writeConfig(singYamlPath, updated);
-    return updated;
+  /** Returns a copy of {@code config} with resources merged; any null argument is preserved. */
+  public static SailYaml updateResources(SailYaml config, Integer cpu, String memory, String disk) {
+    return withResources(config, mergeResources(config.resources(), cpu, memory, disk));
   }
 
   /**
@@ -121,18 +90,6 @@ public final class SailYamlUpdater {
             "memory", memory != null ? memory : current.memory(),
             "disk", disk != null ? disk : current.disk());
     return SailYaml.Resources.fromMap(merged);
-  }
-
-  private static SailYaml readConfig(Path path) throws IOException {
-    if (!Files.exists(path)) {
-      throw new IllegalStateException("sail.yaml not found: " + path.toAbsolutePath());
-    }
-    return SailYaml.fromMap(YamlUtil.parseFile(path));
-  }
-
-  private static void writeConfig(Path path, SailYaml config) throws IOException {
-    var yaml = SailYamlGenerator.generate(config);
-    Files.writeString(path, yaml);
   }
 
   private static SailYaml withServices(SailYaml c, Map<String, SailYaml.Service> services) {

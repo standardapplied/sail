@@ -14,11 +14,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
 import java.io.PrintStream;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -79,14 +79,9 @@ public final class ProjectAddServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
-              + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
-    }
-
+    var explicit = ProjectDefinitions.explicitFile(file);
+    var config =
+        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
@@ -114,7 +109,15 @@ public final class ProjectAddServiceCommand implements Runnable {
     var applier = new ProjectApplier(shell, out);
     var result = applier.applyServices(name, Map.of(svcName, service));
 
-    SailYamlUpdater.addService(singYamlPath, svcName, service);
+    var updatedText =
+        SailYamlGenerator.generate(SailYamlUpdater.addService(config, svcName, service));
+    ProjectMutations.persist(
+        name,
+        explicit,
+        updatedText,
+        dryRun,
+        out,
+        "record service '" + svcName + "' in the catalog");
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -15,10 +15,10 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.gen.SailYamlGenerator;
 import java.io.PrintStream;
-import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -77,15 +77,9 @@ public final class ProjectAddRepoCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
-              + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
-    }
-
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var explicit = ProjectDefinitions.explicitFile(file);
+    var config =
+        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
@@ -114,7 +108,14 @@ public final class ProjectAddRepoCommand implements Runnable {
         applier.applyRepos(
             name, List.of(repo), sshUser, GitCredentials.singleTokenMap(token), config.git());
 
-    SailYamlUpdater.addRepo(singYamlPath, repo);
+    var updatedText = SailYamlGenerator.generate(SailYamlUpdater.addRepo(config, repo));
+    ProjectMutations.persist(
+        name,
+        explicit,
+        updatedText,
+        dryRun,
+        out,
+        "record repo '" + repo.path() + "' in the catalog");
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -12,9 +12,9 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
-import java.nio.file.Files;
+import ai.singlr.sail.gen.SailYamlGenerator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
@@ -60,18 +60,12 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
-              + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
-    }
-
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var explicit = ProjectDefinitions.explicitFile(file);
+    var config =
+        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     if (config.services() == null || !config.services().containsKey(serviceName)) {
       throw new IllegalStateException(
-          "Service '" + serviceName + "' not found in " + singYamlPath.toAbsolutePath());
+          "Service '" + serviceName + "' is not defined in project '" + name + "'.");
     }
 
     var shell = new ShellExecutor(dryRun);
@@ -83,7 +77,15 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var applier = new ProjectApplier(shell, out);
     var result = applier.removeServices(name, List.of(serviceName));
 
-    SailYamlUpdater.removeService(singYamlPath, serviceName);
+    var updatedText =
+        SailYamlGenerator.generate(SailYamlUpdater.removeService(config, serviceName));
+    ProjectMutations.persist(
+        name,
+        explicit,
+        updatedText,
+        dryRun,
+        out,
+        "remove service '" + serviceName + "' from the catalog");
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

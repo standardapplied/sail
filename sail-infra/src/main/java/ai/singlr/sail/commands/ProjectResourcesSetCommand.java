@@ -13,11 +13,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.gen.SailYamlGenerator;
 import java.io.PrintStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -93,17 +93,10 @@ public final class ProjectResourcesSetCommand implements Runnable {
           "Root privileges required. Run with: sudo sail project resources set " + name);
     }
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
-              + "\n  Ensure ~/.sail/projects/"
-              + name
-              + "/sail.yaml exists.");
-    }
-
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var explicit = ProjectDefinitions.explicitFile(file);
+    var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
+    var config =
+        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     if (config.resources() == null) {
       throw new IllegalStateException(
           "sail.yaml must have a resources section with cpu, memory, and disk.");
@@ -134,16 +127,20 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     if (!descriptorChanged && !liveLimitsChanged && !diskChanged) {
-      printAlreadyCurrent(singYamlPath, desiredResources);
+      printAlreadyCurrent(descriptorPath, desiredResources);
       return;
     }
 
     if (descriptorChanged) {
-      if (dryRun) {
-        out.println("[dry-run] update " + singYamlPath.toAbsolutePath() + " resources");
-      } else {
-        SailYamlUpdater.updateResources(singYamlPath, cpu, memory, disk);
-      }
+      var updatedText =
+          SailYamlGenerator.generate(SailYamlUpdater.updateResources(config, cpu, memory, disk));
+      ProjectMutations.persist(
+          name,
+          explicit,
+          updatedText,
+          dryRun,
+          out,
+          "record resources for '" + name + "' in the catalog");
     }
 
     var applyManager = new ContainerManager(applyShell());
@@ -161,7 +158,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     printResult(
-        singYamlPath,
+        descriptorPath,
         config.resources(),
         desiredResources,
         descriptorChanged,
