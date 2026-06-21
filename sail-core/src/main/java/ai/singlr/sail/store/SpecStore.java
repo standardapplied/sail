@@ -552,6 +552,23 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /**
+   * Records a baseline revision for every spec that has none yet. A spec written before this store
+   * journaled its mutations has a row in {@code specs} but no change-log entry, so it is invisible
+   * to sync until journaled — the same gap {@link ProjectStore#backfillRevisions()} closes for
+   * projects. Idempotent: a spec already in the change log is left untouched. The minted rev is
+   * content-addressed, so two boxes backfilling the same pre-journal spec reach the same revision
+   * and converge without a conflict. Returns how many were backfilled.
+   */
+  public int backfillRevisions() {
+    var journaled = syncEntityIds();
+    var pending = list(SpecFilter.all()).stream().filter(s -> !journaled.contains(s.id())).toList();
+    for (var spec : pending) {
+      db.transaction(() -> recordRevision(spec.id(), "local", false));
+    }
+    return pending.size();
+  }
+
+  /**
    * Writes an authoritative state from main at its exact revision (no minting), marking it the new
    * synced ancestor ({@code base_rev = rev}). A null snapshot adopts a deletion. Used by the sync
    * engine; the revision is journaled with origin {@code sync}.

@@ -18,6 +18,7 @@ import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -86,6 +87,7 @@ public final class MigrateCommand implements Runnable {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
+      backfillSpecRevisions(db, jsonOutput);
       importProjects(db, jsonOutput);
       backfillProjectRevisions(db, jsonOutput);
       scrubProjectIdentity(db, jsonOutput);
@@ -94,6 +96,18 @@ public final class MigrateCommand implements Runnable {
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       return runs;
+    }
+  }
+
+  /**
+   * Journals a baseline revision for specs that predate the sync machinery, so a spec sitting in
+   * the database without a change-log entry becomes visible to {@code sail sync}. The analog of
+   * {@link #backfillProjectRevisions} for specs. Quiet when nothing needed it.
+   */
+  private static void backfillSpecRevisions(Sqlite db, boolean jsonOutput) {
+    var backfilled = new SpecStore(db).backfillRevisions();
+    if (!jsonOutput && backfilled > 0) {
+      System.out.println(Ansi.AUTO.string("  @|green ✓|@ specs: " + backfilled + " made syncable"));
     }
   }
 

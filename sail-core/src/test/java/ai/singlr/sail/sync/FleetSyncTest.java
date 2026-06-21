@@ -224,6 +224,22 @@ class FleetSyncTest {
     assertTrue(node.projects.findByName("outline").isPresent(), "backfill makes it replicate");
   }
 
+  @Test
+  void anUnjournaledSpecStaysInvisibleUntilBackfilled() {
+    main.specs.create(spec("oauth", "OAuth flow", "done", List.of()));
+    main.db.execute("DELETE FROM change_log WHERE entity_type = 'spec' AND entity_id = ?", "oauth");
+
+    syncFromMain();
+    assertTrue(
+        node.specs.findById("oauth").isEmpty(),
+        "without backfill, a spec predating the change log does not sync");
+
+    main.specs.backfillRevisions();
+    syncFromMain();
+
+    assertEquals("OAuth flow", node.specs.findById("oauth").orElseThrow().title());
+  }
+
   private static String decode(FileStore.FileRow row) {
     return new String(Base64.getDecoder().decode(row.content()));
   }

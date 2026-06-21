@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -390,5 +391,31 @@ class SpecStoreTest {
 
     assertEquals(List.of("auth"), store.findById("billing").orElseThrow().dependsOn());
     assertTrue(store.findById("auth").isEmpty(), "the dependency need not exist");
+  }
+
+  @Test
+  void backfillMakesAPreJournalSpecSyncable() {
+    store.create(spec("oauth", "OAuth flow", "done"));
+    db.execute("DELETE FROM change_log WHERE entity_type = 'spec' AND entity_id = ?", "oauth");
+    assertFalse(store.syncEntityIds().contains("oauth"), "simulated pre-journal spec");
+
+    assertEquals(1, store.backfillRevisions());
+    assertTrue(store.syncEntityIds().contains("oauth"), "now visible to sync");
+  }
+
+  @Test
+  void backfillIsANoOpForAnAlreadyJournaledSpec() {
+    store.create(spec("oauth", "OAuth flow", "done"));
+    assertEquals(0, store.backfillRevisions(), "create already journaled it");
+  }
+
+  @Test
+  void backfillJournalsEveryPreJournalSpecAcrossProjects() {
+    store.create(spec("a", "acme", "A", "pending"));
+    store.create(spec("b", "zenith", "B", "pending"));
+    db.execute("DELETE FROM change_log WHERE entity_type = 'spec'");
+
+    assertEquals(2, store.backfillRevisions());
+    assertTrue(store.syncEntityIds().containsAll(List.of("a", "b")));
   }
 }
