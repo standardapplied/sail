@@ -122,66 +122,8 @@ public final class ProjectApplier {
     return new ApplyResult(added, 0, skipped, List.of());
   }
 
-  /**
-   * Installs Node.js in the container if not already present. Used when a Node-dependent agent is
-   * added to an already-provisioned project that did not originally include Node.
-   */
-  public ApplyResult applyNodeRuntime(String name, String version)
-      throws IOException, InterruptedException, TimeoutException {
-    var check = shell.exec(rootExec(name, List.of("node", "--version")));
-    if (check.ok() && check.stdout().strip().startsWith("v" + version)) {
-      out.println("  [skip] Node.js " + version + " already installed");
-      return new ApplyResult(0, 0, 1, List.of());
-    }
-    out.println("  [add] Installing Node.js " + version + "...");
-    var majorVersion = version.contains(".") ? version.substring(0, version.indexOf('.')) : version;
-    var prereqs =
-        shell.exec(
-            rootExec(
-                name,
-                List.of("apt-get", "install", "-y", "-qq", "ca-certificates", "curl", "gnupg")),
-            null,
-            INSTALL_TIMEOUT);
-    if (!prereqs.ok()) {
-      throw new IOException("Failed to install Node.js prerequisites: " + prereqs.stderr());
-    }
-    var setup =
-        shell.exec(
-            rootExec(
-                name,
-                List.of(
-                    "bash",
-                    "-c",
-                    "curl -fsSL https://deb.nodesource.com/setup_" + majorVersion + ".x | bash -")),
-            null,
-            INSTALL_TIMEOUT);
-    if (!setup.ok()) {
-      throw new IOException(
-          "Failed to configure NodeSource repository for Node "
-              + majorVersion
-              + ": "
-              + setup.stderr());
-    }
-    var result =
-        shell.exec(
-            rootExec(name, List.of("apt-get", "install", "-y", "-qq", "nodejs")),
-            null,
-            INSTALL_TIMEOUT);
-    if (!result.ok()) {
-      throw new IOException("Failed to install Node.js " + version + ": " + result.stderr());
-    }
-    out.println("  [done] Node.js " + version + " installed");
-    return new ApplyResult(1, 0, 0, List.of());
-  }
-
-  private static List<String> rootExec(String containerName, List<String> args) {
-    var full = new ArrayList<>(List.of("incus", "exec", containerName, "--"));
-    full.addAll(args);
-    return List.copyOf(full);
-  }
-
   /** Installs missing agent CLI tools. Tools already on PATH are skipped. */
-  public ApplyResult applyAgentTools(String name, List<String> install, SailYaml.Runtimes runtimes)
+  public ApplyResult applyAgentTools(String name, List<String> install)
       throws IOException, InterruptedException, TimeoutException {
     if (install == null || install.isEmpty()) {
       return ApplyResult.empty();
@@ -197,16 +139,6 @@ public final class ProjectApplier {
         out.println("  [skip] Agent '" + agentName + "' already installed");
         skipped++;
         continue;
-      }
-      if (tool.requiresNode()) {
-        var nodeCheck = shell.exec(ContainerExec.asDevUser(name, List.of("which", "node")));
-        if (!nodeCheck.ok()) {
-          throw new IllegalStateException(
-              "Bug: agent '"
-                  + agentName
-                  + "' requires Node.js but it is not installed."
-                  + " The command layer should have resolved this before applying.");
-        }
       }
       out.println("  [add] Installing agent '" + agentName + "'...");
       var result =

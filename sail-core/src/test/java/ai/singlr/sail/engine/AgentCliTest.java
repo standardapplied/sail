@@ -20,8 +20,6 @@ class AgentCliTest {
 
     assertEquals("claude-code", cli.yamlName());
     assertEquals("claude", cli.binaryName());
-    assertFalse(cli.requiresNode());
-    assertEquals(AgentCli.InstallMethod.NATIVE_SCRIPT, cli.method());
     assertTrue(cli.installCommand().contains("claude.ai/install.sh"));
   }
 
@@ -31,9 +29,10 @@ class AgentCliTest {
 
     assertEquals("codex", cli.yamlName());
     assertEquals("codex", cli.binaryName());
-    assertTrue(cli.requiresNode());
-    assertEquals(AgentCli.InstallMethod.NPM, cli.method());
-    assertTrue(cli.installCommand().contains("@openai/codex"));
+    assertTrue(
+        cli.installCommand().contains("chatgpt.com/codex/install.sh"),
+        "Codex installs via the native script, not npm");
+    assertTrue(cli.installCommand().contains("CODEX_NON_INTERACTIVE=1"));
   }
 
   @Test
@@ -47,23 +46,10 @@ class AgentCliTest {
   }
 
   @Test
-  void claudeCodeDoesNotRequireNode() {
-    assertFalse(AgentCli.CLAUDE_CODE.requiresNode());
-  }
-
-  @Test
-  void codexRequiresNode() {
-    assertTrue(AgentCli.CODEX.requiresNode());
-  }
-
-  @Test
-  void claudeCodeUsesNativeScript() {
-    assertEquals(AgentCli.InstallMethod.NATIVE_SCRIPT, AgentCli.CLAUDE_CODE.method());
-  }
-
-  @Test
-  void codexUsesNpm() {
-    assertEquals(AgentCli.InstallMethod.NPM, AgentCli.CODEX.method());
+  void bothAgentsInstallViaNativeScript() {
+    assertTrue(AgentCli.CLAUDE_CODE.installCommand().startsWith("curl "));
+    assertTrue(AgentCli.CODEX.installCommand().startsWith("curl "));
+    assertFalse(AgentCli.CODEX.installCommand().contains("npm"));
   }
 
   private static final String TASK = "/home/dev/.sail/agent-task.txt";
@@ -163,6 +149,6 @@ class AgentCliTest {
 
   @Test
   void displayNameCodex() {
-    assertEquals("Codex CLI (@openai/codex)", AgentCli.CODEX.displayName());
+    assertEquals("Codex CLI", AgentCli.CODEX.displayName());
   }
 }

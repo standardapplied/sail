@@ -1780,57 +1780,6 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void npmAgentToolRequiresNodeValidation() {
-    var configWithCodex =
-        new SailYaml(
-            "acme-health",
-            "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
-            "ubuntu/24.04",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            new SailYaml.Agent(
-                "codex",
-                true,
-                "sail/",
-                true,
-                List.of("codex"),
-                Map.of(),
-                null,
-                null,
-                null,
-                null,
-                null),
-            null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onFail("incus info acme-health", "not found")
-            .onOk("incus launch")
-            .onOk("ip -4 addr show")
-            .onFail("id dev", "no such user")
-            .onOk("useradd")
-            .onFail("which podman", "")
-            .onFail("test -f /etc/profile.d/testcontainers.sh", "")
-            .onFail("crontab -l", "no crontab")
-            .onFail("which codex", "")
-            .onFail("which node", "");
-    var tracker = tracker();
-    var provisioner = new ProjectProvisioner(shell, tracker, null);
-
-    var ex =
-        assertThrows(
-            IllegalStateException.class,
-            () -> provisioner.provision(configWithCodex, hostYaml(), null, null));
-    assertTrue(ex.getMessage().contains("requires Node.js"));
-    assertTrue(ex.getMessage().contains("codex"));
-  }
-
-  @Test
   void multipleAgentToolsInstalled() throws Exception {
     var configWithMultiple =
         new SailYaml(
@@ -1884,7 +1833,8 @@ class ProjectProvisionerTest {
     assertTrue(
         cmds.stream().anyMatch(c -> c.contains("claude.ai/install.sh")), "Should install claude");
     assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("@openai/codex")), "Should install codex via npm");
+        cmds.stream().anyMatch(c -> c.contains("chatgpt.com/codex/install.sh")),
+        "Should install codex via the native script");
   }
 
   @Test

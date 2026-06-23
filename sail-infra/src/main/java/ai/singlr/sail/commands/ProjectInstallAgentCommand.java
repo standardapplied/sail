@@ -89,20 +89,6 @@ public final class ProjectInstallAgentCommand implements Runnable {
       return;
     }
 
-    if (tool.requiresNode()) {
-      var nodeCheck = shell.exec(ContainerExec.asDevUser(name, List.of("which", "node")));
-      if (!nodeCheck.ok()) {
-        throw new IOException(
-            "Agent CLI '"
-                + tool.yamlName()
-                + "' requires Node.js, but Node is not installed in '"
-                + name
-                + "'."
-                + "\n  Add a 'node' version under 'runtimes:' in sail.yaml and reprovision,"
-                + "\n  or install Node.js manually inside the container.");
-      }
-    }
-
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
       System.out.println();

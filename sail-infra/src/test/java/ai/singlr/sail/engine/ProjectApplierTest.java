@@ -171,7 +171,7 @@ class ProjectApplierTest {
             .onOk("bash -c");
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, List.of("codex"), null);
+    var result = applier.applyAgentTools(CONTAINER, List.of("codex"));
 
     assertEquals(1, result.added());
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("bash -c")));
@@ -182,7 +182,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor().onOk("bash -lc which claude");
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"), null);
+    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"));
 
     assertEquals(0, result.added());
     assertEquals(1, result.skipped());
@@ -193,7 +193,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor().onOk("bash -lc which claude");
     var applier = applier(shell);
 
-    applier.applyAgentTools(CONTAINER, List.of("claude-code"), null);
+    applier.applyAgentTools(CONTAINER, List.of("claude-code"));
 
     assertTrue(
         shell.invocations().stream().anyMatch(c -> c.contains("bash -lc which claude")),
@@ -210,25 +210,10 @@ class ProjectApplierTest {
             .onOk("bash -c");
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code", "codex"), null);
+    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code", "codex"));
 
     assertEquals(1, result.added());
     assertEquals(1, result.skipped());
-  }
-
-  @Test
-  void applyAgentToolsThrowsWhenNodeMissingForNpmAgent() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onFail("bash -lc which codex", "not found")
-            .onFail("which node", "not found");
-    var applier = applier(shell);
-
-    var ex =
-        assertThrows(
-            Exception.class, () -> applier.applyAgentTools(CONTAINER, List.of("codex"), null));
-
-    assertTrue(ex.getMessage().contains("requires Node.js"));
   }
 
   @Test
@@ -236,7 +221,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, null, null);
+    var result = applier.applyAgentTools(CONTAINER, null);
 
     assertEquals(0, result.added());
   }
@@ -502,8 +487,7 @@ class ProjectApplierTest {
 
     var ex =
         assertThrows(
-            Exception.class,
-            () -> applier.applyAgentTools(CONTAINER, List.of("claude-code"), null));
+            Exception.class, () -> applier.applyAgentTools(CONTAINER, List.of("claude-code")));
 
     assertTrue(ex.getMessage().contains("Failed to install agent"));
   }
@@ -513,7 +497,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, List.of(), null);
+    var result = applier.applyAgentTools(CONTAINER, List.of());
 
     assertEquals(0, result.added());
   }
@@ -524,7 +508,7 @@ class ProjectApplierTest {
         new ScriptedShellExecutor().onFail("bash -lc which claude", "not found").onOk("bash -c");
     var applier = applier(shell);
 
-    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"), null);
+    var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"));
 
     assertEquals(1, result.added());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("which node")));

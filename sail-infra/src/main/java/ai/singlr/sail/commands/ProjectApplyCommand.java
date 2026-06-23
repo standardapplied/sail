@@ -14,7 +14,6 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.ProjectDefaults;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
@@ -99,10 +98,6 @@ public final class ProjectApplyCommand implements Runnable {
           throw new IllegalStateException("Container error: " + e.message());
     }
 
-    var nodeResolution = resolveNodeDependency(config);
-    config = nodeResolution.config();
-    var installNodeVersion = nodeResolution.nodeVersionToInstall();
-
     var ansi = Ansi.AUTO;
     if (!json) {
       Banner.printBranding(System.out, ansi);
@@ -118,12 +113,6 @@ public final class ProjectApplyCommand implements Runnable {
     var totalAdded = 0;
     var totalRemoved = 0;
     var totalSkipped = 0;
-
-    if (installNodeVersion != null) {
-      var nodeResult = applier.applyNodeRuntime(name, installNodeVersion);
-      totalAdded += nodeResult.added();
-      totalSkipped += nodeResult.skipped();
-    }
 
     var warnings = applier.checkUnsupportedChanges(config, info.limits());
 
@@ -148,7 +137,7 @@ public final class ProjectApplyCommand implements Runnable {
         config.agent() != null
             ? Objects.requireNonNullElse(config.agent().install(), List.of(config.agent().type()))
             : null;
-    var agentResult = applier.applyAgentTools(name, agentInstall, config.runtimes());
+    var agentResult = applier.applyAgentTools(name, agentInstall);
     totalAdded += agentResult.added();
     totalSkipped += agentResult.skipped();
 
@@ -195,32 +184,5 @@ public final class ProjectApplyCommand implements Runnable {
                 + " removed, "
                 + totalSkipped
                 + " skipped"));
-  }
-
-  private record ApplyNodeResolution(SailYaml config, String nodeVersionToInstall) {}
-
-  private ApplyNodeResolution resolveNodeDependency(SailYaml config) {
-    var nodeAgents = NodeDependencyCheck.findNodeDependentAgents(config);
-    if (nodeAgents.isEmpty() || NodeDependencyCheck.hasNodeRuntime(config)) {
-      return new ApplyNodeResolution(config, null);
-    }
-
-    if (json) {
-      NodeDependencyCheck.failNonInteractive(config);
-    }
-
-    var resolution = NodeDependencyCheck.resolve(config, false);
-    return switch (resolution) {
-      case NodeDependencyCheck.Resolution.Unchanged r -> new ApplyNodeResolution(r.config(), null);
-      case NodeDependencyCheck.Resolution.NodeAdded r ->
-          new ApplyNodeResolution(r.config(), ProjectDefaults.DEFAULT_NODE_VERSION);
-      case NodeDependencyCheck.Resolution.AgentsDropped r ->
-          new ApplyNodeResolution(r.config(), null);
-      case NodeDependencyCheck.Resolution.Aborted ignored -> {
-        System.out.println("  Aborted.");
-        throw new IllegalStateException(
-            "Aborted: Node-dependent agents require Node.js in the project runtimes.");
-      }
-    };
   }
 }
