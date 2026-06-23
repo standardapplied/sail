@@ -41,28 +41,43 @@ jobs:
             **/target/site/jacoco
             **/target/site/jacoco.xml
 
-      - name: Cache OWASP Dependency-Check data
+      # The NVD database is project-independent, so the cache key is keyed only on the OS,
+      # never on pom.xml — a version bump must not cold-start the cache. github.run_id makes the
+      # primary key unique so every run saves the refreshed database; restore-keys then pulls the
+      # most recent prior database (including across branches via the default-branch cache).
+      - name: Cache OWASP Dependency-Check NVD database
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/dependency-check-data
-          key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-${{ github.run_id }}
+          key: dependency-check-nvd-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-
-            dependency-check-${{ runner.os }}-
+            dependency-check-nvd-${{ runner.os }}-
 
-      - name: Scan dependencies
+      # Refresh the cached NVD database best-effort. NVD's API is frequently flaky (429/503/524);
+      # when it is unreachable this step fails but never fails the build — the scan below runs
+      # offline against whatever database the cache restored.
+      - name: Refresh NVD database (best effort)
+        continue-on-error: true
         run: >
-          mvn install org.owasp:dependency-check-maven:12.1.8:aggregate
-          -DskipTests
-          -Djacoco.skip=true
-          -Dformat=HTML
-          -DfailBuildOnCVSS=7
-          -DskipTestScope=true
+          mvn -N -B org.owasp:dependency-check-maven:12.1.8:update-only
           -DnvdApiKey=${{ secrets.NVD_API_KEY }}
           -DdataDirectory=${{ runner.temp }}/dependency-check-data
           -DnvdValidForHours=168
           -DnvdApiDelay=4000
           -DnvdMaxRetryCount=30
+
+      # autoUpdate=false: the scan never contacts NVD, so an NVD outage cannot fail the build. It
+      # analyzes against the cached database and still fails on a real CVE at or above CVSS 7.
+      - name: Scan dependencies
+        run: >
+          mvn -B install org.owasp:dependency-check-maven:12.1.8:aggregate
+          -DskipTests
+          -Djacoco.skip=true
+          -Dformat=HTML
+          -DfailBuildOnCVSS=7
+          -DskipTestScope=true
+          -DautoUpdate=false
+          -DdataDirectory=${{ runner.temp }}/dependency-check-data
 
       - name: Upload dependency check reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
