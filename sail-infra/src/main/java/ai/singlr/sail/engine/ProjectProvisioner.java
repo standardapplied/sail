@@ -1029,17 +1029,6 @@ public final class ProjectProvisioner {
         continue;
       }
 
-      if (tool.requiresNode()) {
-        var nodeCheck = execInContainer(name, List.of("which", "node"));
-        if (!nodeCheck.ok()) {
-          throw new IllegalStateException(
-              "Bug: agent '"
-                  + tool.yamlName()
-                  + "' requires Node.js, but Node is not installed."
-                  + " The command layer should have resolved this before provisioning.");
-        }
-      }
-
       var result =
           execAsDevUser(name, List.of("bash", "-c", tool.installCommand()), INSTALL_TIMEOUT);
       if (!result.ok()) {

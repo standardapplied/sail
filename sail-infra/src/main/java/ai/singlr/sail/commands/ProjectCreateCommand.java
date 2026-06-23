@@ -113,12 +113,6 @@ public final class ProjectCreateCommand implements Runnable {
           "sail.yaml must have a 'resources' section with cpu, memory, and disk.");
     }
 
-    if (yes || json) {
-      config = resolveNodeDependencyAuto(config);
-    } else if (!dryRun) {
-      config = resolveNodeDependencyInteractive(config);
-    }
-
     var projectDir = SailPaths.projectDir(config.name());
     Files.createDirectories(projectDir);
     var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
@@ -268,28 +262,6 @@ public final class ProjectCreateCommand implements Runnable {
     }
 
     return Map.copyOf(tokens);
-  }
-
-  private SailYaml resolveNodeDependencyAuto(SailYaml config) {
-    var resolution = NodeDependencyCheck.resolve(config, true);
-    return switch (resolution) {
-      case NodeDependencyCheck.Resolution.NodeAdded r -> r.config();
-      default -> config;
-    };
-  }
-
-  private SailYaml resolveNodeDependencyInteractive(SailYaml config) {
-    var resolution = NodeDependencyCheck.resolve(config, false);
-    return switch (resolution) {
-      case NodeDependencyCheck.Resolution.Unchanged r -> r.config();
-      case NodeDependencyCheck.Resolution.NodeAdded r -> r.config();
-      case NodeDependencyCheck.Resolution.AgentsDropped r -> r.config();
-      case NodeDependencyCheck.Resolution.Aborted ignored -> {
-        System.out.println("  Aborted.");
-        throw new IllegalStateException(
-            "Aborted: Node-dependent agents require Node.js in the project runtimes.");
-      }
-    };
   }
 
   /**

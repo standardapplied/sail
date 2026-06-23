@@ -14,36 +14,21 @@ import ai.singlr.sail.common.Strings;
  */
 public enum AgentCli {
   CLAUDE_CODE(
-      "claude-code",
-      "claude",
-      InstallMethod.NATIVE_SCRIPT,
-      "curl -fsSL https://claude.ai/install.sh | bash",
-      "CLAUDE.md"),
-  CODEX("codex", "codex", InstallMethod.NPM, "sudo npm install -g @openai/codex", "AGENTS.md");
-
-  /** How the agent CLI is installed. */
-  public enum InstallMethod {
-    /** Native install script (no Node.js dependency). */
-    NATIVE_SCRIPT,
-    /** Global npm package (requires Node.js). */
-    NPM
-  }
+      "claude-code", "claude", "curl -fsSL https://claude.ai/install.sh | bash", "CLAUDE.md"),
+  CODEX(
+      "codex",
+      "codex",
+      "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+      "AGENTS.md");
 
   private final String yamlName;
   private final String binaryName;
-  private final InstallMethod method;
   private final String installCommand;
   private final String contextFileName;
 
-  AgentCli(
-      String yamlName,
-      String binaryName,
-      InstallMethod method,
-      String installCommand,
-      String contextFileName) {
+  AgentCli(String yamlName, String binaryName, String installCommand, String contextFileName) {
     this.yamlName = yamlName;
     this.binaryName = binaryName;
-    this.method = method;
     this.installCommand = installCommand;
     this.contextFileName = contextFileName;
   }
@@ -58,11 +43,6 @@ public enum AgentCli {
     return binaryName;
   }
 
-  /** The installation method for this agent CLI. */
-  public InstallMethod method() {
-    return method;
-  }
-
   /** The shell command to install this agent CLI. */
   public String installCommand() {
     return installCommand;
@@ -73,16 +53,11 @@ public enum AgentCli {
     return contextFileName;
   }
 
-  /** Whether this agent CLI requires Node.js to install (npm-based). */
-  public boolean requiresNode() {
-    return method == InstallMethod.NPM;
-  }
-
-  /** Human-readable display name including the package identifier. */
+  /** Human-readable display name. */
   public String displayName() {
     return switch (this) {
       case CLAUDE_CODE -> "Claude Code";
-      case CODEX -> "Codex CLI (@openai/codex)";
+      case CODEX -> "Codex CLI";
     };
   }
 
