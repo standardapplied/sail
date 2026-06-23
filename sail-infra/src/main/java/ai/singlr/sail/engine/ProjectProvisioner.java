@@ -8,8 +8,6 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.gen.AgentAuditFiles;
-import ai.singlr.sail.gen.AgentContextGenerator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
@@ -1072,56 +1069,23 @@ public final class ProjectProvisioner {
       return;
     }
 
-    var contextFiles = AgentContextGenerator.generateFiles(config);
-    var auditFiles = AgentAuditFiles.assemble(config);
+    var user = sshUser(config);
+    var workspace = "/home/" + user + "/workspace";
+    execInContainer(config.name(), List.of("mkdir", "-p", workspace));
+    execInContainer(config.name(), List.of("chown", user + ":" + user, workspace));
 
-    if (contextFiles.isEmpty() && auditFiles.isEmpty()) {
-      tracker.advance(currentPhase);
+    var result = AgentContextInstaller.install(shell, config.name(), config);
+    tracker.advance(currentPhase);
+
+    if (result.isEmpty()) {
       stepSkipped(18, "no agent configured");
       return;
     }
 
     step(18, "Generating agent context files...");
-
-    var user = sshUser(config);
-    var workspacePath = "/home/" + user + "/workspace";
-    execInContainer(config.name(), List.of("mkdir", "-p", workspacePath));
-    execInContainer(config.name(), List.of("chown", user + ":" + user, workspacePath));
-
-    var existingFiles = listWorkspaceFiles(config.name(), workspacePath);
-    var pushed = new ArrayList<String>();
-    var skipped = new ArrayList<String>();
-
-    for (var file : contextFiles) {
-      var fileName = file.remotePath().substring(file.remotePath().lastIndexOf('/') + 1);
-      if (file.skipIfExists() && containsCaseInsensitive(existingFiles, fileName)) {
-        skipped.add(fileName);
-        continue;
-      }
-      var parentDir = file.remotePath().substring(0, file.remotePath().lastIndexOf('/'));
-      execInContainer(config.name(), List.of("mkdir", "-p", parentDir));
-      pushFileToContainer(config.name(), file.remotePath(), file.content());
-      execInContainer(config.name(), List.of("chown", "-R", user + ":" + user, parentDir));
-      pushed.add(fileName);
-    }
-
-    for (var file : auditFiles) {
-      var parentDir = file.remotePath().substring(0, file.remotePath().lastIndexOf('/'));
-      execInContainer(config.name(), List.of("mkdir", "-p", parentDir));
-      pushFileToContainer(config.name(), file.remotePath(), file.content());
-      if (file.executable()) {
-        execInContainer(config.name(), List.of("chmod", "+x", file.remotePath()));
-      }
-      execInContainer(config.name(), List.of("chown", user + ":" + user, file.remotePath()));
-    }
-
-    tracker.advance(currentPhase);
     var summary = new StringBuilder("Agent context generated");
-    if (!pushed.isEmpty()) {
-      summary.append(" (").append(String.join(", ", pushed)).append(")");
-    }
-    if (!skipped.isEmpty()) {
-      summary.append(" — kept existing: ").append(String.join(", ", skipped));
+    if (!result.pushed().isEmpty()) {
+      summary.append(" (").append(String.join(", ", baseNames(result.pushed()))).append(")");
     }
     stepDone(18, summary.toString());
   }
@@ -1321,25 +1285,8 @@ public final class ProjectProvisioner {
     }
   }
 
-  /**
-   * Lists filenames in a directory inside the container. Returns an empty set on failure (directory
-   * not found, no files, etc.).
-   */
-  private Set<String> listWorkspaceFiles(String containerName, String dirPath) {
-    try {
-      var result = execInContainer(containerName, List.of("ls", "-1", dirPath));
-      if (!result.ok() || result.stdout().isBlank()) {
-        return Set.of();
-      }
-      return Set.copyOf(List.of(result.stdout().strip().split("\n")));
-    } catch (Exception e) {
-      return Set.of();
-    }
-  }
-
-  private static boolean containsCaseInsensitive(Set<String> files, String target) {
-    var lowerTarget = target.toLowerCase();
-    return files.stream().anyMatch(f -> f.toLowerCase().equals(lowerTarget));
+  private static List<String> baseNames(List<String> paths) {
+    return paths.stream().map(p -> p.substring(p.lastIndexOf('/') + 1)).toList();
   }
 
   /**

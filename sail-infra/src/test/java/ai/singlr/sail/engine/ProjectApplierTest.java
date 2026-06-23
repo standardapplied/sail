@@ -341,6 +341,29 @@ class ProjectApplierTest {
   }
 
   @Test
+  void applyAgentContextMergesTheContextFileAndSecurityMd() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("cat /home/dev/workspace/CLAUDE.md", "old\n\nmy note\n")
+            .onOk("cat /home/dev/workspace/SECURITY.md", "old\n\nmy security note\n");
+    var applier = applier(shell);
+    var config = minimalConfig("claude-code");
+
+    var result = applier.applyAgentContext(CONTAINER, config);
+
+    assertEquals(
+        0, result.skipped(), "a delta apply merges the editable files rather than skipping");
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.contains("cat /home/dev/workspace/CLAUDE.md")),
+        "the context file is merged on apply, preserving the engineer's personal region");
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("cat /home/dev/workspace/SECURITY.md")),
+        "SECURITY.md is merged the same way");
+    assertTrue(result.added() > 0, "machinery (the spec-board skill) still refreshes");
+  }
+
+  @Test
   void applyServicesThrowsOnStartFailure() {
     var shell =
         new ScriptedShellExecutor()
@@ -545,7 +568,10 @@ class ProjectApplierTest {
 
     assertEquals(4, result.added());
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("security-audit.sh")));
-    assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("chmod") && c.contains("+x")));
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("incus file push") && c.contains("--mode 0755")),
+        "executable audit files are pushed with mode 0755");
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("mkdir") && c.contains("-p")));
   }
 

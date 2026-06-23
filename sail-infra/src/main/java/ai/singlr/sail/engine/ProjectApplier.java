@@ -8,8 +8,6 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
-import ai.singlr.sail.gen.AgentAuditFiles;
-import ai.singlr.sail.gen.AgentContextGenerator;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -248,36 +246,20 @@ public final class ProjectApplier {
     return new ApplyResult(1, 0, 0, List.of());
   }
 
-  /** Regenerates agent context files (per-agent context + SECURITY.md + audit hooks). */
+  /**
+   * Regenerates agent context files (per-agent context + SECURITY.md + methodology/skill + audit
+   * hooks) via {@link AgentContextInstaller}, so a delta apply keeps engineer-owned files exactly
+   * as {@code project reconfigure} and {@code agent context regen} do.
+   */
   public ApplyResult applyAgentContext(String name, SailYaml config) throws Exception {
-    var contextFiles = AgentContextGenerator.generateFiles(config);
-    var auditFiles = AgentAuditFiles.assemble(config);
-
-    if (contextFiles.isEmpty() && auditFiles.isEmpty()) {
+    var result = AgentContextInstaller.install(shell, name, config);
+    if (result.isEmpty()) {
       return ApplyResult.empty();
     }
-
-    var sshUser = config.sshUser();
-    shell.exec(
-        ContainerExec.asDevUser(name, List.of("mkdir", "-p", "/home/" + sshUser + "/workspace")));
-
-    for (var file : contextFiles) {
-      out.println("  [apply] Agent context \u2192 " + file.remotePath());
-      var parentDir = file.remotePath().substring(0, file.remotePath().lastIndexOf('/'));
-      shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", parentDir)));
-      pushFile(name, file.remotePath(), file.content());
+    for (var path : result.pushed()) {
+      out.println("  [apply] Agent context \u2192 " + path);
     }
-
-    for (var file : auditFiles) {
-      var parentDir = file.remotePath().substring(0, file.remotePath().lastIndexOf('/'));
-      shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", parentDir)));
-      pushFile(name, file.remotePath(), file.content());
-      if (file.executable()) {
-        shell.exec(ContainerExec.asDevUser(name, List.of("chmod", "+x", file.remotePath())));
-      }
-      out.println("  [apply] Audit file \u2192 " + file.remotePath());
-    }
-    return new ApplyResult(contextFiles.size() + auditFiles.size(), 0, 0, List.of());
+    return new ApplyResult(result.pushed().size(), 0, 0, List.of());
   }
 
   /**

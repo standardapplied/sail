@@ -10,6 +10,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
@@ -31,7 +32,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -140,13 +140,9 @@ public final class RunCommand implements Runnable {
       return;
     }
 
-    var auditFiles = AgentAuditFiles.assemble(config);
-
-    var allFiles = new ArrayList<GeneratedFile>();
-    allFiles.addAll(contextFiles);
-    allFiles.addAll(auditFiles);
-
     if (dryRun) {
+      var allFiles = new ArrayList<GeneratedFile>(contextFiles);
+      allFiles.addAll(AgentAuditFiles.assemble(config));
       for (var f : allFiles) {
         System.out.println(
             "[dry-run] Would push "
@@ -160,38 +156,10 @@ public final class RunCommand implements Runnable {
       return;
     }
 
-    var sshUser = config.sshUser();
-    var workspacePath = "/home/" + sshUser + "/workspace";
-    shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", workspacePath)));
-
-    var existingFiles = listWorkspaceFiles(shell, name, workspacePath);
-    var pushedCount = 0;
-    var skipped = new ArrayList<String>();
-
-    for (var f : contextFiles) {
-      var fileName = f.remotePath().substring(f.remotePath().lastIndexOf('/') + 1);
-      if (f.skipIfExists() && containsCaseInsensitive(existingFiles, fileName)) {
-        skipped.add(fileName);
-        continue;
-      }
-      pushFile(shell, name, f.remotePath(), f.content(), sshUser);
-      pushedCount++;
-    }
-    for (var f : auditFiles) {
-      var parentDir = f.remotePath().substring(0, f.remotePath().lastIndexOf('/'));
-      shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", parentDir)));
-      pushFile(shell, name, f.remotePath(), f.content(), sshUser);
-      if (f.executable()) {
-        shell.exec(ContainerExec.asDevUser(name, List.of("chmod", "+x", f.remotePath())));
-      }
-      pushedCount++;
-    }
+    var result = AgentContextInstaller.install(shell, name, config);
 
     if (!json) {
-      var msg = "Context regenerated (" + pushedCount + " files)";
-      if (!skipped.isEmpty()) {
-        msg += " — kept existing: " + String.join(", ", skipped);
-      }
+      var msg = "Context regenerated (" + result.pushed().size() + " files)";
       System.out.println(Ansi.AUTO.string("  @|green \u2713|@ " + msg));
       System.out.println();
     }
@@ -451,44 +419,6 @@ public final class RunCommand implements Runnable {
             Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
       }
     }
-  }
-
-  private static void pushFile(
-      ShellExecutor shell, String containerName, String remotePath, String content, String sshUser)
-      throws Exception {
-    var tmpFile = Files.createTempFile("sail-push-", ".tmp");
-    try {
-      Files.writeString(tmpFile, content);
-      var result =
-          shell.exec(
-              List.of("incus", "file", "push", tmpFile.toString(), containerName + remotePath));
-      if (!result.ok()) {
-        throw new IOException("Failed to push file " + remotePath + ": " + result.stderr());
-      }
-    } finally {
-      Files.deleteIfExists(tmpFile);
-    }
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName, List.of("chown", sshUser + ":" + sshUser, remotePath)));
-  }
-
-  private static Set<String> listWorkspaceFiles(
-      ShellExecutor shell, String containerName, String dirPath) {
-    try {
-      var result = shell.exec(ContainerExec.asDevUser(containerName, List.of("ls", "-1", dirPath)));
-      if (!result.ok() || result.stdout().isBlank()) {
-        return Set.of();
-      }
-      return Set.copyOf(List.of(result.stdout().strip().split("\n")));
-    } catch (Exception e) {
-      return Set.of();
-    }
-  }
-
-  private static boolean containsCaseInsensitive(Set<String> files, String target) {
-    var lowerTarget = target.toLowerCase();
-    return files.stream().anyMatch(f -> f.toLowerCase().equals(lowerTarget));
   }
 
   private static void validateSafePath(String value, String optionName) {

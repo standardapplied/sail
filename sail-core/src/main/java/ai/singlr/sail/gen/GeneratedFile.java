@@ -12,13 +12,22 @@ package ai.singlr.sail.gen;
  * @param remotePath absolute path inside the container
  * @param content file content
  * @param executable whether the file should be marked executable
- * @param skipIfExists if true, do not overwrite when a file with the same name (case-insensitive)
- *     already exists at the target path — the repo's own version takes precedence
+ * @param mergeMarker when non-null, the file is merge-managed: {@code content} is the regenerated
+ *     body and everything from this marker down in the existing file is the engineer's preserved
+ *     personal region (see {@link ContextMerge}); when null, the file is overwritten outright
  */
 public record GeneratedFile(
-    String remotePath, String content, boolean executable, boolean skipIfExists) {
+    String remotePath, String content, boolean executable, String mergeMarker) {
 
   public GeneratedFile(String remotePath, String content, boolean executable) {
-    this(remotePath, content, executable, false);
+    this(remotePath, content, executable, null);
+  }
+
+  /**
+   * A merge-managed file: the generated {@code body} is refreshed above {@code mergeMarker} while
+   * the engineer's personal region below it is preserved across regeneration.
+   */
+  public static GeneratedFile merged(String remotePath, String body, String mergeMarker) {
+    return new GeneratedFile(remotePath, body, false, mergeMarker);
   }
 }

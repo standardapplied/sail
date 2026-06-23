@@ -1971,7 +1971,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void contextGenerationSkipsExistingAgentFiles() throws Exception {
+  void contextGenerationMergesAnExistingAgentFile() throws Exception {
     var config =
         new SailYaml(
             "acme-health",
@@ -2014,19 +2014,20 @@ class ProjectProvisionerTest {
             .onFail("podman container inspect", "no such container")
             .onFail("crontab -l", "no crontab")
             .onOk("which claude", "/home/dev/.local/bin/claude")
-            .onOk("ls -1", "claude.md\nREADME.md");
+            .onOk("ls -1", "CLAUDE.md\nREADME.md")
+            .onOk("cat /home/dev/workspace/CLAUDE.md", "old body\n\nmy personal note\n");
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
     provisioner.provision(config, hostYaml(), null, null);
 
-    assertTrue(
-        steps.stream().anyMatch(s -> s.contains("kept existing")),
-        "Should report that existing CLAUDE.md was kept");
     var cmds = shell.invocations();
-    assertFalse(
+    assertTrue(
+        cmds.stream().anyMatch(c -> c.contains("cat /home/dev/workspace/CLAUDE.md")),
+        "merging reads the existing CLAUDE.md to preserve the engineer's personal region");
+    assertTrue(
         cmds.stream().anyMatch(c -> c.contains("file push") && c.contains("CLAUDE.md")),
-        "Should NOT push CLAUDE.md when repo already has claude.md");
+        "the merged CLAUDE.md is written back");
   }
 
   /** Records all step events for assertion. */

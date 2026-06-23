@@ -402,13 +402,24 @@ public record SailYaml(
   }
 
   public record AgentContext(
-      String techStack, String conventions, String buildCommands, String projectSpecific) {
+      String techStack,
+      String conventions,
+      String buildCommands,
+      String projectSpecific,
+      String security) {
+
+    public AgentContext(
+        String techStack, String conventions, String buildCommands, String projectSpecific) {
+      this(techStack, conventions, buildCommands, projectSpecific, null);
+    }
+
     public static AgentContext fromMap(Map<String, Object> map) {
       return new AgentContext(
           (String) map.get("tech_stack"),
           (String) map.get("conventions"),
           (String) map.get("build_commands"),
-          (String) map.get("project_specific"));
+          (String) map.get("project_specific"),
+          (String) map.get("security"));
     }
 
     public Map<String, Object> toMap() {
@@ -417,6 +428,7 @@ public record SailYaml(
       if (conventions != null) map.put("conventions", conventions);
       if (buildCommands != null) map.put("build_commands", buildCommands);
       if (projectSpecific != null) map.put("project_specific", projectSpecific);
+      if (security != null) map.put("security", security);
       return map;
     }
   }

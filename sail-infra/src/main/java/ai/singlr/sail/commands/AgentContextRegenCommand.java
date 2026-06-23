@@ -7,8 +7,8 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
@@ -18,12 +18,9 @@ import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Set;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -51,6 +48,13 @@ public final class AgentContextRegenCommand implements Runnable {
 
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
+
+  @Option(
+      names = "--force",
+      description =
+          "Overwrite engineer-owned files (CLAUDE.md, AGENTS.md, SECURITY.md) with the freshly"
+              + " generated template. By default they are kept.")
+  private boolean force;
 
   @Spec private CommandSpec spec;
 
@@ -108,38 +112,8 @@ public final class AgentContextRegenCommand implements Runnable {
                 + ")");
       }
     } else {
-      var sshUser = config.sshUser();
-      var workspacePath = "/home/" + sshUser + "/workspace";
-      shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", workspacePath)));
-
-      var existingFiles = listWorkspaceFiles(shell, name, workspacePath);
-      var skipped = new ArrayList<String>();
-
-      for (var file : contextFiles) {
-        var fileName = file.remotePath().substring(file.remotePath().lastIndexOf('/') + 1);
-        if (file.skipIfExists() && containsCaseInsensitive(existingFiles, fileName)) {
-          skipped.add(fileName);
-          continue;
-        }
-        pushFile(shell, name, file.remotePath(), file.content(), sshUser);
-        pushed.add(file.remotePath());
-      }
-      for (var auditFile : auditFiles) {
-        var parentDir =
-            auditFile.remotePath().substring(0, auditFile.remotePath().lastIndexOf('/'));
-        shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", parentDir)));
-        pushFile(shell, name, auditFile.remotePath(), auditFile.content(), sshUser);
-        if (auditFile.executable()) {
-          shell.exec(ContainerExec.asDevUser(name, List.of("chmod", "+x", auditFile.remotePath())));
-        }
-      }
-
-      if (!skipped.isEmpty() && !json) {
-        for (var s : skipped) {
-          System.out.println(Ansi.AUTO.string("  @|faint Kept existing " + s + " from repo|@"));
-        }
-      }
-
+      var result = AgentContextInstaller.install(shell, name, config, force);
+      pushed.addAll(result.pushed());
       installSpecCli(shell);
     }
 
@@ -184,44 +158,5 @@ public final class AgentContextRegenCommand implements Runnable {
       System.err.println(
           Banner.errorLine("Could not install the spec CLI: " + e.getMessage(), Ansi.AUTO));
     }
-  }
-
-  private static Set<String> listWorkspaceFiles(
-      ShellExecutor shell, String containerName, String dirPath) {
-    try {
-      var result = shell.exec(ContainerExec.asDevUser(containerName, List.of("ls", "-1", dirPath)));
-      if (!result.ok() || result.stdout().isBlank()) {
-        return Set.of();
-      }
-      return Set.copyOf(List.of(result.stdout().strip().split("\n")));
-    } catch (Exception e) {
-      return Set.of();
-    }
-  }
-
-  private static boolean containsCaseInsensitive(Set<String> files, String target) {
-    var lowerTarget = target.toLowerCase();
-    return files.stream().anyMatch(f -> f.toLowerCase().equals(lowerTarget));
-  }
-
-  /** Pushes content to a file inside the container via temp file + incus file push + chown. */
-  private static void pushFile(
-      ShellExecutor shell, String containerName, String remotePath, String content, String sshUser)
-      throws Exception {
-    var tmpFile = Files.createTempFile("sail-push-", ".tmp");
-    try {
-      Files.writeString(tmpFile, content);
-      var result =
-          shell.exec(
-              List.of("incus", "file", "push", tmpFile.toString(), containerName + remotePath));
-      if (!result.ok()) {
-        throw new IOException("Failed to push file " + remotePath + ": " + result.stderr());
-      }
-    } finally {
-      Files.deleteIfExists(tmpFile);
-    }
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName, List.of("chown", sshUser + ":" + sshUser, remotePath)));
   }
 }
