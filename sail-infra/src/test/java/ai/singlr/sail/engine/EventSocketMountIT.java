@@ -46,7 +46,8 @@ class EventSocketMountIT {
     deleteContainerQuietly();
     try {
       var launched = shell.exec(List.of("incus", "launch", IMAGE, CONTAINER));
-      assumeTrue(launched.ok(), "could not launch test container: " + launched.stderr());
+      assertTrue(
+          launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
 
       new IncusDeviceManager(shell).ensureEventSocket(CONTAINER, hostDir, CONTAINER_DIR);
 
