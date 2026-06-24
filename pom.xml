@@ -361,6 +361,9 @@
     <profiles>
         <profile>
             <id>integration</id>
+            <properties>
+                <sail.it.requireIncus>true</sail.it.requireIncus>
+            </properties>
             <build>
                 <plugins>
                     <plugin>
