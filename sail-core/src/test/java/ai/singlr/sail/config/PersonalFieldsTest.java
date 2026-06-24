@@ -35,6 +35,26 @@ class PersonalFieldsTest {
   }
 
   @Test
+  void dropsTheLocalGitSshKeyPath() {
+    var redacted =
+        PersonalFields.redact(
+            "git:\n  name: Uday\n  email: uday@example.com\n  auth: ssh\n"
+                + "  ssh_key: ~/.ssh/id_ed25519\n");
+    var git = git(redacted);
+    assertFalse(git.containsKey("ssh_key"), "the local private-key path is never synced");
+    assertEquals("ssh", git.get("auth"), "git.auth (token vs ssh) stays — a project choice");
+    assertEquals("${GIT_NAME}", git.get("name"));
+    assertFalse(
+        redacted.contains("id_ed25519"), "no key path leaks into the catalogued definition");
+  }
+
+  @Test
+  void strippingSshKeyAloneCountsAsAChange() {
+    var redacted = PersonalFields.redact("git:\n  name: '${GIT_NAME}'\n  ssh_key: ~/.ssh/k\n");
+    assertFalse(git(redacted).containsKey("ssh_key"));
+  }
+
+  @Test
   void leavesSharedFieldsUntouched() {
     var redacted =
         PersonalFields.redact(
