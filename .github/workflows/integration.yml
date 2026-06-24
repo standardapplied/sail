@@ -28,7 +28,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y incus
           sudo incus admin init --minimal
-          sudo usermod -aG incus-admin "$USER"
+          sudo chmod o+rw /var/lib/incus/unix.socket
+
+      - name: Verify incus is reachable by the runner
+        run: |
+          which incus
+          incus version
+          incus list
 
       - name: Run incus integration tests
-        run: sg incus-admin -c "mvn -B -Pintegration verify"
+        run: mvn -B -Pintegration verify -Dsail.it.requireIncus=true

@@ -38,7 +38,7 @@ class EventSocketMountIT {
 
   @Test
   void mountIsReachableInsideAndSurvivesRestart() throws Exception {
-    assumeTrue(incusAvailable(), "incus daemon not available; integration test skipped");
+    ensureIncusOrSkip();
 
     var hostDir = Files.createTempDirectory("sail-it-event-socket");
     Files.writeString(hostDir.resolve("marker"), "ok");
@@ -64,6 +64,23 @@ class EventSocketMountIT {
       deleteContainerQuietly();
       deleteRecursively(hostDir);
     }
+  }
+
+  /**
+   * Skips when no incus daemon is reachable — except in the dedicated CI lane, which sets {@code
+   * -Dsail.it.requireIncus=true}: there an unreachable daemon is a misconfiguration that must fail
+   * loudly, never a silent skip that lets the lane pass having validated nothing.
+   */
+  private void ensureIncusOrSkip() {
+    if (incusAvailable()) {
+      return;
+    }
+    if (Boolean.getBoolean("sail.it.requireIncus")) {
+      throw new AssertionError(
+          "incus is required in this lane (-Dsail.it.requireIncus=true) but is not reachable from"
+              + " the test process — the integration test cannot validate anything");
+    }
+    assumeTrue(false, "incus daemon not available; integration test skipped");
   }
 
   private boolean incusAvailable() {
