@@ -135,9 +135,72 @@ class ReviewPipelineControllerTest {
                 Map.of("name", "human", "type", "human"))));
   }
 
+  private ReviewPipelineConfig singleStageNoAgent(String gate) {
+    return ReviewPipelineConfig.fromMap(
+        Map.of(
+            "stages",
+            List.of(
+                Map.of(
+                    "name",
+                    "security",
+                    "type",
+                    "agent",
+                    "categories",
+                    List.of("security"),
+                    "gate",
+                    gate))));
+  }
+
   private ReviewPipelineController controller(
       ReviewPipelineConfig config, ReviewAgentRunner runner) {
-    return new ReviewPipelineController(specStore, reviewStore, p -> config, runner, null);
+    return new ReviewPipelineController(
+        specStore, reviewStore, p -> config, p -> "codex", runner, null);
+  }
+
+  @Test
+  void stageWithoutAnAgentUsesTheRosterReviewer() throws Exception {
+    createSpec("auth", "in_progress");
+    var capturedAgent = new AtomicReference<String>();
+    var latch = new CountDownLatch(1);
+    ReviewAgentRunner capturing =
+        (p, a, prompt) -> {
+          capturedAgent.set(a);
+          latch.countDown();
+          return "[]";
+        };
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleStageNoAgent("no_critical"),
+            p -> "claude-code",
+            capturing,
+            null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    ctrl.awaitCompletion(5000);
+
+    assertEquals("claude-code", capturedAgent.get());
+  }
+
+  @Test
+  void stageFailsWhenNoReviewerIsAvailable() throws Exception {
+    createSpec("auth", "in_progress");
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleStageNoAgent("no_critical"),
+            p -> null,
+            (p, a, pr) -> "[]",
+            null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    ctrl.awaitCompletion(5000);
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", reviewStore.stagesForReview(review.id()).getFirst().status());
   }
 
   @Test
@@ -299,7 +362,12 @@ class ReviewPipelineControllerTest {
     var latch = new CountDownLatch(1);
     var ctrl =
         new ReviewPipelineController(
-            specStore, reviewStore, p -> twoAgentStages(), new LatchedRunner("[]", latch), null);
+            specStore,
+            reviewStore,
+            p -> twoAgentStages(),
+            p -> "codex",
+            new LatchedRunner("[]", latch),
+            null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -320,7 +388,12 @@ class ReviewPipelineControllerTest {
     var latch = new CountDownLatch(1);
     var ctrl =
         new ReviewPipelineController(
-            specStore, reviewStore, p -> agentThenHuman(), new LatchedRunner("[]", latch), null);
+            specStore,
+            reviewStore,
+            p -> agentThenHuman(),
+            p -> "codex",
+            new LatchedRunner("[]", latch),
+            null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -340,7 +413,8 @@ class ReviewPipelineControllerTest {
   void noPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
     var ctrl =
-        new ReviewPipelineController(specStore, reviewStore, p -> null, (p, a, pr) -> "[]", null);
+        new ReviewPipelineController(
+            specStore, reviewStore, p -> null, p -> "codex", (p, a, pr) -> "[]", null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -444,7 +518,9 @@ class ReviewPipelineControllerTest {
                         List.of("security"),
                         "gate",
                         "no_critical"))));
-    var ctrl = new ReviewPipelineController(specStore, reviewStore, p -> config, runner, null);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore, reviewStore, p -> config, p -> "codex", runner, null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -485,7 +561,12 @@ class ReviewPipelineControllerTest {
     var latch = new CountDownLatch(1);
     var ctrl =
         new ReviewPipelineController(
-            specStore, reviewStore, p -> config, new LatchedRunner(criticalOutput, latch), null);
+            specStore,
+            reviewStore,
+            p -> config,
+            p -> "codex",
+            new LatchedRunner(criticalOutput, latch),
+            null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -509,6 +590,7 @@ class ReviewPipelineControllerTest {
               specStore,
               reviewStore,
               p -> singleAgentStage("no_critical"),
+              p -> "codex",
               (p, a, pr) -> "[]",
               bus);
 

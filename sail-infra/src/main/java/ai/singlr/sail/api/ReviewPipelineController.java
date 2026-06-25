@@ -48,21 +48,29 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final Function<String, ReviewPipelineConfig> configResolver;
+  private final Function<String, String> reviewerResolver;
   private final ReviewAgentRunner agentRunner;
   private final EventBus eventBus;
   private final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight =
       new ConcurrentHashMap<>();
   private final ExecutorService pipelineExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+  /**
+   * @param reviewerResolver resolves a project's default reviewer agent (the
+   *     installed-agent-that-isn't-the-coder, else the coder for self-review — see {@code
+   *     AgentRoster.reviewer}) for stages that do not name one explicitly
+   */
   public ReviewPipelineController(
       SpecStore specStore,
       ReviewStore reviewStore,
       Function<String, ReviewPipelineConfig> configResolver,
+      Function<String, String> reviewerResolver,
       ReviewAgentRunner agentRunner,
       EventBus eventBus) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.configResolver = configResolver;
+    this.reviewerResolver = reviewerResolver;
     this.agentRunner = agentRunner;
     this.eventBus = eventBus;
   }
@@ -197,7 +205,12 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   private boolean executeAgentStage(
       ReviewStore.StageRow stage, StageConfig stageConfig, String project, String specId) {
-    var agent = stageConfig.agent() != null ? stageConfig.agent() : "codex";
+    var agent = stageConfig.agent() != null ? stageConfig.agent() : reviewerResolver.apply(project);
+    if (agent == null) {
+      reviewStore.completeStage(stage.id(), "failed");
+      publishEvent(project, specId, "review_stage_failed", stage.name());
+      return false;
+    }
     reviewStore.startStage(stage.id(), agent);
     publishEvent(project, specId, "review_stage_started", stage.name());
 
