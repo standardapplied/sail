@@ -13,9 +13,10 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Checks agent guardrails. The only enforced guardrail is wall-clock duration — a hard time limit
- * that Sail can check deterministically. Git activity queries are kept for informational use by
- * {@code agent status} and {@code agent report}, not as guardrail triggers.
+ * Checks agent guardrails: a hard wall-clock ceiling ({@code max_duration}) and an idle/stall
+ * window ({@code max_idle}), measured from the agent's last progress event so a long but active
+ * build is not mistaken for a hang. Git activity queries are kept for informational use by {@code
+ * agent status} and {@code agent report}, not as guardrail triggers.
  */
 public final class GuardrailChecker {
 
@@ -60,6 +61,28 @@ public final class GuardrailChecker {
       }
     }
 
+    return new GuardrailResult.Ok();
+  }
+
+  /**
+   * Checks the stall guardrail: triggers when no progress event has arrived for longer than {@code
+   * max_idle}. {@code lastProgressAt} is the time of the agent's most recent tool call or log
+   * chunk, tracked by the watcher from the event stream — so a long but active build is not
+   * flagged, only a genuinely hung agent. Returns {@link GuardrailResult.Ok} when stall detection
+   * is off ({@code max_idle} unset) or no progress has been observed yet.
+   */
+  public static GuardrailResult checkStall(Instant lastProgressAt, Guardrails guardrails) {
+    var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
+    if (maxIdle == null || lastProgressAt == null) {
+      return new GuardrailResult.Ok();
+    }
+    var idle = Duration.between(lastProgressAt, Instant.now());
+    if (idle.compareTo(maxIdle) > 0) {
+      return new GuardrailResult.Triggered(
+          "stall",
+          "No progress for " + formatDuration(idle) + " (limit: " + guardrails.maxIdle() + ")",
+          guardrails.action());
+    }
     return new GuardrailResult.Ok();
   }
 

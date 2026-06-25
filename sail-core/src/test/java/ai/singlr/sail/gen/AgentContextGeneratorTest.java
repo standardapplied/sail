@@ -419,7 +419,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void autonomousSectionAppendedWhenGuardrailsConfigured() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var agent =
         new SailYaml.Agent(
             "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
@@ -514,7 +514,7 @@ class AgentContextGeneratorTest {
         List.of(
             new SailYaml.Repo("https://github.com/test/backend.git", "backend", "main"),
             new SailYaml.Repo("https://github.com/test/frontend.git", "frontend", "main"));
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var agent =
         new SailYaml.Agent(
             "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
@@ -543,7 +543,7 @@ class AgentContextGeneratorTest {
   @Test
   void noMultiRepoGuidanceWhenSingleRepo() {
     var repos = List.of(new SailYaml.Repo("https://github.com/test/app.git", "app", "main"));
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var agent =
         new SailYaml.Agent(
             "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
@@ -570,7 +570,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void completionProtocolIncludesSecurityAuditStep() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
     var agent =
         new SailYaml.Agent(
@@ -611,7 +611,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void securityAuditStepBeforePullRequest() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
     var agent =
         new SailYaml.Agent(
@@ -653,7 +653,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void taskFileStepsStartAt6WhenSecurityAuditPresent() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", "stop");
+    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
     var agent =
         new SailYaml.Agent(

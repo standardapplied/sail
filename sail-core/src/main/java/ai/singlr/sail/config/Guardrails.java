@@ -14,15 +14,18 @@ import java.util.regex.Pattern;
 
 /**
  * Agent guardrail configuration parsed from the {@code guardrails} block inside {@code agent} in
- * sail.yaml. The only enforced guardrail is wall-clock duration — a hard time limit. Git-based
- * heuristics (idle timeout, commit burst) were removed because they produce false positives (agent
- * working but not committing) and false negatives (agent committing garbage). Quality assessment
- * happens post-task via {@code agent review} and {@code agent audit}.
+ * sail.yaml. Two time-based guardrails are enforced: a hard wall-clock ceiling ({@code
+ * max_duration}) and an idle/stall window ({@code max_idle}). The stall window measures time since
+ * the agent's last <em>progress event</em> (a tool call or log chunk) — not git activity. The
+ * earlier git-based idle timeout was removed because an agent working without committing looked
+ * idle; the agent event stream does not have that blind spot, so it distinguishes a long build from
+ * a hung agent. Quality assessment still happens post-task via {@code agent review}.
  *
  * @param maxDuration hard wall-clock stop (e.g. "4h", "90m")
+ * @param maxIdle stall window — act when no progress event arrives for this long (e.g. "15m")
  * @param action what to do on trigger: stop, snapshot-and-stop, notify
  */
-public record Guardrails(String maxDuration, String action) {
+public record Guardrails(String maxDuration, String maxIdle, String action) {
 
   private static final Set<String> VALID_ACTIONS = Set.of("stop", "snapshot-and-stop", "notify");
   private static final Pattern DURATION_PATTERN = Pattern.compile("^(\\d+)([hms])$");
@@ -33,6 +36,7 @@ public record Guardrails(String maxDuration, String action) {
    */
   public static Guardrails fromMap(Map<String, Object> map) {
     var maxDuration = (String) map.get("max_duration");
+    var maxIdle = (String) map.get("max_idle");
 
     var action = Objects.requireNonNullElse((String) map.get("action"), "stop");
     if (!VALID_ACTIONS.contains(action)) {
@@ -43,12 +47,13 @@ public record Guardrails(String maxDuration, String action) {
               + String.join(", ", VALID_ACTIONS));
     }
 
-    return new Guardrails(maxDuration, action);
+    return new Guardrails(maxDuration, maxIdle, action);
   }
 
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     if (maxDuration != null) map.put("max_duration", maxDuration);
+    if (maxIdle != null) map.put("max_idle", maxIdle);
     map.put("action", action);
     return map;
   }

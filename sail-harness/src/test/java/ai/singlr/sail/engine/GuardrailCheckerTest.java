@@ -24,7 +24,7 @@ class GuardrailCheckerTest {
   void wallClockWithinLimitReturnsOk() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);
-    var guardrails = new Guardrails("4h", "stop");
+    var guardrails = new Guardrails("4h", null, "stop");
 
     var result =
         checker.check(
@@ -37,7 +37,7 @@ class GuardrailCheckerTest {
   void wallClockExceededTriggers() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);
-    var guardrails = new Guardrails("1h", "snapshot-and-stop");
+    var guardrails = new Guardrails("1h", null, "snapshot-and-stop");
 
     var result =
         checker.check(
@@ -51,10 +51,51 @@ class GuardrailCheckerTest {
   }
 
   @Test
+  void stallTriggersWhenNoProgressBeyondTheIdleWindow() {
+    var guardrails = new Guardrails(null, "15m", "stop");
+
+    var result =
+        GuardrailChecker.checkStall(Instant.now().minus(Duration.ofMinutes(20)), guardrails);
+
+    assertInstanceOf(GuardrailChecker.GuardrailResult.Triggered.class, result);
+    var triggered = (GuardrailChecker.GuardrailResult.Triggered) result;
+    assertEquals("stall", triggered.reason());
+    assertTrue(triggered.detail().contains("limit: 15m"));
+    assertEquals("stop", triggered.action());
+  }
+
+  @Test
+  void stallIsOkWhenProgressIsRecent() {
+    var guardrails = new Guardrails(null, "15m", "stop");
+
+    var result =
+        GuardrailChecker.checkStall(Instant.now().minus(Duration.ofMinutes(1)), guardrails);
+
+    assertInstanceOf(GuardrailChecker.GuardrailResult.Ok.class, result);
+  }
+
+  @Test
+  void stallDetectionIsOffWhenMaxIdleUnset() {
+    var guardrails = new Guardrails("4h", null, "stop");
+
+    var result = GuardrailChecker.checkStall(Instant.now().minus(Duration.ofHours(5)), guardrails);
+
+    assertInstanceOf(GuardrailChecker.GuardrailResult.Ok.class, result);
+  }
+
+  @Test
+  void stallIsOkWhenNoProgressHasBeenObservedYet() {
+    var guardrails = new Guardrails(null, "15m", "stop");
+
+    assertInstanceOf(
+        GuardrailChecker.GuardrailResult.Ok.class, GuardrailChecker.checkStall(null, guardrails));
+  }
+
+  @Test
   void noMaxDurationConfiguredReturnsOk() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);
-    var guardrails = new Guardrails(null, "stop");
+    var guardrails = new Guardrails(null, null, "stop");
 
     var result =
         checker.check(
@@ -67,7 +108,7 @@ class GuardrailCheckerTest {
   void notifyActionPreserved() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);
-    var guardrails = new Guardrails("1h", "notify");
+    var guardrails = new Guardrails("1h", null, "notify");
 
     var result =
         checker.check(
@@ -113,7 +154,7 @@ class GuardrailCheckerTest {
   void checkDoesNotQueryGit() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);
-    var guardrails = new Guardrails("4h", "stop");
+    var guardrails = new Guardrails("4h", null, "stop");
 
     checker.check(CONTAINER, guardrails, Instant.now().minusSeconds(300), List.of(REPO));
 

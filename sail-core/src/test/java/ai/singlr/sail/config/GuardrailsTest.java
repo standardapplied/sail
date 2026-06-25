@@ -6,6 +6,7 @@
 package ai.singlr.sail.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -128,5 +129,22 @@ class GuardrailsTest {
         assertThrows(
             IllegalArgumentException.class, () -> Guardrails.parseDuration("2562047788015216h"));
     assertTrue(ex.getMessage().contains("too large"));
+  }
+
+  @Test
+  void maxIdleRoundTripsThroughMaps() {
+    var guardrails =
+        Guardrails.fromMap(Map.of("max_duration", "4h", "max_idle", "15m", "action", "notify"));
+
+    assertEquals("15m", guardrails.maxIdle());
+    assertEquals("15m", guardrails.toMap().get("max_idle"));
+  }
+
+  @Test
+  void maxIdleIsOmittedFromTheMapWhenUnset() {
+    var guardrails = Guardrails.fromMap(Map.of("max_duration", "4h"));
+
+    assertNull(guardrails.maxIdle());
+    assertFalse(guardrails.toMap().containsKey("max_idle"));
   }
 }
