@@ -74,14 +74,6 @@ public record SecurityAudit(boolean enabled, String auditor) {
       }
       return auditor;
     }
-    if (installList == null || installList.isEmpty()) {
-      return null;
-    }
-    for (var agent : installList) {
-      if (!agent.equals(primaryType)) {
-        return agent;
-      }
-    }
-    return primaryType;
+    return AgentRoster.reviewer(primaryType, installList);
   }
 }
