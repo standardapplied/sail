@@ -780,6 +780,24 @@ class SailApiOperationsTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void agentReportIncludesSpecsFromDatabase() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            store -> seedSpec(store, "search", "Add search", "done", List.of(), "Do search"));
+
+    var result = operations.agentReport("acme");
+
+    var specs = (List<Map<String, Object>>) get(result, "specs");
+    assertEquals(1, specs.size());
+    assertEquals("search", specs.getFirst().get("id"));
+  }
+
+  @Test
   void agentReportMapsReporterFailure() throws Exception {
     var operations =
         operations(
