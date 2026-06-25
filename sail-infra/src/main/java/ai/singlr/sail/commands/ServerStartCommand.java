@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.EventBus;
+import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.ServerConnectionConfig;
@@ -16,6 +17,7 @@ import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
@@ -28,6 +30,7 @@ import ai.singlr.sail.store.ExpiredRowSweeper;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
@@ -143,6 +146,13 @@ public final class ServerStartCommand implements Runnable {
     var operations =
         new SailApiOperations(
             new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR, bus, persister, specStore);
+    var reviewController =
+        ReviewWiring.controller(
+            specStore,
+            new ReviewStore(db),
+            bus,
+            ServerStartCommand::loadProjectYaml,
+            new ShellExecutor(false));
 
     var webauthn = resolveWebauthn();
     var configured = webauthn.isConfigured();
@@ -166,7 +176,8 @@ public final class ServerStartCommand implements Runnable {
                 persister,
                 SailPaths.apiSocketPath(),
                 passkeyHandler,
-                specStore);
+                specStore,
+                reviewController);
         var sweeper = new ExpiredRowSweeper(dbPath)) {
       server.start();
       sweeper.start();
@@ -214,6 +225,16 @@ public final class ServerStartCommand implements Runnable {
         new WebauthnCredentialStore(db),
         new AuthSessionStore(db),
         new PendingChallengeStore(db));
+  }
+
+  /** Loads a project's {@code sail.yaml}, or {@code null} when it is missing or unreadable. */
+  private static SailYaml loadProjectYaml(String project) {
+    try {
+      return SailYaml.fromMap(
+          YamlUtil.parseFile(SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR)));
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private static boolean isLoopback(String host) {

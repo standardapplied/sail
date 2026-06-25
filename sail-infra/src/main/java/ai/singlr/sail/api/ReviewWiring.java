@@ -8,6 +8,9 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.AgentRoster;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.SpecStore;
 import java.util.function.Function;
 
 /**
@@ -18,9 +21,29 @@ import java.util.function.Function;
  * reviewed by the project's roster reviewer ({@link AgentRoster#reviewer}, i.e. the other installed
  * agent when there is one, else the coder itself in a fresh session).
  */
-final class ReviewWiring {
+public final class ReviewWiring {
 
   private ReviewWiring() {}
+
+  /**
+   * Assembles the production review pipeline controller: the two roster-aware resolvers over {@code
+   * projectLoader}, and a {@link ContainerReviewAgentRunner} that launches reviewers in the
+   * container over {@code shell}.
+   */
+  public static ReviewPipelineController controller(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      Function<String, SailYaml> projectLoader,
+      ShellExec shell) {
+    return new ReviewPipelineController(
+        specStore,
+        reviewStore,
+        configResolver(projectLoader),
+        reviewerResolver(projectLoader),
+        new ContainerReviewAgentRunner(shell),
+        eventBus);
+  }
 
   /** Resolves a project's review pipeline: its configured one, or the mandatory default. */
   static Function<String, ReviewPipelineConfig> configResolver(Function<String, SailYaml> loader) {

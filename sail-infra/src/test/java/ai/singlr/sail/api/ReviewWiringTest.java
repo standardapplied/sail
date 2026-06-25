@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.config.SailYaml;
@@ -78,5 +79,13 @@ class ReviewWiringTest {
   void reviewerResolverIsNullWhenNoAgentConfigured() {
     assertNull(ReviewWiring.reviewerResolver(p -> yaml(null)).apply("acme"));
     assertNull(ReviewWiring.reviewerResolver(p -> null).apply("acme"));
+  }
+
+  @Test
+  void controllerFactoryAssemblesAReviewPipelineController() {
+    try (var controller = ReviewWiring.controller(null, null, null, p -> null, null)) {
+      assertNotNull(controller);
+      assertEquals("review-pipeline", controller.name());
+    }
   }
 }

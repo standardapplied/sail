@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -130,6 +131,31 @@ class ApiCoverageEdgesTest {
               tmp.resolve("api.sock"),
               null,
               new SpecStore(db))) {
+        assertSame(bus, server.eventBus());
+      }
+    }
+  }
+
+  @Test
+  void sailApiServerWiresTheReviewPipelineControllerWhenPresent(@TempDir Path tmp)
+      throws Exception {
+    try (var bus = new EventBus();
+        var db = Sqlite.open(tmp.resolve("control.db"))) {
+      new SchemaManager(db).migrate();
+      var controller =
+          ReviewWiring.controller(new SpecStore(db), new ReviewStore(db), bus, p -> null, null);
+      try (var server =
+          new SailApiServer(
+              "127.0.0.1",
+              0,
+              new SailApiOperations(),
+              new FixedTokenTestAuth("tok"),
+              bus,
+              null,
+              tmp.resolve("api.sock"),
+              null,
+              new SpecStore(db),
+              controller)) {
         assertSame(bus, server.eventBus());
       }
     }

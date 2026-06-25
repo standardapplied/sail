@@ -25,6 +25,8 @@ public final class SailApiServer implements AutoCloseable {
   private final EventBus.Subscription persisterSubscription;
   private final EventBus.Subscription webhookSubscription;
   private final EventBus.Subscription specLifecycleSubscription;
+  private final EventBus.Subscription reviewSubscription;
+  private final ReviewPipelineController reviewController;
   private final SseHandler sseHandler;
   private final LocalApiSocket socketListener;
 
@@ -128,9 +130,7 @@ public final class SailApiServer implements AutoCloseable {
     this(host, port, operations, auth, eventBus, auditSubscriber, socketPath, passkeyHandler, null);
   }
 
-  /**
-   * Full constructor; {@code specStore} wires the DB-backed spec-lifecycle reactor when present.
-   */
+  /** Backwards-compatible full constructor without a review pipeline controller. */
   public SailApiServer(
       String host,
       int port,
@@ -142,14 +142,49 @@ public final class SailApiServer implements AutoCloseable {
       HttpHandler passkeyHandler,
       SpecStore specStore)
       throws IOException {
+    this(
+        host,
+        port,
+        operations,
+        auth,
+        eventBus,
+        auditSubscriber,
+        socketPath,
+        passkeyHandler,
+        specStore,
+        null);
+  }
+
+  /**
+   * Full control-plane constructor. {@code specStore} wires the spec-lifecycle reactor and {@code
+   * reviewController} wires the review pipeline. When the review controller is present it owns the
+   * {@code in_progress -> review} transition (and the review that follows), so the lifecycle
+   * reactor — which only performs that transition — is not also subscribed; exactly one handler
+   * advances a stopped agent's spec.
+   */
+  public SailApiServer(
+      String host,
+      int port,
+      ApiOperations operations,
+      ApiAuth auth,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      Path socketPath,
+      HttpHandler passkeyHandler,
+      SpecStore specStore,
+      ReviewPipelineController reviewController)
+      throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
     this.persisterSubscription =
         eventBus != null && auditSubscriber != null ? eventBus.subscribe(auditSubscriber) : null;
     this.webhookSubscription =
         eventBus != null ? eventBus.subscribe(WebhookReactor.withDefaultResolver()) : null;
+    this.reviewController = reviewController;
+    this.reviewSubscription =
+        eventBus != null && reviewController != null ? eventBus.subscribe(reviewController) : null;
     this.specLifecycleSubscription =
-        eventBus != null && specStore != null
+        eventBus != null && specStore != null && reviewController == null
             ? eventBus.subscribe(new SpecLifecycleReactor(specStore))
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
@@ -208,6 +243,12 @@ public final class SailApiServer implements AutoCloseable {
   public void close() {
     if (socketListener != null) {
       socketListener.close();
+    }
+    if (reviewSubscription != null) {
+      reviewSubscription.close();
+    }
+    if (reviewController != null) {
+      reviewController.close();
     }
     if (specLifecycleSubscription != null) {
       specLifecycleSubscription.close();
