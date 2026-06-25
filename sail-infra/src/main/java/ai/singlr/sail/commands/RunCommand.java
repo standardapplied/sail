@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
@@ -38,7 +39,6 @@ import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Unified harness entry point. Regenerates agent context from sail.yaml, then launches the
@@ -94,7 +94,7 @@ public final class RunCommand implements Runnable {
       defaultValue = "sail.yaml")
   private String file;
 
-  @Spec private CommandSpec spec;
+  @picocli.CommandLine.Spec private CommandSpec spec;
 
   @Override
   public void run() {
@@ -173,19 +173,7 @@ public final class RunCommand implements Runnable {
         if (nextSpec != null) {
           var specBody =
               store.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-          var description = !specBody.isBlank() ? specBody : nextSpec.title();
-          task =
-              "Your current spec: \""
-                  + nextSpec.title()
-                  + "\" (id: "
-                  + nextSpec.id()
-                  + ").\n\n"
-                  + description
-                  + "\n\nWhen complete, run `sail spec status "
-                  + name
-                  + " "
-                  + nextSpec.id()
-                  + " done`. Then pick up the next pending spec and continue working.";
+          task = specTask(name, nextSpec, specBody);
           if (!json) {
             System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
             System.out.println(Ansi.AUTO.string("  @|faint " + nextSpec.title() + "|@"));
@@ -263,6 +251,25 @@ public final class RunCommand implements Runnable {
     } else {
       launchInteractive(sshUser, workDir, fullPermissions, agentCli);
     }
+  }
+
+  /**
+   * Builds the agent task prompt for a pending spec: its title and id, the body (falling back to
+   * the title when empty), and the instruction to mark it done and pick up the next one.
+   */
+  static String specTask(String project, Spec spec, String body) {
+    var description = !body.isBlank() ? body : spec.title();
+    return "Your current spec: \""
+        + spec.title()
+        + "\" (id: "
+        + spec.id()
+        + ").\n\n"
+        + description
+        + "\n\nWhen complete, run `sail spec status "
+        + project
+        + " "
+        + spec.id()
+        + " done`. Then pick up the next pending spec and continue working.";
   }
 
   private void launchBackground(

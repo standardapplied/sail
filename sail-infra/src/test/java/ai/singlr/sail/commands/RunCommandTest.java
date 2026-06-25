@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SpecStatus;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -17,6 +19,7 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -146,5 +149,27 @@ class RunCommandTest {
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
     assertTrue(errOutput.contains("does not exist"));
+  }
+
+  @Test
+  void specTaskIncludesSpecDetailsAndDoneInstruction() {
+    var spec = new Spec("auth", "Add auth", SpecStatus.PENDING, null, List.of(), null);
+
+    var task = RunCommand.specTask("acme", spec, "Implement the login flow.");
+
+    assertTrue(task.contains("Add auth"));
+    assertTrue(task.contains("(id: auth)"));
+    assertTrue(task.contains("Implement the login flow."));
+    assertTrue(task.contains("sail spec status acme auth done"));
+  }
+
+  @Test
+  void specTaskFallsBackToTitleWhenBodyIsBlank() {
+    var spec = new Spec("auth", "Add auth", SpecStatus.PENDING, null, List.of(), null);
+
+    var task = RunCommand.specTask("acme", spec, "   ");
+
+    assertTrue(task.contains("Add auth"));
+    assertTrue(task.contains("sail spec status acme auth done"));
   }
 }

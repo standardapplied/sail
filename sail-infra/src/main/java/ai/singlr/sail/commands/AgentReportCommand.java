@@ -12,11 +12,11 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ControlPlaneDb;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
@@ -44,6 +44,16 @@ public final class AgentReportCommand implements Runnable {
   private String file;
 
   @picocli.CommandLine.Spec private CommandSpec spec;
+
+  private final ControlPlaneDb controlPlaneDb;
+
+  public AgentReportCommand() {
+    this(ControlPlaneDb.DEFAULT);
+  }
+
+  AgentReportCommand(ControlPlaneDb controlPlaneDb) {
+    this.controlPlaneDb = controlPlaneDb;
+  }
 
   @Override
   public void run() {
@@ -82,8 +92,8 @@ public final class AgentReportCommand implements Runnable {
     Banner.printAgentReport(name, report, System.out, Ansi.AUTO);
   }
 
-  private static List<Spec> projectSpecs(String project) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+  List<Spec> projectSpecs(String project) {
+    try (var db = controlPlaneDb.open()) {
       return new SpecStore(db).projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
