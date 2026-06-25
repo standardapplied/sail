@@ -137,8 +137,11 @@ public final class AgentWatchCommand implements Runnable {
       Instant startedAt)
       throws Exception {
     var guardrailFired = false;
+    var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
+    var lastProgressAt = startedAt;
     while (true) {
-      var waitMs = waitMsUntil(deadline, guardrailFired);
+      var stallDeadline = maxIdle != null ? lastProgressAt.plus(maxIdle) : Instant.MAX;
+      var waitMs = waitMsUntil(earlier(deadline, stallDeadline), guardrailFired);
       Event event = waitMs <= 0 ? null : queue.poll(waitMs, TimeUnit.MILLISECONDS);
 
       if (event != null && isAgentExit(event)) {
@@ -146,6 +149,9 @@ public final class AgentWatchCommand implements Runnable {
         return;
       }
       if (event != null) {
+        if (isProgressEvent(event)) {
+          lastProgressAt = DateTimeUtils.now();
+        }
         continue;
       }
 
@@ -153,6 +159,9 @@ public final class AgentWatchCommand implements Runnable {
         continue;
       }
       var result = checker.check(name, guardrails, startedAt, repoPaths);
+      if (result instanceof GuardrailChecker.GuardrailResult.Ok) {
+        result = GuardrailChecker.checkStall(lastProgressAt, guardrails);
+      }
       if (!(result instanceof GuardrailChecker.GuardrailResult.Triggered triggered)) {
         continue;
       }
@@ -225,6 +234,19 @@ public final class AgentWatchCommand implements Runnable {
     var type = event.type();
     return Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(type)
         || Event.WellKnownTypes.AGENT_SESSION_COMPLETED.equals(type);
+  }
+
+  /** Whether an event signals the agent is actively working — resets the stall timer. */
+  static boolean isProgressEvent(Event event) {
+    var type = event.type();
+    return Event.WellKnownTypes.AGENT_TOOL_STARTED.equals(type)
+        || Event.WellKnownTypes.AGENT_TOOL_FINISHED.equals(type)
+        || Event.WellKnownTypes.AGENT_LOG_CHUNK.equals(type);
+  }
+
+  /** The earlier of two instants. */
+  static Instant earlier(Instant a, Instant b) {
+    return a.isBefore(b) ? a : b;
   }
 
   private void announceStart(Guardrails guardrails, Instant deadline) {

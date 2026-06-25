@@ -134,6 +134,27 @@ class AgentWatchCommandTest {
     assertFalse(AgentWatchCommand.isAgentExit(snapshot));
   }
 
+  @Test
+  void isProgressEventDetectsToolAndLogActivity() {
+    assertTrue(
+        AgentWatchCommand.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED)));
+    assertTrue(
+        AgentWatchCommand.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_FINISHED)));
+    assertTrue(
+        AgentWatchCommand.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_LOG_CHUNK)));
+    assertFalse(
+        AgentWatchCommand.isProgressEvent(sampleEvent(Event.WellKnownTypes.SNAPSHOT_CREATED)));
+  }
+
+  @Test
+  void earlierReturnsTheSoonerInstant() {
+    var soon = java.time.Instant.now();
+    var later = soon.plusSeconds(3600);
+
+    assertEquals(soon, AgentWatchCommand.earlier(soon, later));
+    assertEquals(soon, AgentWatchCommand.earlier(later, soon));
+  }
+
   private static Event sampleEvent(String type) {
     return Event.of("test-project", "test-spec", type, "claude-code", "host-01", Map.of());
   }
