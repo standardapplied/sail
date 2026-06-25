@@ -26,6 +26,8 @@ public final class ApiSpecDeleteCommand implements Runnable {
   @Option(names = "--force", description = "Skip confirmation.")
   private boolean force;
 
+  @Mixin private SyncOptions syncOptions;
+
   @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -39,6 +41,7 @@ public final class ApiSpecDeleteCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
 
     if (!force && !json) {

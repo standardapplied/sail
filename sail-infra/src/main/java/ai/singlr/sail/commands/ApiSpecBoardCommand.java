@@ -23,6 +23,8 @@ public final class ApiSpecBoardCommand implements Runnable {
       description = "Scope the board to one client project. Inferred from cwd's sail.yaml.")
   private String project;
 
+  @Mixin private SyncOptions syncOptions;
+
   @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -36,6 +38,7 @@ public final class ApiSpecBoardCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
     var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
     var path =

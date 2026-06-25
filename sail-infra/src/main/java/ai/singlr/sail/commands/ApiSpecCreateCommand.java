@@ -61,6 +61,8 @@ public final class ApiSpecCreateCommand implements Runnable {
   @Option(names = "--repos", description = "Comma-separated repo names.")
   private String repos;
 
+  @Mixin private SyncOptions syncOptions;
+
   @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -74,6 +76,7 @@ public final class ApiSpecCreateCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
     var resolvedProject = project != null ? project : projectFromCwd();

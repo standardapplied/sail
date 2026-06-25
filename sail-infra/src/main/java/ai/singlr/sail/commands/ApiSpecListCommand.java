@@ -43,6 +43,8 @@ public final class ApiSpecListCommand implements Runnable {
       description = "Search by ID or title.")
   private String query;
 
+  @Mixin private SyncOptions syncOptions;
+
   @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -57,6 +59,7 @@ public final class ApiSpecListCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
     var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {

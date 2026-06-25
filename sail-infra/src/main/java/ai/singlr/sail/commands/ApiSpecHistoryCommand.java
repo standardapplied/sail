@@ -28,6 +28,8 @@ public final class ApiSpecHistoryCommand implements Runnable {
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
+  @Mixin private SyncOptions syncOptions;
+
   @Mixin private ConnectionOptions connection;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -42,6 +44,7 @@ public final class ApiSpecHistoryCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {

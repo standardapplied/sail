@@ -100,6 +100,8 @@ public final class DispatchCommand implements Runnable {
       defaultValue = "sail.yaml")
   private String file;
 
+  @picocli.CommandLine.Mixin private SyncOptions syncOptions;
+
   @picocli.CommandLine.Spec private CommandSpec commandSpec;
 
   private SailEventPublisher eventPublisher;
@@ -111,6 +113,7 @@ public final class DispatchCommand implements Runnable {
 
   private void execute() throws Exception {
     NameValidator.requireValidProjectName(name);
+    SpecSync.freshenIfNode(syncOptions.noSync());
     if (restart && specId == null) {
       throw new IllegalArgumentException(
           "--restart requires --spec to identify which spec to restart.");
@@ -156,6 +159,7 @@ public final class DispatchCommand implements Runnable {
       printNoSpecs();
       return;
     }
+    SpecSync.freshenIfNode(syncOptions.noSync());
     var resolution = prepared.resolution();
     var nextSpec = resolution.spec();
     var specBody = prepared.body();
