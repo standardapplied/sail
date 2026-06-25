@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.SessionStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -113,23 +114,33 @@ public final class AgentReporter {
    * @param containerName the Incus container name
    * @param config the project's SailYaml config
    */
-  public Report generate(String containerName, SailYaml config, List<Spec> specs)
+  public Report generate(
+      String containerName, SailYaml config, List<Spec> specs, SessionStore.SessionRow session)
       throws IOException, InterruptedException, TimeoutException {
-    return generate(containerName, config, specs, SailPaths.projectDir(containerName));
+    return generate(containerName, config, specs, session, SailPaths.projectDir(containerName));
   }
 
   /**
    * Generates a full report with an explicit state directory (enables testing without /etc/sail).
-   * Specs are supplied by the caller from the control-plane database — the source of truth — never
-   * scanned from the container filesystem.
+   * Specs come from the control-plane database. When {@code session} is present it is the source of
+   * truth for the run's start and end times — so the duration is the agent's real run-time, not
+   * wall-clock since dispatch (the agent-session file records only the start).
    */
-  Report generate(String containerName, SailYaml config, List<Spec> specs, Path stateDir)
+  Report generate(
+      String containerName,
+      SailYaml config,
+      List<Spec> specs,
+      SessionStore.SessionRow session,
+      Path stateDir)
       throws IOException, InterruptedException, TimeoutException {
 
     var agentSession = new AgentSession(shell);
     var info = agentSession.queryStatus(containerName);
     var running = info != null && info.running();
-    var startedAt = info != null ? info.startedAt() : null;
+    var startedAt =
+        session != null && session.startedAt() != null
+            ? session.startedAt()
+            : info != null ? info.startedAt() : null;
     var branch = info != null ? info.branch() : "";
 
     var commitCount = 0;
@@ -200,6 +211,10 @@ public final class AgentReporter {
       sessionStatus = "Completed";
     } else {
       sessionStatus = "No session";
+    }
+
+    if (session != null && session.completedAt() != null) {
+      endedAt = session.completedAt();
     }
 
     String durationStr = null;

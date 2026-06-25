@@ -387,7 +387,10 @@ public final class SailApiOperations implements ApiOperations {
     var loaded = loadProject(project);
     try {
       var specs = specStore != null ? specStore.projectSpecs(project) : List.<Spec>of();
-      return agentReportView(new AgentReporter(shell).generate(project, loaded.config(), specs));
+      var session =
+          sessionStore != null ? sessionStore.latestForProject(project).orElse(null) : null;
+      return agentReportView(
+          new AgentReporter(shell).generate(project, loaded.config(), specs, session));
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_REPORT_FAILED, "Failed to generate agent report.", e);
     }

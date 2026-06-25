@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.SessionStore;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
@@ -46,7 +47,7 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, specs, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
 
     assertEquals(CONTAINER, report.name());
     assertEquals("Completed", report.sessionStatus());
@@ -80,7 +81,7 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
     assertEquals("Running", report.sessionStatus());
     assertEquals(5, report.commitCount());
@@ -107,7 +108,7 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
     assertEquals("Killed by guardrail", report.sessionStatus());
     assertTrue(report.guardrailTriggered());
@@ -127,7 +128,7 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
     assertEquals("No session", report.sessionStatus());
     assertFalse(report.guardrailTriggered());
@@ -154,7 +155,7 @@ class AgentReporterTest {
 
     var config = buildConfigNoSpecsDir();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
     assertEquals("Completed", report.sessionStatus());
     assertTrue(report.specs().isEmpty());
@@ -186,7 +187,7 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
     assertEquals("Rolled back", report.sessionStatus());
     assertTrue(report.rolledBack());
@@ -216,12 +217,45 @@ class AgentReporterTest {
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, specs, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
 
     assertEquals(2, report.specs().size());
     assertEquals("Build auth", report.specs().getFirst().title());
     assertEquals("Update docs", report.specs().get(1).title());
     assertEquals(List.of("auth"), report.specs().get(1).dependsOn());
+  }
+
+  @Test
+  void durationUsesTheRealStartAndEndFromTheDatabaseSession(@TempDir java.nio.file.Path stateDir)
+      throws Exception {
+    var start = Instant.now().minusSeconds(7200);
+    var end = Instant.now().minusSeconds(3600);
+    var session =
+        new SessionStore.SessionRow(
+            "s1",
+            CONTAINER,
+            "auth",
+            "claude-code",
+            "feat/auth",
+            "do it",
+            123,
+            "completed",
+            start.toString(),
+            end.toString());
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("cat /home/dev/.sail/agent.pid", "No such file")
+            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
+            .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
+
+    var report =
+        new AgentReporter(shell)
+            .generate(CONTAINER, buildConfig("specs"), List.of(), session, stateDir);
+
+    assertEquals(start.toString(), report.startedAt());
+    assertEquals(end.toString(), report.endedAt());
+    assertTrue(report.duration().startsWith("1h"), "duration must be run-time, not since-dispatch");
   }
 
   @Test

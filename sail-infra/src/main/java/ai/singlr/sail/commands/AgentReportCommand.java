@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.ControlPlaneDb;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Files;
 import java.util.List;
@@ -82,7 +83,7 @@ public final class AgentReportCommand implements Runnable {
     var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
 
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(name, config, projectSpecs(name));
+    var report = reporter.generate(name, config, projectSpecs(name), latestSession(name));
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));
@@ -97,6 +98,14 @@ public final class AgentReportCommand implements Runnable {
       return new SpecStore(db).projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
+    }
+  }
+
+  SessionStore.SessionRow latestSession(String project) {
+    try (var db = controlPlaneDb.open()) {
+      return new SessionStore(db).latestForProject(project).orElse(null);
+    } catch (Exception ignored) {
+      return null;
     }
   }
 }
