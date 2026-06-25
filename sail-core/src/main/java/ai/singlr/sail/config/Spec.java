@@ -16,13 +16,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * A single spec representing one unit of work. Each spec lives in its own directory inside the
- * {@code specs/} folder, containing a {@code spec.yaml} (this record) and optionally a {@code
- * spec.md} with the detailed description.
+ * A single spec representing one unit of work. Specs are stored as rows in the control-plane
+ * database — the shared, synced source of truth — and managed through the {@code spec} CLI; this
+ * record is their in-memory form, with the detailed body held separately.
  *
- * @param id directory name and unique identifier
- * @param project client project this spec belongs to (nullable when loaded from legacy file-based
- *     specs that pre-date the project column; control-plane callers must always supply it)
+ * @param id unique identifier
+ * @param project client project this spec belongs to (nullable when loaded from legacy specs that
+ *     pre-date the project column; control-plane callers must always supply it)
  * @param title short human-readable title
  * @param status lifecycle state (see {@link SpecStatus})
  * @param assignee engineer responsible (nullable, matches git identity)

@@ -310,27 +310,6 @@ public final class ProjectApplier {
   }
 
   /**
-   * Creates the specs scaffold directory inside the container when {@code agent.specs_dir} is
-   * configured and the directory does not already exist.
-   */
-  public ApplyResult applySpecsScaffold(String name, SailYaml config)
-      throws IOException, InterruptedException, TimeoutException {
-    if (config.agent() == null || config.agent().specsDir() == null) {
-      return ApplyResult.empty();
-    }
-    var sshUser = config.sshUser();
-    var specsPath = "/home/" + sshUser + "/workspace/" + config.agent().specsDir();
-    var check = shell.exec(ContainerExec.asDevUser(name, List.of("test", "-d", specsPath)));
-    if (check.ok()) {
-      out.println("  [skip] Specs directory '" + config.agent().specsDir() + "' already exists");
-      return new ApplyResult(0, 0, 1, List.of());
-    }
-    out.println("  [add] Creating specs scaffold at " + config.agent().specsDir() + "/...");
-    shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", specsPath)));
-    return new ApplyResult(1, 0, 0, List.of());
-  }
-
-  /**
    * Upgrades the container cleanup cron from the legacy {@code podman system prune} to the robust
    * {@code cleanup-containers.sh} script that identifies stray containers by restart policy. Also
    * installs the manual agent cleanup helper. Idempotent — skips if already upgraded.

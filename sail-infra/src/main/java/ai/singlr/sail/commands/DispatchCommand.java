@@ -442,8 +442,8 @@ public final class DispatchCommand implements Runnable {
    * Publishes a lifecycle {@link Event} to the running sail-api so SSE subscribers, webhook
    * reactors, and the audit JSONL all see the same dispatch story regardless of which surface (CLI
    * or HTTP) kicked it off. Failures are non-fatal: a sail-api outage must not block the dispatch
-   * itself, since {@code spec.yaml} + {@code audit.jsonl} are the source of truth. Dry-run skips
-   * publishing entirely because no real state change happened.
+   * itself, since the control-plane database (the spec's status is already persisted there) is the
+   * source of truth. Dry-run skips publishing entirely because no real state change happened.
    */
   private void publishLifecycle(String type, String specId, Map<String, Object> data) {
     if (dryRun) {

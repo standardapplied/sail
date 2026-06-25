@@ -149,10 +149,6 @@ public final class ProjectApplyCommand implements Runnable {
     totalAdded += ctxResult.added();
     totalSkipped += ctxResult.skipped();
 
-    var specsResult = applier.applySpecsScaffold(name, config);
-    totalAdded += specsResult.added();
-    totalSkipped += specsResult.skipped();
-
     var cleanupResult = applier.applyCleanupCron(name, sshUser);
     totalAdded += cleanupResult.added();
     totalSkipped += cleanupResult.skipped();

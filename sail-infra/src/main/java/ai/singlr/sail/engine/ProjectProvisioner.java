@@ -81,7 +81,7 @@ public final class ProjectProvisioner {
       configurePruneCron(config);
       installAgentTools(config);
       generateAgentContext(config);
-      createSpecsScaffold(config);
+      recordSpecsPhase();
       writeProjectState(config);
       tracker.cleanup();
     } catch (Exception e) {
@@ -1041,33 +1041,14 @@ public final class ProjectProvisioner {
     stepDone(18, summary.toString());
   }
 
-  private void createSpecsScaffold(SailYaml config) throws Exception {
+  private void recordSpecsPhase() throws Exception {
     currentPhase = ProjectPhase.SPECS_SCAFFOLD_CREATED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(19, "specs scaffold already created");
+      stepSkipped(19, "specs are database-backed (no scaffold)");
       return;
     }
-
-    if (config.agent() == null || config.agent().specsDir() == null) {
-      tracker.advance(currentPhase);
-      stepSkipped(19, "no specs directory configured");
-      return;
-    }
-
-    var user = sshUser(config);
-    var specsPath = "/home/" + user + "/workspace/" + config.agent().specsDir();
-    var check = execInContainer(config.name(), List.of("test", "-d", specsPath));
-    if (check.ok()) {
-      tracker.advance(currentPhase);
-      stepSkipped(19, "specs directory already exists");
-      return;
-    }
-
-    step(19, "Creating specs scaffold...");
-    execInContainer(config.name(), List.of("mkdir", "-p", specsPath));
-    execInContainer(config.name(), List.of("chown", "-R", user + ":" + user, specsPath));
     tracker.advance(currentPhase);
-    stepDone(19, "specs scaffold created at " + config.agent().specsDir() + "/");
+    stepSkipped(19, "specs are database-backed (no scaffold)");
   }
 
   private void writeProjectState(SailYaml config) throws Exception {

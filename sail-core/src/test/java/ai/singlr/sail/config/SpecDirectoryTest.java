@@ -19,41 +19,6 @@ import org.junit.jupiter.api.Test;
 class SpecDirectoryTest {
 
   @Test
-  void parseMetadataReturnsSpec() {
-    var metadata =
-        Map.<String, Object>of(
-            "id",
-            "search",
-            "title",
-            "Add search",
-            "status",
-            "pending",
-            "depends_on",
-            List.of("auth"));
-
-    var spec = SpecDirectory.parseMetadata(metadata);
-
-    assertEquals("search", spec.id());
-    assertEquals("Add search", spec.title());
-    assertEquals(SpecStatus.PENDING, spec.status());
-    assertEquals(List.of("auth"), spec.dependsOn());
-  }
-
-  @Test
-  void generateMetadataRoundTrips() {
-    var spec =
-        new Spec("search", "Search", SpecStatus.PENDING, "alice", List.of("auth"), "feat/search");
-
-    var metadata = SpecDirectory.generateMetadata(spec);
-    var parsed = SpecDirectory.parseMetadata(metadata);
-
-    assertEquals("search", parsed.id());
-    assertEquals("alice", parsed.assignee());
-    assertEquals(List.of("auth"), parsed.dependsOn());
-    assertEquals("feat/search", parsed.branch());
-  }
-
-  @Test
   void nextReadyReturnsFirstPending() {
     var specs =
         List.of(
@@ -274,9 +239,7 @@ class SpecDirectoryTest {
 
   @Test
   void unknownStatusParsesAsDraft() {
-    var spec =
-        SpecDirectory.parseMetadata(
-            Map.<String, Object>of("id", "x", "title", "X", "status", "blocked"));
+    var spec = Spec.fromMap(Map.<String, Object>of("id", "x", "title", "X", "status", "blocked"));
 
     assertEquals(SpecStatus.DRAFT, spec.status());
     assertEquals(1, SpecDirectory.statusCounts(List.of(spec)).get("draft"));

@@ -7,7 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -42,7 +41,7 @@ public final class AgentReporter {
    * @param endedAt approximate end time (nullable if still running)
    * @param duration human-readable duration
    * @param branch git branch used
-   * @param specs per-spec detail (empty if no specs directory)
+   * @param specs the project's specs from the control-plane database (empty if none)
    * @param commitCount total commits since launch
    * @param lastCommitMinutesAgo minutes since last commit (-1 if unknown)
    * @param guardrailTriggered whether a guardrail was triggered
@@ -114,17 +113,17 @@ public final class AgentReporter {
    * @param containerName the Incus container name
    * @param config the project's SailYaml config
    */
-  @SuppressWarnings("unchecked")
-  public Report generate(String containerName, SailYaml config)
+  public Report generate(String containerName, SailYaml config, List<Spec> specs)
       throws IOException, InterruptedException, TimeoutException {
-    return generate(containerName, config, SailPaths.projectDir(containerName));
+    return generate(containerName, config, specs, SailPaths.projectDir(containerName));
   }
 
   /**
    * Generates a full report with an explicit state directory (enables testing without /etc/sail).
+   * Specs are supplied by the caller from the control-plane database — the source of truth — never
+   * scanned from the container filesystem.
    */
-  @SuppressWarnings("unchecked")
-  Report generate(String containerName, SailYaml config, Path stateDir)
+  Report generate(String containerName, SailYaml config, List<Spec> specs, Path stateDir)
       throws IOException, InterruptedException, TimeoutException {
 
     var agentSession = new AgentSession(shell);
@@ -132,14 +131,6 @@ public final class AgentReporter {
     var running = info != null && info.running();
     var startedAt = info != null ? info.startedAt() : null;
     var branch = info != null ? info.branch() : "";
-
-    var specs = List.<Spec>of();
-    if (config.agent() != null && config.agent().specsDir() != null) {
-      try {
-        specs = readSpecs(containerName, config);
-      } catch (Exception ignored) {
-      }
-    }
 
     var commitCount = 0;
     var lastCommitMinutesAgo = -1L;
@@ -235,38 +226,6 @@ public final class AgentReporter {
         guardrailAction,
         rolledBack,
         rollbackSnapshot);
-  }
-
-  private List<Spec> readSpecs(String containerName, SailYaml config)
-      throws IOException, InterruptedException, TimeoutException {
-    var specsDir = "/home/" + config.sshUser() + "/workspace/" + config.agent().specsDir();
-    var findResult =
-        shell.exec(
-            ContainerExec.asDevUser(
-                containerName,
-                List.of(
-                    "find",
-                    specsDir,
-                    "-mindepth",
-                    "2",
-                    "-maxdepth",
-                    "2",
-                    "-name",
-                    "spec.yaml",
-                    "-print")));
-    if (!findResult.ok() || findResult.stdout().isBlank()) {
-      return List.of();
-    }
-    var specs = new java.util.ArrayList<Spec>();
-    var paths = findResult.stdout().lines().filter(line -> !line.isBlank()).sorted().toList();
-    for (var path : paths) {
-      var catResult = shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", path)));
-      if (!catResult.ok()) {
-        throw new IOException("Failed to read spec metadata: " + catResult.stderr());
-      }
-      specs.add(SpecDirectory.parseMetadata(YamlUtil.parseMap(catResult.stdout())));
-    }
-    return List.copyOf(specs);
   }
 
   private static Instant parseInstantSafe(String value) {

@@ -833,68 +833,6 @@ class ProjectApplierTest {
   }
 
   @Test
-  void applySpecsScaffoldCreatesWhenDirDoesNotExist() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onFail("test -d /home/dev/workspace/specs", "not found")
-            .onOk("mkdir")
-            .onOk("incus file push")
-            .onOk("chown");
-    var applier = applier(shell);
-    var config = configWithSpecsDir("specs");
-
-    var result = applier.applySpecsScaffold(CONTAINER, config);
-
-    assertEquals(1, result.added());
-    assertEquals(0, result.skipped());
-    assertTrue(
-        shell.invocations().stream().anyMatch(c -> c.contains("mkdir") && c.contains("specs")));
-    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("incus file push")));
-  }
-
-  @Test
-  void applySpecsScaffoldSkipsWhenDirExists() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("test -d /home/dev/workspace/specs");
-    var applier = applier(shell);
-    var config = configWithSpecsDir("specs");
-
-    var result = applier.applySpecsScaffold(CONTAINER, config);
-
-    assertEquals(0, result.added());
-    assertEquals(1, result.skipped());
-  }
-
-  @Test
-  void applySpecsScaffoldReturnsEmptyWhenSpecsDirNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
-    var applier = applier(shell);
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
-    var config =
-        new SailYaml(
-            "test",
-            null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var result = applier.applySpecsScaffold(CONTAINER, config);
-
-    assertEquals(0, result.added());
-    assertEquals(0, result.skipped());
-    assertTrue(shell.invocations().isEmpty());
-  }
-
-  @Test
   void applyCleanupCronInstallsScriptsAndCron() throws Exception {
     var shell =
         new ScriptedShellExecutor()
@@ -1002,26 +940,6 @@ class ProjectApplierTest {
     var agent =
         new SailYaml.Agent(
             agentType, true, "sail/", true, null, null, null, "specs", null, null, null);
-    return new SailYaml(
-        "test",
-        null,
-        new SailYaml.Resources(2, "4GB", "50GB"),
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        agent,
-        null,
-        null);
-  }
-
-  private static SailYaml configWithSpecsDir(String specsDir) {
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, specsDir, null, null, null);
     return new SailYaml(
         "test",
         null,

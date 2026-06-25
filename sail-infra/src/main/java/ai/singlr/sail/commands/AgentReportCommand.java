@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
@@ -14,13 +15,15 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
+import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "report",
@@ -40,7 +43,7 @@ public final class AgentReportCommand implements Runnable {
       defaultValue = "sail.yaml")
   private String file;
 
-  @Spec private CommandSpec spec;
+  @picocli.CommandLine.Spec private CommandSpec spec;
 
   @Override
   public void run() {
@@ -69,7 +72,7 @@ public final class AgentReportCommand implements Runnable {
     var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
 
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(name, config);
+    var report = reporter.generate(name, config, projectSpecs(name));
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));
@@ -77,5 +80,13 @@ public final class AgentReportCommand implements Runnable {
     }
 
     Banner.printAgentReport(name, report, System.out, Ansi.AUTO);
+  }
+
+  private static List<Spec> projectSpecs(String project) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return new SpecStore(db).projectSpecs(project);
+    } catch (Exception ignored) {
+      return List.of();
+    }
   }
 }

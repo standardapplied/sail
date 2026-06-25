@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import java.nio.file.Files;
 import java.time.Instant;
@@ -26,18 +27,10 @@ class AgentReporterTest {
   void completedSessionWithSpecs(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(3600 * 4).toString();
     var lastCommit = String.valueOf(Instant.now().minusSeconds(300).getEpochSecond());
-    var authSpecYaml =
-        """
-        id: auth
-        title: Build auth module
-        status: done
-        """;
-    var testsSpecYaml =
-        """
-        id: tests
-        title: Write tests
-        status: done
-        """;
+    var specs =
+        List.of(
+            new Spec("auth", "Build auth module", SpecStatus.DONE, null, List.of(), null),
+            new Spec("tests", "Write tests", SpecStatus.DONE, null, List.of(), null));
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
@@ -47,18 +40,13 @@ class AgentReporterTest {
                 "{\"task\":\"build auth\",\"started_at\":\""
                     + startedAt
                     + "\",\"branch\":\"sail/snap-20260302\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
-            .onOk(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "/home/dev/workspace/specs/auth/spec.yaml\n/home/dev/workspace/specs/tests/spec.yaml\n")
-            .onOk("cat /home/dev/workspace/specs/auth/spec.yaml", authSpecYaml)
-            .onOk("cat /home/dev/workspace/specs/tests/spec.yaml", testsSpecYaml)
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "18\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, stateDir);
 
     assertEquals(CONTAINER, report.name());
     assertEquals("Completed", report.sessionStatus());
@@ -88,14 +76,11 @@ class AgentReporterTest {
                     + "\",\"branch\":\"\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "5\n")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
-            .onFail(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "No such file");
+            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
 
     assertEquals("Running", report.sessionStatus());
     assertEquals(5, report.commitCount());
@@ -118,14 +103,11 @@ class AgentReporterTest {
                 "cat /home/dev/guardrail-triggered.yaml",
                 "reason: max_duration\naction: snapshot-and-stop\n")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "0\n")
-            .onOk("git -C /home/dev/workspace rev-list --count", "45\n")
-            .onFail(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "No such file");
+            .onOk("git -C /home/dev/workspace rev-list --count", "45\n");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
 
     assertEquals("Killed by guardrail", report.sessionStatus());
     assertTrue(report.guardrailTriggered());
@@ -140,15 +122,12 @@ class AgentReporterTest {
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
-            .onFail(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
 
     assertEquals("No session", report.sessionStatus());
     assertFalse(report.guardrailTriggered());
@@ -175,7 +154,7 @@ class AgentReporterTest {
 
     var config = buildConfigNoSpecsDir();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
 
     assertEquals("Completed", report.sessionStatus());
     assertTrue(report.specs().isEmpty());
@@ -203,14 +182,11 @@ class AgentReporterTest {
                     + "\",\"branch\":\"sail/snap\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
-            .onOk("git -C /home/dev/workspace rev-list --count", "10\n")
-            .onFail(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "No such file");
+            .onOk("git -C /home/dev/workspace rev-list --count", "10\n");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), stateDir);
 
     assertEquals("Rolled back", report.sessionStatus());
     assertTrue(report.rolledBack());
@@ -221,20 +197,10 @@ class AgentReporterTest {
   @Test
   void specsWithDependenciesIncluded(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(3600).toString();
-    var authSpecYaml =
-        """
-        id: auth
-        title: Build auth
-        status: done
-        """;
-    var docsSpecYaml =
-        """
-        id: docs
-        title: Update docs
-        status: pending
-        depends_on:
-          - auth
-        """;
+    var specs =
+        List.of(
+            new Spec("auth", "Build auth", SpecStatus.DONE, null, List.of(), null),
+            new Spec("docs", "Update docs", SpecStatus.PENDING, null, List.of("auth"), null));
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
@@ -244,18 +210,13 @@ class AgentReporterTest {
                 "{\"task\":\"build auth\",\"started_at\":\""
                     + startedAt
                     + "\",\"branch\":\"\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
-            .onOk(
-                "find /home/dev/workspace/specs -mindepth 2 -maxdepth 2 -name spec.yaml -print",
-                "/home/dev/workspace/specs/auth/spec.yaml\n/home/dev/workspace/specs/docs/spec.yaml\n")
-            .onOk("cat /home/dev/workspace/specs/auth/spec.yaml", authSpecYaml)
-            .onOk("cat /home/dev/workspace/specs/docs/spec.yaml", docsSpecYaml)
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "8\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig("specs");
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, stateDir);
 
     assertEquals(2, report.specs().size());
     assertEquals("Build auth", report.specs().getFirst().title());

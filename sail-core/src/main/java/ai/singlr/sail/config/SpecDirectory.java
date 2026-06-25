@@ -12,10 +12,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Parses and generates the {@code specs/} directory format used for spec-driven agent work — each
- * spec a directory with {@code spec.yaml} metadata and {@code spec.md} details. Pure
- * parsing/generation only: callers pass content strings in and receive content strings back, and
- * this class performs no file I/O itself.
+ * Spec selection and board-summary logic over a list of specs read from the control-plane database:
+ * which spec is ready to dispatch next, which are blocked by unmet dependencies, and the kanban
+ * counts. Pure functions over the given list — no file or database I/O.
  */
 public final class SpecDirectory {
 
@@ -39,14 +38,6 @@ public final class SpecDirectory {
   }
 
   private SpecDirectory() {}
-
-  public static Spec parseMetadata(Map<String, Object> metadata) {
-    return Spec.fromMap(metadata);
-  }
-
-  public static Map<String, Object> generateMetadata(Spec spec) {
-    return spec.toMap();
-  }
 
   /**
    * Returns the first pending spec whose dependencies are all done and whose assignee matches the
