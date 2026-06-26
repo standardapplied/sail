@@ -1024,7 +1024,8 @@ class BannerTest {
             null,
             null,
             false,
-            null);
+            null,
+            0);
     var out = new ByteArrayOutputStream();
     Banner.printAgentReport("acme-health", report, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -1061,6 +1062,7 @@ class BannerTest {
             "max_duration",
             "snapshot-and-stop",
             false,
+            null,
             null);
     var out = new ByteArrayOutputStream();
     Banner.printAgentReport("acme", report, new PrintStream(out), Ansi.OFF);

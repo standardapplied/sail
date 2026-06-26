@@ -73,13 +73,14 @@ public final class SessionTracker implements EventSubscriber {
   }
 
   private void handleStopped(Event event, String status) {
+    var exitCode = extractInt(event.data(), "exit_code");
     var sessionId = activeSessionsByProject.remove(event.project());
     if (sessionId != null) {
-      sessionStore.complete(sessionId, status);
+      sessionStore.complete(sessionId, status, exitCode);
     } else {
       sessionStore
           .runningForProject(event.project())
-          .ifPresent(session -> sessionStore.complete(session.id(), status));
+          .ifPresent(session -> sessionStore.complete(session.id(), status, exitCode));
     }
   }
 

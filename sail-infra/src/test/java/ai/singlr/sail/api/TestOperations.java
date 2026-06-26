@@ -262,7 +262,17 @@ class TestOperations implements ApiOperations {
   public Result<SessionListResponse> agentSessions(String project) {
     var session =
         new SessionView(
-            "s1", project, "auth", "claude-code", "feat/auth", "task", 1234, "running", "t0", null);
+            "s1",
+            project,
+            "auth",
+            "claude-code",
+            "feat/auth",
+            "task",
+            1234,
+            "running",
+            "t0",
+            null,
+            null);
     return Result.success(new SessionListResponse(project, List.of(session)));
   }
 }

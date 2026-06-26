@@ -304,7 +304,8 @@ public final class SchemaManager {
           "INSERT INTO spec_dependencies_v2 (spec_id, depends_on)"
               + " SELECT spec_id, depends_on FROM spec_dependencies",
           "DROP TABLE spec_dependencies",
-          "ALTER TABLE spec_dependencies_v2 RENAME TO spec_dependencies");
+          "ALTER TABLE spec_dependencies_v2 RENAME TO spec_dependencies",
+          "ALTER TABLE agent_sessions ADD COLUMN exit_code INTEGER");
 
   private final Sqlite db;
 

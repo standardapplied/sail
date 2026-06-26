@@ -108,6 +108,39 @@ class SessionTrackerTest {
   }
 
   @Test
+  void stoppedPersistsTheExitCodeFromTheEvent() {
+    tracker.onEvent(
+        Event.of(
+            "backend", "auth", Event.WellKnownTypes.AGENT_SESSION_STARTED, "claude-code", "host"));
+
+    tracker.onEvent(
+        Event.of(
+            "backend",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            Map.of("exit_code", 137, "source", "watcher")));
+
+    var session = sessionStore.latestForProject("backend").orElseThrow();
+    assertEquals("stopped", session.status());
+    assertEquals(137, session.exitCode());
+  }
+
+  @Test
+  void stoppedWithoutAnExitCodeLeavesItNull() {
+    tracker.onEvent(
+        Event.of(
+            "backend", "auth", Event.WellKnownTypes.AGENT_SESSION_STARTED, "claude-code", "host"));
+
+    tracker.onEvent(
+        Event.of(
+            "backend", "auth", Event.WellKnownTypes.AGENT_SESSION_STOPPED, "claude-code", "host"));
+
+    assertNull(sessionStore.latestForProject("backend").orElseThrow().exitCode());
+  }
+
+  @Test
   void completedSetsCompletedStatus() {
     tracker.onEvent(
         Event.of("backend", null, Event.WellKnownTypes.AGENT_SESSION_STARTED, "codex", "host"));

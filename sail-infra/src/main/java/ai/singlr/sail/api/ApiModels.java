@@ -803,7 +803,8 @@ record SessionView(
     Integer pid,
     String status,
     String startedAt,
-    String completedAt)
+    String completedAt,
+    Integer exitCode)
     implements Mappable {
   static SessionView from(SessionStore.SessionRow row) {
     return new SessionView(
@@ -816,7 +817,8 @@ record SessionView(
         row.pid(),
         row.status(),
         row.startedAt(),
-        row.completedAt());
+        row.completedAt(),
+        row.exitCode());
   }
 
   @Override
@@ -832,6 +834,7 @@ record SessionView(
     m.put("status", status);
     m.put("started_at", startedAt);
     if (completedAt != null) m.put("completed_at", completedAt);
+    if (exitCode != null) m.put("exit_code", exitCode);
     return m;
   }
 }

@@ -74,6 +74,12 @@ public record Event(
     /** A spec left in_progress/review past the reconciler threshold — surfaced for triage. */
     public static final String SPEC_STRANDED = "spec_stranded";
 
+    /**
+     * The dispatched agent exited non-zero — its work is not auto-advanced to review. Carries the
+     * exit code in {@code data.exit_code} so the failure can be triaged.
+     */
+    public static final String AGENT_FAILED = "agent_failed";
+
     private WellKnownTypes() {}
   }
 

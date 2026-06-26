@@ -241,7 +241,8 @@ class AgentReporterTest {
             123,
             "completed",
             start.toString(),
-            end.toString());
+            end.toString(),
+            0);
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")
@@ -256,6 +257,38 @@ class AgentReporterTest {
     assertEquals(start.toString(), report.startedAt());
     assertEquals(end.toString(), report.endedAt());
     assertTrue(report.duration().startsWith("1h"), "duration must be run-time, not since-dispatch");
+  }
+
+  @Test
+  void aNonZeroExitIsReportedAsFailed(@TempDir java.nio.file.Path stateDir) throws Exception {
+    var start = Instant.now().minusSeconds(120);
+    var session =
+        new SessionStore.SessionRow(
+            "s1",
+            CONTAINER,
+            "auth",
+            "claude-code",
+            "feat/auth",
+            "do it",
+            123,
+            "stopped",
+            start.toString(),
+            Instant.now().toString(),
+            137);
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("cat /home/dev/.sail/agent.pid", "No such file")
+            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
+            .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
+
+    var report =
+        new AgentReporter(shell)
+            .generate(CONTAINER, buildConfig("specs"), List.of(), session, stateDir);
+
+    assertEquals("Failed (exit 137)", report.sessionStatus());
+    assertEquals(137, report.exitCode());
+    assertEquals(137, report.toMap().get("exit_code"));
   }
 
   @Test
@@ -277,7 +310,8 @@ class AgentReporterTest {
             null,
             null,
             false,
-            null);
+            null,
+            0);
 
     var map = report.toMap();
 
@@ -290,6 +324,7 @@ class AgentReporterTest {
     assertEquals(47L, map.get("last_commit_minutes_ago"));
     assertEquals(false, map.get("guardrail_triggered"));
     assertEquals(false, map.get("rolled_back"));
+    assertEquals(0, map.get("exit_code"));
     assertFalse(map.containsKey("guardrail_reason"));
     assertFalse(map.containsKey("rollback_snapshot"));
   }
@@ -311,6 +346,7 @@ class AgentReporterTest {
             "max_duration",
             "snapshot-and-stop",
             false,
+            null,
             null);
 
     var map = report.toMap();

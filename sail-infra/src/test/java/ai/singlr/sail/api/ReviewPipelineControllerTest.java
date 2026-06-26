@@ -77,6 +77,16 @@ class ReviewPipelineControllerTest {
         "test-project", specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "claude-code", "host");
   }
 
+  private Event agentStoppedEvent(String specId, int exitCode) {
+    return Event.of(
+        "test-project",
+        specId,
+        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+        "claude-code",
+        "host",
+        Map.of("exit_code", exitCode, "source", "watcher"));
+  }
+
   private ReviewPipelineConfig singleAgentStage(String gate) {
     return ReviewPipelineConfig.fromMap(
         Map.of(
@@ -613,6 +623,40 @@ class ReviewPipelineControllerTest {
     errDb.close();
 
     assertDoesNotThrow(() -> ctrl.onEvent(agentStoppedEvent("auth")));
+  }
+
+  @Test
+  void nonZeroExitSkipsReviewAndLeavesSpecInProgress() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth", 137));
+
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+  }
+
+  @Test
+  void nonZeroExitPublishesAgentFailed() {
+    createSpec("auth", "in_progress");
+    try (var bus = new EventBus()) {
+      var ctrl =
+          controller(p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr) -> "[]", bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth", 1));
+
+      assertTrue(bus.publishedCount() > 0);
+    }
+  }
+
+  @Test
+  void zeroExitStillRunsReview() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth", 0));
+
+    assertEquals("passed", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
   }
 
   @Test

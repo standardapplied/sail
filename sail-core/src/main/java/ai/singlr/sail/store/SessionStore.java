@@ -16,6 +16,9 @@ import java.util.Optional;
  */
 public final class SessionStore {
 
+  private static final String COLUMNS =
+      "id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at, exit_code";
+
   private final Sqlite db;
 
   public SessionStore(Sqlite db) {
@@ -32,7 +35,8 @@ public final class SessionStore {
       Integer pid,
       String status,
       String startedAt,
-      String completedAt) {}
+      String completedAt,
+      Integer exitCode) {}
 
   public String create(
       String project, String specId, String agent, String branch, String task, Integer pid) {
@@ -54,54 +58,51 @@ public final class SessionStore {
 
   public Optional<SessionRow> findById(String id) {
     return db.queryOne(
-        """
-        SELECT id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at
-        FROM agent_sessions WHERE id = ?""",
-        this::mapSession,
-        id);
+        "SELECT " + COLUMNS + " FROM agent_sessions WHERE id = ?", this::mapSession, id);
   }
 
   public Optional<SessionRow> latestForProject(String project) {
     return db.queryOne(
-        """
-        SELECT id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at
-        FROM agent_sessions WHERE project = ? ORDER BY started_at DESC LIMIT 1""",
+        "SELECT "
+            + COLUMNS
+            + " FROM agent_sessions WHERE project = ? ORDER BY started_at DESC LIMIT 1",
         this::mapSession,
         project);
   }
 
   public Optional<SessionRow> runningForProject(String project) {
     return db.queryOne(
-        """
-        SELECT id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at
-        FROM agent_sessions WHERE project = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1""",
+        "SELECT "
+            + COLUMNS
+            + " FROM agent_sessions WHERE project = ? AND status = 'running'"
+            + " ORDER BY started_at DESC LIMIT 1",
         this::mapSession,
         project);
   }
 
   public List<SessionRow> listForProject(String project) {
     return db.query(
-        """
-        SELECT id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at
-        FROM agent_sessions WHERE project = ? ORDER BY started_at DESC""",
+        "SELECT " + COLUMNS + " FROM agent_sessions WHERE project = ? ORDER BY started_at DESC",
         this::mapSession,
         project);
   }
 
   public List<SessionRow> listForSpec(String specId) {
     return db.query(
-        """
-        SELECT id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at
-        FROM agent_sessions WHERE spec_id = ? ORDER BY started_at DESC""",
+        "SELECT " + COLUMNS + " FROM agent_sessions WHERE spec_id = ? ORDER BY started_at DESC",
         this::mapSession,
         specId);
   }
 
-  public void complete(String id, String status) {
+  /**
+   * Marks a session finished with its final status and the agent process's exit code (nullable).
+   */
+  public void complete(String id, String status, Integer exitCode) {
     db.execute(
-        "UPDATE agent_sessions SET status = ?, completed_at = ? WHERE id = ?",
+        "UPDATE agent_sessions SET status = ?, completed_at = ?, exit_code = ? WHERE id = ?",
         status,
         DateTimeUtils.now().toString(),
+        exitCode != null ? exitCode.longValue() : null,
         id);
   }
 
@@ -116,6 +117,7 @@ public final class SessionStore {
         row.isNull(6) ? null : (int) row.integer(6),
         row.text(7),
         row.text(8),
-        row.text(9));
+        row.text(9),
+        row.isNull(10) ? null : (int) row.integer(10));
   }
 }

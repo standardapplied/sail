@@ -162,6 +162,12 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     if (spec.get().status() != SpecStatus.IN_PROGRESS) return;
 
+    var exitCode = exitCodeOf(event);
+    if (exitCode != null && exitCode != 0) {
+      publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, "exit " + exitCode);
+      return;
+    }
+
     specStore.updateStatus(specId, SpecStatus.REVIEW);
 
     var config = configResolver.apply(event.project());
@@ -313,6 +319,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (eventBus == null) return;
     var data = detail != null ? Map.<String, Object>of("detail", detail) : Map.<String, Object>of();
     eventBus.publish(Event.of(project, specId, type, Event.SAIL_AGENT, hostname(), data));
+  }
+
+  private static Integer exitCodeOf(Event event) {
+    return event.data().get("exit_code") instanceof Number n ? n.intValue() : null;
   }
 
   private static String hostname() {

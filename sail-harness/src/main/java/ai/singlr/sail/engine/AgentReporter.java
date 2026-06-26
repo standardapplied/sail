@@ -50,6 +50,7 @@ public final class AgentReporter {
    * @param guardrailAction the action taken (nullable)
    * @param rolledBack whether auto-rollback occurred
    * @param rollbackSnapshot snapshot restored (nullable)
+   * @param exitCode the agent process's exit code (nullable if unknown / still running)
    */
   public record Report(
       String name,
@@ -65,7 +66,8 @@ public final class AgentReporter {
       String guardrailReason,
       String guardrailAction,
       boolean rolledBack,
-      String rollbackSnapshot) {
+      String rollbackSnapshot,
+      Integer exitCode) {
 
     /** Converts to a map for JSON serialization. */
     public Map<String, Object> toMap() {
@@ -101,6 +103,9 @@ public final class AgentReporter {
       map.put("rolled_back", rolledBack);
       if (rollbackSnapshot != null) {
         map.put("rollback_snapshot", rollbackSnapshot);
+      }
+      if (exitCode != null) {
+        map.put("exit_code", exitCode);
       }
       return map;
     }
@@ -217,6 +222,11 @@ public final class AgentReporter {
       endedAt = session.completedAt();
     }
 
+    var exitCode = session != null ? session.exitCode() : null;
+    if (!running && !rolledBack && !guardrailTriggered && exitCode != null && exitCode != 0) {
+      sessionStatus = "Failed (exit " + exitCode + ")";
+    }
+
     String durationStr = null;
     if (startInstant != null) {
       var endInstant = parseInstantSafe(endedAt);
@@ -240,7 +250,8 @@ public final class AgentReporter {
         guardrailReason,
         guardrailAction,
         rolledBack,
-        rollbackSnapshot);
+        rollbackSnapshot,
+        exitCode);
   }
 
   private static Instant parseInstantSafe(String value) {

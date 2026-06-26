@@ -762,14 +762,25 @@ class ApiRouterTest {
   void sessionViewModelCoversConstruction() {
     var row =
         new ai.singlr.sail.store.SessionStore.SessionRow(
-            "s1", "proj", "auth", "claude-code", "feat/auth", "task", 42, "running", "t0", null);
+            "s1",
+            "proj",
+            "auth",
+            "claude-code",
+            "feat/auth",
+            "task",
+            42,
+            "completed",
+            "t0",
+            "t1",
+            7);
     var view = SessionView.from(row);
     assertEquals("s1", view.id());
     assertEquals("proj", view.project());
     assertEquals(42, view.pid());
     var map = view.toMap();
     assertEquals("claude-code", map.get("agent"));
-    assertFalse(map.containsKey("completed_at"));
+    assertEquals(7, map.get("exit_code"));
+    assertTrue(map.containsKey("completed_at"));
 
     var list = new SessionListResponse("proj", java.util.List.of(view));
     assertEquals("proj", list.toMap().get("project"));
@@ -1189,6 +1200,7 @@ class ApiRouterTest {
               1234,
               "running",
               "t0",
+              null,
               null);
       return Result.success(new SessionListResponse(project, java.util.List.of(session)));
     }

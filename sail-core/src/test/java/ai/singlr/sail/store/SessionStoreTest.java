@@ -65,11 +65,27 @@ class SessionStoreTest {
   @Test
   void completeSession() {
     var id = store.create("backend", "auth", "claude-code", null, null, null);
-    store.complete(id, "completed");
+    store.complete(id, "completed", 0);
 
     var session = store.findById(id).orElseThrow();
     assertEquals("completed", session.status());
     assertNotNull(session.completedAt());
+    assertEquals(0, session.exitCode());
+  }
+
+  @Test
+  void completeRecordsANonZeroExitCode() {
+    var id = store.create("backend", "auth", "claude-code", null, null, null);
+    store.complete(id, "stopped", 137);
+
+    assertEquals(137, store.findById(id).orElseThrow().exitCode());
+  }
+
+  @Test
+  void exitCodeIsNullUntilCompleted() {
+    var id = store.create("backend", "auth", "claude-code", null, null, null);
+
+    assertNull(store.findById(id).orElseThrow().exitCode());
   }
 
   @Test
@@ -91,7 +107,7 @@ class SessionStoreTest {
   @Test
   void runningForProjectFindsActiveSession() {
     var id1 = store.create("backend", "spec-1", "claude-code", null, null, null);
-    store.complete(id1, "completed");
+    store.complete(id1, "completed", 0);
     store.create("backend", "spec-2", "claude-code", null, null, null);
 
     var running = store.runningForProject("backend");
@@ -103,7 +119,7 @@ class SessionStoreTest {
   @Test
   void runningForProjectReturnsEmptyWhenAllCompleted() {
     var id = store.create("backend", "spec-1", "claude-code", null, null, null);
-    store.complete(id, "completed");
+    store.complete(id, "completed", 0);
 
     assertTrue(store.runningForProject("backend").isEmpty());
   }
@@ -140,7 +156,7 @@ class SessionStoreTest {
     var id = store.create("backend", null, "claude-code", null, null, null);
     assertEquals("running", store.findById(id).orElseThrow().status());
 
-    store.complete(id, "stopped");
+    store.complete(id, "stopped", null);
     assertEquals("stopped", store.findById(id).orElseThrow().status());
   }
 }
