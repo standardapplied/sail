@@ -39,6 +39,9 @@ class ContainerReviewAgentRunnerTest {
     assertFalse(agentCommand.contains("--settings"), "reviewer must not load the sail hooks");
     assertFalse(agentCommand.contains("SAIL_SPEC_ID"), "reviewer must run without a spec id");
     assertTrue(agentCommand.contains("cd /home/dev/workspace"));
+    assertTrue(
+        shell.lastTimeout.toMinutes() >= 5,
+        "the agent must run under a generous timeout, not the 2-minute shell default");
   }
 
   @Test
@@ -84,8 +87,11 @@ class ContainerReviewAgentRunnerTest {
       return new Result(1, "", "no script for " + joined);
     }
 
+    private Duration lastTimeout;
+
     @Override
     public Result exec(List<String> command, Path workDir, Duration timeout) {
+      lastTimeout = timeout;
       return exec(command);
     }
 

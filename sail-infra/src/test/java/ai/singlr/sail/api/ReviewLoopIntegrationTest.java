@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,12 +77,41 @@ class ReviewLoopIntegrationTest {
   }
 
   private ReviewPipelineConfig singleStage(String gate) {
+    return singleStage(gate, 3);
+  }
+
+  private ReviewPipelineConfig singleStage(String gate, int maxIterations) {
     return ReviewPipelineConfig.fromMap(
         Map.of(
             "max_iterations",
-            3,
+            maxIterations,
             "stages",
             List.of(Map.of("name", "security", "type", "agent", "agent", "codex", "gate", gate))));
+  }
+
+  private static final String CRITICAL_FINDING =
+      """
+      ```json
+      [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        "line_start": 1, "line_end": 1, "title": "Bad",
+        "description": "Very bad", "confidence": 0.95}]
+      ```
+      """;
+
+  /**
+   * A runner that plays a real review cycle: it tells a review prompt from a fix prompt by content,
+   * so review calls return findings (scripted) and fix calls just acknowledge — letting a test
+   * drive the review→fix→re-review loop.
+   */
+  private static ReviewAgentRunner cyclingRunner(java.util.List<String> reviewOutputs) {
+    var reviewCall = new AtomicInteger();
+    return (project, agent, prompt) -> {
+      if (prompt.contains("Output your findings")) {
+        var i = reviewCall.getAndIncrement();
+        return i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]";
+      }
+      return "fix applied";
+    };
   }
 
   private void subscribe(
@@ -141,26 +171,6 @@ class ReviewLoopIntegrationTest {
   }
 
   @Test
-  void aCriticalFindingPublishedToTheBusFailsTheReview() throws Exception {
-    createSpec("auth");
-    var criticalOutput =
-        """
-        ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.95}]
-        ```
-        """;
-    var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr) -> criticalOutput, latch);
-
-    bus.publish(stop("auth"));
-
-    BusTesting.awaitDelivery(latch);
-    assertEquals("failed", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
-  }
-
-  @Test
   void aHookTurnEndStopThroughTheBusDoesNotTriggerReview() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
@@ -171,6 +181,38 @@ class ReviewLoopIntegrationTest {
     BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+  }
+
+  @Test
+  void theReviewFixReReviewLoopReachesDoneWhenAFixResolvesTheFindings() throws Exception {
+    createSpec("auth");
+    var latch = new CountDownLatch(1);
+    subscribe(singleStage("no_critical"), cyclingRunner(List.of(CRITICAL_FINDING)), latch);
+
+    bus.publish(stop("auth"));
+
+    BusTesting.awaitDelivery(latch);
+    assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        2,
+        reviewStore.reviewsForSpec("auth").size(),
+        "one failed review, then a passing re-review after the fix");
+  }
+
+  @Test
+  void unresolvedFindingsEscalateAfterTheIterationBudget() throws Exception {
+    createSpec("auth");
+    var latch = new CountDownLatch(1);
+    subscribe(
+        singleStage("no_critical", 2),
+        cyclingRunner(List.of(CRITICAL_FINDING, CRITICAL_FINDING)),
+        latch);
+
+    bus.publish(stop("auth"));
+
+    BusTesting.awaitDelivery(latch);
+    assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test

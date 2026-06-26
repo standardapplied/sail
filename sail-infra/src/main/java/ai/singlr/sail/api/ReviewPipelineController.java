@@ -180,23 +180,26 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     var iteration = existing.map(r -> r.iteration() + 1).orElse(1);
     if (iteration > config.maxIterations()) {
-      escalate(specId, existing.get().id());
+      escalate(event.project(), specId, existing.get().id());
       return;
     }
 
-    var reviewId = reviewStore.createReview(specId, iteration);
-    reviewStore.updateReviewStatus(reviewId, "running");
-
-    for (var stageConfig : config.stages()) {
-      reviewStore.createStage(
-          reviewId, stageConfig.name(), stageConfig.type().name().toLowerCase());
-    }
-
+    var reviewId = createReviewWithStages(config, specId, iteration);
     var future =
         CompletableFuture.runAsync(
             () -> executePipeline(reviewId, config, event.project(), specId), pipelineExecutor);
     inFlight.put(reviewId, future);
     future.whenComplete((v, ex) -> inFlight.remove(reviewId));
+  }
+
+  private String createReviewWithStages(ReviewPipelineConfig config, String specId, int iteration) {
+    var reviewId = reviewStore.createReview(specId, iteration);
+    reviewStore.updateReviewStatus(reviewId, "running");
+    for (var stageConfig : config.stages()) {
+      reviewStore.createStage(
+          reviewId, stageConfig.name(), stageConfig.type().name().toLowerCase());
+    }
+    return reviewId;
   }
 
   void executePipeline(
@@ -284,7 +287,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (review.isEmpty()) return;
 
     if (review.get().iteration() >= config.maxIterations()) {
-      escalate(specId, reviewId);
+      escalate(project, specId, reviewId);
       return;
     }
 
@@ -292,6 +295,19 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (openFindings.isEmpty()) return;
 
     triggerFixIteration(specId, openFindings, project);
+    reReview(config, project, specId, review.get().iteration() + 1);
+  }
+
+  /**
+   * Closes the review→fix→re-review loop: after the coding agent addresses the findings, run the
+   * review again as the next iteration. Synchronous and bounded — each pass increments the
+   * iteration and {@link #handleStageFailure} escalates instead of recursing once {@code
+   * maxIterations} is reached.
+   */
+  private void reReview(ReviewPipelineConfig config, String project, String specId, int iteration) {
+    specStore.updateStatus(specId, SpecStatus.REVIEW);
+    var reviewId = createReviewWithStages(config, specId, iteration);
+    executePipeline(reviewId, config, project, specId);
   }
 
   private void triggerFixIteration(String specId, List<Finding> findings, String project) {
@@ -311,10 +327,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     }
   }
 
-  private void escalate(String specId, String reviewId) {
+  private void escalate(String project, String specId, String reviewId) {
     reviewStore.updateReviewStatus(reviewId, "escalated");
     specStore.updateStatus(specId, SpecStatus.REVIEW);
-    publishEvent(null, specId, "review_escalated", null);
+    publishEvent(project, specId, "review_escalated", null);
   }
 
   private void publishEvent(String project, String specId, String type, String detail) {

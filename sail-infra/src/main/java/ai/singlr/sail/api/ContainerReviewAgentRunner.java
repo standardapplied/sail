@@ -9,6 +9,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ShellExec;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -26,6 +27,13 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
   private static final String PROMPT_PATH = ContainerExec.DEV_HOME + "/.sail/review-prompt.txt";
   private static final String WORKSPACE = ContainerExec.DEV_HOME + "/workspace";
 
+  /**
+   * How long a single review (or fix) agent invocation may run. The default shell timeout (2
+   * minutes) is far too short for an agent reasoning over a real diff; the dispatch-level guardrail
+   * ceiling is hours, so a generous per-invocation budget is the right bound here.
+   */
+  private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(30);
+
   private final ShellExec shell;
 
   ContainerReviewAgentRunner(ShellExec shell) {
@@ -39,7 +47,9 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
     var result =
         shell.exec(
             ContainerExec.asDevUser(
-                project, List.of("bash", "-lc", "cd " + WORKSPACE + " && " + command)));
+                project, List.of("bash", "-lc", "cd " + WORKSPACE + " && " + command)),
+            null,
+            AGENT_TIMEOUT);
     if (!result.ok()) {
       throw new IllegalStateException(
           "Review agent '" + agent + "' failed in '" + project + "': " + result.stderr());

@@ -332,7 +332,7 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void criticalFindingFailsNoCriticalGate() {
+  void aCriticalFindingThatIsNeverFixedEscalates() {
     createSpec("auth", "in_progress");
     var agentOutput =
         """
@@ -347,7 +347,7 @@ class ReviewPipelineControllerTest {
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
-    assertEquals("failed", review.status());
+    assertEquals("escalated", review.status());
   }
 
   @Test
@@ -716,7 +716,7 @@ class ReviewPipelineControllerTest {
     var ctrl = controller(singleAgentStage("no_critical"), runner);
 
     assertDoesNotThrow(() -> ctrl.onEvent(agentStoppedEvent("auth")));
-    assertEquals(2, calls.get());
+    assertTrue(calls.get() >= 2, "the review ran and a fix was attempted");
   }
 
   private static void await(CountDownLatch latch) {
