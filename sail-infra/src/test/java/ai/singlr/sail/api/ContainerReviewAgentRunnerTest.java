@@ -31,10 +31,16 @@ class ContainerReviewAgentRunnerTest {
     var output = new ContainerReviewAgentRunner(shell).run("acme", "claude-code", "Review it");
 
     assertEquals("[]", output);
-    assertTrue(
+    var pushCommand =
         shell.commands().stream()
-            .anyMatch(c -> c.contains("file push") && c.contains("review-prompt.txt")),
-        "the prompt must be staged to a file, not passed on the command line");
+            .filter(c -> c.contains("file push") && c.contains("review-prompt.txt"))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new AssertionError("the prompt must be staged to a file, not on the cmd line"));
+    assertTrue(
+        pushCommand.contains("--uid 1000") && pushCommand.contains("--gid 1000"),
+        "the prompt must be owned by the dev user so the reviewer can read it: " + pushCommand);
     var agentCommand = shell.commandContaining("claude --print");
     assertFalse(agentCommand.contains("--settings"), "reviewer must not load the sail hooks");
     assertFalse(agentCommand.contains("SAIL_SPEC_ID"), "reviewer must run without a spec id");

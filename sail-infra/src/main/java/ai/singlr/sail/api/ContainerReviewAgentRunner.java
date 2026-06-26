@@ -40,9 +40,17 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
     this.shell = shell;
   }
 
+  /**
+   * The prompt is pushed owned by the dev user (uid/gid 1000), not root — the reviewer runs as dev
+   * and reads it via {@code $(cat ...)}, so a root-owned 0600 file would be unreadable to the very
+   * agent that needs it.
+   */
+  private static final List<String> PROMPT_PUSH_FLAGS =
+      List.of("--mode", "0600", "--uid", "1000", "--gid", "1000");
+
   @Override
   public String run(String project, String agent, String prompt) throws Exception {
-    ContainerFilePush.push(shell, project, PROMPT_PATH, prompt, List.of("--mode", "0600"));
+    ContainerFilePush.push(shell, project, PROMPT_PATH, prompt, PROMPT_PUSH_FLAGS);
     var command = AgentCli.fromYamlName(agent).headlessCommand(PROMPT_PATH, true, null, null, null);
     var result =
         shell.exec(

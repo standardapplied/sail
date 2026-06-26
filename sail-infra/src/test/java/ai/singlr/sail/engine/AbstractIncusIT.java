@@ -25,7 +25,7 @@ import java.util.List;
  * unreachable daemon fails loudly with the exact reason rather than silently passing. Every real
  * step is a hard assertion — an {@code assumeTrue} on a launch or exec would be a false-green trap.
  */
-abstract class AbstractIncusIT {
+public abstract class AbstractIncusIT {
 
   protected static final String IMAGE = "images:ubuntu/24.04";
 
