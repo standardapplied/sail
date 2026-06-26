@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
@@ -178,6 +180,78 @@ class AgentWatchCommandTest {
 
     assertEquals(Event.SAIL_AGENT, event.agent());
     assertEquals(0, event.data().get("exit_code"));
+  }
+
+  @Test
+  void onTimeoutSurfacesADeadUnitRegardlessOfEverythingElse() {
+    for (var fired : new boolean[] {true, false}) {
+      for (var reached : new boolean[] {true, false}) {
+        assertEquals(
+            AgentWatchCommand.TimeoutDecision.SYNTHESIZE_STOP,
+            AgentWatchCommand.onTimeout(false, fired, reached),
+            "a dead unit must always be surfaced");
+      }
+    }
+  }
+
+  @Test
+  void onTimeoutChecksGuardrailsOnlyAtTheDeadline() {
+    assertEquals(
+        AgentWatchCommand.TimeoutDecision.CHECK_GUARDRAILS,
+        AgentWatchCommand.onTimeout(true, false, true));
+    assertEquals(
+        AgentWatchCommand.TimeoutDecision.KEEP_WAITING,
+        AgentWatchCommand.onTimeout(true, false, false),
+        "the 15s liveness poll must not turn into a 15s guardrail poll");
+  }
+
+  @Test
+  void onTimeoutStopsCheckingOnceAGuardrailHasFired() {
+    assertEquals(
+        AgentWatchCommand.TimeoutDecision.KEEP_WAITING,
+        AgentWatchCommand.onTimeout(true, true, true));
+  }
+
+  @Test
+  void emitSyntheticStopPublishesWhenASpecIsKnown() throws Exception {
+    var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
+    var exit = new AgentSession.ExitState(false, 2, "scrum-7", "codex");
+
+    AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
+
+    assertEquals("scrum-7", captured.get().spec());
+    assertEquals(2, captured.get().data().get("exit_code"));
+  }
+
+  @Test
+  void emitSyntheticStopSkipsAnAdHocSessionWithNoSpec() throws Exception {
+    var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
+    var exit = new AgentSession.ExitState(false, 0, "", "codex");
+
+    AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
+
+    assertNull(captured.get());
+  }
+
+  @Test
+  void emitSyntheticStopIsANoOpWithoutAPublisher() {
+    var exit = new AgentSession.ExitState(false, 0, "scrum-7", "codex");
+
+    assertDoesNotThrow(() -> AgentWatchCommand.emitSyntheticStop(null, "acme", exit));
+  }
+
+  @Test
+  void emitSyntheticStopSwallowsPublisherFailures() {
+    var exit = new AgentSession.ExitState(false, 1, "scrum-7", "codex");
+
+    assertDoesNotThrow(
+        () ->
+            AgentWatchCommand.emitSyntheticStop(
+                e -> {
+                  throw new RuntimeException("network down");
+                },
+                "acme",
+                exit));
   }
 
   private static Event sampleEvent(String type) {

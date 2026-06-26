@@ -136,9 +136,40 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private SailEventPublisher resolvePublisher() {
+  /** Sink for the watcher's synthetic stop. A seam so the loop is testable without the network. */
+  @FunctionalInterface
+  interface StopPublisher {
+    void publish(Event event) throws Exception;
+  }
+
+  /** What a timeout wake-up (no event in the queue) should do next. */
+  enum TimeoutDecision {
+    SYNTHESIZE_STOP,
+    CHECK_GUARDRAILS,
+    KEEP_WAITING
+  }
+
+  /**
+   * Decides what to do when the loop wakes with no event. Pure so the cadence rules are tested
+   * directly: a dead unit is always surfaced; otherwise the (container-touching) guardrail check
+   * runs only once a deadline is actually reached — the 15s liveness poll must not turn into a 15s
+   * guardrail poll.
+   */
+  static TimeoutDecision onTimeout(
+      boolean unitActive, boolean guardrailFired, boolean deadlineReached) {
+    if (!unitActive) {
+      return TimeoutDecision.SYNTHESIZE_STOP;
+    }
+    if (guardrailFired || !deadlineReached) {
+      return TimeoutDecision.KEEP_WAITING;
+    }
+    return TimeoutDecision.CHECK_GUARDRAILS;
+  }
+
+  private StopPublisher resolvePublisher() {
     try {
-      return SailEventPublisher.localDefault();
+      var publisher = SailEventPublisher.localDefault();
+      return publisher::publish;
     } catch (Exception e) {
       return null;
     }
@@ -155,15 +186,15 @@ public final class AgentWatchCommand implements Runnable {
       Notifications notifications,
       List<String> repoPaths,
       Instant startedAt,
-      SailEventPublisher publisher)
+      StopPublisher publisher)
       throws Exception {
     var guardrailFired = false;
     var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
     var lastProgressAt = startedAt;
     while (true) {
       var stallDeadline = maxIdle != null ? lastProgressAt.plus(maxIdle) : Instant.MAX;
-      var waitMs =
-          Math.min(LIVENESS_POLL_MS, waitMsUntil(earlier(deadline, stallDeadline), guardrailFired));
+      var deadlineAt = earlier(deadline, stallDeadline);
+      var waitMs = Math.min(LIVENESS_POLL_MS, waitMsUntil(deadlineAt, guardrailFired));
       Event event = waitMs <= 0 ? null : queue.poll(waitMs, TimeUnit.MILLISECONDS);
 
       if (event != null && isAgentExit(event)) {
@@ -178,13 +209,14 @@ public final class AgentWatchCommand implements Runnable {
       }
 
       var exit = agentSession.queryExitStatus(name);
-      if (!exit.active()) {
-        emitSyntheticStop(publisher, exit);
+      var decision =
+          onTimeout(exit.active(), guardrailFired, !DateTimeUtils.now().isBefore(deadlineAt));
+      if (decision == TimeoutDecision.SYNTHESIZE_STOP) {
+        emitSyntheticStop(publisher, name, exit);
         handleAgentExited(notifier, notifications);
         return;
       }
-
-      if (guardrailFired) {
+      if (decision == TimeoutDecision.KEEP_WAITING) {
         continue;
       }
       var result = checker.check(name, guardrails, startedAt, repoPaths);
@@ -353,15 +385,16 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private void emitSyntheticStop(SailEventPublisher publisher, AgentSession.ExitState exit) {
+  static void emitSyntheticStop(
+      StopPublisher publisher, String project, AgentSession.ExitState exit) {
     if (publisher == null || Strings.isBlank(exit.specId())) {
       return;
     }
     try {
-      publisher.publish(syntheticStop(name, exit));
+      publisher.publish(syntheticStop(project, exit));
     } catch (Exception e) {
       System.err.println(
-          "  [watch] could not publish synthetic stop for " + name + ": " + e.getMessage());
+          "  [watch] could not publish synthetic stop for " + project + ": " + e.getMessage());
     }
   }
 
