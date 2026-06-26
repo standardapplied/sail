@@ -156,11 +156,11 @@ class SseHandlerTest {
                       }
                     });
 
-        assertTrue(subscribedLatch.await(5, TimeUnit.SECONDS), "should receive subscribed comment");
+        BusTesting.awaitDelivery(subscribedLatch);
         var stamped = bus.publish(Event.of("light", null, "spec_dispatched", "sail", "h"));
         publishedId[0] = stamped.id();
 
-        assertTrue(eventLatch.await(5, TimeUnit.SECONDS), "should receive published event");
+        BusTesting.awaitDelivery(eventLatch);
         assertTrue(
             receivedData[0].contains("\"id\": " + publishedId[0]),
             "frame should carry the stamped id: " + receivedData[0]);

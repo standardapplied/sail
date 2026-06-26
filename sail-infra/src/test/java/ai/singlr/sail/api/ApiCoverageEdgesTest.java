@@ -221,7 +221,7 @@ class ApiCoverageEdgesTest {
           });
 
       bus.publish(Event.of("p", null, "t", "a", "h"));
-      assertTrue(entered.await(2, TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(entered);
       Thread.sleep(500);
     }
   }
@@ -255,7 +255,7 @@ class ApiCoverageEdgesTest {
           }
         });
     bus.publish(Event.of("p", null, "t", "a", "h"));
-    assertTrue(entered.await(2, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(entered);
     bus.close();
   }
 

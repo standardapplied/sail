@@ -245,7 +245,7 @@ class SessionTrackerTest {
               "host",
               Map.of("pid", 42)));
 
-      assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(latch);
 
       var session = sessionStore.latestForProject("backend");
       assertTrue(session.isPresent());

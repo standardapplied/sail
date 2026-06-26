@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -65,7 +64,7 @@ class EventBusTest {
               }));
       bus.publish(Event.of("p", null, "t", "a", "h"));
       bus.publish(Event.of("p", null, "t", "a", "h"));
-      assertTrue(latch.await(5, TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(latch);
       assertEquals(2, seen.size());
     }
   }
@@ -94,7 +93,7 @@ class EventBusTest {
               }));
       bus.publish(Event.of("light", null, "t", "a", "h"));
       bus.publish(Event.of("dark", null, "t", "a", "h"));
-      assertTrue(latch.await(5, TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(latch);
       assertEquals(1, lightSeen.get());
       assertEquals(1, darkSeen.get());
     }
@@ -130,7 +129,7 @@ class EventBusTest {
       assertNotNull(sub);
 
       bus.publish(Event.of("p", null, "t", "a", "h"));
-      assertTrue(started.await(5, TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(started);
 
       for (var i = 0; i < 10; i++) {
         bus.publish(Event.of("p", null, "t", "a", "h"));
@@ -209,7 +208,7 @@ class EventBusTest {
       bus.subscribe(subscriber("open", EventSubscriber.all(), e -> delivered.countDown()));
       bus.publish(Event.of("p", null, "t", "a", "h"));
 
-      assertTrue(delivered.await(5, TimeUnit.SECONDS), "an open subscriber must receive the event");
+      BusTesting.awaitDelivery(delivered);
       assertEquals(0, seen.get(), "a closed subscription must not deliver");
     }
   }
@@ -228,7 +227,7 @@ class EventBusTest {
               }));
       bus.publish(Event.of("p", null, "t", "a", "h"));
       bus.publish(Event.of("p", null, "t", "a", "h"));
-      assertTrue(seen.await(5, TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(seen);
     }
   }
 

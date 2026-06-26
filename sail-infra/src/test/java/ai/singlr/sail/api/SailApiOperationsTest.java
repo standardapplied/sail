@@ -898,7 +898,7 @@ class SailApiOperationsTest {
       operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
       operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
 
-      assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(latch);
       var result = operations.recentEvents(5);
       assertTrue(result.isSuccess());
     }

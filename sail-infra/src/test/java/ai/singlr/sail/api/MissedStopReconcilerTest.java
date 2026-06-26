@@ -20,7 +20,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -116,7 +115,7 @@ class MissedStopReconcilerTest {
     var replayed = new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
 
     assertEquals(1, replayed);
-    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
   }
 
@@ -130,7 +129,7 @@ class MissedStopReconcilerTest {
     var replayed = new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
 
     assertEquals(1, replayed);
-    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
   }
 
@@ -143,7 +142,7 @@ class MissedStopReconcilerTest {
 
     new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
 
-    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
   }

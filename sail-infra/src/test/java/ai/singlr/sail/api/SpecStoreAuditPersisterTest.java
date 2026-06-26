@@ -99,7 +99,7 @@ class SpecStoreAuditPersisterTest {
       var event = Event.of("proj", null, "server_started", "sail", "host");
       bus.publish(event);
 
-      assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      BusTesting.awaitDelivery(latch);
 
       var stored = eventStore.recent(1);
       assertEquals(1, stored.size());

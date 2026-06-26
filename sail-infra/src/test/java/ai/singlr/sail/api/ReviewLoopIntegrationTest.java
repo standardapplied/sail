@@ -18,7 +18,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,7 +121,7 @@ class ReviewLoopIntegrationTest {
 
     bus.publish(stop("auth"));
 
-    assertTrue(latch.await(5, TimeUnit.SECONDS), "the controller should receive the stop");
+    BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
     assertEquals("passed", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
   }
@@ -143,7 +142,7 @@ class ReviewLoopIntegrationTest {
 
     bus.publish(stop("auth"));
 
-    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(latch);
     assertEquals("failed", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
   }
 
@@ -155,7 +154,7 @@ class ReviewLoopIntegrationTest {
 
     bus.publish(stop("auth", 137));
 
-    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
   }
