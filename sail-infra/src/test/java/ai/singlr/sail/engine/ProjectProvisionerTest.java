@@ -1947,7 +1947,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void contextGenerationMergesAnExistingAgentFile() throws Exception {
+  void contextGenerationLeavesAnExistingAgentFileUntouched() throws Exception {
     var config =
         new SailYaml(
             "acme-health",
@@ -1989,21 +1989,19 @@ class ProjectProvisionerTest {
             .onOk("echo $VERSION_CODENAME", "noble")
             .onFail("podman container inspect", "no such container")
             .onFail("crontab -l", "no crontab")
-            .onOk("which claude", "/home/dev/.local/bin/claude")
-            .onOk("ls -1", "CLAUDE.md\nREADME.md")
-            .onOk("cat /home/dev/workspace/CLAUDE.md", "old body\n\nmy personal note\n");
+            .onOk("which claude", "/home/dev/.local/bin/claude");
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
     provisioner.provision(config, hostYaml(), null, null);
 
     var cmds = shell.invocations();
+    assertFalse(
+        cmds.stream().anyMatch(c -> c.contains("file push") && c.contains("/CLAUDE.md")),
+        "an existing engineer-owned CLAUDE.md is left untouched on provision");
     assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("cat /home/dev/workspace/CLAUDE.md")),
-        "merging reads the existing CLAUDE.md to preserve the engineer's personal region");
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("file push") && c.contains("CLAUDE.md")),
-        "the merged CLAUDE.md is written back");
+        cmds.stream().anyMatch(c -> c.contains("file push") && c.contains(".sail/context.md")),
+        "the sail-owned context core is still installed");
   }
 
   /** Records all step events for assertion. */

@@ -85,27 +85,22 @@ class AgentContextInstallerTest {
   }
 
   @Test
-  void mergesBothTheContextFileAndSecurityMdPreservingTheirPersonalRegions() throws Exception {
-    var shell =
-        okShell()
-            .onOk("cat " + WORKSPACE + "/CLAUDE.md", "old body\n\nmy personal note\n")
-            .onOk("cat " + WORKSPACE + "/SECURITY.md", "old\n\nmy security note\n");
+  void skipsEngineerOwnedFilesThatAlreadyExist() throws Exception {
+    var shell = okShell();
 
     var result = AgentContextInstaller.install(shell, CONTAINER, config());
 
-    assertTrue(
-        shell.invocations().stream().anyMatch(c -> c.contains("cat " + WORKSPACE + "/CLAUDE.md")),
-        "the context file is merged: its existing personal region is read");
-    assertTrue(
-        shell.invocations().stream().anyMatch(c -> c.contains("cat " + WORKSPACE + "/SECURITY.md")),
-        "SECURITY.md is merged the same way, not skipped");
-    assertTrue(result.pushed().stream().anyMatch(p -> p.endsWith("/CLAUDE.md")));
-    assertTrue(result.pushed().stream().anyMatch(p -> p.endsWith("/SECURITY.md")));
-    assertTrue(result.pushed().contains(SKILL), "machinery still refreshes");
+    assertFalse(
+        result.pushed().stream().anyMatch(p -> p.endsWith("/CLAUDE.md")),
+        "an existing engineer-owned CLAUDE.md is never clobbered");
+    assertFalse(
+        result.pushed().stream().anyMatch(p -> p.endsWith("/SECURITY.md")),
+        "an existing engineer-owned SECURITY.md is never clobbered");
+    assertTrue(result.pushed().contains(SKILL), "sail-owned machinery still refreshes every run");
   }
 
   @Test
-  void forceResetsMergeFilesWithoutReadingThem() throws Exception {
+  void forceOverwritesEngineerOwnedFilesWithoutCheckingExistence() throws Exception {
     var shell = okShell();
 
     var result = AgentContextInstaller.install(shell, CONTAINER, config(), true);
@@ -113,28 +108,30 @@ class AgentContextInstallerTest {
     assertTrue(result.pushed().stream().anyMatch(p -> p.endsWith("/CLAUDE.md")));
     assertTrue(result.pushed().stream().anyMatch(p -> p.endsWith("/SECURITY.md")));
     assertFalse(
-        shell.invocations().stream().anyMatch(c -> c.contains("cat " + WORKSPACE)),
-        "--force resets the personal region instead of reading and preserving it");
+        shell.invocations().stream().anyMatch(c -> c.contains("test -f " + WORKSPACE)),
+        "--force overwrites engineer-owned files outright, never checking whether they exist");
   }
 
   @Test
   void pushesAFreshContextFileWhenTheContainerHasNone() throws Exception {
-    var shell = okShell();
-
-    var result = AgentContextInstaller.install(shell, CONTAINER, config());
-
-    assertTrue(result.pushed().stream().anyMatch(p -> p.endsWith("/CLAUDE.md")));
-  }
-
-  @Test
-  void treatsAnUnreadableContextFileAsFresh() throws Exception {
-    var shell = okShell().onFail("cat " + WORKSPACE + "/CLAUDE.md", "No such file or directory");
+    var shell = okShell().onFail("test -f " + WORKSPACE + "/CLAUDE.md", "");
 
     var result = AgentContextInstaller.install(shell, CONTAINER, config());
 
     assertTrue(
         result.pushed().stream().anyMatch(p -> p.endsWith("/CLAUDE.md")),
-        "an absent or unreadable context file is rendered fresh, not skipped");
+        "an absent engineer-owned file is scaffolded fresh");
+  }
+
+  @Test
+  void treatsAFailedExistenceCheckAsAbsent() throws Exception {
+    var shell = okShell().onFail("test -f " + WORKSPACE + "/SECURITY.md", "");
+
+    var result = AgentContextInstaller.install(shell, CONTAINER, config());
+
+    assertTrue(
+        result.pushed().stream().anyMatch(p -> p.endsWith("/SECURITY.md")),
+        "when the existence check fails, the file is treated as absent and scaffolded");
   }
 
   @Test

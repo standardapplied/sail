@@ -12,22 +12,33 @@ package ai.singlr.sail.gen;
  * @param remotePath absolute path inside the container
  * @param content file content
  * @param executable whether the file should be marked executable
- * @param mergeMarker when non-null, the file is merge-managed: {@code content} is the regenerated
- *     body and everything from this marker down in the existing file is the engineer's preserved
- *     personal region (see {@link ContextMerge}); when null, the file is overwritten outright
+ * @param ownership who owns the file, and therefore how the installer treats it on regeneration
  */
 public record GeneratedFile(
-    String remotePath, String content, boolean executable, String mergeMarker) {
+    String remotePath, String content, boolean executable, Ownership ownership) {
 
+  /** Who owns an installed file, which decides whether the installer overwrites it. */
+  public enum Ownership {
+    /** Sail owns it: regenerated and overwritten on every run (the core, the shipped skills). */
+    SAIL,
+
+    /**
+     * The engineer owns it: sail writes it once when it is absent (or on {@code --force}) and never
+     * touches it again — it is an ordinary file the engineer is free to edit and share.
+     */
+    ENGINEER
+  }
+
+  /** A sail-owned file, overwritten on every run. */
   public GeneratedFile(String remotePath, String content, boolean executable) {
-    this(remotePath, content, executable, null);
+    this(remotePath, content, executable, Ownership.SAIL);
   }
 
   /**
-   * A merge-managed file: the generated {@code body} is refreshed above {@code mergeMarker} while
-   * the engineer's personal region below it is preserved across regeneration.
+   * An engineer-owned file: sail writes it once when absent (or on {@code --force}) and otherwise
+   * leaves it untouched. Never executable.
    */
-  public static GeneratedFile merged(String remotePath, String body, String mergeMarker) {
-    return new GeneratedFile(remotePath, body, false, mergeMarker);
+  public static GeneratedFile engineerOwned(String remotePath, String content) {
+    return new GeneratedFile(remotePath, content, false, Ownership.ENGINEER);
   }
 }

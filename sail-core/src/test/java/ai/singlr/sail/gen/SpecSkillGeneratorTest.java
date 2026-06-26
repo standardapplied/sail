@@ -101,38 +101,22 @@ class SpecSkillGeneratorTest {
   }
 
   @Test
-  void codexReturnsEmptyFiles() {
+  void codexGetsARealSkillFileNotInlineInstructions() {
     var files = SpecSkillGenerator.generateFiles(AgentCli.CODEX, "specs", BASE);
 
-    assertTrue(files.isEmpty());
+    assertEquals(2, files.size());
+    assertEquals(BASE + ".agents/skills/spec-board/SKILL.md", files.get(0).remotePath());
+    assertEquals(BASE + ".agents/skills/spec-board/spec-template.md", files.get(1).remotePath());
+    var content = files.get(0).content();
+    assertTrue(content.contains("name: spec-board"));
+    assertTrue(content.contains("spec create"));
+    assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
   }
 
   @Test
-  void codexInstructionsContainsSpecManagement() {
-    var instructions = SpecSkillGenerator.codexInstructions("specs");
-
-    assertFalse(instructions.isEmpty());
-    assertTrue(instructions.contains("Spec Management"));
-    assertTrue(instructions.contains("spec create"));
-    assertFalse(instructions.contains("spec.yaml"), "specs are DB rows, not files");
-  }
-
-  @Test
-  void codexInstructionsReturnsEmptyWhenNull() {
-    var instructions = SpecSkillGenerator.codexInstructions(null);
-
-    assertTrue(instructions.isEmpty());
-  }
-
-  @Test
-  void codexInstructionsContainsAllOperations() {
-    var instructions = SpecSkillGenerator.codexInstructions("specs");
-
-    assertTrue(instructions.contains("Pending"));
-    assertTrue(instructions.contains("In Progress"));
-    assertTrue(instructions.contains("create"), "Should contain create instructions");
-    assertTrue(instructions.contains("update"), "Should contain update instructions");
-    assertTrue(instructions.contains("brainstormed"), "Should contain bulk creation instructions");
+  void specsDisabledGeneratesNothingForEitherAgent() {
+    assertTrue(SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, null, BASE).isEmpty());
+    assertTrue(SpecSkillGenerator.generateFiles(AgentCli.CODEX, null, BASE).isEmpty());
   }
 
   @Test
@@ -150,9 +134,9 @@ class SpecSkillGeneratorTest {
     assertTrue(claude.get(0).content().contains("spec create"));
     assertFalse(claude.get(0).content().contains("work-items"));
 
-    var codex = SpecSkillGenerator.codexInstructions("work-items");
-    assertTrue(codex.contains("spec create"));
-    assertFalse(codex.contains("work-items"));
+    var codex = SpecSkillGenerator.generateFiles(AgentCli.CODEX, "work-items", BASE);
+    assertTrue(codex.get(0).content().contains("spec create"));
+    assertFalse(codex.get(0).content().contains("work-items"));
   }
 
   @Test

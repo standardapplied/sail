@@ -7,7 +7,6 @@ package ai.singlr.sail.gen;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
@@ -100,7 +99,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesProjectDescription() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Project"));
     assertTrue(md.contains("Acme Health Platform"));
@@ -108,7 +107,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesTechStack() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Tech Stack"));
     assertTrue(md.contains("Backend: JDK 25, Helidon 4.3.x"));
@@ -117,7 +116,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesConventions() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Conventions"));
     assertTrue(md.contains("Use virtual threads"));
@@ -126,7 +125,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesBuildCommands() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Build & Run"));
     assertTrue(md.contains("mvn clean package -DskipTests"));
@@ -135,7 +134,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesServicesTable() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Services"));
     assertTrue(md.contains("| Service | Port | Notes |"));
@@ -147,7 +146,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void postgresNotesIncludeUserAndDb() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("user: dev"));
     assertTrue(md.contains("db: acme"));
@@ -155,14 +154,14 @@ class AgentContextGeneratorTest {
 
   @Test
   void meilisearchNotesIncludeMode() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("development mode"));
   }
 
   @Test
   void includesProcessesTable() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Developer Commands"));
     assertTrue(md.contains("| Task | Command |"));
@@ -172,7 +171,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesEnvironmentSection() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Environment"));
     assertTrue(md.contains("Incus container managed by `sail`"));
@@ -185,7 +184,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void includesProjectSpecific() {
-    var md = AgentContextGenerator.generateClaudeMd(fullConfig());
+    var md = AgentContextGenerator.generateContextBody(fullConfig());
 
     assertTrue(md.contains("## Project-Specific Notes"));
     assertTrue(md.contains("HIPAA compliance is critical"));
@@ -209,14 +208,14 @@ class AgentContextGeneratorTest {
             new SailYaml.AgentContext("stack", "conv", "build", null),
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertFalse(md.contains("Project-Specific Notes"));
   }
 
   @Test
   void handlesMinimalConfig() {
-    var md = AgentContextGenerator.generateClaudeMd(minimalConfig());
+    var md = AgentContextGenerator.generateContextBody(minimalConfig());
 
     assertTrue(md.contains("## Project"));
     assertTrue(md.contains("A minimal project"));
@@ -246,7 +245,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Runtimes"));
     assertTrue(md.contains("- JDK 25"));
@@ -256,7 +255,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void runtimesOmittedWhenAllZeroOrNull() {
-    var md = AgentContextGenerator.generateClaudeMd(minimalConfig());
+    var md = AgentContextGenerator.generateContextBody(minimalConfig());
 
     assertFalse(md.contains("## Runtimes"));
   }
@@ -279,7 +278,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Runtimes"));
     assertTrue(md.contains("- JDK 25"));
@@ -309,7 +308,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Repositories"));
     assertTrue(md.contains("`~/workspace/acme`"));
@@ -321,7 +320,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void repositoriesOmittedWhenNull() {
-    var md = AgentContextGenerator.generateClaudeMd(minimalConfig());
+    var md = AgentContextGenerator.generateContextBody(minimalConfig());
 
     assertFalse(md.contains("## Repositories"));
   }
@@ -344,14 +343,14 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("Git identity: Acme Eng <eng@acme.com>"));
   }
 
   @Test
   void environmentOmitsGitIdentityWhenNull() {
-    var md = AgentContextGenerator.generateClaudeMd(minimalConfig());
+    var md = AgentContextGenerator.generateContextBody(minimalConfig());
 
     assertFalse(md.contains("Git identity:"));
   }
@@ -377,7 +376,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("Redis 7"));
     assertTrue(md.contains("6379"));
@@ -385,13 +384,13 @@ class AgentContextGeneratorTest {
   }
 
   @Test
-  void headerIsCorrectFormat() {
+  void claudeEntryFileImportsTheSailCoreAndIsEngineerOwned() {
     var md = AgentContextGenerator.generateClaudeMd(fullConfig());
 
     assertTrue(md.startsWith("# CLAUDE.md"));
-    assertTrue(md.contains("generated by sail from sail.yaml"));
-    assertTrue(
-        md.contains("sail:personal"), "the header points the engineer at the personal region");
+    assertTrue(md.contains("@.sail/context.md"), "the Claude entry imports the sail-owned core");
+    assertTrue(md.contains("This file is yours"), "the entry tells the engineer they own it");
+    assertFalse(md.contains("sail:personal"), "the personal marker is retired");
   }
 
   @Test
@@ -412,7 +411,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Project\nmy-project"));
   }
@@ -439,7 +438,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Autonomous Operation"));
     assertTrue(md.contains("### Work Protocol"));
@@ -469,7 +468,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Autonomous Operation"));
     assertTrue(md.contains("handoff.md"));
@@ -477,7 +476,7 @@ class AgentContextGeneratorTest {
 
   @Test
   void autonomousSectionOmittedWhenNoAutonomousConfig() {
-    var md = AgentContextGenerator.generateClaudeMd(minimalConfig());
+    var md = AgentContextGenerator.generateContextBody(minimalConfig());
 
     assertFalse(md.contains("Autonomous Operation"));
   }
@@ -503,7 +502,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertFalse(md.contains("Autonomous Operation"));
   }
@@ -534,7 +533,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("### Multi-Repository Work"));
     assertTrue(md.contains("same name in each affected repo"));
@@ -563,7 +562,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertFalse(md.contains("Multi-Repository Work"));
   }
@@ -601,7 +600,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("security audit"));
     assertTrue(md.contains("OWASP"));
@@ -642,7 +641,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     var auditIdx = md.indexOf("security audit");
     var prIdx = md.indexOf("Create a pull request");
@@ -684,7 +683,7 @@ class AgentContextGeneratorTest {
             null,
             null);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("6. If no more work remains"));
   }
@@ -731,7 +730,7 @@ class AgentContextGeneratorTest {
     var config = configWithAgent(agent);
     var files = AgentContextGenerator.generateFiles(config);
 
-    assertEquals(5, files.size());
+    assertEquals(8, files.size());
     assertTrue(files.stream().anyMatch(f -> f.remotePath().endsWith("CLAUDE.md")));
     assertTrue(files.stream().anyMatch(f -> f.remotePath().endsWith("AGENTS.md")));
     assertTrue(files.stream().anyMatch(f -> f.remotePath().endsWith("SECURITY.md")));
@@ -756,7 +755,7 @@ class AgentContextGeneratorTest {
     var config = configWithAgent(agent);
     var files = AgentContextGenerator.generateFiles(config);
 
-    assertEquals(5, files.size());
+    assertEquals(8, files.size());
   }
 
   @Test
@@ -800,7 +799,22 @@ class AgentContextGeneratorTest {
   }
 
   @Test
-  void perAgentContextFilesAreMergeManaged() {
+  void theSailCoreIsSailOwnedAndCarriesTheBody() {
+    var files = AgentContextGenerator.generateFiles(fullConfig());
+
+    var core =
+        files.stream()
+            .filter(f -> f.remotePath().endsWith(".sail/context.md"))
+            .findFirst()
+            .orElseThrow();
+
+    assertEquals(GeneratedFile.Ownership.SAIL, core.ownership());
+    assertTrue(core.content().contains("## Tech Stack"), "the core carries the generated body");
+    assertTrue(core.content().contains("do not edit"), "the core warns it is regenerated");
+  }
+
+  @Test
+  void perAgentEntryFilesAreEngineerOwned() {
     var files = AgentContextGenerator.generateFiles(fullConfig());
 
     var contextFiles =
@@ -811,12 +825,12 @@ class AgentContextGeneratorTest {
 
     assertFalse(contextFiles.isEmpty());
     assertTrue(
-        contextFiles.stream().allMatch(f -> f.mergeMarker() != null),
-        "the per-agent context merges a shared body with a preserved personal region");
+        contextFiles.stream().allMatch(f -> f.ownership() == GeneratedFile.Ownership.ENGINEER),
+        "the per-agent entry file is the engineer's — sail writes it once, never clobbers it");
   }
 
   @Test
-  void securityMdIsMergeManaged() {
+  void securityMdIsEngineerOwned() {
     var files = AgentContextGenerator.generateFiles(fullConfig());
 
     var security =
@@ -825,9 +839,7 @@ class AgentContextGeneratorTest {
             .findFirst()
             .orElseThrow();
 
-    assertNotNull(
-        security.mergeMarker(),
-        "SECURITY.md is merged like the context file: shared baseline, preserved personal notes");
+    assertEquals(GeneratedFile.Ownership.ENGINEER, security.ownership());
   }
 
   @Test
@@ -857,7 +869,7 @@ class AgentContextGeneratorTest {
     var machinery = files.stream().filter(f -> f.remotePath().contains("/skills/")).toList();
 
     assertFalse(machinery.isEmpty(), "the spec-board skill is machinery");
-    assertTrue(machinery.stream().allMatch(f -> f.mergeMarker() == null));
+    assertTrue(machinery.stream().allMatch(f -> f.ownership() == GeneratedFile.Ownership.SAIL));
   }
 
   @Test
@@ -887,11 +899,12 @@ class AgentContextGeneratorTest {
             .toList();
 
     assertEquals(2, agentFiles.size());
-    assertTrue(agentFiles.stream().allMatch(f -> f.mergeMarker() != null));
+    assertTrue(
+        agentFiles.stream().allMatch(f -> f.ownership() == GeneratedFile.Ownership.ENGINEER));
   }
 
   @Test
-  void allAgentContextFilesShareSameBody() {
+  void bothAgentsReferenceTheOneSailCore() {
     var agent =
         new SailYaml.Agent(
             "claude-code",
@@ -908,16 +921,15 @@ class AgentContextGeneratorTest {
     var config = configWithAgent(agent);
     var files = AgentContextGenerator.generateFiles(config);
 
-    var contextBodies =
-        files.stream()
-            .filter(
-                f -> f.remotePath().endsWith("CLAUDE.md") || f.remotePath().endsWith("AGENTS.md"))
-            .map(f -> f.content().substring(f.content().indexOf('\n')))
-            .toList();
+    var cores = files.stream().filter(f -> f.remotePath().endsWith(".sail/context.md")).toList();
+    assertEquals(1, cores.size(), "the core body is generated once and shared");
 
-    for (var i = 1; i < contextBodies.size(); i++) {
-      assertEquals(contextBodies.getFirst(), contextBodies.get(i));
-    }
+    var claude =
+        files.stream().filter(f -> f.remotePath().endsWith("CLAUDE.md")).findFirst().orElseThrow();
+    var codex =
+        files.stream().filter(f -> f.remotePath().endsWith("AGENTS.md")).findFirst().orElseThrow();
+    assertTrue(claude.content().contains("@.sail/context.md"), "Claude imports the core");
+    assertTrue(codex.content().contains("## Conventions"), "Codex inlines a snapshot of the core");
   }
 
   @Test
@@ -1016,7 +1028,7 @@ class AgentContextGeneratorTest {
     var files = AgentContextGenerator.generateFiles(fullConfig());
     var content =
         files.stream()
-            .filter(f -> f.remotePath().endsWith("CLAUDE.md"))
+            .filter(f -> f.remotePath().endsWith(".sail/context.md"))
             .findFirst()
             .orElseThrow()
             .content();
@@ -1224,7 +1236,7 @@ class AgentContextGeneratorTest {
     var config = configWithAgent(agent);
     var files = AgentContextGenerator.generateFiles(config);
 
-    assertEquals(5, files.size());
+    assertEquals(8, files.size());
   }
 
   @Test
@@ -1234,7 +1246,7 @@ class AgentContextGeneratorTest {
             "claude-code", true, "sail/", true, null, null, null, "specs", null, null, null);
     var config = configWithAgent(agent);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Spec-Driven Development"));
     assertTrue(md.contains("Sail database"));
@@ -1255,7 +1267,7 @@ class AgentContextGeneratorTest {
             "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
     var config = configWithAgent(agent);
 
-    var md = AgentContextGenerator.generateClaudeMd(config);
+    var md = AgentContextGenerator.generateContextBody(config);
 
     assertFalse(md.contains("Spec-Driven Development"));
   }

@@ -8,7 +8,6 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.ContextMerge;
 import ai.singlr.sail.gen.GeneratedFile;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -18,12 +17,12 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Generates a project's agent context from its {@link SailYaml} and installs it into the running
- * container: the per-agent context file (CLAUDE.md / AGENTS.md), SECURITY.md, the methodology and
- * spec-board skill, and the audit/guardrail hooks. Each file is installed by its policy: a {@link
- * GeneratedFile#mergeMarker merge} file (the per-agent context and SECURITY.md) refreshes its
- * generated body above the marker while preserving the engineer's personal region below it (see
- * {@link ContextMerge}); everything else (the spec-board skill, methodology, agent hooks) is
- * overwritten outright. {@code force} resets a merge file's personal region to the default stub.
+ * container: the sail-owned {@code .sail/context.md} core, the per-agent entry file (CLAUDE.md /
+ * AGENTS.md), SECURITY.md, the methodology and spec-board skills, and the audit/guardrail hooks.
+ * Each file is installed by its {@link GeneratedFile.Ownership ownership}: sail-owned files (the
+ * core, skills, hooks) are overwritten every run; engineer-owned files (the per-agent entry and
+ * SECURITY.md) are written only when absent — sail scaffolds them once and never clobbers the
+ * engineer's copy. {@code force} overwrites the engineer-owned files too.
  *
  * <p>Each file's parent directory is created before the push, so deeply nested generated files —
  * the {@code .claude/skills/spec-board/} skill in particular — land even on a container that never
@@ -58,9 +57,9 @@ public final class AgentContextInstaller {
   }
 
   /**
-   * Regenerates and installs the agent context for {@code config}, preserving each merge file's
-   * personal region. Equivalent to {@link #install(ShellExec, String, SailYaml, boolean)} with
-   * {@code force=false}.
+   * Regenerates and installs the agent context for {@code config}, leaving engineer-owned files
+   * that already exist untouched. Equivalent to {@link #install(ShellExec, String, SailYaml,
+   * boolean)} with {@code force=false}.
    */
   public static Result install(ShellExec shell, String container, SailYaml config)
       throws IOException, InterruptedException, TimeoutException {
@@ -69,12 +68,12 @@ public final class AgentContextInstaller {
 
   /**
    * Regenerates and installs the agent context for {@code config} into {@code container}, returning
-   * the remote paths written. Returns {@link Result#none()} when no agent is configured.
+   * the remote paths actually written. Returns {@link Result#none()} when no agent is configured.
    *
-   * <p>Merge files (the per-agent context and SECURITY.md) refresh their generated body while
-   * preserving the engineer's personal region below the marker; machinery (the spec-board skill,
-   * methodology, agent hooks) is overwritten. {@code force} resets a merge file's personal region
-   * to the default stub.
+   * <p>Sail-owned files (the {@code .sail} core, skills, agent hooks) are overwritten every run.
+   * Engineer-owned files (the per-agent {@code CLAUDE.md}/{@code AGENTS.md} and {@code
+   * SECURITY.md}) are written only when absent — sail scaffolds them once and never clobbers the
+   * engineer's copy. {@code force} overwrites them too, resetting them to the generated template.
    */
   public static Result install(ShellExec shell, String container, SailYaml config, boolean force)
       throws IOException, InterruptedException, TimeoutException {
@@ -82,32 +81,35 @@ public final class AgentContextInstaller {
     NameValidator.requireValidProjectName(container);
     Objects.requireNonNull(config, "config");
 
-    var contextFiles = AgentContextGenerator.generateFiles(config);
-    var auditFiles = AgentAuditFiles.assemble(config);
-    if (contextFiles.isEmpty() && auditFiles.isEmpty()) {
+    var files = new ArrayList<>(AgentContextGenerator.generateFiles(config));
+    files.addAll(AgentAuditFiles.assemble(config));
+    if (files.isEmpty()) {
       return Result.none();
     }
 
     var pushed = new ArrayList<String>();
-    for (var file : contextFiles) {
-      if (file.mergeMarker() != null) {
-        var prior = force ? null : readFile(shell, container, file.remotePath());
-        pushContent(
-            shell,
-            container,
-            file.remotePath(),
-            ContextMerge.merge(prior, file.content()),
-            file.executable());
-      } else {
+    for (var file : files) {
+      if (shouldInstall(shell, container, file, force)) {
         push(shell, container, file);
+        pushed.add(file.remotePath());
       }
-      pushed.add(file.remotePath());
-    }
-    for (var file : auditFiles) {
-      push(shell, container, file);
-      pushed.add(file.remotePath());
     }
     return new Result(pushed);
+  }
+
+  /** Sail-owned files always install; engineer-owned files install only when absent or forced. */
+  private static boolean shouldInstall(
+      ShellExec shell, String container, GeneratedFile file, boolean force)
+      throws IOException, InterruptedException, TimeoutException {
+    return switch (file.ownership()) {
+      case SAIL -> true;
+      case ENGINEER -> force || !fileExists(shell, container, file.remotePath());
+    };
+  }
+
+  private static boolean fileExists(ShellExec shell, String container, String remotePath)
+      throws IOException, InterruptedException, TimeoutException {
+    return exec(shell, container, List.of("test", "-f", remotePath)).ok();
   }
 
   private static void push(ShellExec shell, String container, GeneratedFile file)
@@ -125,16 +127,6 @@ public final class AgentContextInstaller {
       flags.addAll(List.of("--mode", "0755"));
     }
     ContainerFilePush.push(shell, container, remotePath, content, flags);
-  }
-
-  /** The current content of a container file, or {@code null} if it is absent or unreadable. */
-  private static String readFile(ShellExec shell, String container, String remotePath) {
-    try {
-      var result = exec(shell, container, List.of("cat", remotePath));
-      return result.ok() ? result.stdout() : null;
-    } catch (IOException | InterruptedException | TimeoutException e) {
-      return null;
-    }
   }
 
   private static ShellExec.Result exec(ShellExec shell, String container, List<String> args)

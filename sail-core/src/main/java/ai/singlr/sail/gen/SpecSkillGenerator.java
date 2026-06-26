@@ -6,7 +6,6 @@
 package ai.singlr.sail.gen;
 
 import ai.singlr.sail.engine.AgentCli;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -17,10 +16,9 @@ import java.util.List;
  * over the bind-mounted Unix socket; the agent never needs the {@code sail} binary or a token, and
  * what it creates syncs to every other box.
  *
- * <ul>
- *   <li>Claude Code: {@code .claude/skills/spec-board/SKILL.md} + a spec body template
- *   <li>Codex: instructions embedded in {@code AGENTS.md} via {@link #codexInstructions}
- * </ul>
+ * <p>Both agents have a skill system with the same {@code SKILL.md} shape, so the skill ships as
+ * {@code .claude/skills/spec-board/SKILL.md} for Claude Code and {@code
+ * .agents/skills/spec-board/SKILL.md} for Codex, each with a spec body template alongside.
  */
 public final class SpecSkillGenerator {
 
@@ -34,53 +32,30 @@ public final class SpecSkillGenerator {
    *     no skill is generated. (Retained as the project's "uses specs" switch even though specs are
    *     now stored in the database rather than this directory.)
    * @param basePath the workspace base path (e.g., {@code /home/dev/workspace/})
-   * @return generated files, empty if specs are disabled or the agent is Codex (inline
-   *     instructions)
+   * @return the SKILL.md + spec-template.md for the agent, or empty when specs are disabled
    */
   public static List<GeneratedFile> generateFiles(
       AgentCli agent, String specsDir, String basePath) {
     if (specsDir == null) {
       return List.of();
     }
-    return switch (agent) {
-      case CLAUDE_CODE -> claudeSkillFiles(basePath);
-      case CODEX -> List.of();
-    };
+    var skillDir = basePath + skillRoot(agent) + "spec-board/";
+    return List.of(
+        new GeneratedFile(skillDir + "SKILL.md", skillMd(), false),
+        new GeneratedFile(skillDir + "spec-template.md", specTemplateMd(), false));
   }
 
   /**
-   * Returns spec management instructions for Codex, which has no skill system. These are appended
-   * to the generated AGENTS.md content.
-   *
-   * @param specsDir the configured specs directory name; {@code null} disables specs (empty string)
-   * @return markdown instructions, or empty string when specs are disabled
+   * Skill directory for the agent — both agents have a skill system with the same SKILL.md shape.
    */
-  public static String codexInstructions(String specsDir) {
-    if (specsDir == null) {
-      return "";
-    }
-    return """
-
-        ## Spec Management
-
-        You are the spec manager for this project. Specs live in the Sail database, not in files. \
-        When the engineer asks you to create, list, update, or show specs, use the `spec` CLI \
-        exactly as described below.
-
-        """
-        + coreInstructions()
-        + specTemplate();
+  private static String skillRoot(AgentCli agent) {
+    return switch (agent) {
+      case CLAUDE_CODE -> ".claude/skills/";
+      case CODEX -> ".agents/skills/";
+    };
   }
 
-  private static List<GeneratedFile> claudeSkillFiles(String basePath) {
-    var files = new ArrayList<GeneratedFile>();
-    var skillDir = basePath + ".claude/skills/spec-board/";
-    files.add(new GeneratedFile(skillDir + "SKILL.md", claudeSkillMd(), false));
-    files.add(new GeneratedFile(skillDir + "spec-template.md", specTemplateMd(), false));
-    return List.copyOf(files);
-  }
-
-  private static String claudeSkillMd() {
+  private static String skillMd() {
     return """
         ---
         name: spec-board
@@ -259,12 +234,6 @@ public final class SpecSkillGenerator {
         """;
   }
 
-  private static String specTemplate() {
-    return "When writing a spec body, use this structure:\n\n```markdown\n"
-        + specTemplateMd()
-        + "```\n";
-  }
-
   private static String specTemplateMd() {
     return """
         # <Title>
@@ -295,14 +264,5 @@ public final class SpecSkillGenerator {
         ## Out of Scope
         - What this spec explicitly does NOT cover
         """;
-  }
-
-  private static String coreInstructions() {
-    return listInstructions()
-        + createInstructions()
-        + showInstructions()
-        + updateInstructions()
-        + bulkCreateInstructions()
-        + coreReference();
   }
 }

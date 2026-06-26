@@ -274,7 +274,9 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentContextPushesClaudeMd() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -f /home/dev/workspace/CLAUDE.md", "");
     var applier = applier(shell);
     var config = minimalConfig("claude-code");
 
@@ -288,7 +290,9 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentContextPushesAgentsMdForCodex() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -f /home/dev/workspace/AGENTS.md", "");
     var applier = applier(shell);
     var config = minimalConfig("codex");
 
@@ -326,26 +330,22 @@ class ProjectApplierTest {
   }
 
   @Test
-  void applyAgentContextMergesTheContextFileAndSecurityMd() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat /home/dev/workspace/CLAUDE.md", "old\n\nmy note\n")
-            .onOk("cat /home/dev/workspace/SECURITY.md", "old\n\nmy security note\n");
+  void applyAgentContextLeavesExistingEngineerFilesUntouched() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
     var config = minimalConfig("claude-code");
 
     var result = applier.applyAgentContext(CONTAINER, config);
 
-    assertEquals(
-        0, result.skipped(), "a delta apply merges the editable files rather than skipping");
-    assertTrue(
-        shell.invocations().stream().anyMatch(c -> c.contains("cat /home/dev/workspace/CLAUDE.md")),
-        "the context file is merged on apply, preserving the engineer's personal region");
-    assertTrue(
+    assertFalse(
         shell.invocations().stream()
-            .anyMatch(c -> c.contains("cat /home/dev/workspace/SECURITY.md")),
-        "SECURITY.md is merged the same way");
-    assertTrue(result.added() > 0, "machinery (the spec-board skill) still refreshes");
+            .anyMatch(c -> c.contains("incus file push") && c.contains("/CLAUDE.md")),
+        "an existing engineer-owned CLAUDE.md is never clobbered on a delta apply");
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("incus file push") && c.contains("/SECURITY.md")),
+        "an existing engineer-owned SECURITY.md is never clobbered");
+    assertTrue(result.added() > 0, "sail-owned machinery (the core and skills) still refreshes");
   }
 
   @Test
@@ -550,7 +550,11 @@ class ProjectApplierTest {
 
     var result = applier.applyAgentContext(CONTAINER, config);
 
-    assertEquals(4, result.added());
+    assertEquals(
+        3,
+        result.added(),
+        "the sail-owned core, audit script, and agent settings refresh; the engineer-owned"
+            + " AGENTS.md and SECURITY.md are left as-is");
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("security-audit.sh")));
     assertTrue(
         shell.invocations().stream()
