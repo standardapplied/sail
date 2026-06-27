@@ -39,6 +39,7 @@ class RyukReapsContainersIT extends AbstractIncusIT {
     ensureIncusOrSkip();
     try {
       launch(CONTAINER);
+      waitForNetwork();
       setUpRootlessPodman();
 
       var run =
@@ -160,6 +161,24 @@ class RyukReapsContainersIT extends AbstractIncusIT {
         echo "--- ryuk logs ---"; podman logs sail-ryuk 2>&1 | tail -20 || true
         podman rm -f sail-ryuk sail-victim >/dev/null 2>&1 || true
         """;
+  }
+
+  /**
+   * Waits until the freshly launched container has working outbound DNS — a bare {@code incus
+   * launch} returns before systemd-networkd finishes DHCP off the incus NAT bridge, so an immediate
+   * {@code apt-get} fails to resolve the archive. Fails loudly if the network never comes up (e.g.
+   * the CI host blocks bridge forwarding).
+   */
+  private void waitForNetwork() throws Exception {
+    for (var attempt = 0; attempt < 60; attempt++) {
+      if (exec(CONTAINER, List.of("getent", "hosts", "archive.ubuntu.com")).ok()) {
+        return;
+      }
+      Thread.sleep(2000);
+    }
+    assertOk(
+        exec(CONTAINER, List.of("getent", "hosts", "archive.ubuntu.com")),
+        "container never obtained outbound DNS within 120s (incus NAT/forwarding?)");
   }
 
   private void waitForUserBus() throws Exception {
