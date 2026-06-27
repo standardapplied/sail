@@ -39,12 +39,14 @@ public final class AgentContextGenerator {
     var body = generateContextBody(config);
     var methodology = config.agent() != null ? config.agent().methodology() : null;
     var specsDir = config.agent() != null ? config.agent().specsDir() : null;
+    var rules = config.agentContext() != null ? config.agentContext().rules() : null;
 
     var files = new ArrayList<GeneratedFile>();
     for (var agent : targetAgents) {
       files.add(new GeneratedFile(home + agent.homeContextPath(), body, false));
       files.addAll(MethodologyGenerator.generateFiles(agent, methodology, home));
       files.addAll(SpecSkillGenerator.generateFiles(agent, specsDir, home));
+      files.addAll(LanguageRulesGenerator.generateFiles(agent, rules, home));
     }
     return List.copyOf(files);
   }

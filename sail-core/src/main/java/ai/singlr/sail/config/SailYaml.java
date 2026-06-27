@@ -406,11 +406,21 @@ public record SailYaml(
       String conventions,
       String buildCommands,
       String projectSpecific,
-      String security) {
+      String security,
+      List<AgentRule> rules) {
 
     public AgentContext(
         String techStack, String conventions, String buildCommands, String projectSpecific) {
-      this(techStack, conventions, buildCommands, projectSpecific, null);
+      this(techStack, conventions, buildCommands, projectSpecific, null, null);
+    }
+
+    public AgentContext(
+        String techStack,
+        String conventions,
+        String buildCommands,
+        String projectSpecific,
+        String security) {
+      this(techStack, conventions, buildCommands, projectSpecific, security, null);
     }
 
     public static AgentContext fromMap(Map<String, Object> map) {
@@ -419,7 +429,8 @@ public record SailYaml(
           (String) map.get("conventions"),
           (String) map.get("build_commands"),
           (String) map.get("project_specific"),
-          (String) map.get("security"));
+          (String) map.get("security"),
+          AgentRule.listFromMap(map.get("rules")));
     }
 
     public Map<String, Object> toMap() {
@@ -429,6 +440,50 @@ public record SailYaml(
       if (buildCommands != null) map.put("build_commands", buildCommands);
       if (projectSpecific != null) map.put("project_specific", projectSpecific);
       if (security != null) map.put("security", security);
+      if (rules != null && !rules.isEmpty()) map.put("rules", AgentRule.listToMap(rules));
+      return map;
+    }
+  }
+
+  /**
+   * An org-supplied coding-standard rule the agent loads only when it touches matching files. The
+   * {@code body} is supplied verbatim by the project; sail materializes it into each agent's native
+   * path-scoped channel (a Claude {@code .claude/rules/<name>.md} with a {@code paths:} glob, a
+   * Codex skill loaded by description). Sail ships no rule content of its own.
+   */
+  public record AgentRule(String name, List<String> paths, String body) {
+
+    public AgentRule {
+      NameValidator.requireSafePath(name, "agent_context.rules name");
+      paths = paths == null ? List.of() : List.copyOf(paths);
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<AgentRule> listFromMap(Object raw) {
+      if (!(raw instanceof Map<?, ?> map)) {
+        return null;
+      }
+      var rules = new ArrayList<AgentRule>();
+      for (var entry : map.entrySet()) {
+        if (entry.getValue() instanceof Map<?, ?> value) {
+          rules.add(
+              new AgentRule(
+                  (String) entry.getKey(),
+                  (List<String>) value.get("paths"),
+                  (String) value.get("body")));
+        }
+      }
+      return List.copyOf(rules);
+    }
+
+    static Map<String, Object> listToMap(List<AgentRule> rules) {
+      var map = new LinkedHashMap<String, Object>();
+      for (var rule : rules) {
+        var inner = new LinkedHashMap<String, Object>();
+        if (!rule.paths().isEmpty()) inner.put("paths", new ArrayList<>(rule.paths()));
+        if (rule.body() != null) inner.put("body", rule.body());
+        map.put(rule.name(), inner);
+      }
       return map;
     }
   }

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SailYamlTest {
@@ -527,6 +528,75 @@ class SailYamlTest {
   }
 
   @Test
+  void agentContextRulesParsedFromYaml() throws Exception {
+    var yaml =
+        """
+        name: test
+        agent_context:
+          rules:
+            java:
+              paths: ["**/*.java", "**/*.kt"]
+              body: |
+                - Records for value types.
+            typescript:
+              paths: ["**/*.ts"]
+              body: |
+                - Strict null checks.
+        """;
+    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    var rules = config.agentContext().rules();
+    assertEquals(2, rules.size());
+    var java = rules.getFirst();
+    assertEquals("java", java.name());
+    assertEquals(List.of("**/*.java", "**/*.kt"), java.paths());
+    assertTrue(java.body().contains("Records for value types."));
+    assertEquals("typescript", rules.get(1).name());
+  }
+
+  @Test
+  void agentContextRulesRoundTripThroughToMap() throws Exception {
+    var yaml =
+        """
+        name: test
+        agent_context:
+          rules:
+            java:
+              paths: ["**/*.java"]
+              body: |
+                - Sealed interfaces.
+        """;
+    var original = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    var reparsed = SailYaml.fromMap(original.toMap());
+
+    var rule = reparsed.agentContext().rules().getFirst();
+    assertEquals("java", rule.name());
+    assertEquals(List.of("**/*.java"), rule.paths());
+    assertTrue(rule.body().contains("Sealed interfaces."));
+  }
+
+  @Test
+  void agentContextWithoutRulesParsesToNull() throws Exception {
+    var yaml =
+        """
+        name: test
+        agent_context:
+          tech_stack: Java 25
+        """;
+    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    assertNull(config.agentContext().rules());
+  }
+
+  @Test
+  void aRuleNameThatTraversesIsRejected() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new SailYaml.AgentRule("../etc/evil", List.of(), "body"));
+  }
+
+  @Test
   void securityAuditParsedFromYaml() throws Exception {
     var yaml =
         """
@@ -771,9 +841,9 @@ class SailYamlTest {
         """;
     var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
 
-    var updated = config.withAgentInstall(java.util.List.of("claude-code"));
+    var updated = config.withAgentInstall(List.of("claude-code"));
 
-    assertEquals(java.util.List.of("claude-code"), updated.agent().install());
+    assertEquals(List.of("claude-code"), updated.agent().install());
     assertEquals("claude-code", updated.agent().type());
     assertTrue(updated.agent().autoBranch());
   }

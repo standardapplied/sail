@@ -956,6 +956,33 @@ class AgentContextGeneratorTest {
   }
 
   @Test
+  void configuredLanguageRulesAreMaterializedUnderTheHomeNamespace() {
+    var agentCtx =
+        new SailYaml.AgentContext(
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of(new SailYaml.AgentRule("java", List.of("**/*.java"), "- Records for DTOs.")));
+    var files = AgentContextGenerator.generateFiles(configWithRuntimesAndContext(null, agentCtx));
+
+    var rule = fileEndingWith(files, "/.claude/rules/java.md");
+    assertTrue(rule.content().contains("**/*.java"));
+    assertTrue(rule.content().contains("- Records for DTOs."));
+    assertFalse(
+        files.stream().anyMatch(f -> f.remotePath().contains("/workspace/")),
+        "rules land in sail's home namespace, never the engineer's workspace");
+  }
+
+  @Test
+  void noLanguageRulesWhenNoneConfigured() {
+    var files = AgentContextGenerator.generateFiles(fullConfig());
+
+    assertFalse(files.stream().anyMatch(f -> f.remotePath().contains("/rules/")));
+  }
+
+  @Test
   void userConventionsAppendedAfterUniversalPrinciples() {
     var agentCtx = new SailYaml.AgentContext(null, "- Custom project rule", null, null);
     var config = configWithRuntimesAndContext(new SailYaml.Runtimes(25, null, null), agentCtx);

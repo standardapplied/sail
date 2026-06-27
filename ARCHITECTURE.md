@@ -327,7 +327,12 @@ orientation (tech stack, conventions, runtimes, services), language-agnostic eng
 principles, a short security stance (the full OWASP rubric lives in the review/audit
 prompt), the spec-driven workflow (DB-authoritative — no `specs/` directory to edit), and
 the autonomous-operation protocol. Methodology/spec skills land under the home skills
-namespace; sail ships no hardcoded language standards.
+namespace; sail ships no hardcoded language standards. A project may supply its own via
+`agent_context.rules` (name → `{paths, body}`): sail materializes each into the agent's native
+"load only when relevant" channel — a path-scoped Claude rule (`~/.claude/rules/<name>.md` with a
+`paths:` glob) and a description-loaded Codex skill — so Java standards reach the agent only while
+it edits Java, never bloating the always-loaded context. The bodies are project-supplied; sail
+ships none.
 
 **Guardrails + rollback:** `agent.guardrails` sets a `max_duration` and an action
 (`snapshot-and-stop` / `stop` / `notify`). An event-driven watcher (`sail agent watch`,
