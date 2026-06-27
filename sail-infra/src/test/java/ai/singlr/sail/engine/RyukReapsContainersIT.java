@@ -160,11 +160,16 @@ class RyukReapsContainersIT extends AbstractIncusIT {
         podman run -d --rm --name sail-ryuk --privileged \\
           -v "$SOCK:/var/run/docker.sock" \\
           -e RYUK_RECONNECTION_TIMEOUT=5s \\
+          -e RYUK_REQUEST_TIMEOUT=60s \\
           -e RYUK_VERBOSE=true \\
           -p 127.0.0.1:8080:8080 \\
           "$RYUK_IMG" || { echo "RYUK_START_FAILED"; podman logs sail-ryuk 2>&1 || true; exit 1; }
 
         for i in $(seq 1 30); do podman logs sail-ryuk 2>&1 | grep -q "msg=Started" && break; sleep 1; done
+
+        echo "--- timing a direct force-remove for comparison ---"
+        time podman rm -f sail-victim >/dev/null 2>&1 && echo "DIRECT_RM_OK"
+        podman run -d --name sail-victim --label "$LABEL" "$VICTIM_IMG" sleep 600 >/dev/null 2>&1
 
         echo "--- registering filter with ryuk, then dropping the connection ---"
         exec 3<>/dev/tcp/127.0.0.1/8080
@@ -172,8 +177,8 @@ class RyukReapsContainersIT extends AbstractIncusIT {
         sleep 2
         exec 3>&- 3<&-
 
-        echo "--- waiting past the reconnection timeout for the reap ---"
-        sleep 15
+        echo "--- waiting past the reconnection timeout + a generous reap window ---"
+        sleep 75
 
         if podman ps -a --format '{{.Names}}' | grep -qx sail-victim; then
           echo "RYUK_RESULT=NOT_REAPED"
