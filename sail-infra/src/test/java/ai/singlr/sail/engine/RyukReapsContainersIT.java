@@ -152,18 +152,19 @@ class RyukReapsContainersIT extends AbstractIncusIT {
         podman pull -q "$RYUK_IMG"    || { echo "RYUK_PULL_FAILED"; exit 1; }
         podman pull -q "$VICTIM_IMG"  || { echo "VICTIM_PULL_FAILED"; exit 1; }
 
-        echo "--- starting ryuk (privileged) ---"
+        echo "--- starting labelled victim first ---"
+        podman run -d --name sail-victim --label "$LABEL" "$VICTIM_IMG" sleep 600 \\
+          || { echo "VICTIM_START_FAILED"; exit 1; }
+
+        echo "--- starting ryuk (privileged, verbose) ---"
         podman run -d --rm --name sail-ryuk --privileged \\
           -v "$SOCK:/var/run/docker.sock" \\
-          -e RYUK_RECONNECTION_TIMEOUT=3s \\
+          -e RYUK_RECONNECTION_TIMEOUT=5s \\
+          -e RYUK_VERBOSE=true \\
           -p 127.0.0.1:8080:8080 \\
           "$RYUK_IMG" || { echo "RYUK_START_FAILED"; podman logs sail-ryuk 2>&1 || true; exit 1; }
 
-        for i in $(seq 1 30); do (echo >/dev/tcp/127.0.0.1/8080) >/dev/null 2>&1 && break; sleep 1; done
-
-        echo "--- starting labelled victim ---"
-        podman run -d --name sail-victim --label "$LABEL" "$VICTIM_IMG" sleep 600 \\
-          || { echo "VICTIM_START_FAILED"; exit 1; }
+        for i in $(seq 1 30); do podman logs sail-ryuk 2>&1 | grep -q "msg=Started" && break; sleep 1; done
 
         echo "--- registering filter with ryuk, then dropping the connection ---"
         exec 3<>/dev/tcp/127.0.0.1/8080
@@ -172,14 +173,16 @@ class RyukReapsContainersIT extends AbstractIncusIT {
         exec 3>&- 3<&-
 
         echo "--- waiting past the reconnection timeout for the reap ---"
-        sleep 12
+        sleep 15
 
         if podman ps -a --format '{{.Names}}' | grep -qx sail-victim; then
           echo "RYUK_RESULT=NOT_REAPED"
         else
           echo "RYUK_RESULT=REAPED"
         fi
-        echo "--- ryuk logs ---"; podman logs sail-ryuk 2>&1 | tail -20 || true
+        echo "--- victim labels (as podman sees them) ---"
+        podman inspect sail-victim --format '{{json .Config.Labels}}' 2>&1 || true
+        echo "--- ryuk logs (verbose) ---"; podman logs sail-ryuk 2>&1 | tail -40 || true
         podman rm -f sail-ryuk sail-victim >/dev/null 2>&1 || true
         """;
   }
