@@ -30,6 +30,14 @@ jobs:
           sudo incus admin init --minimal
           sudo chmod o+rw /var/lib/incus/unix.socket
 
+      - name: Give launched containers outbound internet
+        # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently
+        # drops the incus NAT bridge's egress, so containers can resolve DNS but cannot connect
+        # out (apt/image pulls time out). Allow forwarding so provisioned containers reach the net.
+        run: |
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo iptables -P FORWARD ACCEPT
+
       - name: Verify incus is reachable by the runner
         run: |
           which incus
