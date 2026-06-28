@@ -118,7 +118,7 @@ class AgentContextGeneratorTest {
   void includesConventions() {
     var md = AgentContextGenerator.generateContextBody(fullConfig());
 
-    assertTrue(md.contains("## Conventions"));
+    assertTrue(md.contains("## Project Conventions"));
     assertTrue(md.contains("Use virtual threads"));
     assertTrue(md.contains("Records for DTOs"));
   }
@@ -226,7 +226,7 @@ class AgentContextGeneratorTest {
     assertTrue(md.contains("## Project"));
     assertTrue(md.contains("A minimal project"));
     assertTrue(md.contains("## Environment"));
-    assertTrue(md.contains("## Conventions"));
+    assertTrue(md.contains("## Engineering Principles"));
     assertFalse(md.contains("## Tech Stack"));
     assertFalse(md.contains("## Services"));
     assertFalse(md.contains("## Developer Commands"));
@@ -413,11 +413,11 @@ class AgentContextGeneratorTest {
   }
 
   @Test
-  void autonomousSectionAppendedWhenGuardrailsConfigured() {
+  void autonomousOperationIsNotInTheAlwaysLoadedBody() {
     var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var agent =
         new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
+            "claude-code", true, "sail/", true, null, null, guardrails, "specs", null, null, null);
     var config =
         new SailYaml(
             "test",
@@ -436,254 +436,11 @@ class AgentContextGeneratorTest {
 
     var md = AgentContextGenerator.generateContextBody(config);
 
-    assertTrue(md.contains("## Autonomous Operation"));
-    assertTrue(md.contains("### Work Protocol"));
-    assertTrue(md.contains("### Completion Protocol"));
-    assertTrue(md.contains("### Error Recovery"));
+    assertFalse(
+        md.contains("## Autonomous Operation"),
+        "autonomous-run instructions belong in the dispatch prompt, not the always-loaded context");
     assertFalse(md.contains("Session Handoff"), "context handoff is the agent runtime's job");
     assertFalse(md.contains("handoff.md"), "no ~/handoff.md context-management instructions");
-  }
-
-  @Test
-  void autonomousSectionAppendedWhenSpecsDirConfigured() {
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, "specs", null, null, null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertTrue(md.contains("## Autonomous Operation"));
-    assertTrue(md.contains("### Completion Protocol"));
-  }
-
-  @Test
-  void autonomousSectionOmittedWhenNoAutonomousConfig() {
-    var md = AgentContextGenerator.generateContextBody(minimalConfig());
-
-    assertFalse(md.contains("Autonomous Operation"));
-  }
-
-  @Test
-  void autonomousSectionOmittedWhenAgentHasNeitherGuardrailsNorTasks() {
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertFalse(md.contains("Autonomous Operation"));
-  }
-
-  @Test
-  void multiRepoGuidanceWhenMultipleRepos() {
-    var repos =
-        List.of(
-            new SailYaml.Repo("https://github.com/test/backend.git", "backend", "main"),
-            new SailYaml.Repo("https://github.com/test/frontend.git", "frontend", "main"));
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            repos,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertTrue(md.contains("### Multi-Repository Work"));
-    assertTrue(md.contains("same name in each affected repo"));
-  }
-
-  @Test
-  void noMultiRepoGuidanceWhenSingleRepo() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/test/app.git", "app", "main"));
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, guardrails, null, null, null, null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            repos,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertFalse(md.contains("Multi-Repository Work"));
-  }
-
-  @Test
-  void completionProtocolIncludesSecurityAuditStep() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
-    var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
-    var agent =
-        new SailYaml.Agent(
-            "claude-code",
-            true,
-            "sail/",
-            true,
-            null,
-            null,
-            guardrails,
-            null,
-            securityAudit,
-            null,
-            null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertTrue(md.contains("security audit"));
-    assertTrue(md.contains("OWASP"));
-    assertTrue(md.contains("hardcoded secrets"));
-    assertTrue(md.contains("input validation"));
-  }
-
-  @Test
-  void securityAuditStepBeforePullRequest() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
-    var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
-    var agent =
-        new SailYaml.Agent(
-            "claude-code",
-            true,
-            "sail/",
-            true,
-            null,
-            null,
-            guardrails,
-            null,
-            securityAudit,
-            null,
-            null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    var auditIdx = md.indexOf("security audit");
-    var prIdx = md.indexOf("Create a pull request");
-    assertTrue(auditIdx > 0, "security audit step should be present");
-    assertTrue(prIdx > 0, "pull request step should be present");
-    assertTrue(auditIdx < prIdx, "security audit should come before pull request");
-  }
-
-  @Test
-  void completionStepsRenumberWhenSecurityAuditPresent() {
-    var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
-    var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
-    var agent =
-        new SailYaml.Agent(
-            "claude-code",
-            true,
-            "sail/",
-            true,
-            null,
-            null,
-            guardrails,
-            "specs",
-            securityAudit,
-            null,
-            null);
-    var config =
-        new SailYaml(
-            "test",
-            "Test",
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertTrue(md.contains("4. Run a security audit"), "the audit is inserted as step 4");
-    assertTrue(md.contains("5. Create a pull request"), "the PR step renumbers after it");
   }
 
   @Test
@@ -884,7 +641,7 @@ class AgentContextGeneratorTest {
     var claude = fileEndingWith(files, "/.claude/CLAUDE.md").content();
     var codex = fileEndingWith(files, "/.codex/AGENTS.md").content();
     assertEquals(claude, codex, "the sail-owned body is identical for both agents");
-    assertTrue(claude.contains("## Conventions"));
+    assertTrue(claude.contains("## Engineering Principles"));
   }
 
   @Test
@@ -909,14 +666,15 @@ class AgentContextGeneratorTest {
   void contextIncludesUniversalPrinciples() {
     var content = coreBody(AgentContextGenerator.generateFiles(fullConfig()));
 
-    assertTrue(content.contains("SOLID principles"));
-    assertTrue(content.contains("DRY"));
-    assertTrue(content.contains("self-documenting"));
-    assertTrue(content.contains("simple and elegant"));
-    assertTrue(content.contains("No inline comments in code, ever"));
-    assertTrue(content.contains("edge cases"));
+    assertTrue(content.contains("efficient senior engineer"));
+    assertTrue(content.contains("best code is the code never written"));
+    assertTrue(content.contains("SRP, DRY, KISS, YAGNI"));
+    assertTrue(content.contains("Deletion over addition"));
+    assertTrue(content.contains("Boring over clever"));
+    assertTrue(content.contains("Fewest files possible"));
+    assertTrue(content.contains("No inline comments, ever"));
     assertTrue(content.contains("Test behavior, not lines"));
-    assertFalse(content.contains("world's best coder"), "the hype line is trimmed");
+    assertFalse(content.contains("SOLID principles"), "consolidated into SRP/DRY/KISS/YAGNI");
   }
 
   @Test
@@ -998,7 +756,7 @@ class AgentContextGeneratorTest {
     var config = configWithRuntimesAndContext(new SailYaml.Runtimes(25, null, null), agentCtx);
     var content = coreBody(AgentContextGenerator.generateFiles(config));
 
-    var autoIdx = content.indexOf("SOLID principles");
+    var autoIdx = content.indexOf("SRP, DRY, KISS, YAGNI");
     var userIdx = content.indexOf("Custom project rule");
     assertTrue(autoIdx > 0);
     assertTrue(userIdx > 0);

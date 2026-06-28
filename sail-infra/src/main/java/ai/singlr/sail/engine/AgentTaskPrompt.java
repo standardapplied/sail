@@ -41,6 +41,31 @@ public final class AgentTaskPrompt {
         + targetModel
         + targetReasoning
         + "\n"
-        + description;
+        + description
+        + autonomousProtocol(spec);
+  }
+
+  /**
+   * The autonomous-operation protocol, appended to the dispatch prompt only — it applies to a
+   * headless dispatched run, not to an engineer's interactive session, so it lives here rather than
+   * in the always-loaded context file. The security-audit and code-review steps are enforced by the
+   * post-task hooks, so the prompt stays generic.
+   */
+  private static String autonomousProtocol(Spec spec) {
+    var multiRepo =
+        spec.repos().size() > 1
+            ? "\nThis spec spans multiple repos: branch, commit, and open a linked pull request in"
+                + " each affected repo.\n"
+            : "";
+    return """
+
+        ## Autonomous Operation
+        Execute without waiting for confirmation: plan, implement, test, commit. When complete, run
+        the tests, commit with a clear message, push the branch, and open a pull request.
+        """
+        + multiRepo
+        + "If the build fails repeatedly on the same error, or three different approaches fail, stop"
+        + " and report rather than retrying. Never leave work uncommitted — a WIP commit beats lost"
+        + " work.\n";
   }
 }

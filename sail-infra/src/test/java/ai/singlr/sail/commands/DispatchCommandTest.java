@@ -171,6 +171,40 @@ class DispatchCommandTest {
   }
 
   @Test
+  void buildTaskPromptCarriesTheAutonomousProtocol() {
+    var spec = new Spec("oauth", "OAuth", SpecStatus.PENDING, null, List.of(), null);
+
+    var prompt = AgentTaskPrompt.build(spec, "Details");
+
+    assertTrue(
+        prompt.contains("## Autonomous Operation"),
+        "the autonomous protocol belongs in the dispatch prompt, not the always-loaded context");
+    assertTrue(prompt.contains("open a pull request"));
+    assertFalse(prompt.contains("handoff.md"), "no context-handoff cruft");
+  }
+
+  @Test
+  void buildTaskPromptNotesMultiRepoOnlyWhenSpecSpansRepos() {
+    var single = new Spec("a", "A", SpecStatus.PENDING, null, List.of(), null);
+    assertFalse(AgentTaskPrompt.build(single, "d").contains("spans multiple repos"));
+
+    var multi =
+        new Spec(
+            "b",
+            "test",
+            "B",
+            SpecStatus.PENDING,
+            null,
+            List.of(),
+            List.of("api", "web"),
+            null,
+            null,
+            null,
+            null);
+    assertTrue(AgentTaskPrompt.build(multi, "d").contains("spans multiple repos"));
+  }
+
+  @Test
   void dispatchCommandRegisteredInSing() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
