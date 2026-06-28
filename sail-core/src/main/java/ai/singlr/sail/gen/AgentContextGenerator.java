@@ -344,12 +344,7 @@ public final class AgentContextGenerator {
               """);
     }
 
-    sb.append(step++).append(". Create a pull request for the current branch\n");
-
-    if (config.agent().specsDir() != null) {
-      sb.append(step)
-          .append(". If no more work remains, write a summary to ~/handoff.md and exit\n");
-    }
+    sb.append(step).append(". Create a pull request for the current branch\n");
 
     if (config.repos() != null && config.repos().size() > 1) {
       sb.append(
@@ -369,17 +364,11 @@ public final class AgentContextGenerator {
     sb.append(
         """
 
-        ### Session Handoff
-        If you are running low on context or the session is cycling:
-        1. Write your current progress and next steps to ~/handoff.md
-        2. Commit and push all work in progress (even partial — use a WIP commit)
-        3. The next session will read ~/handoff.md to continue where you left off
-
         ### Error Recovery
-        - If the build fails more than 5 consecutive times on the same error, stop and document
-          the issue in ~/handoff.md. Do not continue retrying the same approach.
-        - If you have attempted 3 different approaches to the same problem without success,
-          stop and write your findings to ~/handoff.md.
+        - If the build fails more than 5 consecutive times on the same error, stop and surface the
+          problem rather than retrying the same approach.
+        - If you have attempted 3 different approaches to the same problem without success, stop and
+          report what you found.
         - Never leave work uncommitted. A WIP commit is better than lost work.
         """);
   }

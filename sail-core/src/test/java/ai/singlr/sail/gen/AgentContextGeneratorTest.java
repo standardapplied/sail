@@ -439,8 +439,9 @@ class AgentContextGeneratorTest {
     assertTrue(md.contains("## Autonomous Operation"));
     assertTrue(md.contains("### Work Protocol"));
     assertTrue(md.contains("### Completion Protocol"));
-    assertTrue(md.contains("### Session Handoff"));
     assertTrue(md.contains("### Error Recovery"));
+    assertFalse(md.contains("Session Handoff"), "context handoff is the agent runtime's job");
+    assertFalse(md.contains("handoff.md"), "no ~/handoff.md context-management instructions");
   }
 
   @Test
@@ -467,7 +468,7 @@ class AgentContextGeneratorTest {
     var md = AgentContextGenerator.generateContextBody(config);
 
     assertTrue(md.contains("## Autonomous Operation"));
-    assertTrue(md.contains("handoff.md"));
+    assertTrue(md.contains("### Completion Protocol"));
   }
 
   @Test
@@ -647,7 +648,7 @@ class AgentContextGeneratorTest {
   }
 
   @Test
-  void taskFileStepsStartAt6WhenSecurityAuditPresent() {
+  void completionStepsRenumberWhenSecurityAuditPresent() {
     var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var securityAudit = new ai.singlr.sail.config.SecurityAudit(true, null);
     var agent =
@@ -681,7 +682,8 @@ class AgentContextGeneratorTest {
 
     var md = AgentContextGenerator.generateContextBody(config);
 
-    assertTrue(md.contains("6. If no more work remains"));
+    assertTrue(md.contains("4. Run a security audit"), "the audit is inserted as step 4");
+    assertTrue(md.contains("5. Create a pull request"), "the PR step renumbers after it");
   }
 
   @Test
