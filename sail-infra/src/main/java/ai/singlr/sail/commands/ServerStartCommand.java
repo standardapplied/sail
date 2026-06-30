@@ -23,6 +23,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BindPolicy;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -75,6 +76,13 @@ public final class ServerStartCommand implements Runnable {
   private int port;
 
   @Option(
+      names = "--allow-remote",
+      description =
+          "Permit binding a non-loopback address. The API is plaintext HTTP and any token can"
+              + " dispatch agents; only expose it behind a TLS reverse proxy with restricted access.")
+  private boolean allowRemote;
+
+  @Option(
       names = "--rp-id",
       description =
           "WebAuthn Relying Party ID for passkey login (the registrable domain the proxy serves)."
@@ -101,6 +109,7 @@ public final class ServerStartCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    BindPolicy.requireBindable(host, allowRemote);
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
@@ -207,7 +216,7 @@ public final class ServerStartCommand implements Runnable {
         System.out.println(
             Ansi.AUTO.string("    @|faint Passkey login enabled for " + webauthn.rpId() + "|@"));
       }
-      if (!isLoopback(host)) {
+      if (!BindPolicy.isLoopback(host)) {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|yellow ⚠|@ Bound to a non-loopback address over plaintext HTTP. Any holder"
@@ -280,9 +289,5 @@ public final class ServerStartCommand implements Runnable {
     } catch (Exception e) {
       return null;
     }
-  }
-
-  private static boolean isLoopback(String host) {
-    return "127.0.0.1".equals(host) || "localhost".equals(host) || "::1".equals(host);
   }
 }

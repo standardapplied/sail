@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.BindPolicy;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import picocli.CommandLine.Command;
@@ -28,6 +29,13 @@ public final class HostServiceInstallCommand implements Runnable {
   @Option(names = "--port", description = "Bind port.", defaultValue = "7070")
   private int port;
 
+  @Option(
+      names = "--allow-remote",
+      description =
+          "Permit a non-loopback bind address. The API is plaintext HTTP and any token can dispatch"
+              + " agents; only expose it behind a TLS reverse proxy with restricted access.")
+  private boolean allowRemote;
+
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
@@ -39,6 +47,7 @@ public final class HostServiceInstallCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    BindPolicy.requireBindable(host, allowRemote);
     var shell = new ShellExecutor(dryRun);
     var username = HostServiceInstallers.currentUsername();
     var installer = HostServiceInstallers.create(shell, host, port, username);
@@ -60,7 +69,11 @@ public final class HostServiceInstallCommand implements Runnable {
     }
     System.out.println(
         Ansi.AUTO.string(
-            "    @|bold ExecStart:|@ sail server start --host " + host + " --port " + port));
+            "    @|bold ExecStart:|@ sail server start --host "
+                + host
+                + " --port "
+                + port
+                + (BindPolicy.isLoopback(host) ? "" : " --allow-remote")));
 
     if (!dryRun
         && installer.mode() == SystemdServiceInstaller.Mode.USER

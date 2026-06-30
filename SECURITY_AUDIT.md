@@ -80,8 +80,8 @@ verification and dependency scanning.
 ## Existing Controls Still Valid
 
 ### API bind address requires explicit remote opt-in
-`sail api` refuses to bind to non-loopback addresses unless `--allow-remote` is supplied. This keeps
-the default local API posture local-first even when an operator mistypes `--host 0.0.0.0`.
+`sail server start` refuses to bind to non-loopback addresses unless `--allow-remote` is supplied.
+This keeps the default local API posture local-first even when an operator mistypes `--host 0.0.0.0`.
 
 ### API token file hardening
 The API token store rejects non-regular token paths, reapplies owner-only permissions before reusing

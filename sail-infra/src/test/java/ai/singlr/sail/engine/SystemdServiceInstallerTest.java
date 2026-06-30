@@ -149,6 +149,28 @@ class SystemdServiceInstallerTest {
     assertFalse(unit.contains("User=root"), "USER mode unit must not pin User=root");
   }
 
+  @Test
+  void loopbackBindDoesNotEmitAllowRemote(@TempDir Path home) {
+    assertFalse(userInstaller(home).renderUnit().contains("--allow-remote"));
+  }
+
+  @Test
+  void nonLoopbackBindEmitsAllowRemoteSoTheDaemonGuardPasses(@TempDir Path home) {
+    var installer =
+        new SystemdServiceInstaller(
+            new ScriptedShellExecutor(), Mode.USER, home, SAIL_BINARY, "0.0.0.0", PORT, USER);
+
+    assertTrue(
+        installer
+            .renderUnit()
+            .contains(
+                "ExecStart="
+                    + SAIL_BINARY
+                    + " server start --host 0.0.0.0 --port "
+                    + PORT
+                    + " --allow-remote"));
+  }
+
   // --------------------- USER mode: install / uninstall ---------------------
 
   @Test
