@@ -146,6 +146,7 @@ public final class SystemdServiceInstaller {
   public String renderUnit() {
     var userClause = mode == Mode.SYSTEM ? "User=root\n" : "";
     var wantedBy = mode == Mode.SYSTEM ? "multi-user.target" : "default.target";
+    var remoteFlag = BindPolicy.isLoopback(bindAddress) ? "" : " --allow-remote";
     return """
         [Unit]
         Description=Sail API server
@@ -154,7 +155,7 @@ public final class SystemdServiceInstaller {
 
         [Service]
         Type=simple
-        %sExecStart=%s server start --host %s --port %d
+        %sExecStart=%s server start --host %s --port %d%s
         Restart=on-failure
         RestartSec=2
         LimitNOFILE=4096
@@ -162,7 +163,7 @@ public final class SystemdServiceInstaller {
         [Install]
         WantedBy=%s
         """
-        .formatted(userClause, sailBinary, bindAddress, bindPort, wantedBy);
+        .formatted(userClause, sailBinary, bindAddress, bindPort, remoteFlag, wantedBy);
   }
 
   /**
