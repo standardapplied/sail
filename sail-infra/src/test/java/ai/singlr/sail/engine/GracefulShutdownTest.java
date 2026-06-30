@@ -6,7 +6,11 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
@@ -86,5 +90,26 @@ class GracefulShutdownTest {
     b.join();
 
     assertEquals(1, closes.get(), "a SIGTERM hook racing the finally must still close once");
+  }
+
+  @Test
+  void announcesCleanCompletionExactlyOnceSoAStopIsObservable() {
+    var shutdown = new GracefulShutdown().register(() -> {}).register(() -> {});
+    var captured = new ByteArrayOutputStream();
+    var originalOut = System.out;
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      shutdown.shutdown();
+      shutdown.shutdown();
+    } finally {
+      System.setOut(originalOut);
+    }
+
+    var output = captured.toString(StandardCharsets.UTF_8);
+    assertTrue(output.contains("shutdown] closed 2"), "a clean stop must be observable: " + output);
+    assertEquals(
+        1,
+        output.lines().filter(l -> l.contains("shutdown] closed")).count(),
+        "the completion line must print exactly once");
   }
 }
