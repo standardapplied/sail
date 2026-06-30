@@ -6,13 +6,17 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentLogRenderer;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,9 +68,18 @@ public final class AgentLogCommand implements Runnable {
     if (follow) {
       var tailCmd = ContainerExec.asDevUser(name, List.of("tail", "-f", logPath));
       var pb = new ProcessBuilder(tailCmd);
-      pb.inheritIO();
+      pb.redirectErrorStream(true);
       var process = pb.start();
-      try {
+      try (var reader =
+          new BufferedReader(
+              new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          var out = renderForLog(line, json);
+          if (!out.isEmpty()) {
+            System.out.println(out);
+          }
+        }
         process.waitFor();
       } finally {
         process.destroyForcibly();
@@ -103,7 +116,26 @@ public final class AgentLogCommand implements Runnable {
         return;
       }
 
-      System.out.print(result.stdout());
+      System.out.print(renderLines(result.stdout()));
     }
+  }
+
+  /**
+   * Output form for one log line: the raw line under {@code --json} so machine consumers (and the
+   * GUI's live stream) get the structured event verbatim, otherwise the human-rendered form.
+   */
+  static String renderForLog(String line, boolean json) {
+    return json ? line : AgentLogRenderer.render(line);
+  }
+
+  private static String renderLines(String raw) {
+    var out = new StringBuilder();
+    for (var line : raw.split("\n", -1)) {
+      var rendered = AgentLogRenderer.render(line);
+      if (!rendered.isEmpty()) {
+        out.append(rendered).append('\n');
+      }
+    }
+    return out.toString();
   }
 }

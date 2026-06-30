@@ -105,6 +105,25 @@ public enum AgentCli {
       String model,
       String reasoningEffort,
       String claudeSettingsPath) {
+    return headlessCommand(
+        taskFile, fullPermissions, model, reasoningEffort, claudeSettingsPath, false);
+  }
+
+  /**
+   * Same as {@link #headlessCommand(String, boolean, String, String, String)} but, when {@code
+   * stream} is true, makes Claude Code emit newline-delimited JSON events ({@code --output-format
+   * stream-json --verbose}) instead of a single final result, so {@code agent.log} fills live
+   * during a long-running dispatch. This must be scoped to the background dispatch path only: the
+   * review/foreground paths parse the agent's final {@code json} block and would break under
+   * streaming output. Codex already streams a readable transcript, so the flag is a no-op for it.
+   */
+  public String headlessCommand(
+      String taskFile,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String claudeSettingsPath,
+      boolean stream) {
     var task = "\"$(cat " + taskFile + ")\"";
     return switch (this) {
       case CLAUDE_CODE -> {
@@ -112,7 +131,8 @@ public enum AgentCli {
         var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
         var settings =
             Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
-        yield binaryName + " --print" + settings + perm + " -p " + task;
+        var streamFormat = stream ? " --output-format stream-json --verbose" : "";
+        yield binaryName + " --print" + streamFormat + settings + perm + " -p " + task;
       }
       case CODEX -> {
         var perm = fullPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";

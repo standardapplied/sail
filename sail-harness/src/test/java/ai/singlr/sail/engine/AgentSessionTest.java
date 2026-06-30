@@ -208,6 +208,41 @@ class AgentSessionTest {
   }
 
   @Test
+  void buildBackgroundLaunchCommandStreamsClaudeOutput() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme", "dev", "/home/dev/workspace", false, AgentCli.CLAUDE_CODE);
+
+    var joined = String.join(" ", cmd);
+    assertTrue(
+        joined.contains("--output-format stream-json --verbose"),
+        "dispatched Claude agents must stream incremental events so the log fills live");
+  }
+
+  @Test
+  void buildForegroundTaskCommandDoesNotStream() {
+    var cmd =
+        AgentSession.buildForegroundTaskCommand(
+            "acme", "dev", "/home/dev/workspace", false, AgentCli.CLAUDE_CODE);
+
+    var joined = String.join(" ", cmd);
+    assertFalse(
+        joined.contains("stream-json"),
+        "foreground/review path keeps its non-streaming final-result output");
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandCodexDoesNotGetStreamFlag() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme", "dev", "/home/dev/workspace", false, AgentCli.CODEX);
+
+    var joined = String.join(" ", cmd);
+    assertFalse(
+        joined.contains("stream-json"), "Codex already streams readable text; no flag added");
+  }
+
+  @Test
   void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
     var cmd =
         AgentSession.buildBackgroundLaunchCommand(
@@ -259,7 +294,7 @@ class AgentSessionTest {
     var joined = String.join(" ", cmd);
     assertTrue(
         joined.contains(
-            "claude --print --settings "
+            "claude --print --output-format stream-json --verbose --settings "
                 + ClaudeCodeHookConfig.SETTINGS_PATH
                 + " --dangerously-skip-permissions"));
   }

@@ -243,7 +243,7 @@ public final class AgentSession {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
+        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath, true);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =

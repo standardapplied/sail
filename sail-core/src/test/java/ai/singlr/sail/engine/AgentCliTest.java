@@ -93,6 +93,32 @@ class AgentCliTest {
   }
 
   @Test
+  void headlessCommandClaudeCodeStreamingAddsStreamJson() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, true, null, null, null, true);
+
+    assertTrue(
+        cmd.contains("claude --print --output-format stream-json --verbose"),
+        "streaming dispatch emits newline-delimited JSON events");
+    assertTrue(cmd.contains("-p \"$(cat " + TASK + ")\""));
+  }
+
+  @Test
+  void headlessCommandClaudeCodeNonStreamingHasNoStreamJson() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, true, null, null, null, false);
+
+    assertFalse(cmd.contains("stream-json"));
+  }
+
+  @Test
+  void headlessCommandCodexIgnoresStreamFlag() {
+    var streamed = AgentCli.CODEX.headlessCommand(TASK, true, null, null, null, true);
+    var plain = AgentCli.CODEX.headlessCommand(TASK, true, null, null, null, false);
+
+    assertEquals(plain, streamed, "Codex streams readable text already; the flag is a no-op");
+    assertFalse(streamed.contains("stream-json"));
+  }
+
+  @Test
   void headlessCommandClaudeCodeWithoutPermissions() {
     var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, false);
 
