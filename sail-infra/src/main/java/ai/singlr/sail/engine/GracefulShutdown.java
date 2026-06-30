@@ -46,5 +46,6 @@ public final class GracefulShutdown {
         System.err.println("  [shutdown] failed to close " + resource + ": " + e);
       }
     }
+    System.out.println("  [shutdown] closed " + ordered.size() + " resource(s) cleanly");
   }
 }
