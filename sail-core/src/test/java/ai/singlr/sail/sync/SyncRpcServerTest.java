@@ -7,9 +7,13 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -140,5 +144,54 @@ class SyncRpcServerTest {
         .serve(new StringReader(SyncWire.encode(new SyncWire.Fetch("spec")) + "\n"), out);
 
     assertInstanceOf(SyncWire.Failed.class, SyncWire.decodeResponse(out.toString().strip()));
+  }
+
+  @Test
+  void aWrappedStoreExceptionSurfacesTheRootCauseInTheFailedMessage() throws Exception {
+    var throwing =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            throw new IllegalStateException(
+                "commit failed", new RuntimeException("database is locked"));
+          }
+        };
+    var out = new StringWriter();
+    var request = new SyncWire.Commit("spec", "a", Map.of(), null);
+
+    new SyncRpcServer(throwing, true).serve(new StringReader(SyncWire.encode(request) + "\n"), out);
+
+    var failed =
+        assertInstanceOf(SyncWire.Failed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertTrue(
+        failed.message().contains("database is locked"),
+        "the actionable root cause must surface, not the wrapper: " + failed.message());
+  }
+
+  @Test
+  void aSwallowedStoreExceptionIsLoggedServerSide() throws Exception {
+    var throwing =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            throw new IllegalStateException("database is locked");
+          }
+        };
+    var request = new SyncWire.Commit("spec", "a", Map.of(), null);
+    var captured = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      new SyncRpcServer(throwing, true)
+          .serve(new StringReader(SyncWire.encode(request) + "\n"), new StringWriter());
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertTrue(
+        captured.toString(StandardCharsets.UTF_8).contains("database is locked"),
+        "a swallowed store exception must leave a server-side diagnostic");
   }
 }

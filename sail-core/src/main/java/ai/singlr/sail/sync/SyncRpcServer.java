@@ -65,6 +65,7 @@ public final class SyncRpcServer {
         case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session loop");
       };
     } catch (RuntimeException e) {
+      System.err.println("  [sync] request failed, returning Failed to client: " + e);
       return new SyncWire.Failed(
           "Main could not apply the request and made no change; retry the sync. Cause: "
               + rootMessage(e));
@@ -72,7 +73,11 @@ public final class SyncRpcServer {
   }
 
   private static String rootMessage(Throwable t) {
-    return Objects.toString(t.getMessage(), t.getClass().getSimpleName());
+    var root = t;
+    while (root.getCause() != null && root.getCause() != root) {
+      root = root.getCause();
+    }
+    return Objects.toString(root.getMessage(), root.getClass().getSimpleName());
   }
 
   private static void reply(Writer out, SyncWire.Response response) throws IOException {
