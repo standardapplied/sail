@@ -539,7 +539,8 @@ class ApiRouterTest {
     assertEquals("codex", map.get("reviewer"));
 
     var reviewRow =
-        new ai.singlr.sail.store.ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null);
+        new ai.singlr.sail.store.ReviewStore.ReviewRow(
+            "r1", "auth", 1, "passed", "t0", "t1", null, null);
     var reviewView = ReviewView.from(reviewRow, java.util.List.of(stageView));
     assertEquals(1, reviewView.iteration());
     var rmap = reviewView.toMap();

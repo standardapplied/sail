@@ -351,6 +351,38 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aSupersededHistoryStartsAFreshAttemptAtIterationOneInsteadOfEscalating() {
+    createSpec("auth", "in_progress");
+    var exhausted = reviewStore.createReview("auth", 3);
+    reviewStore.updateReviewStatus(exhausted, "escalated");
+    reviewStore.supersedeForSpec("auth");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals(1, review.iteration(), "a re-dispatch is a fresh attempt, not iteration 4");
+    assertEquals("passed", review.status());
+    assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aWedgedRunningReviewFromAPriorAttemptDoesNotBlockAFreshOne() {
+    createSpec("auth", "in_progress");
+    var interrupted = reviewStore.createReview("auth", 1);
+    reviewStore.updateReviewStatus(interrupted, "running");
+    reviewStore.supersedeForSpec("auth");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        "passed",
+        reviewStore.latestReviewForSpec("auth").orElseThrow().status(),
+        "superseded rows are a closed attempt; even a running one must not skip the review");
+  }
+
+  @Test
   void mediumFindingPassesNoCriticalGate() {
     createSpec("auth", "in_progress");
     var agentOutput =

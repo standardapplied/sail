@@ -21,6 +21,11 @@ public final class ReviewStore {
     this.db = db;
   }
 
+  /**
+   * @param supersededAt when a later dispatch attempt closed this review, or {@code null} while it
+   *     belongs to the current attempt. The pipeline ignores superseded rows, so iterations count
+   *     per attempt rather than per spec lifetime.
+   */
   public record ReviewRow(
       String id,
       String specId,
@@ -28,7 +33,13 @@ public final class ReviewStore {
       String status,
       String createdAt,
       String completedAt,
-      String decidedBy) {}
+      String decidedBy,
+      String supersededAt) {
+
+    public boolean superseded() {
+      return supersededAt != null;
+    }
+  }
 
   public record StageRow(
       String id,
@@ -53,26 +64,36 @@ public final class ReviewStore {
 
   public Optional<ReviewRow> findReview(String reviewId) {
     return db.queryOne(
-        "SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by"
-            + " FROM reviews WHERE id = ?",
+        "SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,"
+            + " superseded_at FROM reviews WHERE id = ?",
         this::mapReview,
         reviewId);
   }
 
+  /**
+   * The latest review of the spec's <em>current</em> dispatch attempt, or empty when none exists
+   * yet or a re-dispatch superseded them all. Superseded rows are history, not pipeline state: the
+   * controller keys its already-running guard and its iteration count off this, so excluding them
+   * here is what makes each dispatch attempt start fresh at iteration 1.
+   */
   public Optional<ReviewRow> latestReviewForSpec(String specId) {
     return db.queryOne(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by
-        FROM reviews WHERE spec_id = ? ORDER BY iteration DESC LIMIT 1""",
+        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,
+          superseded_at
+        FROM reviews WHERE spec_id = ? AND superseded_at IS NULL
+        ORDER BY created_at DESC, rowid DESC LIMIT 1""",
         this::mapReview,
         specId);
   }
 
+  /** Every review ever run for the spec, across all dispatch attempts, oldest first. */
   public List<ReviewRow> reviewsForSpec(String specId) {
     return db.query(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by
-        FROM reviews WHERE spec_id = ? ORDER BY iteration ASC""",
+        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,
+          superseded_at
+        FROM reviews WHERE spec_id = ? ORDER BY created_at ASC, rowid ASC""",
         this::mapReview,
         specId);
   }
@@ -84,6 +105,21 @@ public final class ReviewStore {
         DateTimeUtils.now().toString(),
         decidedBy,
         reviewId);
+  }
+
+  /**
+   * Closes every prior-attempt review for a spec by marking it {@code superseded}, returning how
+   * many changed. Called at dispatch time, so review iterations count per dispatch attempt: the
+   * pipeline starts a superseded spec back at iteration 1 instead of inheriting (and eventually
+   * exhausting) the lifetime count, which would otherwise silently escalate every re-dispatch once
+   * {@code max_iterations} had ever been reached.
+   */
+  public int supersedeForSpec(String specId) {
+    db.execute(
+        "UPDATE reviews SET superseded_at = ? WHERE spec_id = ? AND superseded_at IS NULL",
+        DateTimeUtils.now().toString(),
+        specId);
+    return db.changes();
   }
 
   /**
@@ -238,7 +274,8 @@ public final class ReviewStore {
         row.text(3),
         row.text(4),
         row.text(5),
-        row.text(6));
+        row.text(6),
+        row.text(7));
   }
 
   private StageRow mapStage(Sqlite.Row row) {

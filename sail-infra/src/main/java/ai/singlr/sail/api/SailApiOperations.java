@@ -248,6 +248,9 @@ public final class SailApiOperations implements ApiOperations {
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
     specStore.updateStatus(nextSpec.id(), SpecStatus.IN_PROGRESS);
+    if (reviewStore != null) {
+      reviewStore.supersedeForSpec(nextSpec.id());
+    }
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
     var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
