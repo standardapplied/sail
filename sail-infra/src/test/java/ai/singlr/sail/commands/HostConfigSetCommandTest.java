@@ -237,4 +237,51 @@ class HostConfigSetCommandTest {
             () -> HostConfigSetCommand.validate("webauthn-origin", "http://localhost:7070/"));
     assertTrue(thrown.getMessage().contains("trailing slash"));
   }
+
+  @Test
+  void validateRejectsAMalformedSshPublicKey() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("ssh-public-key", "not a real key"));
+  }
+
+  @Test
+  void writeWorkstationKeyStoresTheCanonicalLine(@TempDir Path tmp) throws Exception {
+    var dest = tmp.resolve("workstation_key.pub");
+    var value = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK sumesh@macbook";
+
+    var written = HostConfigSetCommand.writeWorkstationKey(dest, value);
+
+    assertEquals(value, written.line(), "returns the parsed key whose canonical line was written");
+    assertEquals(value + "\n", java.nio.file.Files.readString(dest));
+  }
+
+  @Test
+  void dryRunForSshPublicKeyReportsWithoutRequiringRootOrHostYaml() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit =
+        cmd.execute(
+            "host",
+            "config",
+            "set",
+            "ssh-public-key",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK me@mac",
+            "--dry-run");
+
+    assertEquals(0, exit);
+    assertTrue(capturedOut.toString().contains("ssh-public-key"));
+  }
+
+  @Test
+  void rejectsAMalformedSshPublicKeyThroughTheCommand() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit =
+        cmd.execute("host", "config", "set", "ssh-public-key", "not-a-real-key", "--dry-run");
+
+    assertNotEquals(0, exit, "a malformed key must be rejected");
+  }
 }

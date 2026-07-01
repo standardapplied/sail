@@ -15,9 +15,9 @@ import picocli.CommandLine.Help.Ansi;
  * Answers a synced descriptor's per-developer placeholders when {@code project create} provisions
  * it. Git identity is prompted — offering this box's {@code git config} as a default to accept or
  * override — so each engineer's containers commit as them even when their box has a different (or
- * no) global identity. {@code ${SSH_PUBLIC_KEY}} stays box-resolved from the sail sync key, never
- * typed. When the box cannot prompt ({@code --yes}/{@code --json}/no TTY) it falls back to the
- * box's own identity and fails loud with the one command that fixes it.
+ * no) global identity. {@code ${SSH_PUBLIC_KEY}} stays box-resolved from the box owner's registered
+ * workstation key, never typed. When the box cannot prompt ({@code --yes}/{@code --json}/no TTY) it
+ * falls back to the box's own identity and fails loud with the one command that fixes it.
  */
 public final class InteractiveIdentity implements UnaryOperator<String> {
 

@@ -111,8 +111,9 @@ class InteractiveIdentityTest {
 
   @Test
   void sshPublicKeyIsBoxResolvedNeverPrompted() throws Exception {
-    var id = resolver(boxWithKey("ssh-ed25519 AAAAKEY"), true);
+    var key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK mady@box";
+    var id = resolver(boxWithKey(key), true);
 
-    assertEquals("ssh-ed25519 AAAAKEY", id.apply(PlaceholderResolver.SSH_PUBLIC_KEY));
+    assertEquals(key, id.apply(PlaceholderResolver.SSH_PUBLIC_KEY));
   }
 }

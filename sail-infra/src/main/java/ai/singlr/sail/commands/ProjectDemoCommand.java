@@ -170,7 +170,8 @@ public final class ProjectDemoCommand implements Runnable {
       var serverIp = hostYaml.serverIp();
       var serverUser = System.getProperty("user.name");
       if (serverIp != null) {
-        Banner.printSshConfig(config.name(), serverIp, serverUser, r.ipv4(), out, ansi);
+        Banner.printSshConfig(
+            config.name(), serverIp, serverUser, r.ipv4(), "~/.ssh/id_ed25519", out, ansi);
       }
 
       var ports = ContainerExec.queryServicePorts(shell, config.name());

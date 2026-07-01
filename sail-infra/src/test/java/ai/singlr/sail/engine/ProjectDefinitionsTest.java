@@ -82,8 +82,9 @@ class ProjectDefinitionsTest {
 
   @Test
   void resolveForProvisioningFillsPlaceholdersFromTheLocalBox() throws Exception {
-    var keyPath = dir.resolve("sync_ed25519.pub");
-    Files.writeString(keyPath, "ssh-ed25519 AAAAMADY mady@box\n");
+    var workstationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK mady@box";
+    var keyPath = dir.resolve("workstation_key.pub");
+    Files.writeString(keyPath, workstationKey + "\n");
     var identity = new LocalIdentity(gitConfig("Mady M", "mady@example.com"), keyPath);
 
     var config =
@@ -96,7 +97,7 @@ class ProjectDefinitionsTest {
 
     assertEquals("Mady M", config.git().name());
     assertEquals("mady@example.com", config.git().email());
-    assertEquals("ssh-ed25519 AAAAMADY mady@box", config.ssh().authorizedKeys().getFirst());
+    assertEquals(workstationKey, config.ssh().authorizedKeys().getFirst());
   }
 
   @Test

@@ -11,7 +11,11 @@ import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.ssh.SshPublicKey;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
@@ -32,6 +36,7 @@ public final class HostConfigSetCommand implements Runnable {
   private static final Set<String> SETTABLE_KEYS =
       Set.of(
           "server-ip",
+          "ssh-public-key",
           "webauthn-rp-id",
           "webauthn-rp-name",
           "webauthn-origin",
@@ -76,6 +81,11 @@ public final class HostConfigSetCommand implements Runnable {
 
     validate(key, value);
 
+    if ("ssh-public-key".equals(key)) {
+      applyWorkstationKey();
+      return;
+    }
+
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
       throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
@@ -107,6 +117,43 @@ public final class HostConfigSetCommand implements Runnable {
     }
   }
 
+  private void applyWorkstationKey() throws IOException {
+    var dest = SailPaths.workstationPublicKeyPath();
+    if (dryRun) {
+      System.out.println("[dry-run] Would set ssh-public-key in " + dest);
+      return;
+    }
+    var written = writeWorkstationKey(dest, value);
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("key", key);
+      map.put("value", written.line());
+      map.put("status", "updated");
+      System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
+    System.out.println(
+        Ansi.AUTO.string("  @|bold,green ✓|@ ssh-public-key set (" + written.fingerprint() + ")"));
+  }
+
+  /**
+   * Validates and writes the box owner's workstation public key, returning the parsed key.
+   * Package-private so the parse/write behaviour is unit-tested without root or a real host.
+   */
+  static SshPublicKey writeWorkstationKey(Path dest, String value) throws IOException {
+    var key = SshPublicKey.parse(value);
+    SailPaths.ensureDataDir(dest.getParent());
+    Files.writeString(dest, key.line() + "\n");
+    Files.setPosixFilePermissions(
+        dest,
+        Set.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.GROUP_READ,
+            PosixFilePermission.OTHERS_READ));
+    return key;
+  }
+
   static void validate(String key, String value) {
     switch (key) {
       case "server-ip" -> {
@@ -115,6 +162,7 @@ public final class HostConfigSetCommand implements Runnable {
               "Invalid IPv4 address: '" + value + "'. Expected format: 192.168.1.100");
         }
       }
+      case "ssh-public-key" -> SshPublicKey.parse(value);
       case "webauthn-rp-id" -> {
         if (!RP_ID.matcher(value).matches()) {
           throw new IllegalArgumentException(

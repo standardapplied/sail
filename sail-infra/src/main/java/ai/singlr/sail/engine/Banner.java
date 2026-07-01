@@ -504,6 +504,7 @@ public final class Banner {
       String serverIp,
       String serverUser,
       String containerIp,
+      String identityFile,
       PrintStream out,
       Ansi ansi) {
     out.println();
@@ -512,13 +513,13 @@ public final class Banner {
     out.println(amber(ansi, "    @|faint Host singular-server|@"));
     out.println(amber(ansi, "    @|faint     HostName " + serverIp + "|@"));
     out.println(amber(ansi, "    @|faint     User " + serverUser + "|@"));
-    out.println(amber(ansi, "    @|faint     IdentityFile ~/.ssh/id_ed25519|@"));
+    out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
     out.println(amber(ansi, "    @|faint Host " + name + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + containerIp + "|@"));
     out.println(amber(ansi, "    @|faint     User dev|@"));
     out.println(amber(ansi, "    @|faint     ProxyJump singular-server|@"));
-    out.println(amber(ansi, "    @|faint     IdentityFile ~/.ssh/id_ed25519|@"));
+    out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
     out.println(
         amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + name + "/home/dev/workspace"));

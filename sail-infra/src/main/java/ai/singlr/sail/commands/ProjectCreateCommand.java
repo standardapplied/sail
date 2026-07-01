@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -199,7 +200,14 @@ public final class ProjectCreateCommand implements Runnable {
       var serverIp = hostYaml.serverIp();
       var serverUser = System.getProperty("user.name");
       if (serverIp != null) {
-        Banner.printSshConfig(config.name(), serverIp, serverUser, r.ipv4(), System.out, Ansi.AUTO);
+        Banner.printSshConfig(
+            config.name(),
+            serverIp,
+            serverUser,
+            r.ipv4(),
+            WorkstationIdentity.identityFile(),
+            System.out,
+            Ansi.AUTO);
       } else {
         System.out.println();
         System.out.println(

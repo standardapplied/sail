@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -64,6 +65,14 @@ public final class HostInitCommand implements Runnable {
           "Server's public IP address (for SSH config generation in 'sail project connect').")
   private String serverIp;
 
+  @Option(
+      names = "--ssh-public-key",
+      description =
+          "Your workstation SSH public key, authorized into this box's project containers so you"
+              + " can connect from your laptop. Set it later with 'sail host config set"
+              + " ssh-public-key'.")
+  private String sshPublicKey;
+
   @Option(names = "--yes", description = "Skip confirmation prompts (for non-interactive use).")
   private boolean yes;
 
@@ -87,6 +96,9 @@ public final class HostInitCommand implements Runnable {
     }
 
     var isZfs = HostYaml.BACKEND_ZFS.equals(storage);
+    if (Strings.isNotBlank(sshPublicKey)) {
+      SshPublicKey.parse(sshPublicKey);
+    }
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -94,6 +106,10 @@ public final class HostInitCommand implements Runnable {
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
       throw new IllegalStateException("Root privileges required. Run with: sudo sail host init");
+    }
+
+    if (Strings.isNotBlank(sshPublicKey) && !dryRun) {
+      HostConfigSetCommand.writeWorkstationKey(SailPaths.workstationPublicKeyPath(), sshPublicKey);
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();

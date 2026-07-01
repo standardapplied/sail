@@ -71,4 +71,19 @@ class SshPublicKeyTest {
         IllegalArgumentException.class,
         () -> SshPublicKey.parse("ssh-rsa " + realEd25519Blob + " spoofed"));
   }
+
+  @Test
+  void rejectsMultiLineInputSoItCannotInjectAnExtraAuthorizedKeysLine() {
+    var twoKeys = TestSshKeys.ed25519("a", null) + "\n" + TestSshKeys.ed25519("b", null);
+    assertThrows(IllegalArgumentException.class, () -> SshPublicKey.parse(twoKeys));
+  }
+
+  @Test
+  void defaultPrivateKeyNameMapsAlgorithmToConventionalFilename() {
+    assertEquals(
+        "id_ed25519", new SshPublicKey("ssh-ed25519", "", null, "").defaultPrivateKeyName());
+    assertEquals("id_rsa", new SshPublicKey("ssh-rsa", "", null, "").defaultPrivateKeyName());
+    assertEquals(
+        "id_ecdsa", new SshPublicKey("ecdsa-sha2-nistp256", "", null, "").defaultPrivateKeyName());
+  }
 }
