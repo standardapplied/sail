@@ -137,6 +137,16 @@ public final class SailPaths {
   }
 
   /**
+   * The box owner's workstation (laptop) SSH public key: {@code ~/.sail/workstation_key.pub}. This
+   * is the human key an engineer connects to project containers with — distinct from the machine
+   * {@link #syncKeyPath() sync key}. Each box has a single owner, so one workstation key authorizes
+   * that owner into the box's containers.
+   */
+  public static Path workstationPublicKeyPath() {
+    return SAIL_DIR.resolve("workstation_key.pub");
+  }
+
+  /**
    * Resolves the project descriptor path for a project. Checks in order:
    *
    * <ol>

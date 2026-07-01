@@ -34,7 +34,11 @@ public record SshPublicKey(String type, String blob, String comment, String fing
     if (Strings.isBlank(input)) {
       throw new IllegalArgumentException("SSH public key is empty.");
     }
-    var parts = input.strip().split("\\s+", 3);
+    var line = input.strip();
+    if (line.indexOf('\n') >= 0 || line.indexOf('\r') >= 0) {
+      throw new IllegalArgumentException("SSH public key must be a single line.");
+    }
+    var parts = line.split("\\s+", 3);
     if (parts.length < 2) {
       throw new IllegalArgumentException(
           "Not a valid SSH public key. Expected '<type> <base64> [comment]'.");
@@ -62,6 +66,18 @@ public record SshPublicKey(String type, String blob, String comment, String fing
   /** The canonical single-line form for an {@code authorized_keys} entry. */
   public String line() {
     return Strings.isBlank(comment) ? type + " " + blob : type + " " + blob + " " + comment;
+  }
+
+  /**
+   * The conventional OpenSSH private-key filename for this key's algorithm (e.g. {@code
+   * id_ed25519}, {@code id_rsa}, {@code id_ecdsa}) — used to point a connect snippet at the
+   * matching {@code IdentityFile} instead of guessing {@code id_ed25519}.
+   */
+  public String defaultPrivateKeyName() {
+    if (type.startsWith("ecdsa-")) {
+      return "id_ecdsa";
+    }
+    return "id_" + (type.startsWith("ssh-") ? type.substring("ssh-".length()) : type);
   }
 
   private static boolean declaredTypeMatchesBlob(String type, byte[] blob) {

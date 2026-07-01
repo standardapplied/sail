@@ -13,10 +13,12 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -97,15 +99,33 @@ public final class ConnectCommand implements Runnable {
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
     var containerUser = resolveContainerUser(name);
 
+    var identityFile = WorkstationIdentity.identityFile();
+
     if (json) {
       System.out.println(
           YamlUtil.dumpJson(
-              connectJson(name, resolvedServerIp, resolvedServerUser, containerIp, containerUser)));
+              connectJson(
+                  name,
+                  resolvedServerIp,
+                  resolvedServerUser,
+                  containerIp,
+                  containerUser,
+                  identityFile,
+                  WorkstationIdentity.registered().isPresent())));
       return;
     }
 
+    if (WorkstationIdentity.registered().isEmpty()) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below"
+                  + " assumes ~/.ssh/id_ed25519. If the container rejects your key, register the"
+                  + " one you connect with, then re-create the project:"));
+      System.out.println(Ansi.AUTO.string("    @|bold " + WorkstationIdentity.SET_KEY_HINT + "|@"));
+    }
     System.out.println(
-        connectSnippet(resolvedServerIp, resolvedServerUser, name, containerIp, containerUser));
+        connectSnippet(
+            resolvedServerIp, resolvedServerUser, name, containerIp, containerUser, identityFile));
   }
 
   /**
@@ -122,31 +142,44 @@ public final class ConnectCommand implements Runnable {
   }
 
   static Map<String, Object> connectJson(
-      String name, String serverIp, String serverUser, String containerIp, String containerUser) {
+      String name,
+      String serverIp,
+      String serverUser,
+      String containerIp,
+      String containerUser,
+      String identityFile,
+      boolean workstationKeySet) {
     var map = new LinkedHashMap<String, Object>();
     map.put("project", name);
     map.put("server_ip", serverIp);
     map.put("server_user", serverUser);
     map.put("container_ip", containerIp);
     map.put("container_user", containerUser);
+    map.put("identity_file", identityFile);
+    map.put("workstation_key_set", workstationKeySet);
     return map;
   }
 
   static String connectSnippet(
-      String serverIp, String serverUser, String name, String containerIp, String containerUser) {
+      String serverIp,
+      String serverUser,
+      String name,
+      String containerIp,
+      String containerUser,
+      String identityFile) {
     return """
         # Add to ~/.ssh/config on your Mac:
 
         Host singular-server
             HostName %s
             User %s
-            IdentityFile ~/.ssh/id_ed25519
+            IdentityFile %s
 
         Host %s
             HostName %s
             User %s
             ProxyJump singular-server
-            IdentityFile ~/.ssh/id_ed25519
+            IdentityFile %s
 
         # Then connect:
         #   ssh %s
@@ -157,9 +190,11 @@ public final class ConnectCommand implements Runnable {
         .formatted(
             serverIp,
             serverUser,
+            identityFile,
             name,
             containerIp,
             containerUser,
+            identityFile,
             name,
             containerUser,
             name,

@@ -25,7 +25,7 @@ class LocalIdentityTest {
 
   @BeforeEach
   void setUp() {
-    keyPath = dir.resolve("sync_ed25519.pub");
+    keyPath = dir.resolve("workstation_key.pub");
   }
 
   private LocalIdentity identity(Map<String, String> gitConfig) {
@@ -39,10 +39,21 @@ class LocalIdentityTest {
     assertEquals("mady@example.com", identity.valueFor("GIT_EMAIL"));
   }
 
+  private static final String VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK mady@box";
+
   @Test
   void resolvesSshKeyFromTheBoxIdentityFile() throws IOException {
-    Files.writeString(keyPath, "ssh-ed25519 AAAAMADY mady@box\n");
-    assertEquals("ssh-ed25519 AAAAMADY mady@box", identity(Map.of()).valueFor("SSH_PUBLIC_KEY"));
+    Files.writeString(keyPath, VALID_KEY + "\n");
+    assertEquals(VALID_KEY, identity(Map.of()).valueFor("SSH_PUBLIC_KEY"));
+  }
+
+  @Test
+  void failsLoudRatherThanInjectingAnUnparseableKey() throws IOException {
+    Files.writeString(keyPath, "this is not a valid ssh key\n");
+    var error =
+        assertThrows(
+            IllegalStateException.class, () -> identity(Map.of()).valueFor("SSH_PUBLIC_KEY"));
+    assertTrue(error.getMessage().contains("sail host config set ssh-public-key"));
   }
 
   @Test
@@ -57,7 +68,10 @@ class LocalIdentityTest {
     var error =
         assertThrows(
             IllegalStateException.class, () -> identity(Map.of()).valueFor("SSH_PUBLIC_KEY"));
-    assertTrue(error.getMessage().contains("sail join"));
+    assertTrue(
+        error.getMessage().contains("sail host config set ssh-public-key"),
+        "must point at the workstation-key setter, not the machine sync key: "
+            + error.getMessage());
   }
 
   @Test

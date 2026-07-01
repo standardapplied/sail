@@ -7,8 +7,8 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PlaceholderResolver;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -16,11 +16,12 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Answers a project definition's personal-field placeholders from <em>this</em> box: the git
- * identity from {@code git config --global}, and {@code ${SSH_PUBLIC_KEY}} from the box's sail
- * identity key — the same key {@code sail join} registers with main. Resolution happens once, when
- * a project is provisioned, so the synced definition stays identity-free and each engineer's
- * containers commit as them and trust only their own key. A missing value fails loud with the one
- * command that fixes it, rather than silently provisioning with someone else's identity.
+ * identity from {@code git config --global}, and {@code ${SSH_PUBLIC_KEY}} from the box owner's
+ * workstation key ({@link SailPaths#workstationPublicKeyPath()}) — the human key an engineer SSHes
+ * into containers with, distinct from the machine sync key. Resolution happens once, when a project
+ * is provisioned, so the synced definition stays identity-free and each box's containers trust
+ * their owner's laptop key. A missing value fails loud with the one command that fixes it, rather
+ * than silently provisioning a container no laptop can reach.
  */
 public final class LocalIdentity {
 
@@ -32,9 +33,9 @@ public final class LocalIdentity {
     this.sshPublicKeyPath = sshPublicKeyPath;
   }
 
-  /** This box's identity: real git config and the sail sync public key. */
+  /** This box's identity: real git config and the box owner's workstation public key. */
   public static LocalIdentity detect() {
-    return new LocalIdentity(new ShellExecutor(false), SailPaths.syncPublicKeyPath());
+    return new LocalIdentity(new ShellExecutor(false), SailPaths.workstationPublicKeyPath());
   }
 
   /**
@@ -82,21 +83,18 @@ public final class LocalIdentity {
   }
 
   private String sshPublicKey() {
-    try {
-      var key = Files.readString(sshPublicKeyPath).strip();
-      if (Strings.isBlank(key)) {
-        throw new IllegalStateException(missingKeyMessage());
-      }
-      return key;
-    } catch (IOException e) {
-      throw new IllegalStateException(missingKeyMessage());
-    }
+    return WorkstationIdentity.registeredAt(sshPublicKeyPath)
+        .map(SshPublicKey::line)
+        .orElseThrow(() -> new IllegalStateException(missingKeyMessage()));
   }
 
   private String missingKeyMessage() {
-    return "This box has no sail identity key yet ("
-        + sshPublicKeyPath
-        + ").\n  It is created when you run 'sail join' or 'sail host ssh-identity'.";
+    return """
+        This box has no valid workstation SSH key set (%s), so a container here can't authorize \
+        you to connect from your laptop.
+          Set it once with the public key you SSH with:
+            %s"""
+        .formatted(sshPublicKeyPath, WorkstationIdentity.SET_KEY_HINT);
   }
 
   private String run(List<String> command) {
