@@ -78,7 +78,7 @@ class ContainerReviewAgentRunnerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("property=ActiveState", "ActiveState=active\nExecMainStatus=0\n")
-            .onOk("wc -c /home/dev/.sail/review.log", "100 /home/dev/.sail/review.log")
+            .onOk("stat -c", "100")
             .onOk("cat /home/dev/.sail/review.pid", "9999");
 
     var clock = clockOf(T0, T0, T0.plusSeconds(11 * 60));
@@ -88,5 +88,41 @@ class ContainerReviewAgentRunnerTest {
     assertTrue(
         shell.invocations().stream().anyMatch(c -> c.contains("kill")),
         "a stalled reviewer must be killed, not left running");
+  }
+
+  @Test
+  void killsAndFailsWhenTheReviewerRunsPastMaxDuration() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("property=ActiveState", "ActiveState=active\nExecMainStatus=0\n")
+            .onFail("stat -c", "no such file")
+            .onOk("cat /home/dev/.sail/review.pid", "9999");
+
+    var clock = clockOf(T0, T0, T0.plusSeconds(31 * 60));
+
+    var ex = assertThrows(Exception.class, () -> runner(shell, clock).run("acme", "codex", "p"));
+    assertTrue(ex.getMessage().contains("max_duration"), ex.getMessage());
+    assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("kill")));
+  }
+
+  @Test
+  void throwsWhenTheReviewUnitFailsToLaunch() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("systemd-run", "unit refused");
+
+    var ex =
+        assertThrows(Exception.class, () -> runner(shell, clockOf(T0)).run("acme", "codex", "p"));
+    assertTrue(ex.getMessage().contains("Failed to launch"), ex.getMessage());
+  }
+
+  @Test
+  void returnsEmptyWhenTheReviewLogCannotBeRead() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("property=ActiveState", "ActiveState=inactive\nExecMainStatus=0\n")
+            .onFail("cat /home/dev/.sail/review.log", "gone");
+
+    assertEquals("", runner(shell, clockOf(T0)).run("acme", "codex", "p"));
   }
 }

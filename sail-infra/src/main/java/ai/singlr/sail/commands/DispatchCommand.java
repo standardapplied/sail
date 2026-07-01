@@ -17,6 +17,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
@@ -274,6 +275,7 @@ public final class DispatchCommand implements Runnable {
 
     ensureSailSetup(shell, name);
     agentSession.ensureDirectory(name);
+    agentSession.resetLog(name, AgentUnit.REVIEW);
     agentSession.writeTaskFile(name, task);
     agentSession.writeSession(
         name, task, Objects.requireNonNullElse(branchName, ""), nextSpec.id(), agentType);

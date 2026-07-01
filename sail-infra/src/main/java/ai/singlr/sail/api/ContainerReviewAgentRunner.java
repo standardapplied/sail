@@ -151,12 +151,10 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
   private long logSize(String project) throws Exception {
     var result =
         shell.exec(
-            ContainerExec.asDevUser(project, List.of("wc", "-c", AgentUnit.REVIEW.logPath())));
-    if (!result.ok() || result.stdout().isBlank()) {
-      return 0;
-    }
+            ContainerExec.asDevUser(
+                project, List.of("stat", "-c", "%s", AgentUnit.REVIEW.logPath())));
     try {
-      return Long.parseLong(result.stdout().trim().split("\\s+")[0]);
+      return Long.parseLong(result.stdout().trim());
     } catch (RuntimeException e) {
       return 0;
     }

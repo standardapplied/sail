@@ -6,7 +6,9 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -31,5 +33,13 @@ class AgentUnitTest {
     assertNotEquals(AgentUnit.BUILD.taskPath(), AgentUnit.REVIEW.taskPath());
     assertEquals("sail-review", AgentUnit.REVIEW.unitName());
     assertEquals("/home/dev/.sail/review.log", AgentUnit.REVIEW.logPath());
+  }
+
+  @Test
+  void buildTruncatesItsLogWhileReviewAppendsTheNegotiation() {
+    assertFalse(AgentUnit.BUILD.appendsLog(), "each dispatch build starts a fresh agent.log");
+    assertTrue(
+        AgentUnit.REVIEW.appendsLog(),
+        "review.log accumulates the reviewer↔fix negotiation within an attempt");
   }
 }

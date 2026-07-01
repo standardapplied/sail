@@ -231,6 +231,55 @@ class AgentSessionTest {
   }
 
   @Test
+  void resetLogTruncatesTheGivenRolesLog() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    new AgentSession(shell).resetLog("acme", AgentUnit.REVIEW);
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains(": > "), "reset truncates the log to empty");
+    assertTrue(cmd.contains("/home/dev/.sail/review.log"), "resets the review negotiation log");
+  }
+
+  @Test
+  void reviewLaunchAppendsToItsLogWhileBuildTruncates() {
+    var build =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/w",
+                false,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "",
+                "",
+                AgentUnit.BUILD));
+    var review =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/w",
+                false,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "",
+                "",
+                AgentUnit.REVIEW));
+
+    assertTrue(build.contains(": > \"$4\""), "build truncates agent.log fresh each dispatch");
+    assertFalse(build.contains(">> \"$3\""), "build overwrites its log, not append");
+    assertTrue(review.contains(">> \"$3\""), "review appends so the negotiation accumulates");
+    assertFalse(
+        review.contains(": > \"$4\""), "review must not truncate the shared negotiation log");
+  }
+
+  @Test
   void buildBackgroundLaunchCommandStreamsClaudeOutput() {
     var cmd =
         AgentSession.buildBackgroundLaunchCommand(

@@ -59,6 +59,18 @@ public final class AgentSession {
   }
 
   /**
+   * Truncates a role's log to empty. Dispatch calls this for {@link AgentUnit#REVIEW} at the start
+   * of each attempt so the append-mode review log carries only the current attempt's negotiation,
+   * not accumulations from prior dispatches. Best-effort: a failure here never blocks a dispatch.
+   */
+  public void resetLog(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName, List.of("bash", "-c", ": > \"$1\"", "bash", unit.logPath())));
+  }
+
+  /**
    * Writes the task text to a file inside the container. Uses printf with a positional argument to
    * avoid heredoc injection (content containing the delimiter could escape the heredoc).
    */
@@ -308,9 +320,9 @@ public final class AgentSession {
         """
         mkdir -p "$1"
         rm -f "$5"
-        : > "$4"
+        @RESET@
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" @REDIR@ "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
@@ -324,7 +336,9 @@ public final class AgentSession {
         exit 1
         """
             .replace("@SERVICE@", unit.service())
-            .replace("@UNIT@", unit.unitName());
+            .replace("@UNIT@", unit.unitName())
+            .replace("@RESET@", unit.appendsLog() ? "true" : ": > \"$4\"")
+            .replace("@REDIR@", unit.appendsLog() ? ">>" : ">");
     return ContainerExec.asDevUser(
         containerName,
         List.of(

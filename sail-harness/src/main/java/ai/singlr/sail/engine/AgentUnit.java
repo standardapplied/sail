@@ -19,21 +19,30 @@ package ai.singlr.sail.engine;
  * AgentSession} and the watcher read them from here rather than hardcoding their own copies.
  */
 public record AgentUnit(
-    String unitName, String logPath, String pidPath, String sessionPath, String taskPath) {
+    String unitName,
+    String logPath,
+    String pidPath,
+    String sessionPath,
+    String taskPath,
+    boolean appendsLog) {
 
   private static final String DIR = "/home/dev/.sail";
 
-  /** The spec's coding agent: dispatch build and the review fix iterations. */
+  /** The dispatched build. Truncates its log so each dispatch starts with a fresh transcript. */
   public static final AgentUnit BUILD =
       new AgentUnit(
           "sail-agent",
           DIR + "/agent.log",
           DIR + "/agent.pid",
           DIR + "/agent-session.json",
-          DIR + "/agent-task.txt");
+          DIR + "/agent-task.txt",
+          false);
 
   /**
-   * The read-only reviewer; the fix agent streams to this log too, so the negotiation is one file.
+   * The read-only reviewer and the fix agent, which share this unit's log. It <em>appends</em> so
+   * every reviewer↔fix turn within one dispatch attempt lands in a single {@code review.log}; the
+   * attempt boundary resets it (the dispatch clears it before the build), keeping the whole
+   * negotiation in one file without growing across attempts.
    */
   public static final AgentUnit REVIEW =
       new AgentUnit(
@@ -41,7 +50,8 @@ public record AgentUnit(
           DIR + "/review.log",
           DIR + "/review.pid",
           DIR + "/review-session.json",
-          DIR + "/review-prompt.txt");
+          DIR + "/review-prompt.txt",
+          true);
 
   /** The systemd unit name with the {@code .service} suffix, as {@code systemctl} expects it. */
   public String service() {

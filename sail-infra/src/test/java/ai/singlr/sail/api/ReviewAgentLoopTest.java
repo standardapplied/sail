@@ -14,7 +14,6 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -156,9 +155,10 @@ class ReviewAgentLoopTest {
   }
 
   /**
-   * Stands in for the agent CLI binary inside a container. A {@code incus file push} stages the
-   * prompt; the next exec is the agent invocation, answered from the prompt just staged — a review
-   * prompt yields the next scripted findings, anything else (a fix prompt) is acknowledged.
+   * Stands in for the agent CLI running under the review unit. The runner writes the prompt with
+   * {@code printf} (captured here), reports the unit inactive so the await loop exits at once, and
+   * reads the agent's output from {@code review.log} — a review prompt yields the next scripted
+   * findings, anything else (a fix prompt) is acknowledged.
    */
   private static final class FakeAgentShell implements ShellExec {
     private final List<String> reviewOutputs;
@@ -176,23 +176,22 @@ class ReviewAgentLoopTest {
 
     @Override
     public Result exec(List<String> command, Path workDir, Duration timeout) {
-      if (command.contains("push")) {
-        lastPrompt = readPushedPrompt(command);
+      var joined = String.join(" ", command);
+      if (command.getLast().endsWith("review-prompt.txt")) {
+        lastPrompt = command.get(command.size() - 2);
         return new Result(0, "", "");
       }
-      if (lastPrompt.contains("Output your findings")) {
-        var i = reviewCall++;
-        return new Result(0, i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]", "");
+      if (joined.contains("--property=ActiveState")) {
+        return new Result(0, "ActiveState=inactive\nExecMainStatus=0\nEnvironment=\n", "");
       }
-      return new Result(0, "fix applied", "");
-    }
-
-    private static String readPushedPrompt(List<String> command) {
-      try {
-        return Files.readString(Path.of(command.get(command.size() - 2)));
-      } catch (Exception e) {
-        return "";
+      if (joined.contains("cat /home/dev/.sail/review.log")) {
+        if (lastPrompt.contains("Output your findings")) {
+          var i = reviewCall++;
+          return new Result(0, i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]", "");
+        }
+        return new Result(0, "fix applied", "");
       }
+      return new Result(0, "", "");
     }
 
     @Override
