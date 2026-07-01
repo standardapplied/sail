@@ -58,6 +58,26 @@ class ContainerSailSetupTest {
   }
 
   @Test
+  void aHookFileMissingTheToolHeartbeatsForcesAReinstall() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail("grep -qsF " + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER, "");
+
+    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    assertEquals(
+        ContainerSailSetup.Result.BACKFILLED,
+        result,
+        "a claude-settings.json written before the tool hooks existed is stale and must be "
+            + "rewritten, or the stall watcher never sees progress and kills the agent at max_idle");
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("grep -qsF " + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER)),
+        "the probe must verify the hook file carries the tool-progress heartbeats, not just exists");
+  }
+
+  @Test
   void refreshHappensEvenWhenSourcePathUnchanged() throws Exception {
     // Same source path on host and container — the bug class 0.12.5/0.12.6 missed.
     // refreshEventSocket must still tear down + re-add so the kernel re-resolves the inode.

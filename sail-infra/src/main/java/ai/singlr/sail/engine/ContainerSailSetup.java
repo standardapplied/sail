@@ -22,7 +22,11 @@ import java.util.concurrent.TimeoutException;
  *   <li><b>Helper files in the container.</b> {@code sail-event.sh}, {@code claude-settings.json},
  *       and {@code codex hooks.json} are probed with a single {@code test -f} chain; if any is
  *       missing — or the {@code spec} script still references a stale socket path after the socket
- *       moved off {@code /run} — the installers re-run and rewrite them to the current path.
+ *       moved off {@code /run}, or {@code claude-settings.json} predates the tool-progress hooks —
+ *       the installers re-run and rewrite them. The hook-content check matters because the file is
+ *       install-once: without it, a container provisioned before the hooks existed would keep a
+ *       settings file the stall watcher gets no progress from, and its agents die at {@code
+ *       max_idle}.
  * </ol>
  *
  * Designed for the dispatch hot path: ensureEventSocket is one idempotent shell call, the
@@ -80,6 +84,10 @@ public final class ContainerSailSetup {
                         + " && test -f "
                         + SpecCliHelper.SCRIPT_PATH
                         + " && test -f "
+                        + ClaudeCodeHookConfig.SETTINGS_PATH
+                        + " && grep -qsF "
+                        + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
+                        + " "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && test -f "
                         + CodexHookConfig.SETTINGS_PATH

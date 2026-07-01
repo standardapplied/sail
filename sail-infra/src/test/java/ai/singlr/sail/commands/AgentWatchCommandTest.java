@@ -134,6 +134,22 @@ class AgentWatchCommandTest {
   }
 
   @Test
+  void toolProgressEventsTheWatcherResetsOnAreActuallyEmittedByTheHookConfig() {
+    var hookJson = ai.singlr.sail.engine.ClaudeCodeHookConfig.render();
+    assertTrue(
+        hookJson.contains(Event.WellKnownTypes.AGENT_TOOL_STARTED)
+            && AgentWatchCommand.isProgressEvent(
+                sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED)),
+        "the stall watcher resets on agent_tool_started, so the hook config must emit it — "
+            + "otherwise a busy agent is killed at max_idle");
+    assertTrue(
+        hookJson.contains(Event.WellKnownTypes.AGENT_TOOL_FINISHED)
+            && AgentWatchCommand.isProgressEvent(
+                sampleEvent(Event.WellKnownTypes.AGENT_TOOL_FINISHED)),
+        "the stall watcher resets on agent_tool_finished, so the hook config must emit it");
+  }
+
+  @Test
   void earlierReturnsTheSoonerInstant() {
     var soon = java.time.Instant.now();
     var later = soon.plusSeconds(3600);

@@ -35,6 +35,24 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void renderWiresToolHooksSoTheStallWatcherSeesProgress() {
+    var json = ClaudeCodeHookConfig.render();
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
+    assertTrue(
+        hooks.containsKey("PreToolUse"),
+        "PreToolUse must fire a progress heartbeat, or the stall guardrail counts a busy agent"
+            + " as idle and kills it at max_idle");
+    assertTrue(hooks.containsKey("PostToolUse"), "PostToolUse must fire a progress heartbeat");
+    assertTrue(
+        json.contains(SailEventHelper.SCRIPT_PATH + " agent_tool_started"),
+        "PreToolUse must emit agent_tool_started (the event AgentWatchCommand resets the stall on)");
+    assertTrue(
+        json.contains(SailEventHelper.SCRIPT_PATH + " agent_tool_finished"),
+        "PostToolUse must emit agent_tool_finished");
+  }
+
+  @Test
   void renderEmbedsNoSpecId() {
     var json = ClaudeCodeHookConfig.render();
     var firstCmd = SailEventHelper.SCRIPT_PATH + " agent_session_started";

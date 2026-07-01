@@ -23,9 +23,16 @@ import java.util.concurrent.TimeoutException;
  *
  * <ul>
  *   <li>{@code SessionStart} ({@code matcher: startup}) → {@code agent_session_started}
+ *   <li>{@code PreToolUse} → {@code agent_tool_started}
+ *   <li>{@code PostToolUse} → {@code agent_tool_finished}
  *   <li>{@code Stop} → {@code agent_session_stopped}
  *   <li>{@code SessionEnd} → {@code agent_session_completed}
  * </ul>
+ *
+ * <p>The tool hooks are the dispatch watcher's liveness signal: {@code AgentWatchCommand} resets
+ * its stall timer on {@code agent_tool_started}/{@code agent_tool_finished}, so a working agent
+ * pushes the {@code max_idle} deadline out on every tool call. Without them the stall timer counts
+ * from launch and kills even a busy agent at {@code max_idle}.
  *
  * <p>Spec attribution flows in via the {@code SAIL_SPEC_ID} env var that sail sets at launch — no
  * spec id is baked into the hook commands, so the file is install-once at provision/sync time
@@ -42,6 +49,13 @@ public final class ClaudeCodeHookConfig {
   /** Container-side absolute path to the settings file. Used with {@code claude --settings}. */
   public static final String SETTINGS_PATH = SETTINGS_DIR + "/" + SETTINGS_FILE;
 
+  /**
+   * Event type of the {@code PreToolUse} heartbeat, and the marker {@link
+   * ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a settings file written before
+   * the tool hooks existed, so a stale container is refreshed on the next dispatch.
+   */
+  public static final String PROGRESS_HOOK_MARKER = "agent_tool_started";
+
   private final ShellExec shell;
 
   public ClaudeCodeHookConfig(ShellExec shell) {
@@ -54,11 +68,15 @@ public final class ClaudeCodeHookConfig {
    */
   public static String render() {
     var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started");
+    var toolStarted = hookCommand(SailEventHelper.SCRIPT_PATH, PROGRESS_HOOK_MARKER);
+    var toolFinished = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_finished");
     var stop = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_stopped");
     var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed");
 
     var hooks = new LinkedHashMap<String, Object>();
     hooks.put("SessionStart", List.of(matcherGroup("startup", sessionStart)));
+    hooks.put("PreToolUse", List.of(matcherGroup(null, toolStarted)));
+    hooks.put("PostToolUse", List.of(matcherGroup(null, toolFinished)));
     hooks.put("Stop", List.of(matcherGroup(null, stop)));
     hooks.put("SessionEnd", List.of(matcherGroup(null, sessionEnd)));
 
