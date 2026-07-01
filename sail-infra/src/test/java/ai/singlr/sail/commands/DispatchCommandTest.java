@@ -325,12 +325,13 @@ class DispatchCommandTest {
   }
 
   @Test
-  void branchCheckoutReusesAnExistingBranchOnRestart() {
+  void branchCheckoutForceReusesAnExistingBranchOnRestart() {
     var args = DispatchCommand.branchCheckoutArgs("/w/mast", "agent/x", true, true);
     assertEquals(
-        List.of("git", "-C", "/w/mast", "checkout", "agent/x"),
+        List.of("git", "-C", "/w/mast", "checkout", "-f", "agent/x"),
         args,
-        "a restart must re-dispatch onto the existing branch, not fail trying to recreate it");
+        "a restart must land on the existing branch even over a dirty tree from the prior run "
+            + "(untracked scaffold that would otherwise abort a plain checkout)");
   }
 
   @Test

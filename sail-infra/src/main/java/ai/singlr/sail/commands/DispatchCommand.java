@@ -554,9 +554,11 @@ public final class DispatchCommand implements Runnable {
 
   /**
    * The git checkout command for a dispatch's work branch. A fresh branch is created with {@code
-   * checkout -b}; on a restart an already-present branch is reused with a plain {@code checkout} so
-   * re-dispatch resumes onto the prior work instead of failing to recreate it. A collision on a
-   * non-restart dispatch is unexpected and fails loud, pointing the operator at {@code --restart}.
+   * checkout -b}; on a restart an already-present branch is reused with a <em>forced</em> {@code
+   * checkout -f} so re-dispatch lands on the prior branch even when the previous run left a dirty
+   * working tree (untracked scaffold that a plain {@code checkout} would refuse to overwrite),
+   * rather than resuming onto it and aborting. A collision on a non-restart dispatch is unexpected
+   * and fails loud, pointing the operator at {@code --restart}.
    */
   static List<String> branchCheckoutArgs(
       String repoDir, String branchName, boolean branchExists, boolean restart) {
@@ -567,7 +569,7 @@ public final class DispatchCommand implements Runnable {
               + "' already exists. Pass --restart to re-dispatch onto it, or delete it first.");
     }
     return branchExists
-        ? List.of("git", "-C", repoDir, "checkout", branchName)
+        ? List.of("git", "-C", repoDir, "checkout", "-f", branchName)
         : List.of("git", "-C", repoDir, "checkout", "-b", branchName);
   }
 
