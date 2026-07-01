@@ -21,6 +21,42 @@ class GuardrailCheckerTest {
   private static final String REPO = "/home/dev/workspace/acme";
 
   @Test
+  void checkDurationTriggersOnlyOncePastTheLimitAgainstAnExplicitNow() {
+    var g = new Guardrails("30m", null, "stop");
+    var started = Instant.parse("2026-01-01T00:00:00Z");
+
+    assertInstanceOf(
+        GuardrailChecker.GuardrailResult.Ok.class,
+        GuardrailChecker.checkDuration(started, started.plusSeconds(29 * 60), g));
+    var trip = GuardrailChecker.checkDuration(started, started.plusSeconds(31 * 60), g);
+    assertInstanceOf(GuardrailChecker.GuardrailResult.Triggered.class, trip);
+    assertEquals("max_duration", ((GuardrailChecker.GuardrailResult.Triggered) trip).reason());
+  }
+
+  @Test
+  void checkDurationIsOffWhenMaxDurationUnset() {
+    var g = new Guardrails(null, null, "stop");
+    var started = Instant.parse("2026-01-01T00:00:00Z");
+
+    assertInstanceOf(
+        GuardrailChecker.GuardrailResult.Ok.class,
+        GuardrailChecker.checkDuration(started, started.plusSeconds(999_999), g));
+  }
+
+  @Test
+  void checkStallAgainstExplicitNowTriggersOnIdleBeyondMaxIdle() {
+    var g = new Guardrails(null, "20m", "stop");
+    var last = Instant.parse("2026-01-01T00:00:00Z");
+
+    assertInstanceOf(
+        GuardrailChecker.GuardrailResult.Ok.class,
+        GuardrailChecker.checkStall(last, last.plusSeconds(19 * 60), g));
+    var trip = GuardrailChecker.checkStall(last, last.plusSeconds(21 * 60), g);
+    assertInstanceOf(GuardrailChecker.GuardrailResult.Triggered.class, trip);
+    assertEquals("stall", ((GuardrailChecker.GuardrailResult.Triggered) trip).reason());
+  }
+
+  @Test
   void wallClockWithinLimitReturnsOk() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var checker = new GuardrailChecker(shell);

@@ -22,11 +22,8 @@ import java.util.concurrent.TimeoutException;
 public final class AgentSession {
 
   private static final String SAIL_DIR = "/home/dev/.sail";
-  private static final String PID_FILE = SAIL_DIR + "/agent.pid";
-  private static final String LOG_FILE = SAIL_DIR + "/agent.log";
-  private static final String SESSION_FILE = SAIL_DIR + "/agent-session.json";
-  private static final String TASK_FILE = SAIL_DIR + "/agent-task.txt";
-  private static final String SYSTEMD_UNIT = "sail-agent.service";
+  private static final String LOG_FILE = AgentUnit.BUILD.logPath();
+  private static final String TASK_FILE = AgentUnit.BUILD.taskPath();
 
   private final ShellExec shell;
 
@@ -62,15 +59,33 @@ public final class AgentSession {
   }
 
   /**
+   * Truncates a role's log to empty. Dispatch calls this for {@link AgentUnit#REVIEW} at the start
+   * of each attempt so the append-mode review log carries only the current attempt's negotiation,
+   * not accumulations from prior dispatches. Best-effort: a failure here never blocks a dispatch.
+   */
+  public void resetLog(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName, List.of("bash", "-c", ": > \"$1\"", "bash", unit.logPath())));
+  }
+
+  /**
    * Writes the task text to a file inside the container. Uses printf with a positional argument to
    * avoid heredoc injection (content containing the delimiter could escape the heredoc).
    */
   public void writeTaskFile(String containerName, String task)
       throws IOException, InterruptedException, TimeoutException {
+    writeTaskFile(containerName, task, AgentUnit.BUILD);
+  }
+
+  /** Writes the task/prompt file for the given role's unit (build task or review prompt). */
+  public void writeTaskFile(String containerName, String task, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
     var cmd =
         ContainerExec.asDevUser(
             containerName,
-            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", task, TASK_FILE));
+            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", task, unit.taskPath()));
     var result = shell.exec(cmd);
     if (!result.ok()) {
       throw new IOException("Failed to write task file: " + result.stderr());
@@ -93,18 +108,30 @@ public final class AgentSession {
   public void writeSession(
       String containerName, String task, String branch, String specId, String agentType)
       throws IOException, InterruptedException, TimeoutException {
+    writeSession(containerName, task, branch, specId, agentType, AgentUnit.BUILD);
+  }
+
+  /** Writes session metadata for the given role's unit (its own session file and log path). */
+  public void writeSession(
+      String containerName,
+      String task,
+      String branch,
+      String specId,
+      String agentType,
+      AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
     var map = new LinkedHashMap<String, Object>();
     map.put("task", task);
     map.put("branch", branch);
     map.put("spec_id", Objects.requireNonNullElse(specId, ""));
     map.put("agent_type", Objects.requireNonNullElse(agentType, ""));
     map.put("started_at", Instant.now().toString());
-    map.put("log_path", LOG_FILE);
+    map.put("log_path", unit.logPath());
     var json = YamlUtil.dumpJson(map);
     var cmd =
         ContainerExec.asDevUser(
             containerName,
-            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", json, SESSION_FILE));
+            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", json, unit.sessionPath()));
     var result = shell.exec(cmd);
     if (!result.ok()) {
       throw new IOException("Failed to write session metadata: " + result.stderr());
@@ -112,14 +139,20 @@ public final class AgentSession {
   }
 
   /** Queries the current agent session status. Returns null if no session exists. */
-  @SuppressWarnings("unchecked")
   public SessionInfo queryStatus(String containerName)
       throws IOException, InterruptedException, TimeoutException {
-    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", PID_FILE));
+    return queryStatus(containerName, AgentUnit.BUILD);
+  }
+
+  /** Queries the given role's session status. Returns null if no session exists for it. */
+  @SuppressWarnings("unchecked")
+  public SessionInfo queryStatus(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
     var pidResult = shell.exec(pidCmd);
     var parsedPid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
     if (parsedPid == null) {
-      parsedPid = querySystemdPid(containerName);
+      parsedPid = querySystemdPid(containerName, unit);
     }
     if (parsedPid == null) {
       return null;
@@ -131,7 +164,7 @@ public final class AgentSession {
         ContainerExec.asDevUser(containerName, List.of("kill", "-0", String.valueOf(pid)));
     var alive = shell.exec(aliveCmd).ok();
 
-    var sessionCmd = ContainerExec.asDevUser(containerName, List.of("cat", SESSION_FILE));
+    var sessionCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
     var sessionResult = shell.exec(sessionCmd);
     var task = "";
     var startedAt = "";
@@ -143,13 +176,19 @@ public final class AgentSession {
       branch = Objects.toString(meta.get("branch"), "");
     }
 
-    return new SessionInfo(alive, pid, task, startedAt, branch, LOG_FILE);
+    return new SessionInfo(alive, pid, task, startedAt, branch, unit.logPath());
   }
 
   /** Kills a running agent process inside the container. SIGTERM first, then SIGKILL. */
   public void killAgent(String containerName)
       throws IOException, InterruptedException, TimeoutException {
-    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", PID_FILE));
+    killAgent(containerName, AgentUnit.BUILD);
+  }
+
+  /** Kills the given role's running agent inside the container. SIGTERM first, then SIGKILL. */
+  public void killAgent(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
     var pidResult = shell.exec(pidCmd);
     if (!pidResult.ok() || pidResult.stdout().isBlank()) {
       return;
@@ -171,7 +210,7 @@ public final class AgentSession {
       shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
     }
 
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", PID_FILE)));
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
   }
 
   /**
@@ -240,31 +279,66 @@ public final class AgentSession {
       String reasoningEffort,
       String specId,
       String agentType) {
+    return buildBackgroundLaunchCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        specId,
+        agentType,
+        AgentUnit.BUILD);
+  }
+
+  /**
+   * Same as the 9-arg overload but launches under the given {@link AgentUnit}, so the reviewer and
+   * fix agent get their own systemd unit and streamed log instead of clobbering the build's. The
+   * unit name is interpolated (a trusted constant, never user input) rather than passed as a
+   * positional argument, so the {@code printf "%s"} in the launch script stays literal.
+   */
+  public static List<String> buildBackgroundLaunchCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      AgentUnit unit) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath, true);
+        cli.headlessCommand(
+            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
         """
         mkdir -p "$1"
         rm -f "$5"
-        : > "$4"
-        systemctl --user reset-failed sail-agent.service >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit sail-agent bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        @RESET@
+        systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" @REDIR@ "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
-          pid="$(systemctl --user show sail-agent.service --property=MainPID --value 2>/dev/null || true)"
+          pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
           case "$pid" in
             ''|0|*[!0-9]*) ;;
             *) printf '%s\\n' "$pid" > "$5"; exit 0 ;;
           esac
           sleep 0.2
         done
-        systemctl --user status sail-agent.service --no-pager || true
+        systemctl --user status @SERVICE@ --no-pager || true
         exit 1
-        """;
+        """
+            .replace("@SERVICE@", unit.service())
+            .replace("@UNIT@", unit.unitName())
+            .replace("@RESET@", unit.appendsLog() ? "true" : ": > \"$4\"")
+            .replace("@REDIR@", unit.appendsLog() ? ">>" : ">");
     return ContainerExec.asDevUser(
         containerName,
         List.of(
@@ -275,8 +349,8 @@ public final class AgentSession {
             SAIL_DIR,
             workDir,
             agentCmd,
-            LOG_FILE,
-            PID_FILE,
+            unit.logPath(),
+            unit.pidPath(),
             effectiveSpec,
             effectiveAgent));
   }
@@ -358,6 +432,12 @@ public final class AgentSession {
    */
   public ExitState queryExitStatus(String containerName)
       throws IOException, InterruptedException, TimeoutException {
+    return queryExitStatus(containerName, AgentUnit.BUILD);
+  }
+
+  /** Reads the given role's unit terminal state from systemd (liveness, exit code, spec/agent). */
+  public ExitState queryExitStatus(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
     var cmd =
         ContainerExec.asDevUser(
             containerName,
@@ -365,7 +445,7 @@ public final class AgentSession {
                 "systemctl",
                 "--user",
                 "show",
-                SYSTEMD_UNIT,
+                unit.service(),
                 "--property=ActiveState",
                 "--property=ExecMainStatus",
                 "--property=Environment"));
@@ -374,7 +454,7 @@ public final class AgentSession {
     if (!state.specId().isBlank()) {
       return state;
     }
-    var durable = readSessionDescriptor(containerName);
+    var durable = readSessionDescriptor(containerName, unit);
     return new ExitState(
         state.active(),
         state.exitCode(),
@@ -389,9 +469,9 @@ public final class AgentSession {
    * when a collected unit no longer reports its environment; returns blanks for an ad-hoc session.
    */
   @SuppressWarnings("unchecked")
-  private SessionDescriptor readSessionDescriptor(String containerName)
+  private SessionDescriptor readSessionDescriptor(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var cmd = ContainerExec.asDevUser(containerName, List.of("cat", SESSION_FILE));
+    var cmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
     var result = shell.exec(cmd);
     if (!result.ok() || result.stdout().isBlank()) {
       return new SessionDescriptor("", "");
@@ -445,12 +525,13 @@ public final class AgentSession {
     }
   }
 
-  private Integer querySystemdPid(String containerName)
+  private Integer querySystemdPid(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var cmd =
         ContainerExec.asDevUser(
             containerName,
-            List.of("systemctl", "--user", "show", SYSTEMD_UNIT, "--property=MainPID", "--value"));
+            List.of(
+                "systemctl", "--user", "show", unit.service(), "--property=MainPID", "--value"));
     var result = shell.exec(cmd);
     return result.ok() ? parsePid(result.stdout()) : null;
   }

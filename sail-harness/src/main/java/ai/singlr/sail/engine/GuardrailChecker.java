@@ -48,19 +48,30 @@ public final class GuardrailChecker {
   public GuardrailResult check(
       String containerName, Guardrails guardrails, Instant startedAt, List<String> repoPaths)
       throws IOException, InterruptedException, TimeoutException {
+    return checkDuration(startedAt, Instant.now(), guardrails);
+  }
 
+  /**
+   * Pure wall-clock check against an explicit {@code now}, so a caller (the dispatch watcher or the
+   * review await) can drive it deterministically. Triggers once the agent has run past {@code
+   * max_duration}.
+   */
+  public static GuardrailResult checkDuration(
+      Instant startedAt, Instant now, Guardrails guardrails) {
     var maxDuration = Guardrails.parseDuration(guardrails.maxDuration());
     if (maxDuration != null) {
-      var elapsed = Duration.between(startedAt, Instant.now());
+      var elapsed = Duration.between(startedAt, now);
       if (elapsed.compareTo(maxDuration) > 0) {
-        var elapsedStr = formatDuration(elapsed);
         return new GuardrailResult.Triggered(
             "max_duration",
-            "Agent running for " + elapsedStr + " (limit: " + guardrails.maxDuration() + ")",
+            "Agent running for "
+                + formatDuration(elapsed)
+                + " (limit: "
+                + guardrails.maxDuration()
+                + ")",
             guardrails.action());
       }
     }
-
     return new GuardrailResult.Ok();
   }
 
@@ -72,11 +83,17 @@ public final class GuardrailChecker {
    * is off ({@code max_idle} unset) or no progress has been observed yet.
    */
   public static GuardrailResult checkStall(Instant lastProgressAt, Guardrails guardrails) {
+    return checkStall(lastProgressAt, Instant.now(), guardrails);
+  }
+
+  /** Pure stall check against an explicit {@code now}, for deterministic callers. */
+  public static GuardrailResult checkStall(
+      Instant lastProgressAt, Instant now, Guardrails guardrails) {
     var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
     if (maxIdle == null || lastProgressAt == null) {
       return new GuardrailResult.Ok();
     }
-    var idle = Duration.between(lastProgressAt, Instant.now());
+    var idle = Duration.between(lastProgressAt, now);
     if (idle.compareTo(maxIdle) > 0) {
       return new GuardrailResult.Triggered(
           "stall",

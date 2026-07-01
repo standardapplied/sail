@@ -208,6 +208,78 @@ class AgentSessionTest {
   }
 
   @Test
+  void buildBackgroundLaunchCommandUnderReviewUnitIsIsolatedFromBuild() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            false,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "",
+            "",
+            AgentUnit.REVIEW);
+
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("--unit sail-review"), "review runs under its own systemd unit");
+    assertTrue(joined.contains("review.log"), "review streams to its own log, not agent.log");
+    assertTrue(joined.contains("review.pid"));
+    assertFalse(joined.contains("sail-agent"), "must not touch the build unit");
+    assertFalse(joined.contains("/agent.log"), "must not clobber the build log");
+  }
+
+  @Test
+  void resetLogTruncatesTheGivenRolesLog() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    new AgentSession(shell).resetLog("acme", AgentUnit.REVIEW);
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains(": > "), "reset truncates the log to empty");
+    assertTrue(cmd.contains("/home/dev/.sail/review.log"), "resets the review negotiation log");
+  }
+
+  @Test
+  void reviewLaunchAppendsToItsLogWhileBuildTruncates() {
+    var build =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/w",
+                false,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "",
+                "",
+                AgentUnit.BUILD));
+    var review =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/w",
+                false,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "",
+                "",
+                AgentUnit.REVIEW));
+
+    assertTrue(build.contains(": > \"$4\""), "build truncates agent.log fresh each dispatch");
+    assertFalse(build.contains(">> \"$3\""), "build overwrites its log, not append");
+    assertTrue(review.contains(">> \"$3\""), "review appends so the negotiation accumulates");
+    assertFalse(
+        review.contains(": > \"$4\""), "review must not truncate the shared negotiation log");
+  }
+
+  @Test
   void buildBackgroundLaunchCommandStreamsClaudeOutput() {
     var cmd =
         AgentSession.buildBackgroundLaunchCommand(
