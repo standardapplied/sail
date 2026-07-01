@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
@@ -18,8 +19,10 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -52,7 +55,11 @@ public final class HostConfigSetCommand implements Runnable {
   @Parameters(index = "0", description = "Configuration key (e.g. 'server-ip', 'webauthn-rp-id').")
   private String key;
 
-  @Parameters(index = "1", description = "Value to set.")
+  @Parameters(
+      index = "1",
+      arity = "0..1",
+      description =
+          "Value to set. Omit for ssh-public-key to auto-detect it from your authorized_keys.")
   private String value;
 
   @Option(names = "--dry-run", description = "Print what would change without writing.")
@@ -79,12 +86,15 @@ public final class HostConfigSetCommand implements Runnable {
           "Unknown config key: '" + key + "'. Settable keys: " + String.join(", ", SETTABLE_KEYS));
     }
 
-    validate(key, value);
-
     if ("ssh-public-key".equals(key)) {
       applyWorkstationKey();
       return;
     }
+
+    if (Strings.isBlank(value)) {
+      throw new IllegalArgumentException("A value is required for '" + key + "'.");
+    }
+    validate(key, value);
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
@@ -119,29 +129,97 @@ public final class HostConfigSetCommand implements Runnable {
 
   private void applyWorkstationKey() throws IOException {
     var dest = SailPaths.workstationPublicKeyPath();
+    var chosen = resolveWorkstationKey(value, detectWorkstationKeys(authorizedKeysPath()));
     if (dryRun) {
-      System.out.println("[dry-run] Would set ssh-public-key in " + dest);
+      System.out.println(
+          "[dry-run] Would set ssh-public-key (" + chosen.fingerprint() + ") in " + dest);
       return;
     }
-    var written = writeWorkstationKey(dest, value);
+    writeKey(dest, chosen);
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("key", key);
-      map.put("value", written.line());
+      map.put("value", chosen.line());
       map.put("status", "updated");
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
     System.out.println(
-        Ansi.AUTO.string("  @|bold,green ✓|@ ssh-public-key set (" + written.fingerprint() + ")"));
+        Ansi.AUTO.string("  @|bold,green ✓|@ ssh-public-key set (" + chosen.fingerprint() + ")"));
   }
 
   /**
-   * Validates and writes the box owner's workstation public key, returning the parsed key.
+   * The box owner's workstation key: the explicit value if given, else the sole key already
+   * authorized to SSH into this box (their laptop key). Fails loud when none or several are found
+   * so the owner is never guessed for.
+   */
+  static SshPublicKey resolveWorkstationKey(String explicitValue, List<SshPublicKey> detected) {
+    if (Strings.isNotBlank(explicitValue)) {
+      return SshPublicKey.parse(explicitValue);
+    }
+    if (detected.size() == 1) {
+      return detected.getFirst();
+    }
+    if (detected.isEmpty()) {
+      throw new IllegalArgumentException(
+          "No workstation public key found in your authorized_keys. Pass the one you connect"
+              + " with:\n  sudo sail host config set ssh-public-key \"<your public key>\"");
+    }
+    var options =
+        detected.stream()
+            .map(
+                k ->
+                    "  - "
+                        + k.fingerprint()
+                        + (Strings.isBlank(k.comment()) ? "" : " " + k.comment()))
+            .collect(Collectors.joining("\n"));
+    throw new IllegalArgumentException(
+        "Multiple keys are authorized on this box; pass the one you connect with:\n" + options);
+  }
+
+  /** The keys already authorized to SSH into this box (the invoking user's authorized_keys). */
+  static List<SshPublicKey> detectWorkstationKeys(Path authorizedKeys) {
+    if (!Files.isRegularFile(authorizedKeys)) {
+      return List.of();
+    }
+    try {
+      return Files.readAllLines(authorizedKeys).stream()
+          .map(String::strip)
+          .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+          .map(HostConfigSetCommand::parseQuietly)
+          .flatMap(Optional::stream)
+          .toList();
+    } catch (IOException e) {
+      return List.of();
+    }
+  }
+
+  private static Optional<SshPublicKey> parseQuietly(String line) {
+    try {
+      return Optional.of(SshPublicKey.parse(line));
+    } catch (RuntimeException e) {
+      return Optional.empty();
+    }
+  }
+
+  private static Path authorizedKeysPath() {
+    var sudoUser = System.getenv("SUDO_USER");
+    var home =
+        Strings.isNotBlank(sudoUser)
+            ? Path.of("/home", sudoUser)
+            : Path.of(System.getProperty("user.home"));
+    return home.resolve(".ssh").resolve("authorized_keys");
+  }
+
+  /**
+   * Validates and writes an explicit workstation key value, returning the parsed key.
    * Package-private so the parse/write behaviour is unit-tested without root or a real host.
    */
   static SshPublicKey writeWorkstationKey(Path dest, String value) throws IOException {
-    var key = SshPublicKey.parse(value);
+    return writeKey(dest, SshPublicKey.parse(value));
+  }
+
+  private static SshPublicKey writeKey(Path dest, SshPublicKey key) throws IOException {
     SailPaths.ensureDataDir(dest.getParent());
     Files.writeString(dest, key.line() + "\n");
     Files.setPosixFilePermissions(
@@ -162,7 +240,6 @@ public final class HostConfigSetCommand implements Runnable {
               "Invalid IPv4 address: '" + value + "'. Expected format: 192.168.1.100");
         }
       }
-      case "ssh-public-key" -> SshPublicKey.parse(value);
       case "webauthn-rp-id" -> {
         if (!RP_ID.matcher(value).matches()) {
           throw new IllegalArgumentException(
