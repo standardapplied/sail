@@ -364,4 +364,47 @@ class ReviewStoreTest {
     assertTrue(store.stagesForReview(reviewId).isEmpty());
     assertTrue(store.findingsForStage(stageId).isEmpty());
   }
+
+  @Test
+  void supersedeForSpecClosesPriorAttemptsSoIterationsRestartOnRedispatch() {
+    var first = store.createReview("auth", 2);
+    store.updateReviewStatus(first, "escalated");
+    var second = store.createReview("auth", 3);
+    store.updateReviewStatus(second, "running");
+
+    var superseded = store.supersedeForSpec("auth");
+
+    assertEquals(2, superseded);
+    assertTrue(store.findReview(first).orElseThrow().superseded());
+    assertTrue(store.findReview(second).orElseThrow().superseded());
+    assertEquals(
+        "escalated",
+        store.findReview(first).orElseThrow().status(),
+        "supersession is lineage metadata; what happened stays recorded");
+    assertEquals(0, store.supersedeForSpec("auth"), "idempotent on a second call");
+    assertTrue(
+        store.latestReviewForSpec("auth").isEmpty(),
+        "superseded rows are history, not pipeline state — the current attempt starts fresh");
+    assertEquals(2, store.reviewsForSpec("auth").size(), "history stays queryable");
+  }
+
+  @Test
+  void failOrphanedRunningSweepsInterruptedReviewsSoTheyCannotWedgeTheSpec() {
+    var interrupted = store.createReview("auth", 1);
+    store.updateReviewStatus(interrupted, "running");
+    var finished = store.createReview("auth", 2);
+    store.updateReviewStatus(finished, "passed");
+
+    var swept = store.failOrphanedRunning();
+
+    assertEquals(1, swept, "exactly the interrupted review is swept");
+    assertEquals(
+        "failed",
+        store.findReview(interrupted).orElseThrow().status(),
+        "a 'running' review cannot survive a restart; left as-is it silently blocks every"
+            + " future review for the spec");
+    assertEquals(
+        "passed", store.findReview(finished).orElseThrow().status(), "terminal rows untouched");
+    assertEquals(0, store.failOrphanedRunning(), "idempotent: a second sweep finds nothing");
+  }
 }

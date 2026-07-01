@@ -24,7 +24,7 @@ class GeneratedFileTest {
 
   @Test
   void anExecutableFileIsMarkedExecutable() {
-    var file = new GeneratedFile("/home/dev/.sail/security-audit.sh", "#!/usr/bin/env bash", true);
+    var file = new GeneratedFile("/home/dev/.sail/spec-skill.sh", "#!/usr/bin/env bash", true);
 
     assertTrue(file.executable());
   }

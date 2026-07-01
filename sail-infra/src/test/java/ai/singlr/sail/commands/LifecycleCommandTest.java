@@ -670,33 +670,7 @@ class LifecycleCommandTest {
     assertEquals(0, exitCode);
     var output = sw.toString();
     assertTrue(output.contains("context"), "Should list 'context' subcommand");
-    assertTrue(output.contains("audit"), "Should list 'audit' subcommand");
-  }
-
-  @Test
-  void agentAuditHelpShowsDescription() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "audit", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("Run a security audit"));
-    assertTrue(output.contains("--dry-run"));
-    assertTrue(output.contains("--json"));
-  }
-
-  @Test
-  void agentAuditMissingArgsFails() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setErr(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "audit");
-
-    assertNotEquals(0, exitCode);
+    assertTrue(output.contains("review"), "Should list 'review' subcommand");
   }
 
   @Test

@@ -176,7 +176,15 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (config == null || config.stages().isEmpty()) return;
 
     var existing = reviewStore.latestReviewForSpec(specId);
-    if (existing.isPresent() && "running".equals(existing.get().status())) return;
+    if (existing.isPresent() && "running".equals(existing.get().status())) {
+      System.err.println(
+          "review-pipeline: skipping review for spec "
+              + specId
+              + " — review "
+              + existing.get().id()
+              + " is already running");
+      return;
+    }
 
     var iteration = existing.map(r -> r.iteration() + 1).orElse(1);
     if (iteration > config.maxIterations()) {

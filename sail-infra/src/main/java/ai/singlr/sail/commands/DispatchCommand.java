@@ -31,6 +31,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -403,6 +404,7 @@ public final class DispatchCommand implements Runnable {
         return null;
       }
       store.updateStatus(resolution.spec().id(), SpecStatus.IN_PROGRESS);
+      new ReviewStore(db).supersedeForSpec(resolution.spec().id());
       var body =
           store.getContent(resolution.spec().id()).map(SpecStore.SpecContent::body).orElse("");
       return new Prepared(resolution, body);

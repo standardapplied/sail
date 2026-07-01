@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SecurityAudit;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -508,55 +507,6 @@ class ProjectApplierTest {
 
     assertEquals(1, result.added());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("which node")));
-  }
-
-  @Test
-  void applyAgentContextPushesAuditFilesWhenEnabled() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var applier = applier(shell);
-    var audit = new SecurityAudit(true, "codex");
-    var agent =
-        new SailYaml.Agent(
-            "claude-code",
-            true,
-            "sail/",
-            true,
-            List.of("codex"),
-            null,
-            null,
-            null,
-            audit,
-            null,
-            null);
-    var config =
-        new SailYaml(
-            "test",
-            null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            agent,
-            null,
-            null);
-
-    var result = applier.applyAgentContext(CONTAINER, config);
-
-    assertEquals(
-        3,
-        result.added(),
-        "the home AGENTS.md, the audit script, and the agent hook settings — all sail-owned and"
-            + " overwritten");
-    assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("security-audit.sh")));
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("--mode 0755")),
-        "executable audit files are pushed with mode 0755");
-    assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("mkdir") && c.contains("-p")));
   }
 
   @Test

@@ -334,8 +334,8 @@ owns `~/workspace/CLAUDE.md` and `~/workspace/AGENTS.md` outright. Sail never cr
 touches those, and being closer to the code they override sail's layer on conflict. There is
 no `@import` pointer and no `--force`, and sail only ever overwrites its own home namespace.
 The body encodes project orientation (tech stack, conventions, runtimes, services),
-language-agnostic engineering principles, a short security stance (the full OWASP rubric
-lives in the review and audit prompt), the spec-driven workflow (DB-authoritative, with no
+language-agnostic engineering principles, a short security stance (deeper security review
+belongs in a review-pipeline stage), the spec-driven workflow (DB-authoritative, with no
 `specs/` directory to edit), and the autonomous-operation protocol. Methodology and spec
 skills land under the home skills namespace, and sail ships no hardcoded language standards.
 A project may supply its own through `agent_context.rules`, a map of name to `{paths, body}`.
@@ -444,7 +444,7 @@ these roles distinct is what lets the synced catalog stay identity-free.
   time as a DNS-rebinding defense, range-checking every resolved A and AAAA record including
   obfuscated and IPv4-mapped-IPv6 forms.
 - **Untrusted by design.** Spec markdown and agent output are untrusted prompt input. The
-  reviewer, audit, and handoff flows never treat them as authoritative instructions.
+  reviewer and handoff flows never treat them as authoritative instructions.
 - **Releases are signed.** The release workflow builds the GraalVM native images, runs the
   test suite, and publishes `sail-linux-amd64` and `sail-darwin-arm64` (plus a `sail` alias),
   each with a `.sha256` and a keyless-cosign `.cosign.bundle` (Sigstore via GitHub OIDC).

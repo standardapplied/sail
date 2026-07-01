@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SpecCliHelper;
-import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
 import java.nio.file.Files;
@@ -75,7 +74,6 @@ public final class AgentContextRegenCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
 
     var contextFiles = AgentContextGenerator.generateFiles(config);
-    var auditFiles = AgentAuditFiles.assemble(config);
 
     if (contextFiles.isEmpty()) {
       throw new IllegalStateException(
@@ -93,16 +91,6 @@ public final class AgentContextRegenCommand implements Runnable {
                 + " ("
                 + file.content().length()
                 + " bytes)");
-      }
-      for (var auditFile : auditFiles) {
-        System.out.println(
-            "[dry-run] Would push "
-                + auditFile.remotePath()
-                + " ("
-                + auditFile.content().length()
-                + " bytes"
-                + (auditFile.executable() ? ", executable" : "")
-                + ")");
       }
     } else {
       var result = AgentContextInstaller.install(shell, name, config);

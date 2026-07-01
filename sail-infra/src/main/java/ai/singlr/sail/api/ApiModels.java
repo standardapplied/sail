@@ -696,6 +696,7 @@ record ReviewView(
     String createdAt,
     String completedAt,
     String decidedBy,
+    String supersededAt,
     List<StageView> stages)
     implements Mappable {
   static ReviewView from(ReviewStore.ReviewRow row, List<StageView> stages) {
@@ -707,6 +708,7 @@ record ReviewView(
         row.createdAt(),
         row.completedAt(),
         row.decidedBy(),
+        row.supersededAt(),
         stages);
   }
 
@@ -720,6 +722,7 @@ record ReviewView(
     m.put("created_at", createdAt);
     if (completedAt != null) m.put("completed_at", completedAt);
     if (decidedBy != null) m.put("decided_by", decidedBy);
+    if (supersededAt != null) m.put("superseded_at", supersededAt);
     m.put("stages", stages);
     return m;
   }

@@ -110,7 +110,7 @@ class CommandTaxonomyTest {
             .keySet()
             .containsAll(
                 Set.of(
-                    "start", "run", "status", "stop", "logs", "report", "review", "audit", "sweep",
+                    "start", "run", "status", "stop", "logs", "report", "review", "sweep",
                     "context", "watch")));
   }
 

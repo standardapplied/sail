@@ -5,116 +5,176 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ShellExecutor;
-import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
+/**
+ * Shows the review pipeline's state for a project's specs: every attempt's iterations, stage
+ * outcomes, and findings, read from the control plane. This is the one command that answers "did my
+ * review run, and if not, why" — a spec parked in {@code review} with no current-attempt reviews
+ * means the pipeline never launched one, and the output says so instead of leaving the FDE to
+ * forensics.
+ */
 @Command(
     name = "review",
-    description = "Run a code review audit on the project's code changes.",
+    description = "Show review pipeline results for a project's specs.",
     mixinStandardHelpOptions = true)
 public final class AgentReviewCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name.")
-  private String name;
+  private String project;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Option(names = "--spec", description = "Only this spec (also prints its findings).")
+  private String specId;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Option(names = "--dry-run", description = "Print commands instead of executing them.")
-  private boolean dryRun;
+  @Mixin private ConnectionOptions connection;
 
-  @Spec private CommandSpec spec;
+  @Spec private CommandSpec commandSpec;
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(commandSpec, this::execute);
   }
 
+  @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    NameValidator.requireValidProjectName(name);
-
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
-              + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
-    }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
-
-    var shell = new ShellExecutor(dryRun);
-    var mgr = new ContainerManager(shell);
-    var state = mgr.queryState(name);
-
-    ContainerStateGuard.requireRunning(state, name);
-
-    var sshUser = config.sshUser();
-    var scriptPath = "/home/" + sshUser + "/.sail/code-review.sh";
-
-    var check = shell.exec(ContainerExec.asDevUser(name, List.of("test", "-f", scriptPath)));
-    if (!check.ok()) {
-      throw new IllegalStateException(
-          "No code review script found at "
-              + scriptPath
-              + "\n  Run 'sail agent context regen "
-              + name
-              + "' to generate it."
-              + "\n  Ensure code_review.enabled is true in sail.yaml.");
-    }
-
-    var reviewCmd = ContainerExec.asDevUser(name, List.of("bash", scriptPath));
-    var result = shell.exec(reviewCmd);
-
-    if (json) {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("name", name);
-      map.put("action", "review");
-      map.put("result", result.ok() ? "pass" : "fail");
-      map.put("exit_code", result.exitCode());
-      if (!result.ok()) {
-        map.put("details_path", "/home/" + sshUser + "/code-review.md");
+    NameValidator.requireValidProjectName(project);
+    var config = connection.resolve();
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var specs =
+          (List<Map<String, Object>>)
+              client.get("/v1/specs?project=" + project).getOrDefault("specs", List.of());
+      if (specId != null) {
+        specs = specs.stream().filter(s -> specId.equals(s.get("id"))).toList();
+        if (specs.isEmpty()) {
+          throw new IllegalArgumentException(
+              "Spec '" + specId + "' not found in project '" + project + "'.");
+        }
       }
-      if (!result.stdout().isBlank()) {
-        map.put("output", result.stdout().strip());
+
+      var report = new LinkedHashMap<String, Object>();
+      for (var spec : specs) {
+        var id = Objects.toString(spec.get("id"), "");
+        var reviews =
+            (List<Map<String, Object>>)
+                client.get("/v1/specs/" + id + "/reviews").getOrDefault("reviews", List.of());
+        if (reviews.isEmpty() && specId == null) {
+          continue;
+        }
+        report.put(id, Map.of("status", spec.get("status"), "reviews", reviews));
+
+        if (json) {
+          continue;
+        }
+        for (var line : render(id, Objects.toString(spec.get("status"), ""), reviews)) {
+          System.out.println(Ansi.AUTO.string(line));
+        }
+        if (specId != null) {
+          printFindings(client, reviews);
+        }
       }
-      System.out.println(YamlUtil.dumpJson(map));
-      return;
-    }
 
-    Banner.printBranding(System.out, Ansi.AUTO);
-    System.out.println();
-
-    if (result.ok()) {
-      System.out.println(Ansi.AUTO.string("  @|bold,green \u2713 Code review passed.|@"));
-    } else {
-      System.out.println(Ansi.AUTO.string("  @|bold,red \u2717 Code review found issues.|@"));
-      System.out.println(
-          Ansi.AUTO.string("  @|faint Details saved to:|@ /home/" + sshUser + "/code-review.md"));
-      if (!result.stderr().isBlank()) {
-        System.err.println(result.stderr().strip());
+      if (json) {
+        System.out.println(YamlUtil.dumpJson(report));
+        return;
+      }
+      if (report.isEmpty()) {
+        System.out.println(
+            Ansi.AUTO.string("  @|faint No specs with reviews in " + project + ".|@"));
       }
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private void printFindings(SailApiClient client, List<Map<String, Object>> reviews)
+      throws Exception {
+    for (var review : reviews) {
+      var findings =
+          (List<Map<String, Object>>)
+              client.get("/v1/reviews/" + review.get("id")).getOrDefault("findings", List.of());
+      for (var finding : findings) {
+        System.out.println(Ansi.AUTO.string(renderFinding(finding)));
+      }
+    }
+  }
+
+  /** Human rendering of one spec's review history; pure for tests. */
+  static List<String> render(String specId, String specStatus, List<Map<String, Object>> reviews) {
+    var lines = new ArrayList<String>();
+    lines.add("  @|bold " + specId + "|@  @|faint (" + specStatus + ")|@");
+    if (reviews.isEmpty()) {
+      lines.add(
+          "    @|yellow ⚠|@ No reviews have run for this attempt. The pipeline reviews when the"
+              + " agent stops; follow it with: sail agent log <project> --review");
+      return lines;
+    }
+    for (var review : reviews) {
+      var superseded = review.get("superseded_at") != null ? " @|faint superseded|@" : "";
+      lines.add(
+          "    iteration "
+              + review.get("iteration")
+              + " — "
+              + statusMarkup(Objects.toString(review.get("status"), ""))
+              + superseded);
+      for (var stage : stagesOf(review)) {
+        var reviewer = Objects.toString(stage.get("reviewer"), "-");
+        var count = Objects.toString(stage.get("finding_count"), "0");
+        lines.add(
+            "      "
+                + stage.get("name")
+                + " ["
+                + reviewer
+                + "] — "
+                + statusMarkup(Objects.toString(stage.get("status"), ""))
+                + ", "
+                + count
+                + " finding(s)");
+      }
+    }
+    return lines;
+  }
+
+  /** One finding as a single scannable line; pure for tests. */
+  static String renderFinding(Map<String, Object> finding) {
+    return "        "
+        + finding.get("severity")
+        + " "
+        + finding.get("category")
+        + " "
+        + finding.get("file")
+        + ":"
+        + finding.get("line_start")
+        + " "
+        + finding.get("title");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<Map<String, Object>> stagesOf(Map<String, Object> review) {
+    return (List<Map<String, Object>>) review.getOrDefault("stages", List.of());
+  }
+
+  private static String statusMarkup(String status) {
+    return switch (status) {
+      case "passed" -> "@|green passed|@";
+      case "failed" -> "@|red failed|@";
+      case "escalated" -> "@|yellow escalated|@";
+      default -> status;
+    };
   }
 }

@@ -11,8 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.gen.AgentAuditFiles;
-import ai.singlr.sail.gen.GeneratedFile;
 import org.junit.jupiter.api.Test;
 
 class AgentContextInstallerTest {
@@ -31,22 +29,6 @@ class AgentContextInstallerTest {
             image: ubuntu/24.04
             agent:
               type: claude-code
-            ssh: { user: dev, authorized_keys: [] }
-            """));
-  }
-
-  private static SailYaml configWithAudits() {
-    return SailYaml.fromMap(
-        YamlUtil.parseMap(
-            """
-            name: acme
-            resources: { cpu: 2, memory: 4GB, disk: 20GB }
-            image: ubuntu/24.04
-            agent:
-              type: claude-code
-              install: [claude-code, codex]
-              security_audit: { enabled: true }
-              code_review: { enabled: true }
             ssh: { user: dev, authorized_keys: [] }
             """));
   }
@@ -119,22 +101,6 @@ class AgentContextInstallerTest {
     assertFalse(
         result.pushed().stream().anyMatch(p -> p.contains("/workspace/")),
         "sail never writes into the engineer's workspace");
-  }
-
-  @Test
-  void marksExecutableAuditFilesExecutableOnPush() throws Exception {
-    var config = configWithAudits();
-    assertTrue(
-        AgentAuditFiles.assemble(config).stream().anyMatch(GeneratedFile::executable),
-        "precondition: this config generates an executable orchestrator");
-    var shell = okShell();
-
-    AgentContextInstaller.install(shell, CONTAINER, config);
-
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("--mode 0755")),
-        "executable files are pushed with mode 0755");
   }
 
   @Test

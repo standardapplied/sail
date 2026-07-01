@@ -305,7 +305,8 @@ public final class SchemaManager {
               + " SELECT spec_id, depends_on FROM spec_dependencies",
           "DROP TABLE spec_dependencies",
           "ALTER TABLE spec_dependencies_v2 RENAME TO spec_dependencies",
-          "ALTER TABLE agent_sessions ADD COLUMN exit_code INTEGER");
+          "ALTER TABLE agent_sessions ADD COLUMN exit_code INTEGER",
+          "ALTER TABLE reviews ADD COLUMN superseded_at TEXT");
 
   private final Sqlite db;
 

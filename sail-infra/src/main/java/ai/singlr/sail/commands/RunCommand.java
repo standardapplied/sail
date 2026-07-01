@@ -22,14 +22,11 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.gen.GeneratedFile;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -141,9 +138,7 @@ public final class RunCommand implements Runnable {
     }
 
     if (dryRun) {
-      var allFiles = new ArrayList<GeneratedFile>(contextFiles);
-      allFiles.addAll(AgentAuditFiles.assemble(config));
-      for (var f : allFiles) {
+      for (var f : contextFiles) {
         System.out.println(
             "[dry-run] Would push "
                 + f.remotePath()

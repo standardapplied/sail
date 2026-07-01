@@ -20,7 +20,6 @@ import picocli.CommandLine.Command;
       AgentStatusCommand.class,
       AgentStopCommand.class,
       AgentLogCommand.class,
-      AgentAuditCommand.class,
       AgentReviewCommand.class,
       AgentSweepCommand.class,
       AgentContextCommand.class,

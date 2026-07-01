@@ -48,8 +48,8 @@ public final class AgentTaskPrompt {
   /**
    * The autonomous-operation protocol, appended to the dispatch prompt only — it applies to a
    * headless dispatched run, not to an engineer's interactive session, so it lives here rather than
-   * in the always-loaded context file. The security-audit and code-review steps are enforced by the
-   * post-task hooks, so the prompt stays generic.
+   * in the always-loaded context file. Review is enforced server-side by the review pipeline when
+   * the agent stops, so the prompt stays generic.
    */
   private static String autonomousProtocol(Spec spec) {
     var multiRepo =

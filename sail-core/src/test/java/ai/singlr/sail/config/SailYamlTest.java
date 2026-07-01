@@ -597,59 +597,6 @@ class SailYamlTest {
   }
 
   @Test
-  void securityAuditParsedFromYaml() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          security_audit:
-            enabled: true
-            auditor: codex
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertNotNull(config.agent().securityAudit());
-    assertTrue(config.agent().securityAudit().enabled());
-    assertEquals("codex", config.agent().securityAudit().auditor());
-  }
-
-  @Test
-  void securityAuditEnabledWithoutExplicitAuditor() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          install:
-            - codex
-          security_audit:
-            enabled: true
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertNotNull(config.agent().securityAudit());
-    assertTrue(config.agent().securityAudit().enabled());
-    assertNull(config.agent().securityAudit().auditor());
-    assertEquals(
-        "codex",
-        config.agent().securityAudit().resolveAuditor("claude-code", config.agent().install()));
-  }
-
-  @Test
-  void securityAuditNullWhenNotConfigured() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertNull(config.agent().securityAudit());
-  }
-
-  @Test
   void notificationsParsedFromYaml() throws Exception {
     var yaml =
         """
@@ -775,9 +722,6 @@ class SailYamlTest {
           guardrails:
             max_duration: 4h
             action: snapshot-and-stop
-          security_audit:
-            enabled: true
-            auditor: codex
         """;
     var original = SailYaml.fromMap(YamlUtil.parseMap(yaml));
     var map = original.toMap();
@@ -785,8 +729,6 @@ class SailYamlTest {
 
     assertEquals("4h", roundTripped.agent().guardrails().maxDuration());
     assertEquals("snapshot-and-stop", roundTripped.agent().guardrails().action());
-    assertTrue(roundTripped.agent().securityAudit().enabled());
-    assertEquals("codex", roundTripped.agent().securityAudit().auditor());
   }
 
   @Test

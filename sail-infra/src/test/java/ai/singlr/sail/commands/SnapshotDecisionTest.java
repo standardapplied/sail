@@ -98,8 +98,6 @@ class SnapshotDecisionTest {
             null,
             "specs",
             null,
-            null,
-            null,
             null);
     return new SailYaml(
         "test", null, null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null,

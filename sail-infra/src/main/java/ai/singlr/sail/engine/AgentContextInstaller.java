@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.gen.AgentAuditFiles;
 import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.gen.GeneratedFile;
 import java.io.IOException;
@@ -68,7 +67,6 @@ public final class AgentContextInstaller {
     Objects.requireNonNull(config, "config");
 
     var files = new ArrayList<>(AgentContextGenerator.generateFiles(config));
-    files.addAll(AgentAuditFiles.assemble(config));
     if (files.isEmpty()) {
       return Result.none();
     }

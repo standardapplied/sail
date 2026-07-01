@@ -119,8 +119,11 @@ sail spec dispatch --project web # pick the next ready spec, launch the agent, w
 `dispatch` honors dependencies and assignee, snapshots the container for rollback, creates
 the work branch, and launches the agent with full generated context. Its log streams live.
 Sail is agent-agnostic across claude-code and codex, so one agent can implement and another
-can review: enable `security_audit` or `code_review` and the audit runs as a different agent
-at spec completion. Guardrails combine a `max_duration` and an action, so a runaway agent is
+can review: configure `agent.review_pipeline` in `sail.yaml` and when the coder stops, a
+reviewer checks the branch, a fix agent addresses its findings, and the loop repeats up to
+`max_iterations` before escalating to a human. `sail agent review <project>` shows every
+attempt's iterations and findings; `sail agent log <project> --review` follows the
+negotiation live. Guardrails combine a `max_duration` and an action, so a runaway agent is
 stopped and rolled back to the pre-launch snapshot.
 
 Specs and projects edited on two boxes merge automatically when the changes touch different

@@ -237,14 +237,15 @@ class TestOperations implements ApiOperations {
   @Override
   public Result<ReviewListResponse> reviewsForSpec(String specId) {
     var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 0);
-    var review = new ReviewView("r1", specId, 1, "passed", "t0", "t1", null, List.of(stage));
+    var review = new ReviewView("r1", specId, 1, "passed", "t0", "t1", null, null, List.of(stage));
     return Result.success(new ReviewListResponse(specId, List.of(review)));
   }
 
   @Override
   public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
     var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 0);
-    var review = new ReviewView(reviewId, "spec", 1, "passed", "t0", "t1", null, List.of(stage));
+    var review =
+        new ReviewView(reviewId, "spec", 1, "passed", "t0", "t1", null, null, List.of(stage));
     return Result.success(new ReviewDetailResponse(review, List.of()));
   }
 
