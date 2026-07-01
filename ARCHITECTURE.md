@@ -354,10 +354,35 @@ On a trip it snapshots or kills the agent and fires notifications. Rollback uses
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
-**Multi-agent review:** review is agent-agnostic across claude-code and codex. When enabled,
-a secondary agent runs the security audit or the code review at spec completion, falling back
-to self-audit when only one agent is installed. A per-spec `agent` overrides the project
-default. These stages are baked into the generated completion protocol and post-task hooks.
+**Multi-agent review loop:** review is agent-agnostic across claude-code and codex. When the
+coder's dispatch stops cleanly, the spec moves to `review` and a secondary reviewer runs at
+spec completion (falling back to self-review when only one agent is installed; a per-spec
+`agent` overrides the project default). The reviewer is read-only and emits findings; if a
+stage's gate fails, a fix agent addresses the open findings on the same branch and the
+reviewer runs again, bounded by `max_iterations`, after which the spec `escalates` and parks
+in `review` for a human.
+
+Reviewer and fix agents run on the same agent command and log handling as dispatch, but not
+its process wrapper. Dispatch is fire-and-forget (it launches a detached `systemd-run --user`
+unit and an external `sail agent watch` monitors it); a review blocks the pipeline until it
+has findings, so `ContainerReviewAgentRunner` runs it as a bounded foreground `shell.exec`
+(30-minute per-invocation timeout) that needs no systemd user manager or D-Bus session, so it
+works in any container. The output streams to `review.log` (appended, so an attempt's whole
+reviewer-and-fix negotiation lands in one live-followable log, reset per dispatch attempt),
+findings are parsed from the bytes that run appended (read by offset so a plain agent's
+re-review is never fed a prior iteration's findings) via `StreamJsonResult`. The reviewer runs
+clean (empty `SAIL_SPEC_ID`, no hooks) so its own completion never re-enters the pipeline.
+Follow it live with `sail agent log <project> --review`.
+
+**Recovery without losing work.** The git branch is the durable record: every coding agent
+(build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
+discards it. So an FDE always recovers by returning to the branch. When a spec is stuck: a
+guardrail-killed or failed dispatch leaves the work committed, so `sail spec dispatch
+--restart` resumes on the branch; an escalated review parks in `review` with its findings (in
+the review store), its negotiation (`review.log`), and every fix commit intact, so the FDE
+reads it with `sail agent review <project>` plus `sail agent log <project> --review`, then
+resolves with `sail spec edit <id> --status done` (accept the work as-is) or `--status
+pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
 **Events:** an in-process `EventBus` (lock-light, with bounded per-subscriber queues that
 are lossy by design so publishers never block) fans out to the SSE stream and to startup
