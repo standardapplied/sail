@@ -92,7 +92,7 @@ public final class LocalIdentity {
     return """
         This box has no valid workstation SSH key set (%s), so a container here can't authorize \
         you to connect from your laptop.
-          Set it once with the public key you SSH with:
+          Register it (auto-detected from this box's authorized_keys, or pass the key):
             %s"""
         .formatted(sshPublicKeyPath, WorkstationIdentity.SET_KEY_HINT);
   }

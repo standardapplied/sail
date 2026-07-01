@@ -22,8 +22,7 @@ public final class WorkstationIdentity {
   /**
    * The one command that registers a box's workstation key — shared so the guidance can't drift.
    */
-  public static final String SET_KEY_HINT =
-      "sail host config set ssh-public-key \"$(cat ~/.ssh/id_ed25519.pub)\"";
+  public static final String SET_KEY_HINT = "sudo sail host config set ssh-public-key";
 
   private WorkstationIdentity() {}
 

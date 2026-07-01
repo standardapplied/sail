@@ -14,11 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -238,11 +241,64 @@ class HostConfigSetCommandTest {
     assertTrue(thrown.getMessage().contains("trailing slash"));
   }
 
+  private static final String KEY_A = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK alice@mac";
+  private static final String KEY_B = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcX bob@laptop";
+
   @Test
-  void validateRejectsAMalformedSshPublicKey() {
+  void detectWorkstationKeysParsesValidLinesAndSkipsCommentsAndGarbage(@TempDir Path tmp)
+      throws Exception {
+    var ak = tmp.resolve("authorized_keys");
+    Files.writeString(ak, "# a comment\n\n" + KEY_A + "\nnot a key line\n" + KEY_B + "\n");
+
+    assertEquals(2, HostConfigSetCommand.detectWorkstationKeys(ak).size());
+  }
+
+  @Test
+  void detectWorkstationKeysIsEmptyWhenTheFileIsMissing(@TempDir Path tmp) {
+    assertTrue(HostConfigSetCommand.detectWorkstationKeys(tmp.resolve("absent")).isEmpty());
+  }
+
+  @Test
+  void resolveWorkstationKeyPrefersAnExplicitValueOverDetection() {
+    assertEquals(
+        KEY_A,
+        HostConfigSetCommand.resolveWorkstationKey(KEY_A, List.of(SshPublicKey.parse(KEY_B)))
+            .line());
+  }
+
+  @Test
+  void resolveWorkstationKeyAutoPicksTheSoleDetectedKey() {
+    assertEquals(
+        KEY_A,
+        HostConfigSetCommand.resolveWorkstationKey(null, List.of(SshPublicKey.parse(KEY_A)))
+            .line());
+  }
+
+  @Test
+  void resolveWorkstationKeyFailsWhenNoneCanBeFound() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostConfigSetCommand.resolveWorkstationKey(null, List.of()));
+    assertTrue(error.getMessage().contains("public key"));
+  }
+
+  @Test
+  void resolveWorkstationKeyFailsWhenMultipleAreDetectedSoTheOwnerMustChoose() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                HostConfigSetCommand.resolveWorkstationKey(
+                    null, List.of(SshPublicKey.parse(KEY_A), SshPublicKey.parse(KEY_B))));
+    assertTrue(error.getMessage().toLowerCase().contains("multiple"));
+  }
+
+  @Test
+  void resolveWorkstationKeyRejectsAMalformedExplicitValue() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> HostConfigSetCommand.validate("ssh-public-key", "not a real key"));
+        () -> HostConfigSetCommand.resolveWorkstationKey("not a real key", List.of()));
   }
 
   @Test
