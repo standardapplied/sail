@@ -77,7 +77,14 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 "userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
                     + " mkdir -p /home/dev/.sail /home/dev/workspace;"
-                    + " chown -R dev:dev /home/dev"));
+                    + " chown -R dev:dev /home/dev;"
+                    + " dpkg -s dbus-user-session >/dev/null 2>&1 ||"
+                    + " (apt-get update -qq && DEBIAN_FRONTEND=noninteractive"
+                    + " apt-get install -y -qq dbus-user-session) || true;"
+                    + " loginctl enable-linger dev || true;"
+                    + " systemctl start user@1000.service 2>/dev/null || true;"
+                    + " for i in $(seq 1 40); do test -S /run/user/1000/bus && break;"
+                    + " sleep 0.5; done"));
     assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
     ContainerFilePush.push(
         shell, CONTAINER, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755"));
