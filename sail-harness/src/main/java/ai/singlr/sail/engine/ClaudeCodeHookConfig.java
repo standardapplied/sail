@@ -81,6 +81,7 @@ public final class ClaudeCodeHookConfig {
     hooks.put("SessionEnd", List.of(matcherGroup(null, sessionEnd)));
 
     var root = new LinkedHashMap<String, Object>();
+    root.put("includeCoAuthoredBy", false);
     root.put("hooks", hooks);
     return YamlUtil.dumpJson(root);
   }

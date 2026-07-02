@@ -191,6 +191,9 @@ class DispatchCommandTest {
         prompt.contains("not complete until CI is green"),
         "the agent must watch the PR's checks and fix failures — a red-CI PR is unfinished work");
     assertTrue(prompt.contains("gh pr checks"));
+    assertTrue(
+        prompt.contains("no Co-Authored-By trailers"),
+        "generated work must not carry AI attribution");
     assertFalse(prompt.contains("handoff.md"), "no context-handoff cruft");
   }
 

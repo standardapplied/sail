@@ -332,6 +332,25 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void anUnparseableReviewIsAnErrorNeverACleanPass() {
+    createSpec("auth", "in_progress");
+    var promptEchoOnly = "Begin your response with ```json and end with ```.";
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> promptEchoOnly);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", review.status());
+    assertTrue(
+        review.errored(),
+        "a review whose output cannot be parsed must never gate-pass as zero findings");
+    assertEquals(
+        SpecStatus.REVIEW,
+        specStore.findById("auth").orElseThrow().status(),
+        "the spec must not advance to done on an unreadable review");
+  }
+
+  @Test
   void aRunnerErrorIsRecordedOnTheReviewAndNeverMistakenForAVerdict() {
     createSpec("auth", "in_progress");
     var ctrl =
@@ -632,7 +651,7 @@ class ReviewPipelineControllerTest {
          {"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
           "line_start": 2, "line_end": 2, "title": "XSS",
           "description": "d", "confidence": 0.9},
-         {"severity": "LOW", "category": "STYLE", "file": "Auth.java",
+         {"severity": "LOW", "category": "LOGIC", "file": "Auth.java",
           "line_start": 3, "line_end": 3, "title": "Naming",
           "description": "d", "confidence": 0.9}]
         ```

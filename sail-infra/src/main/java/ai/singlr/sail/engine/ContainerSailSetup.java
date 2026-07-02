@@ -89,6 +89,8 @@ public final class ContainerSailSetup {
                         + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
                         + " "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
+                        + " && grep -qsF includeCoAuthoredBy "
+                        + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && test -f "
                         + CodexHookConfig.SETTINGS_PATH
                         + " && grep -qsF "

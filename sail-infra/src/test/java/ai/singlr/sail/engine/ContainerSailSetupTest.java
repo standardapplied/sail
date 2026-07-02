@@ -131,6 +131,9 @@ class ContainerSailSetupTest {
     assertTrue(
         probe.contains(SpecCliHelper.PROFILE_PATH),
         "the probe must detect a container missing the spec-CLI PATH entry so reconfigure retrofits it");
+    assertTrue(
+        probe.contains("grep -qsF includeCoAuthoredBy"),
+        "settings files predating the attribution opt-out must be refreshed on the next dispatch");
   }
 
   @Test

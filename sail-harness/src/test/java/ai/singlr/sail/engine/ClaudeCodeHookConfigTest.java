@@ -53,6 +53,14 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
+  void renderDisablesCommitCoAuthorAttribution() {
+    var json = ClaudeCodeHookConfig.render();
+    assertTrue(
+        json.contains("\"includeCoAuthoredBy\": false"),
+        "dispatched agents must not sign commits as co-author");
+  }
+
+  @Test
   void renderEmbedsNoSpecId() {
     var json = ClaudeCodeHookConfig.render();
     var firstCmd = SailEventHelper.SCRIPT_PATH + " agent_session_started";
