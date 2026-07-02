@@ -62,7 +62,13 @@ public final class ApiSpecShowCommand implements Runnable {
         System.out.println(Ansi.AUTO.string("  @|bold Project:|@ " + spec.get("project")));
       }
       System.out.println(Ansi.AUTO.string("  @|bold Title:|@ " + spec.get("title")));
-      System.out.println(Ansi.AUTO.string("  @|bold Status:|@ " + spec.get("status")));
+      var openFindings = result.get("open_findings");
+      var findingsSuffix =
+          openFindings instanceof Number n && n.intValue() > 0
+              ? " @|yellow · " + n + " open findings|@"
+              : "";
+      System.out.println(
+          Ansi.AUTO.string("  @|bold Status:|@ " + spec.get("status") + findingsSuffix));
       if (spec.get("assignee") != null) {
         System.out.println(Ansi.AUTO.string("  @|bold Assignee:|@ " + spec.get("assignee")));
       }

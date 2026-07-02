@@ -488,6 +488,34 @@ record SpecUpdateRequest(
   }
 }
 
+record FollowupCreateRequest(String id, String createdBy) {
+  static FollowupCreateRequest fromMap(Map<String, Object> map) {
+    return new FollowupCreateRequest((String) map.get("id"), null);
+  }
+
+  /**
+   * Returns a copy attributed to {@code actor}. {@code created_by} is set by the server from the
+   * authenticated principal, never from the request body, so a client cannot forge authorship.
+   */
+  FollowupCreateRequest withCreatedBy(String actor) {
+    return new FollowupCreateRequest(id, actor);
+  }
+}
+
+record FollowupSpecResponse(
+    GlobalSpecView spec, String sourceSpecId, String reviewId, int findingCount)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec", spec.toMap());
+    m.put("source_spec_id", sourceSpecId);
+    m.put("review_id", reviewId);
+    m.put("finding_count", findingCount);
+    return m;
+  }
+}
+
 record SpecContentRequest(String body, String plan) {
   static SpecContentRequest fromMap(Map<String, Object> map) {
     return new SpecContentRequest((String) map.get("body"), (String) map.get("plan"));
@@ -613,13 +641,15 @@ record GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) implements
   }
 }
 
-record GlobalSpecDetailResponse(GlobalSpecView spec, String body, String plan) implements Mappable {
+record GlobalSpecDetailResponse(GlobalSpecView spec, String body, String plan, int openFindings)
+    implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("spec", spec.toMap());
     if (body != null) m.put("body", body);
     if (plan != null) m.put("plan", plan);
+    if (openFindings > 0) m.put("open_findings", openFindings);
     return m;
   }
 }
@@ -663,7 +693,7 @@ record GlobalSpecContentResponse(String specId, String body, String plan) implem
   }
 }
 
-record GlobalBoardResponse(SpecStore.BoardSummary board) implements Mappable {
+record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -674,6 +704,7 @@ record GlobalBoardResponse(SpecStore.BoardSummary board) implements Mappable {
     m.put("done", board.done());
     m.put("archived", board.archived());
     m.put("next_ready_id", board.nextReadyId());
+    m.put("done_open_findings", doneOpenFindings);
     return m;
   }
 }

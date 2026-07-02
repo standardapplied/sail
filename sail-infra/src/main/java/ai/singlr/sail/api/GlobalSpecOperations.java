@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Objects;
 
@@ -20,9 +21,15 @@ import java.util.Objects;
 final class GlobalSpecOperations {
 
   private final SpecStore specStore;
+  private final ReviewStore reviewStore;
 
   GlobalSpecOperations(SpecStore specStore) {
+    this(specStore, null);
+  }
+
+  GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore) {
     this.specStore = specStore;
+    this.reviewStore = reviewStore;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -42,7 +49,8 @@ final class GlobalSpecOperations {
     return new GlobalSpecDetailResponse(
         GlobalSpecView.from(row),
         content != null ? content.body() : null,
-        content != null ? content.plan() : null);
+        content != null ? content.plan() : null,
+        openFindingCount(specId));
   }
 
   GlobalSpecCreatedResponse create(SpecCreateRequest request) {
@@ -114,6 +122,11 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos());
     specStore.update(updated);
+    if (updated.status() == SpecStatus.DONE
+        && existing.status() != SpecStatus.DONE
+        && reviewStore != null) {
+      reviewStore.resolveSourceFindings(specId);
+    }
     var result = specStore.findById(specId).orElseThrow();
     return new GlobalSpecUpdatedResponse(GlobalSpecView.from(result));
   }
@@ -165,7 +178,27 @@ final class GlobalSpecOperations {
 
   GlobalBoardResponse board(String project) {
     requireStore();
-    return new GlobalBoardResponse(specStore.board(project));
+    return new GlobalBoardResponse(specStore.board(project), doneOpenFindings(project));
+  }
+
+  /**
+   * Open findings still attached to {@code done} specs — residual work the gate let ship. Shown
+   * next to the board's done column so completion-with-residue is distinguishable from clean
+   * completion.
+   */
+  private int doneOpenFindings(String project) {
+    if (reviewStore == null) {
+      return 0;
+    }
+    return specStore
+        .list(new SpecStore.SpecFilter(project, SpecStatus.DONE.wire(), null, null, null))
+        .stream()
+        .mapToInt(spec -> openFindingCount(spec.id()))
+        .sum();
+  }
+
+  private int openFindingCount(String specId) {
+    return reviewStore == null ? 0 : reviewStore.openFindingsAfterPass(specId).size();
   }
 
   GlobalSpecHistoryResponse history(String specId) {

@@ -15,6 +15,8 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -35,6 +37,7 @@ class ApiSpecCommandsTest {
   private Sqlite db;
   private SailApiServer server;
   private String token;
+  private ReviewStore reviewStore;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -46,8 +49,10 @@ class ApiSpecCommandsTest {
     var eventStore = new EventStore(db);
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
+    reviewStore = new ReviewStore(db);
     var operations =
-        new SailApiOperations(new ShellExecutor(false), "sail.yaml", bus, persister, specStore);
+        new SailApiOperations(
+            new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore);
     server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
     server.start();
   }
@@ -92,6 +97,75 @@ class ApiSpecCommandsTest {
     expanded[args.length] = "--project";
     expanded[args.length + 1] = "test";
     return expanded;
+  }
+
+  private void seedPassedReviewWithOpenFinding(String specId) {
+    var reviewId = reviewStore.createReview(specId, 1);
+    var stageId = reviewStore.createStage(reviewId, "security", "agent");
+    reviewStore.addFinding(
+        stageId,
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "Auth.java",
+            10,
+            12,
+            "Token leak",
+            "Token is logged.",
+            "log.info(token)",
+            new Finding.Suggestion("log.info(token)", "log.info(mask(token))", "Never log secrets"),
+            0.9));
+    reviewStore.updateReviewStatus(reviewId, "passed");
+  }
+
+  @Test
+  void createFromReviewDraftsFollowupSpec() {
+    run("create", "--id", "auth", "--title", "OAuth flow", "--status", "done");
+    seedPassedReviewWithOpenFinding("auth");
+
+    var output = run("create", "--from-review", "auth");
+    assertTrue(output.contains("Follow-up spec drafted: auth-followup"));
+    assertTrue(output.contains("1 open findings"));
+
+    var show = run("show", "auth-followup", "--json");
+    assertTrue(show.contains("\"status\": \"draft\""));
+    assertTrue(show.contains("Address review findings: OAuth flow"));
+    assertTrue(show.contains("Token leak"));
+  }
+
+  @Test
+  void createFromReviewHonorsExplicitId() {
+    run("create", "--id", "auth", "--title", "OAuth flow", "--status", "done");
+    seedPassedReviewWithOpenFinding("auth");
+
+    var output = run("create", "--from-review", "auth", "--id", "auth-round2");
+    assertTrue(output.contains("Follow-up spec drafted: auth-round2"));
+  }
+
+  @Test
+  void showAppendsOpenFindingsToStatus() {
+    run("create", "--id", "auth", "--title", "OAuth flow", "--status", "done");
+    seedPassedReviewWithOpenFinding("auth");
+
+    var output = run("show", "auth");
+    assertTrue(output.contains("1 open findings"));
+  }
+
+  @Test
+  void boardAppendsOpenFindingsToDoneColumn() {
+    run("create", "--id", "auth", "--title", "OAuth flow", "--status", "done");
+    seedPassedReviewWithOpenFinding("auth");
+
+    var output = run("board");
+    assertTrue(output.contains("1 open findings"));
+  }
+
+  @Test
+  void boardWithoutResidueShowsNoFindingsSuffix() {
+    run("create", "--id", "auth", "--title", "OAuth flow", "--status", "done");
+
+    var output = run("board");
+    assertFalse(output.contains("open findings"));
   }
 
   @Test

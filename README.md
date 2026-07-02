@@ -126,6 +126,14 @@ attempt's iterations and findings; `sail agent log <project> --review` follows t
 negotiation live. Guardrails combine a `max_duration` and an action, so a runaway agent is
 stopped and rolled back to the pre-launch snapshot.
 
+Findings the gate let ship don't die in the review store: `sail spec create --from-review
+<spec-id>` drafts a follow-up spec from the latest review's open findings — one actionable
+section per finding, priority derived from the highest severity, repos copied from the
+original. The draft stays in `draft` until you promote it, and when it reaches `done` the
+findings it was created from are marked resolved. `sail spec show` and the board flag done
+specs that still carry open findings (`· N open findings`), so completion-with-residue is
+distinguishable from clean completion.
+
 Specs and projects edited on two boxes merge automatically when the changes touch different
 fields. A true same-field clash parks for `sail conflicts` instead of overwriting either
 side.

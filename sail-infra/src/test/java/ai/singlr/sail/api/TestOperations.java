@@ -133,7 +133,34 @@ class TestOperations implements ApiOperations {
                 "",
                 null),
             null,
-            null));
+            null,
+            0));
+  }
+
+  @Override
+  public Result<FollowupSpecResponse> createFollowupSpec(
+      String specId, FollowupCreateRequest request) {
+    return Result.success(
+        new FollowupSpecResponse(
+            new GlobalSpecView(
+                specId + "-followup",
+                "test-project",
+                "Address review findings: Test",
+                "draft",
+                null,
+                null,
+                null,
+                null,
+                3,
+                List.of(),
+                List.of(),
+                request.createdBy(),
+                "",
+                "",
+                request.createdBy()),
+            specId,
+            "r1",
+            2));
   }
 
   @Override
@@ -231,7 +258,7 @@ class TestOperations implements ApiOperations {
   @Override
   public Result<GlobalBoardResponse> globalBoard(String project) {
     return Result.success(
-        new GlobalBoardResponse(new SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null)));
+        new GlobalBoardResponse(new SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null), 0));
   }
 
   @Override

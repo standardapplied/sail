@@ -6,9 +6,11 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 
 /**
  * Review-workflow operations against the {@link ReviewStore}. Split out of {@code
@@ -68,7 +70,92 @@ final class ReviewOperations {
     reviewStore.completeStage(humanStage.id(), "passed");
     reviewStore.approve(reviewId, actor);
     specStore.updateStatus(review.specId(), SpecStatus.DONE);
+    reviewStore.resolveSourceFindings(review.specId());
     return new ReviewApproveResponse(reviewId, true);
+  }
+
+  /**
+   * Drafts a follow-up spec from the open findings of {@code sourceSpecId}'s latest non-superseded
+   * review. The draft copies the source spec's project and repos, derives its priority from the
+   * highest severity present, and starts in {@code draft} so a human reviews and edits it before
+   * promotion — generated work is never auto-dispatched. The findings it was drafted from are
+   * linked, so they are marked resolved when the follow-up reaches {@code done}.
+   */
+  FollowupSpecResponse createFollowup(String sourceSpecId, FollowupCreateRequest request) {
+    requireStore();
+    var source =
+        specStore
+            .findById(sourceSpecId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
+    var review =
+        reviewStore.latestReviewForSpec(sourceSpecId).orElseThrow(() -> noReview(sourceSpecId));
+    var findings = reviewStore.openFindingsForReview(review.id());
+    if (findings.isEmpty()) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "The latest review of spec '" + sourceSpecId + "' has no open findings.",
+          "Every finding is already fixed or dismissed — there is nothing to follow up on.");
+    }
+    var followupId = followupId(sourceSpecId, request.id());
+    if (specStore.findById(followupId).isPresent()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + followupId + "' already exists.",
+          "Pass --id <id> to choose a different id for the follow-up spec.");
+    }
+    specStore.create(
+        new SpecStore.SpecRow(
+            followupId,
+            source.project(),
+            FollowupDraft.title(source.title()),
+            SpecStatus.DRAFT,
+            null,
+            null,
+            null,
+            null,
+            null,
+            FollowupDraft.priority(findings),
+            request.createdBy(),
+            "",
+            "",
+            request.createdBy(),
+            List.of(),
+            source.repos()));
+    specStore.setContent(followupId, FollowupDraft.body(sourceSpecId, review, findings), "");
+    reviewStore.linkSourceFindings(followupId, findings.stream().map(Finding::id).toList());
+    var created = specStore.findById(followupId).orElseThrow();
+    return new FollowupSpecResponse(
+        GlobalSpecView.from(created), sourceSpecId, review.id(), findings.size());
+  }
+
+  private ApiException noReview(String sourceSpecId) {
+    if (reviewStore.reviewsForSpec(sourceSpecId).isEmpty()) {
+      return new ApiException(
+          ErrorCode.NOT_FOUND,
+          "Spec '" + sourceSpecId + "' has no reviews.",
+          "Dispatch the spec with a review pipeline configured, let the review finish,"
+              + " then re-run this command.");
+    }
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "Every review of spec '"
+            + sourceSpecId
+            + "' was superseded by a re-dispatch — there is no current review to draw findings"
+            + " from.",
+        "Let the current dispatch attempt finish its review, then re-run this command.");
+  }
+
+  private static String followupId(String sourceSpecId, String requestedId) {
+    var followupId = requestedId != null ? requestedId : sourceSpecId + "-followup";
+    try {
+      NameValidator.requireValidSpecId(followupId);
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+    }
+    return followupId;
   }
 
   FindingDismissResponse dismissFinding(String reviewId, String findingId) {

@@ -308,7 +308,13 @@ public final class SchemaManager {
           "ALTER TABLE agent_sessions ADD COLUMN exit_code INTEGER",
           "ALTER TABLE reviews ADD COLUMN superseded_at TEXT",
           "ALTER TABLE reviews ADD COLUMN error TEXT",
-          "ALTER TABLE review_stages ADD COLUMN error TEXT");
+          "ALTER TABLE review_stages ADD COLUMN error TEXT",
+          """
+          CREATE TABLE IF NOT EXISTS spec_source_findings (
+              spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
+              finding_id TEXT NOT NULL REFERENCES review_findings(id) ON DELETE CASCADE,
+              PRIMARY KEY (spec_id, finding_id)
+          )""");
 
   private final Sqlite db;
 

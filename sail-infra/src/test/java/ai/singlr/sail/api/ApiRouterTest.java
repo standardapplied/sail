@@ -687,6 +687,35 @@ class ApiRouterTest {
   }
 
   @Test
+  void followupPostReturns201WithDraftedSpec() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/specs/auth-flow/followup", "token", "{}");
+      assertEquals(201, response.statusCode());
+      assertTrue(response.body().contains("\"id\": \"auth-flow-followup\""));
+      assertTrue(response.body().contains("\"source_spec_id\": \"auth-flow\""));
+      assertTrue(response.body().contains("\"finding_count\": 2"));
+    }
+  }
+
+  @Test
+  void followupHonorsRequestedId() throws Exception {
+    try (var server = server()) {
+      var response =
+          post(server, "/v1/specs/auth-flow/followup", "token", "{\"id\": \"auth-round2\"}");
+      assertEquals(201, response.statusCode());
+      assertTrue(response.body().contains("\"id\": \"auth-round2\""));
+    }
+  }
+
+  @Test
+  void followupRejectsNonPost() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/specs/auth-flow/followup", "token");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
   void specReviewsListReturns200() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/specs/auth-flow/reviews", "token");
@@ -1053,7 +1082,34 @@ class ApiRouterTest {
                   "",
                   null),
               null,
-              null));
+              null,
+              0));
+    }
+
+    @Override
+    public Result<FollowupSpecResponse> createFollowupSpec(
+        String specId, FollowupCreateRequest request) {
+      return Result.success(
+          new FollowupSpecResponse(
+              new GlobalSpecView(
+                  request.id() != null ? request.id() : specId + "-followup",
+                  "test-project",
+                  "Address review findings: Test",
+                  "draft",
+                  null,
+                  null,
+                  null,
+                  null,
+                  3,
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  request.createdBy(),
+                  "",
+                  "",
+                  request.createdBy()),
+              specId,
+              "r1",
+              2));
     }
 
     @Override
@@ -1156,7 +1212,7 @@ class ApiRouterTest {
     public Result<GlobalBoardResponse> globalBoard(String project) {
       return Result.success(
           new GlobalBoardResponse(
-              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null)));
+              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, null), 0));
     }
 
     @Override

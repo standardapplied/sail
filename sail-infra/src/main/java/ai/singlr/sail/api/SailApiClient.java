@@ -82,6 +82,10 @@ public final class SailApiClient implements AutoCloseable {
       if (response.statusCode() >= 400) {
         var error = (Map<String, Object>) body.get("error");
         var message = error != null ? (String) error.get("message") : "API request failed";
+        var action = error != null ? (String) error.get("action") : null;
+        if (action != null && !action.isBlank()) {
+          message = message + " " + action;
+        }
         throw new IOException(message + " (HTTP " + response.statusCode() + ")");
       }
       return body;

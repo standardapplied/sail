@@ -49,6 +49,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String SESSIONS = "sessions";
   private static final String APPROVE = "approve";
   private static final String DISMISS = "dismiss";
+  private static final String FOLLOWUP = "followup";
   private static final int DEFAULT_TAIL = 200;
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
@@ -262,6 +263,14 @@ public final class ApiRouter implements HttpHandler {
         return ApiResponse.from(
             operations.restoreGlobalSpec(
                 specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange))));
+      }
+      if (FOLLOWUP.equals(sub)) {
+        requireMethod(request, POST);
+        return ApiResponse.fromCreated(
+            operations.createFollowupSpec(
+                specId,
+                FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))
+                    .withCreatedBy(actor(exchange))));
       }
     }
     throw notFound();

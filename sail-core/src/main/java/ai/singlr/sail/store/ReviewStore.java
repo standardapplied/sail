@@ -295,6 +295,57 @@ public final class ReviewStore {
         "UPDATE review_findings SET resolution = ? WHERE id = ?", resolution.name(), findingId);
   }
 
+  /**
+   * Records which review findings a follow-up spec was drafted from, so completing the spec can
+   * resolve exactly those findings. Idempotent: re-linking an already-linked finding is a no-op.
+   */
+  public void linkSourceFindings(String specId, List<String> findingIds) {
+    db.transaction(
+        () -> {
+          for (var findingId : findingIds) {
+            db.execute(
+                "INSERT OR IGNORE INTO spec_source_findings (spec_id, finding_id) VALUES (?, ?)",
+                specId,
+                findingId);
+          }
+        });
+  }
+
+  /** The finding ids a follow-up spec was drafted from, or empty for a regular spec. */
+  public List<String> sourceFindingIds(String specId) {
+    return db.query(
+        "SELECT finding_id FROM spec_source_findings WHERE spec_id = ? ORDER BY rowid ASC",
+        row -> row.text(0),
+        specId);
+  }
+
+  /**
+   * Marks every still-open finding linked to the follow-up spec {@code FIXED}, returning how many
+   * changed. Called when the follow-up spec reaches {@code done}; findings already dismissed or
+   * fixed by other means are left untouched.
+   */
+  public int resolveSourceFindings(String specId) {
+    db.execute(
+        """
+        UPDATE review_findings SET resolution = 'FIXED'
+        WHERE resolution = 'OPEN'
+        AND id IN (SELECT finding_id FROM spec_source_findings WHERE spec_id = ?)""",
+        specId);
+    return db.changes();
+  }
+
+  /**
+   * Open findings the spec shipped with: the latest non-superseded review's open findings, but only
+   * when that review passed. A failed or still-running review is in-flight work, not residue, so it
+   * contributes nothing here.
+   */
+  public List<Finding> openFindingsAfterPass(String specId) {
+    return latestReviewForSpec(specId)
+        .filter(review -> "passed".equals(review.status()))
+        .map(review -> openFindingsForReview(review.id()))
+        .orElse(List.of());
+  }
+
   private ReviewRow mapReview(Sqlite.Row row) {
     return new ReviewRow(
         row.text(0),

@@ -58,7 +58,13 @@ public final class ApiSpecBoardCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string("    @|blue In Progress:|@ " + result.get("in_progress")));
       System.out.println(Ansi.AUTO.string("    @|yellow Review:|@      " + result.get("review")));
-      System.out.println(Ansi.AUTO.string("    @|green Done:|@        " + result.get("done")));
+      var doneOpenFindings = result.get("done_open_findings");
+      var doneSuffix =
+          doneOpenFindings instanceof Number n && n.intValue() > 0
+              ? " @|yellow · " + n + " open findings|@"
+              : "";
+      System.out.println(
+          Ansi.AUTO.string("    @|green Done:|@        " + result.get("done") + doneSuffix));
 
       var nextReady = result.get("next_ready_id");
       if (nextReady != null) {

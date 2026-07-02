@@ -50,6 +50,9 @@ public interface ApiOperations {
 
   Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
 
+  /** Drafts a follow-up spec from the open findings of a spec's latest non-superseded review. */
+  Result<FollowupSpecResponse> createFollowupSpec(String specId, FollowupCreateRequest request);
+
   Result<GlobalSpecUpdatedResponse> updateGlobalSpec(String specId, SpecUpdateRequest request);
 
   Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId);

@@ -141,7 +141,7 @@ public final class SailApiOperations implements ApiOperations {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.sessionStore = sessionStore;
-    this.globalSpecOps = new GlobalSpecOperations(specStore);
+    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
   }
 
@@ -793,6 +793,12 @@ public final class SailApiOperations implements ApiOperations {
   @Override
   public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
     return safe(() -> globalSpecOps.create(request));
+  }
+
+  @Override
+  public Result<FollowupSpecResponse> createFollowupSpec(
+      String specId, FollowupCreateRequest request) {
+    return safe(() -> reviewOps.createFollowup(specId, request));
   }
 
   @Override

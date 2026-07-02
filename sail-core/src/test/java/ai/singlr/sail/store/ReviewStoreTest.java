@@ -56,6 +56,129 @@ class ReviewStoreTest {
     if (db != null) db.close();
   }
 
+  private void createSpec(String id) {
+    specStore.create(
+        new SpecStore.SpecRow(
+            id,
+            "test-project",
+            "Follow-up",
+            SpecStatus.DRAFT,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of(),
+            List.of()));
+  }
+
+  private Finding addOpenFinding(String stageId, Finding.Severity severity, String title) {
+    var finding =
+        Finding.create(
+            severity,
+            Finding.Category.SECURITY,
+            "src/Auth.java",
+            10,
+            12,
+            title,
+            "Description",
+            "Evidence",
+            new Finding.Suggestion("bad", "good", "why"),
+            0.8);
+    store.addFinding(stageId, finding);
+    return finding;
+  }
+
+  @Test
+  void linkSourceFindingsRecordsAndReturnsIds() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var finding = addOpenFinding(stageId, Finding.Severity.HIGH, "Issue");
+    createSpec("auth-followup");
+
+    store.linkSourceFindings("auth-followup", List.of(finding.id()));
+    store.linkSourceFindings("auth-followup", List.of(finding.id()));
+
+    assertEquals(List.of(finding.id()), store.sourceFindingIds("auth-followup"));
+  }
+
+  @Test
+  void resolveSourceFindingsMarksOnlyLinkedOpenFindingsFixed() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var linked = addOpenFinding(stageId, Finding.Severity.HIGH, "Linked");
+    var dismissed = addOpenFinding(stageId, Finding.Severity.LOW, "Dismissed");
+    var unlinked = addOpenFinding(stageId, Finding.Severity.MEDIUM, "Unlinked");
+    store.resolveFinding(dismissed.id(), Finding.Resolution.DISMISSED);
+    createSpec("auth-followup");
+    store.linkSourceFindings("auth-followup", List.of(linked.id(), dismissed.id()));
+
+    assertEquals(1, store.resolveSourceFindings("auth-followup"));
+
+    var byId = store.findingsForReview(reviewId);
+    assertEquals(
+        Finding.Resolution.FIXED,
+        byId.stream()
+            .filter(f -> f.id().equals(linked.id()))
+            .findFirst()
+            .orElseThrow()
+            .resolution());
+    assertEquals(
+        Finding.Resolution.DISMISSED,
+        byId.stream()
+            .filter(f -> f.id().equals(dismissed.id()))
+            .findFirst()
+            .orElseThrow()
+            .resolution());
+    assertEquals(
+        Finding.Resolution.OPEN,
+        byId.stream()
+            .filter(f -> f.id().equals(unlinked.id()))
+            .findFirst()
+            .orElseThrow()
+            .resolution());
+  }
+
+  @Test
+  void openFindingsAfterPassReturnsOpenFindingsOfLatestPassedReview() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var open = addOpenFinding(stageId, Finding.Severity.HIGH, "Open");
+    var fixed = addOpenFinding(stageId, Finding.Severity.LOW, "Fixed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED);
+    store.updateReviewStatus(reviewId, "passed");
+
+    var findings = store.openFindingsAfterPass("auth");
+    assertEquals(1, findings.size());
+    assertEquals(open.id(), findings.getFirst().id());
+  }
+
+  @Test
+  void openFindingsAfterPassEmptyWhenLatestReviewNotPassed() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    addOpenFinding(stageId, Finding.Severity.HIGH, "Open");
+    store.updateReviewStatus(reviewId, "failed");
+
+    assertTrue(store.openFindingsAfterPass("auth").isEmpty());
+  }
+
+  @Test
+  void openFindingsAfterPassIgnoresSupersededReviews() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    addOpenFinding(stageId, Finding.Severity.HIGH, "Open");
+    store.updateReviewStatus(reviewId, "passed");
+    store.supersedeForSpec("auth");
+
+    assertTrue(store.openFindingsAfterPass("auth").isEmpty());
+  }
+
   @Test
   void createAndFindReview() {
     var id = store.createReview("auth", 1);

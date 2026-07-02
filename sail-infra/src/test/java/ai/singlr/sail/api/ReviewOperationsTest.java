@@ -28,6 +28,7 @@ class ReviewOperationsTest {
   @TempDir Path tempDir;
   private Sqlite db;
   private ReviewStore reviewStore;
+  private SpecStore specStore;
   private ReviewOperations ops;
 
   @BeforeEach
@@ -35,7 +36,7 @@ class ReviewOperationsTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     reviewStore = new ReviewStore(db);
-    var specStore = new SpecStore(db);
+    specStore = new SpecStore(db);
     specStore.create(
         new SpecStore.SpecRow(
             "auth",
@@ -53,7 +54,7 @@ class ReviewOperationsTest {
             "",
             null,
             List.of(),
-            List.of()));
+            List.of("api", "web")));
     ops = new ReviewOperations(reviewStore, specStore);
   }
 
@@ -147,6 +148,164 @@ class ReviewOperationsTest {
   @Test
   void dismissFindingMissingReviewThrowsNotFound() {
     assertThrows(ApiException.class, () -> ops.dismissFinding("nope", "f1"));
+  }
+
+  private String seedPassedReviewWithOpenFindings() {
+    var reviewId = reviewStore.createReview("auth", 1);
+    var stageId = reviewStore.createStage(reviewId, "security", "agent");
+    reviewStore.addFinding(
+        stageId,
+        Finding.create(
+            Finding.Severity.MEDIUM,
+            Finding.Category.EDGE_CASE,
+            "Flow.java",
+            5,
+            5,
+            "Unchecked null",
+            "Null flows through.",
+            "",
+            null,
+            0.6));
+    reviewStore.addFinding(
+        stageId,
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "Auth.java",
+            10,
+            12,
+            "Token leak",
+            "Token is logged.",
+            "log.info(token)",
+            new Finding.Suggestion("log.info(token)", "log.info(mask(token))", "Never log secrets"),
+            0.9));
+    reviewStore.updateReviewStatus(reviewId, "passed");
+    return reviewId;
+  }
+
+  @Test
+  void createFollowupDraftsSpecFromOpenFindings() {
+    var reviewId = seedPassedReviewWithOpenFindings();
+
+    var response = ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+
+    assertEquals("auth-followup", response.spec().id());
+    assertEquals("Address review findings: Auth", response.spec().title());
+    assertEquals("draft", response.spec().status());
+    assertEquals("manatee", response.spec().project());
+    assertEquals(List.of("api", "web"), response.spec().repos());
+    assertEquals(3, response.spec().priority());
+    assertEquals("uday", response.spec().createdBy());
+    assertEquals("auth", response.sourceSpecId());
+    assertEquals(reviewId, response.reviewId());
+    assertEquals(2, response.findingCount());
+    assertEquals(2, reviewStore.sourceFindingIds("auth-followup").size());
+
+    var body = specStore.getContent("auth-followup").orElseThrow().body();
+    assertTrue(body.indexOf("Token leak") < body.indexOf("Unchecked null"));
+    assertTrue(body.contains("HIGH"));
+    assertTrue(body.contains("SECURITY"));
+    assertTrue(body.contains("`Auth.java:10-12`"));
+    assertTrue(body.contains("Token is logged."));
+    assertTrue(body.contains("log.info(mask(token))"));
+    assertTrue(body.contains("Never log secrets"));
+  }
+
+  @Test
+  void createFollowupRejectsAnInvalidExplicitId() {
+    seedPassedReviewWithOpenFindings();
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest("../bad id!", "uday")));
+    assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
+  }
+
+  @Test
+  void createFollowupHonorsExplicitId() {
+    seedPassedReviewWithOpenFindings();
+
+    var response = ops.createFollowup("auth", new FollowupCreateRequest("auth-round2", "uday"));
+
+    assertEquals("auth-round2", response.spec().id());
+  }
+
+  @Test
+  void createFollowupMissingSpecThrowsSpecNotFound() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("nope", new FollowupCreateRequest(null, "uday")));
+    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+  }
+
+  @Test
+  void createFollowupWithoutReviewsExplainsItself() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+    assertEquals(ErrorCode.NOT_FOUND, ex.failure().errorCode());
+    assertTrue(ex.failure().errorMessage().contains("no reviews"));
+  }
+
+  @Test
+  void createFollowupWithOnlySupersededReviewsExplainsItself() {
+    seedPassedReviewWithOpenFindings();
+    reviewStore.supersedeForSpec("auth");
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.failure().errorMessage().contains("superseded"));
+  }
+
+  @Test
+  void createFollowupWithoutOpenFindingsExplainsItself() {
+    var reviewId = seedPassedReviewWithOpenFindings();
+    for (var finding : reviewStore.findingsForReview(reviewId)) {
+      reviewStore.resolveFinding(finding.id(), Finding.Resolution.DISMISSED);
+    }
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+    assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
+    assertTrue(ex.failure().errorMessage().contains("no open findings"));
+  }
+
+  @Test
+  void createFollowupWithExistingIdThrowsConflict() {
+    seedPassedReviewWithOpenFindings();
+    ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.failure().errorMessage().contains("auth-followup"));
+  }
+
+  @Test
+  void approveResolvesSourceFindingsOfTheApprovedSpec() {
+    seedPassedReviewWithOpenFindings();
+    ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+    var followupReview = reviewStore.createReview("auth-followup", 1);
+    var humanStage = reviewStore.createStage(followupReview, "human", "human");
+    reviewStore.startStage(humanStage, "uday");
+
+    ops.approve(followupReview, "uday");
+
+    var resolutions =
+        reviewStore.findingsForReview(reviewStore.reviewsForSpec("auth").getFirst().id()).stream()
+            .map(Finding::resolution)
+            .toList();
+    assertEquals(List.of(Finding.Resolution.FIXED, Finding.Resolution.FIXED), resolutions);
   }
 
   @Test

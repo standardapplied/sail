@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -24,11 +25,20 @@ import picocli.CommandLine.Spec;
 @Command(name = "create", description = "Create a new spec.", mixinStandardHelpOptions = true)
 public final class ApiSpecCreateCommand implements Runnable {
 
-  @Option(names = "--id", required = true, description = "Spec ID.")
+  @Option(names = "--id", description = "Spec ID. Required unless --from-review is used.")
   private String id;
 
-  @Option(names = "--title", required = true, description = "Spec title.")
+  @Option(names = "--title", description = "Spec title. Required unless --from-review is used.")
   private String title;
+
+  @Option(
+      names = "--from-review",
+      paramLabel = "<spec-id>",
+      description =
+          "Draft a follow-up spec from the open findings of the given spec's latest review."
+              + " Title, body, priority, project, and repos are derived; the draft stays in"
+              + " 'draft' status until you promote it.")
+  private String fromReview;
 
   @Option(
       names = "--project",
@@ -77,6 +87,15 @@ public final class ApiSpecCreateCommand implements Runnable {
 
   private void execute() throws Exception {
     SpecSync.freshenIfNode(syncOptions.noSync());
+    if (fromReview != null) {
+      executeFromReview();
+      return;
+    }
+    if (id == null || title == null) {
+      throw new IllegalArgumentException(
+          "--id and --title are required. To draft a follow-up spec from review findings"
+              + " instead, use --from-review <spec-id>.");
+    }
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
     var resolvedProject = project != null ? project : projectFromCwd();
@@ -108,6 +127,59 @@ public final class ApiSpecCreateCommand implements Runnable {
             Ansi.AUTO.string(
                 "  @|green ✓|@ Spec created: " + id + " @|faint (" + resolvedProject + ")|@"));
       }
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private void executeFromReview() throws Exception {
+    NameValidator.requireValidSpecId(fromReview);
+    requireNoDerivedOptions();
+    var config = connection.resolve();
+    var body = new LinkedHashMap<String, Object>();
+    if (id != null) {
+      NameValidator.requireValidSpecId(id);
+      body.put("id", id);
+    }
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var result = client.post("/v1/specs/" + fromReview + "/followup", body);
+
+      if (json) {
+        System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
+        return;
+      }
+      var spec = (Map<String, Object>) result.get("spec");
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Follow-up spec drafted: "
+                  + spec.get("id")
+                  + " @|faint ("
+                  + result.get("finding_count")
+                  + " open findings from the latest review of "
+                  + fromReview
+                  + ")|@"));
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Review and edit it, then promote: sail spec edit "
+                  + spec.get("id")
+                  + " --status pending|@"));
+    }
+  }
+
+  private void requireNoDerivedOptions() {
+    var derived =
+        title != null
+            || bodyFile != null
+            || planFile != null
+            || assignee != null
+            || agent != null
+            || branch != null
+            || dependsOn != null
+            || repos != null
+            || !"draft".equals(status);
+    if (derived) {
+      throw new IllegalArgumentException(
+          "--from-review derives title, body, priority, project, and repos from the review;"
+              + " only --id may be combined with it.");
     }
   }
 
