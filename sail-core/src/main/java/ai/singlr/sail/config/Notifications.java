@@ -63,8 +63,7 @@ public record Notifications(String url, List<String> events, SlackNotifications 
     var slackRaw = (Map<String, Object>) map.get("slack");
     var slack = slackRaw != null ? SlackNotifications.fromMap(slackRaw) : null;
     if (Strings.isBlank(url) && slack == null) {
-      throw new IllegalArgumentException(
-          "notifications requires a webhook url or a slack block.");
+      throw new IllegalArgumentException("notifications requires a webhook url or a slack block.");
     }
     if (Strings.isNotBlank(url)) {
       WebhookUrlSafety.requireSafe(url);

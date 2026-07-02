@@ -287,6 +287,12 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
       var output = agentRunner.run(project, agent, prompt);
       var parseResult = FindingParser.parse(output);
+      if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
+        var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
+        reviewStore.completeStage(stage.id(), "failed", message);
+        publishEvent(project, specId, "review_stage_failed", stage.name());
+        return new StageOutcome.Errored(message);
+      }
 
       for (var finding : parseResult.findings()) {
         reviewStore.addFinding(stage.id(), finding);

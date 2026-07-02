@@ -67,6 +67,9 @@ public final class AgentTaskPrompt {
         The spec is not complete until CI is green: after opening the pull request, watch its
         checks (e.g. `gh pr checks <number> --watch`), and if any check fails, diagnose it, fix it
         on the branch, push, and watch again until every check passes.
+
+        Never add AI attribution to the work: no Co-Authored-By trailers and no "Generated with"
+        footers in commit messages or pull request descriptions.
         """
         + multiRepo
         + "If the build fails repeatedly on the same error, or three different approaches fail, stop"

@@ -7,7 +7,6 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
@@ -163,9 +162,9 @@ class FindingParserTest {
         [{"severity": "LOW", "category": "LOGIC", "title": "Open", "description": "D"}]
         """;
 
-    var json = FindingParser.extractJsonBlock(output);
-    assertNotNull(json);
-    assertTrue(json.startsWith("["));
+    var json = FindingParser.extractJsonBlocks(output);
+    assertEquals(1, json.size());
+    assertTrue(json.getFirst().startsWith("["));
   }
 
   @Test
@@ -177,7 +176,64 @@ class FindingParserTest {
         ```
         """;
 
-    var json = FindingParser.extractJsonBlock(output);
-    assertNotNull(json);
+    var json = FindingParser.extractJsonBlocks(output);
+    assertEquals(1, json.size());
+  }
+
+  @Test
+  void parsesTheFindingsWhenTheTranscriptEchoesThePromptFence() {
+    var transcript =
+        """
+        Rules:
+        5. If there are no issues, return an empty array: []
+
+        Begin your response with ```json and end with ```.
+        codex
+        I inspected the diff and found one issue.
+
+        ```json
+        [{"severity": "MEDIUM", "category": "LOGIC", "file": "a.ts",
+          "line_start": 5, "line_end": 5, "title": "Leaked body",
+          "description": "Response not cancelled.", "confidence": 0.86}]
+        ```
+        """;
+
+    var result = FindingParser.parse(transcript);
+
+    assertEquals(
+        1,
+        result.findings().size(),
+        "the prompt echo's fence must not shadow the real findings block: " + result.warnings());
+    assertEquals("Leaked body", result.findings().getFirst().title());
+  }
+
+  @Test
+  void theLastParseableBlockWinsWhenSeveralArePresent() {
+    var transcript =
+        """
+        ```json
+        not valid json at all
+        ```
+        thinking...
+        ```json
+        []
+        ```
+        """;
+
+    var result = FindingParser.parse(transcript);
+
+    assertEquals(0, result.findings().size());
+    assertTrue(
+        result.warnings().isEmpty(),
+        "a clean empty array is a valid verdict: " + result.warnings());
+  }
+
+  @Test
+  void reportsAWarningWhenNoBlockParses() {
+    var result = FindingParser.parse("Begin your response with ```json and end with ```.");
+
+    assertTrue(result.findings().isEmpty());
+    assertTrue(
+        !result.warnings().isEmpty(), "an unparseable review must say so, never pass silently");
   }
 }

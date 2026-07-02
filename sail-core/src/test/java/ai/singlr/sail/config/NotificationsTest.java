@@ -279,7 +279,8 @@ class NotificationsTest {
   void fromMapRequiresUrlOrSlack() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> Notifications.fromMap(Map.of("events", List.of())));
+            IllegalArgumentException.class,
+            () -> Notifications.fromMap(Map.of("events", List.of())));
     assertTrue(ex.getMessage().contains("url or a slack block"));
   }
 
@@ -287,8 +288,7 @@ class NotificationsTest {
   void fromMapRejectsSlackWithoutChannel() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("slack", Map.of())));
+            IllegalArgumentException.class, () -> Notifications.fromMap(Map.of("slack", Map.of())));
     assertTrue(ex.getMessage().contains("notifications.slack.channel"));
   }
 
