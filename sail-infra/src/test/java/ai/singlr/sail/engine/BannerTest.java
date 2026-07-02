@@ -172,7 +172,7 @@ class BannerTest {
     Banner.printBranding(new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
-    assertTrue(output.contains("▜███▙"), "the Standard Applied sigma mark leads the wordmark");
+    assertTrue(output.contains("╚███╗"), "the stroke-drawn sigma mark leads the wordmark");
     assertTrue(output.contains("███████"), "the SAIL wordmark");
     assertTrue(output.contains("standardapplied/sail"));
   }

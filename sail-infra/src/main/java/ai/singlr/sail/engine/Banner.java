@@ -66,7 +66,7 @@ public final class Banner {
     var r = useColor ? RESET : "";
     out.println();
     var mark =
-        List.of("█████████", "▜███▙    ", "  ▜██▙   ", "  ▟██▛   ", "▟███▛    ", "█████████");
+        List.of("██████████", " ╚███╗    ", "   ╚███╗  ", "   ███╔╝  ", " ███╔╝    ", "██████████");
     var wordmark =
         List.of(
             "███████╗  █████╗  ██╗ ██╗",
