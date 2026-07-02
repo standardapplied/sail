@@ -212,6 +212,17 @@ class ReviewOperationsTest {
   }
 
   @Test
+  void createFollowupRejectsAnInvalidExplicitId() {
+    seedPassedReviewWithOpenFindings();
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> ops.createFollowup("auth", new FollowupCreateRequest("../bad id!", "uday")));
+    assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
+  }
+
+  @Test
   void createFollowupHonorsExplicitId() {
     seedPassedReviewWithOpenFindings();
 

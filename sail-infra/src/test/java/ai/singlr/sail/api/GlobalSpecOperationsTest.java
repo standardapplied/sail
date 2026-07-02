@@ -183,6 +183,53 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void getSurvivesASpecWhoseContentRowIsMissing() {
+    ops.create(createReq(Map.of()));
+    db.execute("DELETE FROM spec_content WHERE spec_id = ?", "auth");
+
+    var detail = ops.get("auth");
+
+    assertNull(detail.body());
+    assertNull(detail.plan());
+  }
+
+  @Test
+  void updateReplacesEveryProvidedField() {
+    ops.create(createReq(Map.of()));
+
+    var updated =
+        ops.update(
+            "auth",
+            SpecUpdateRequest.fromMap(
+                Map.of(
+                    "project", "zenith",
+                    "status", "pending",
+                    "agent", "codex",
+                    "model", "claude-opus-4",
+                    "branch", "feat/x",
+                    "priority", 9,
+                    "depends_on", List.of("other"),
+                    "repos", List.of("api", "web"))));
+
+    assertEquals("zenith", updated.spec().project());
+    assertEquals("codex", updated.spec().agent());
+    assertEquals("claude-opus-4", updated.spec().model());
+    assertEquals("feat/x", updated.spec().branch());
+    assertEquals(9, updated.spec().priority());
+    assertEquals(List.of("other"), updated.spec().dependsOn());
+    assertEquals(List.of("api", "web"), updated.spec().repos());
+  }
+
+  @Test
+  void boardCountsNoResidualFindingsWithoutAReviewStore() {
+    ops.create(createReq(Map.of("status", "done")));
+
+    var board = new GlobalSpecOperations(specStore, null).board(null);
+
+    assertEquals(0, board.doneOpenFindings());
+  }
+
+  @Test
   void updateMissingThrowsNotFound() {
     assertThrows(
         ApiException.class,
