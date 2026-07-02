@@ -56,7 +56,8 @@ class SlackClientTest {
   @Test
   void payloadEscapesTextAndChannel() {
     var payload =
-        SlackClient.buildPayload(new SlackPoster.Post("#ops", "line1\n\"two\"\t\\end", null, false));
+        SlackClient.buildPayload(
+            new SlackPoster.Post("#ops", "line1\n\"two\"\t\\end", null, false));
     assertTrue(payload.contains("\"text\":\"line1\\n\\\"two\\\"\\t\\\\end\""));
   }
 
@@ -76,7 +77,8 @@ class SlackClientTest {
   void successfulPostReturnsChannelAndTs() {
     var client =
         new SlackClient(
-            body -> new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C9\",\"ts\":\"5.5\"}"),
+            body ->
+                new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C9\",\"ts\":\"5.5\"}"),
             millis -> {});
 
     var result = client.post(new SlackPoster.Post("#ops", "hi", null, false));
@@ -92,7 +94,8 @@ class SlackClientTest {
         new SlackClient(
             body -> {
               calls.add(body);
-              return new SlackClient.HttpReply(200, "{\"ok\":false,\"error\":\"channel_not_found\"}");
+              return new SlackClient.HttpReply(
+                  200, "{\"ok\":false,\"error\":\"channel_not_found\"}");
             },
             millis -> {});
 
@@ -130,7 +133,8 @@ class SlackClientTest {
               calls.add(body);
               return calls.size() < 2
                   ? new SlackClient.HttpReply(429, "slow down")
-                  : new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1.1\"}");
+                  : new SlackClient.HttpReply(
+                      200, "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1.1\"}");
             },
             millis -> {});
 
@@ -150,7 +154,8 @@ class SlackClientTest {
               if (calls.size() == 1) {
                 throw new java.io.IOException("connection reset");
               }
-              return new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"2.2\"}");
+              return new SlackClient.HttpReply(
+                  200, "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"2.2\"}");
             },
             millis -> {});
 
@@ -164,7 +169,8 @@ class SlackClientTest {
   void okResponseWithoutTsIsFailure() {
     var client =
         new SlackClient(
-            body -> new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C1\"}"), millis -> {});
+            body -> new SlackClient.HttpReply(200, "{\"ok\":true,\"channel\":\"C1\"}"),
+            millis -> {});
 
     var err = captureStderr(() -> assertNull(client.post(post())));
 
@@ -217,8 +223,7 @@ class SlackClientTest {
   void resolveTokenWarnsOnUnreadableTokenFile() {
     var missing = tempDir.resolve("nope").toString();
 
-    var err =
-        captureStderr(() -> assertNull(SlackClient.resolveToken(fileLookup(missing))));
+    var err = captureStderr(() -> assertNull(SlackClient.resolveToken(fileLookup(missing))));
 
     assertTrue(err.contains("SAIL_SLACK_TOKEN_FILE"));
   }

@@ -632,7 +632,7 @@ class ReviewPipelineControllerTest {
          {"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
           "line_start": 2, "line_end": 2, "title": "XSS",
           "description": "d", "confidence": 0.9},
-         {"severity": "LOW", "category": "STYLE", "file": "Auth.java",
+         {"severity": "LOW", "category": "LOGIC", "file": "Auth.java",
           "line_start": 3, "line_end": 3, "title": "Naming",
           "description": "d", "confidence": 0.9}]
         ```

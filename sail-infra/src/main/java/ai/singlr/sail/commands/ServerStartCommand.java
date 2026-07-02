@@ -14,6 +14,7 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SessionTracker;
+import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.TokenAuth;
 import ai.singlr.sail.api.WebauthnAuthHandler;
@@ -38,6 +39,7 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.StuckSpecReconciler;
@@ -186,6 +188,7 @@ public final class ServerStartCommand implements Runnable {
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false));
     bus.subscribe(new SessionTracker(new SessionStore(db)));
+    bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 
     var webauthn = resolveWebauthn();
     var configured = webauthn.isConfigured();
