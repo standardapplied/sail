@@ -14,13 +14,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -354,5 +359,152 @@ class HostConfigSetCommandTest {
         cmd.execute("host", "config", "set", "ssh-public-key", "not-a-real-key", "--dry-run");
 
     assertNotEquals(0, exit, "a malformed key must be rejected");
+  }
+
+  @Test
+  void slackTokenPassedAsArgumentIsRejectedBeforeAnythingElse() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit = cmd.execute("host", "config", "set", "slack-token", "xoxb-leaked");
+
+    assertNotEquals(0, exit);
+    assertTrue(
+        capturedErr.toString().contains("shell history"),
+        "must explain why the token cannot be an argument");
+  }
+
+  @Test
+  void slackTokenDryRunPrintsThePlanWithoutRootOrPrompting() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit = cmd.execute("host", "config", "set", "slack-token", "--dry-run");
+
+    assertEquals(0, exit);
+    var output = capturedOut.toString();
+    assertTrue(output.contains("0600"), "plan must mention the owner-only token file");
+    assertTrue(output.contains("SAIL_SLACK_TOKEN_FILE"), "plan must mention the drop-in env var");
+    assertTrue(output.contains("restart"), "plan must mention the service restart");
+  }
+
+  @Test
+  void tokenFileOptionIsRejectedForOtherKeys() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit =
+        cmd.execute(
+            "host",
+            "config",
+            "set",
+            "server-ip",
+            "10.0.0.1",
+            "--token-file",
+            "/tmp/x",
+            "--dry-run");
+
+    assertNotEquals(0, exit);
+    assertTrue(capturedErr.toString().contains("slack-token"));
+  }
+
+  @Test
+  void slackTokenWarningFlagsNonBotPrefixesButNeverBlocks() {
+    assertEquals(null, HostConfigSetCommand.slackTokenWarning("xoxb-real-bot-token"));
+    assertNotNull(HostConfigSetCommand.slackTokenWarning("xoxp-user-token"));
+    assertTrue(HostConfigSetCommand.slackTokenWarning("garbage").contains("xoxb-"));
+  }
+
+  @Test
+  void slackTokenFromTokenFileInstallsEverythingAndReportsJsonWithoutTheToken(@TempDir Path tmp)
+      throws Exception {
+    var source = tmp.resolve("source-token");
+    Files.writeString(source, "xoxb-secret-value\n");
+    var home = tmp.resolve("home");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var cmd = slackTokenCommand(shell, home);
+    injectFields(cmd, "tokenFile", source);
+    injectFields(cmd, "json", true);
+
+    cmd.applySlackToken();
+
+    var output = capturedOut.toString();
+    assertTrue(output.contains("updated"));
+    assertTrue(output.contains("slack-token"));
+    assertTrue(!output.contains("xoxb-secret-value"), "the token must never be printed");
+    var written = home.resolve(".sail/slack-token");
+    assertEquals("xoxb-secret-value\n", Files.readString(written));
+    assertEquals(
+        PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(written));
+    assertTrue(
+        Files.readString(
+                home.resolve(".config/systemd/user/sail-api.service.d/20-slack-token.conf"))
+            .contains("SAIL_SLACK_TOKEN_FILE=" + written));
+    assertEquals(
+        List.of("systemctl --user daemon-reload", "systemctl --user restart sail-api.service"),
+        shell.invocations());
+  }
+
+  @Test
+  void slackTokenFromStdinWarnsOnUnexpectedPrefixAndRemindsAboutTheChannel(@TempDir Path tmp)
+      throws Exception {
+    var originalIn = System.in;
+    var originalConsole = ConsoleHelper.consoleSupplier;
+    try {
+      ConsoleHelper.consoleSupplier = () -> null;
+      System.setIn(new ByteArrayInputStream("xoxp-not-a-bot\n".getBytes()));
+      ConsoleHelper.resetStdin();
+      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+      var cmd = slackTokenCommand(shell, tmp.resolve("home"));
+
+      cmd.applySlackToken();
+
+      var output = capturedOut.toString();
+      assertTrue(output.contains("xoxb-"), "must warn about the unexpected token prefix");
+      assertTrue(output.contains("Invite the bot"), "must remind about the channel invite");
+      assertEquals(
+          "xoxp-not-a-bot\n", Files.readString(tmp.resolve("home").resolve(".sail/slack-token")));
+    } finally {
+      System.setIn(originalIn);
+      ConsoleHelper.consoleSupplier = originalConsole;
+      ConsoleHelper.resetStdin();
+    }
+  }
+
+  @Test
+  void slackTokenFailsLoudWhenStdinIsEmpty(@TempDir Path tmp) {
+    var originalIn = System.in;
+    var originalConsole = ConsoleHelper.consoleSupplier;
+    try {
+      ConsoleHelper.consoleSupplier = () -> null;
+      System.setIn(new ByteArrayInputStream(new byte[0]));
+      ConsoleHelper.resetStdin();
+      var cmd = slackTokenCommand(new ScriptedShellExecutor(), tmp.resolve("home"));
+
+      var ex = assertThrows(IllegalArgumentException.class, cmd::applySlackToken);
+      assertTrue(ex.getMessage().contains("--token-file"));
+    } finally {
+      System.setIn(originalIn);
+      ConsoleHelper.consoleSupplier = originalConsole;
+      ConsoleHelper.resetStdin();
+    }
+  }
+
+  @Test
+  void slackTokenFailsLoudWhenTheTokenFileIsMissing(@TempDir Path tmp) {
+    var cmd = slackTokenCommand(new ScriptedShellExecutor(), tmp.resolve("home"));
+    injectFields(cmd, "tokenFile", tmp.resolve("absent"));
+
+    var ex = assertThrows(IllegalArgumentException.class, cmd::applySlackToken);
+    assertTrue(ex.getMessage().contains("not found"));
+  }
+
+  private static HostConfigSetCommand slackTokenCommand(ShellExec shell, Path home) {
+    var cmd = new HostConfigSetCommand();
+    injectFields(cmd, "key", "slack-token");
+    injectFields(cmd, "shell", shell);
+    injectFields(cmd, "userHome", home);
+    injectFields(cmd, "serviceMode", SystemdServiceInstaller.Mode.USER);
+    return cmd;
   }
 }

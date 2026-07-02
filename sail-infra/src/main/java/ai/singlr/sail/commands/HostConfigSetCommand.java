@@ -10,8 +10,12 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.DaemonSecretInstaller;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -45,7 +50,8 @@ public final class HostConfigSetCommand implements Runnable {
           "webauthn-origin",
           "sync-role",
           "sync-main",
-          "sync-handle");
+          "sync-handle",
+          "slack-token");
   private static final Set<String> WEBAUTHN_KEYS =
       Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin");
   private static final Pattern RP_ID = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
@@ -59,8 +65,15 @@ public final class HostConfigSetCommand implements Runnable {
       index = "1",
       arity = "0..1",
       description =
-          "Value to set. Omit for ssh-public-key to auto-detect it from your authorized_keys.")
+          "Value to set. Omit for ssh-public-key to auto-detect it from your authorized_keys."
+              + " Never pass a value for slack-token — it is read from a hidden prompt, a stdin"
+              + " pipe, or --token-file.")
   private String value;
+
+  @Option(
+      names = "--token-file",
+      description = "Read the slack-token value from this file instead of prompting.")
+  private Path tokenFile;
 
   @Option(names = "--dry-run", description = "Print what would change without writing.")
   private boolean dryRun;
@@ -70,20 +83,32 @@ public final class HostConfigSetCommand implements Runnable {
 
   @Spec private CommandSpec spec;
 
+  ShellExec shell;
+  Path userHome;
+  SystemdServiceInstaller.Mode serviceMode;
+
   @Override
   public void run() {
     CliCommand.run(spec, this::execute);
   }
 
   private void execute() throws Exception {
-    if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail host config set " + key + " " + value);
-    }
-
     if (!SETTABLE_KEYS.contains(key)) {
       throw new IllegalArgumentException(
           "Unknown config key: '" + key + "'. Settable keys: " + String.join(", ", SETTABLE_KEYS));
+    }
+
+    if ("slack-token".equals(key)) {
+      applySlackToken();
+      return;
+    }
+    if (tokenFile != null) {
+      throw new IllegalArgumentException("The --token-file option applies only to 'slack-token'.");
+    }
+
+    if (!dryRun && !ConsoleHelper.isRoot()) {
+      throw new IllegalStateException(
+          "Root privileges required. Run with: sudo sail host config set " + key + " " + value);
     }
 
     if ("ssh-public-key".equals(key)) {
@@ -125,6 +150,125 @@ public final class HostConfigSetCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string("  @|faint Restart to apply: sudo systemctl restart sail-api|@"));
     }
+  }
+
+  /**
+   * Sets the daemon's Slack bot token: owner-only token file, systemd drop-in publishing {@code
+   * SAIL_SLACK_TOKEN_FILE}, service restart. The token is never accepted as an argument so it
+   * cannot leak into shell history or the process list. Package-private so the full flow is
+   * unit-tested with an injected shell, home, and mode instead of root and a live systemd.
+   */
+  void applySlackToken() throws Exception {
+    if (Strings.isNotBlank(value)) {
+      throw new IllegalArgumentException(
+          "Never pass the token as an argument — it would land in shell history and the process"
+              + " list. Run without a value for a hidden prompt, pipe the token on stdin, or use"
+              + " --token-file <path>.");
+    }
+    var secret = DaemonSecretInstaller.SLACK_TOKEN;
+    var mode = resolvedServiceMode();
+    var installer = new DaemonSecretInstaller(resolvedShell(), mode, resolvedUserHome());
+
+    if (dryRun) {
+      var systemctl = mode == SystemdServiceInstaller.Mode.USER ? "systemctl --user" : "systemctl";
+      System.out.println(
+          "[dry-run] Would write the Slack bot token to "
+              + installer.secretFilePath(secret)
+              + " (mode 0600)");
+      System.out.println(
+          "[dry-run] Would write "
+              + installer.dropInPath(secret)
+              + " (Environment="
+              + secret.envVar()
+              + "="
+              + installer.secretFilePath(secret)
+              + ")");
+      System.out.println(
+          "[dry-run] Would run: "
+              + systemctl
+              + " daemon-reload (only if the drop-in changed) && "
+              + systemctl
+              + " restart "
+              + SystemdServiceInstaller.UNIT_NAME);
+      return;
+    }
+
+    var token = acquireSlackToken();
+    var warning = slackTokenWarning(token);
+    var applied = installer.install(secret, token);
+
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("key", key);
+      map.put("tokenFile", applied.secretFile().toString());
+      map.put("dropIn", applied.dropIn().toString());
+      map.put("dropInChanged", applied.dropInChanged());
+      map.put("restarted", true);
+      map.put("status", "updated");
+      if (warning != null) {
+        map.put("warning", warning);
+      }
+      System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
+
+    if (warning != null) {
+      System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + warning));
+    }
+    System.out.println(
+        Ansi.AUTO.string("  @|bold,green ✓|@ slack-token set (" + applied.secretFile() + ")"));
+    System.out.println(
+        Ansi.AUTO.string("  @|bold,green ✓|@ sail-api restarted with " + secret.envVar() + " set"));
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|faint Invite the bot to the configured Slack channel or posts will fail.|@"));
+  }
+
+  private String acquireSlackToken() throws IOException {
+    var token = Objects.toString(readRawSlackToken(), "").strip();
+    if (token.isEmpty()) {
+      throw new IllegalArgumentException(
+          "No token provided. Enter it at the prompt, pipe it on stdin, or pass --token-file"
+              + " <path>.");
+    }
+    return token;
+  }
+
+  private String readRawSlackToken() throws IOException {
+    if (tokenFile != null) {
+      if (!Files.isRegularFile(tokenFile)) {
+        throw new IllegalArgumentException("Token file not found: " + tokenFile);
+      }
+      return Files.readString(tokenFile);
+    }
+    if (ConsoleHelper.hasConsole()) {
+      return ConsoleHelper.readPassword("  Slack bot token (input hidden): ");
+    }
+    return ConsoleHelper.readLine();
+  }
+
+  static String slackTokenWarning(String token) {
+    return token.startsWith("xoxb-")
+        ? null
+        : "Token does not start with 'xoxb-' (a Slack bot token). Setting it anyway — if it is"
+            + " wrong, the first post will fail loudly in the sail-api journal.";
+  }
+
+  private ShellExec resolvedShell() {
+    return Objects.requireNonNullElseGet(shell, () -> new ShellExecutor(false));
+  }
+
+  private Path resolvedUserHome() {
+    return Objects.requireNonNullElseGet(userHome, () -> Path.of(System.getProperty("user.home")));
+  }
+
+  private SystemdServiceInstaller.Mode resolvedServiceMode() {
+    if (serviceMode != null) {
+      return serviceMode;
+    }
+    return ConsoleHelper.isRoot()
+        ? SystemdServiceInstaller.Mode.SYSTEM
+        : SystemdServiceInstaller.Mode.USER;
   }
 
   private void applyWorkstationKey() throws IOException {

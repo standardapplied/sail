@@ -324,6 +324,10 @@ public final class SystemdServiceInstaller {
   }
 
   private List<String> systemctl(String... args) {
+    return systemctl(mode, args);
+  }
+
+  static List<String> systemctl(Mode mode, String... args) {
     var cmd = new ArrayList<String>();
     cmd.add("systemctl");
     if (mode == Mode.USER) {
