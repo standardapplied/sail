@@ -203,11 +203,20 @@ public final class HostConfigSetCommand implements Runnable {
   }
 
   private static Path authorizedKeysPath() {
-    var sudoUser = System.getenv("SUDO_USER");
-    var home =
-        Strings.isNotBlank(sudoUser)
-            ? Path.of("/home", sudoUser)
-            : Path.of(System.getProperty("user.home"));
+    return authorizedKeysPath(System.getenv("SUDO_USER"), Path.of(System.getProperty("user.home")));
+  }
+
+  /**
+   * The invoking user's authorized_keys: the sudo caller's when elevated, else the process user's.
+   * Root's home is {@code /root}, not {@code /home/root} — a root shell running {@code sudo} sets
+   * {@code SUDO_USER=root}, and resolving that to {@code /home/root} finds nothing and made
+   * auto-detection falsely report no keys.
+   */
+  static Path authorizedKeysPath(String sudoUser, Path userHome) {
+    if (Strings.isBlank(sudoUser)) {
+      return userHome.resolve(".ssh").resolve("authorized_keys");
+    }
+    var home = "root".equals(sudoUser) ? Path.of("/root") : Path.of("/home", sudoUser);
     return home.resolve(".ssh").resolve("authorized_keys");
   }
 

@@ -254,6 +254,21 @@ class HostConfigSetCommandTest {
   }
 
   @Test
+  void authorizedKeysPathResolvesRootsHomeCorrectlyUnderSudo() {
+    assertEquals(
+        Path.of("/root/.ssh/authorized_keys"),
+        HostConfigSetCommand.authorizedKeysPath("root", Path.of("/ignored")),
+        "sudo from a root shell sets SUDO_USER=root; root's home is /root, not /home/root");
+    assertEquals(
+        Path.of("/home/uday/.ssh/authorized_keys"),
+        HostConfigSetCommand.authorizedKeysPath("uday", Path.of("/ignored")));
+    assertEquals(
+        Path.of("/root/.ssh/authorized_keys"),
+        HostConfigSetCommand.authorizedKeysPath(null, Path.of("/root")),
+        "no sudo: the process user's own home");
+  }
+
+  @Test
   void detectWorkstationKeysIsEmptyWhenTheFileIsMissing(@TempDir Path tmp) {
     assertTrue(HostConfigSetCommand.detectWorkstationKeys(tmp.resolve("absent")).isEmpty());
   }
