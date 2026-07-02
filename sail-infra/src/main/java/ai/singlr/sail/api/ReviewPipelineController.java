@@ -283,7 +283,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     try {
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
-      var prompt = ReviewPromptBuilder.build(branch, project, stageConfig.categories());
+      var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
+      var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories());
 
       var output = agentRunner.run(project, agent, prompt);
       var parseResult = FindingParser.parse(output);

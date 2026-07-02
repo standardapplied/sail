@@ -16,12 +16,21 @@ public final class ReviewPromptBuilder {
 
   private ReviewPromptBuilder() {}
 
-  public static String build(String branch, String repo, List<String> categories) {
+  /**
+   * @param repos the spec's target repository directory names inside the workspace — the actual
+   *     checkouts to review, never the project name (a multi-repo workspace root contains several
+   *     repos, and a wrong name sends the reviewer into an unrelated codebase)
+   */
+  public static String build(String branch, List<String> repos, List<String> categories) {
     var categoryList =
         categories.isEmpty() ? "any relevant category" : String.join(", ", categories);
+    var repoList = repos.isEmpty() ? "the repository in the workspace" : String.join(", ", repos);
 
     return """
-        Review the changes on branch %s in repository %s.
+        Review the changes on branch %s in the following repository director%s inside this
+        workspace: %s. Review only those checkouts — ignore any other repositories present.
+        If that branch no longer exists, review the spec's changes as merged on the default
+        branch instead; do not go hunting for the missing ref.
 
         Focus on these categories: %s
 
@@ -46,6 +55,6 @@ public final class ReviewPromptBuilder {
 
         Begin your response with ```json and end with ```.
         """
-        .formatted(branch, repo, categoryList);
+        .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList);
   }
 }

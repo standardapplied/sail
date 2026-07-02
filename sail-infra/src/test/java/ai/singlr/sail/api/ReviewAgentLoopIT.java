@@ -90,7 +90,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
 
   @Test
   void theRealRunnerInvokesTheAgentInTheContainerAndParsesItsFindings() throws Exception {
-    var prompt = ReviewPromptBuilder.build("feat/test", CONTAINER, List.of("security"));
+    var prompt = ReviewPromptBuilder.build("feat/test", List.of("sail"), List.of("security"));
 
     var output = new ContainerReviewAgentRunner(shell).run(CONTAINER, "codex", prompt);
 
