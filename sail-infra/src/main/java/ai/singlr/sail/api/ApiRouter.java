@@ -29,6 +29,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String DELETE = "DELETE";
   private static final String V1 = "v1";
   private static final String HEALTH = "health";
+  private static final String WHOAMI = "whoami";
   private static final String PROJECTS = "projects";
   private static final String SPECS = "specs";
   private static final String DISPATCH = "dispatch";
@@ -108,6 +109,10 @@ public final class ApiRouter implements HttpHandler {
     auth.require(exchange);
     requireWithinRateLimit(exchange);
     Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
+
+    if (request.matches(GET, V1, WHOAMI)) {
+      return whoami(exchange);
+    }
 
     if (request.hasEventsPrefix()) {
       return routeEvents(exchange, request);
@@ -372,6 +377,25 @@ public final class ApiRouter implements HttpHandler {
    */
   static String resolveAssignee(String assignee, String actor) {
     return "me".equals(assignee) && actor != null ? actor : assignee;
+  }
+
+  /**
+   * Reflects the authenticated caller's identity back from the exchange attributes stamped by
+   * {@link ApiAuth} — no store access. Mirrors {@link #actor}: {@code fde} is present only for
+   * FDE-owned credentials, {@code name} is the credential name. Capabilities are derived from the
+   * role so clients gate UI on a capability rather than a hardcoded role→power map. Marked {@code
+   * Cache-Control: no-store} because the response is per-credential session state.
+   */
+  private static ApiResponse whoami(HttpExchange exchange) {
+    var role = Role.fromAttribute(exchange.getAttribute("token.role"));
+    var capabilities = Arrays.stream(Capability.values()).filter(role::allows).toList();
+    var response =
+        new WhoamiResponse(
+            Objects.toString(exchange.getAttribute("token.fde"), null),
+            Objects.toString(exchange.getAttribute("token.name"), null),
+            role,
+            capabilities);
+    return ApiResponse.ok(response).withHeader("Cache-Control", "no-store");
   }
 
   /**
