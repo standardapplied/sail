@@ -54,7 +54,7 @@ public final class ClientInitCommand implements Runnable {
                 + ClientConfig.GATEWAY_USER
                 + "' gateway user"));
     System.out.println();
-    System.out.println(Ansi.AUTO.string("  Test with: @|bold sail spec list|@"));
+    System.out.println(Ansi.AUTO.string("  Test with: @|bold sail spec list --all-projects|@"));
   }
 
   /**
