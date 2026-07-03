@@ -23,6 +23,19 @@ record HealthResponse(String status) implements Mappable {
   }
 }
 
+record WhoamiResponse(String fde, String name, Role role, List<Capability> capabilities)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("fde", fde);
+    m.put("name", name);
+    m.put("role", role);
+    m.put("capabilities", capabilities);
+    return m;
+  }
+}
+
 record ProjectResponse(String name, String containerStatus, AgentConfigView agent)
     implements Mappable {
   @Override
