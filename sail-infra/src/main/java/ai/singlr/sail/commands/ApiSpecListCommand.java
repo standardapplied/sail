@@ -24,13 +24,28 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class ApiSpecListCommand implements Runnable {
 
+  static final String ACTIVE_STATUSES = "draft,pending,in_progress,review,awaiting_merge";
+
   @Option(
-      names = "--project",
-      description = "Filter by client project. Inferred from cwd's sail.yaml when omitted.")
+      names = {"-p", "--project"},
+      description =
+          "Filter by client project ('*' = all projects). Defaults to the current project,"
+              + " inferred from cwd's sail.yaml or 'sail project switch'.")
   private String project;
 
-  @Option(names = "--status", description = "Filter by status (comma-separated).")
+  @Option(names = "--all-projects", description = "List specs across all projects.")
+  private boolean allProjects;
+
+  @Option(
+      names = "--status",
+      description =
+          "Filter by status (comma-separated). Defaults to the active statuses: "
+              + ACTIVE_STATUSES
+              + ".")
   private String status;
+
+  @Option(names = "--all", description = "Include every status (done and archived too).")
+  private boolean allStatuses;
 
   @Option(names = "--assignee", description = "Filter by assignee ('me' = your own FDE).")
   private String assignee;
@@ -61,11 +76,12 @@ public final class ApiSpecListCommand implements Runnable {
   private void execute() throws Exception {
     SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
-    var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
+    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
+    var resolvedStatus = statusFilter(status, allStatuses);
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var params = new StringBuilder("/v1/specs?");
       if (resolvedProject != null) params.append("project=").append(resolvedProject).append("&");
-      if (status != null) params.append("status=").append(status).append("&");
+      if (resolvedStatus != null) params.append("status=").append(resolvedStatus).append("&");
       if (assignee != null) params.append("assignee=").append(assignee).append("&");
       if (repo != null) params.append("repo=").append(repo).append("&");
       if (query != null) params.append("q=").append(query).append("&");
@@ -83,7 +99,11 @@ public final class ApiSpecListCommand implements Runnable {
       var specs = (List<Map<String, Object>>) result.get("specs");
       if (specs == null || specs.isEmpty()) {
         var scope = resolvedProject != null ? " for project '" + resolvedProject + "'" : "";
-        System.out.println(Ansi.AUTO.string("  @|faint No specs found" + scope + ".|@"));
+        var hint =
+            ACTIVE_STATUSES.equals(resolvedStatus)
+                ? " (active statuses only; pass --all to include done and archived)"
+                : "";
+        System.out.println(Ansi.AUTO.string("  @|faint No specs found" + scope + hint + ".|@"));
         return;
       }
 
@@ -91,10 +111,26 @@ public final class ApiSpecListCommand implements Runnable {
     }
   }
 
+  /**
+   * The status filter {@code list} sends to the server: an explicit {@code --status} verbatim,
+   * every status under {@code --all}, and the active set — which by definition includes {@code
+   * awaiting_merge}, the human merge queue — by default.
+   */
+  static String statusFilter(String status, boolean allStatuses) {
+    if (allStatuses) {
+      if (status != null) {
+        throw new IllegalArgumentException(
+            "--all lists every status; pass either --all or --status, not both.");
+      }
+      return null;
+    }
+    return status != null ? status : ACTIVE_STATUSES;
+  }
+
   @SuppressWarnings("unchecked")
   static void printGroupedByProjectAndStatus(List<Map<String, Object>> specs) {
     var statusOrder =
-        List.of("draft", "pending", "in_progress", "review", "awaiting_merge", "done");
+        List.of("draft", "pending", "in_progress", "review", "awaiting_merge", "done", "archived");
     var byProject = new LinkedHashMap<String, List<Map<String, Object>>>();
     for (var spec : specs) {
       var proj = (String) spec.getOrDefault("project", "unassigned");
@@ -146,6 +182,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "Review";
       case "awaiting_merge" -> "Awaiting Merge";
       case "done" -> "Done";
+      case "archived" -> "Archived";
       default -> status;
     };
   }
@@ -158,6 +195,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "yellow";
       case "awaiting_merge" -> "magenta";
       case "done" -> "green";
+      case "archived" -> "faint";
       default -> "white";
     };
   }

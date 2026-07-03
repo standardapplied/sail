@@ -49,7 +49,9 @@ public final class EventsCommand implements Runnable {
       defaultValue = "100")
   private int lines;
 
-  @Option(names = "--project", description = "Only show events for this project.")
+  @Option(
+      names = {"-p", "--project"},
+      description = "Only show events for this project.")
   private String projectFilter;
 
   @Option(

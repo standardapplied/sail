@@ -18,13 +18,19 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
-@Command(name = "edit", description = "Update a spec's metadata.", mixinStandardHelpOptions = true)
+@Command(
+    name = "update",
+    aliases = {"edit"},
+    description = "Update a spec's metadata.",
+    mixinStandardHelpOptions = true)
 public final class ApiSpecEditCommand implements Runnable {
 
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
-  @Option(names = "--project", description = "Move the spec to a different client project.")
+  @Option(
+      names = {"-p", "--project"},
+      description = "Move the spec to a different client project.")
   private String project;
 
   @Option(names = "--title", description = "New title.")

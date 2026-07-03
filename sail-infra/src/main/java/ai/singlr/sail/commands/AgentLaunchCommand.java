@@ -44,7 +44,10 @@ public final class AgentLaunchCommand implements Runnable {
 
   private static final Pattern SAFE_PATH = Pattern.compile("^[a-zA-Z0-9._/\\-]+$");
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(names = "--task", description = "Task description for headless mode.")
@@ -87,6 +90,7 @@ public final class AgentLaunchCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     if (!json) {

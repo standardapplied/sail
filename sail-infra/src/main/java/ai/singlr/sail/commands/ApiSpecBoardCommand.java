@@ -19,9 +19,14 @@ import picocli.CommandLine.Spec;
 public final class ApiSpecBoardCommand implements Runnable {
 
   @Option(
-      names = "--project",
-      description = "Scope the board to one client project. Inferred from cwd's sail.yaml.")
+      names = {"-p", "--project"},
+      description =
+          "Scope the board to one client project ('*' = all projects). Defaults to the current"
+              + " project, inferred from cwd's sail.yaml or 'sail project switch'.")
   private String project;
+
+  @Option(names = "--all-projects", description = "Show the board across all projects.")
+  private boolean allProjects;
 
   @Mixin private SyncOptions syncOptions;
 
@@ -40,7 +45,7 @@ public final class ApiSpecBoardCommand implements Runnable {
   private void execute() throws Exception {
     SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
-    var resolvedProject = project != null ? project : ApiSpecCreateCommand.projectFromCwd();
+    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var path =
         resolvedProject != null ? "/v1/specs/board?project=" + resolvedProject : "/v1/specs/board";
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {

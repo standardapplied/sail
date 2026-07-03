@@ -65,7 +65,10 @@ public final class AgentWatchCommand implements Runnable {
    */
   private static final long LIVENESS_POLL_MS = 15_000;
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(names = "--dry-run", description = "Print actions instead of executing them.")
@@ -94,6 +97,7 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);

@@ -90,6 +90,7 @@ class CommandTaxonomyTest {
             "list",
             "show",
             "create",
+            "update",
             "edit",
             "content",
             "delete",
@@ -98,6 +99,13 @@ class CommandTaxonomyTest {
             "restore",
             "dispatch"),
         spec.getSubcommands().keySet());
+  }
+
+  @Test
+  void specUpdateKeepsEditAsAlias() {
+    var spec = new CommandLine(new SpecCommand());
+
+    assertSame(spec.getSubcommands().get("update"), spec.getSubcommands().get("edit"));
   }
 
   @Test

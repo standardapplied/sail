@@ -60,8 +60,8 @@ public final class DispatchCommand implements Runnable {
   @Option(
       names = {"-p", "--project"},
       description =
-          "Project whose container runs the agent (default: the current project from 'sail"
-              + " project switch').")
+          "Project whose container runs the agent (default: the current project, inferred from"
+              + " cwd's sail.yaml or 'sail project switch').")
   private String project;
 
   private String name;

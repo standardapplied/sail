@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,12 +84,14 @@ class ApiSpecCommandsTest {
     }
   }
 
+  private static final Set<String> PROJECT_SCOPED = Set.of("create", "list", "board");
+
   private static String[] withDefaultProject(String[] args) {
-    if (args.length == 0 || !"create".equals(args[0])) {
+    if (args.length == 0 || !PROJECT_SCOPED.contains(args[0])) {
       return args;
     }
     for (var arg : args) {
-      if ("--project".equals(arg)) {
+      if ("--project".equals(arg) || "--all-projects".equals(arg)) {
         return args;
       }
     }
@@ -230,6 +233,61 @@ class ApiSpecCommandsTest {
     var output = run("board", "--json");
     assertTrue(output.contains("\"draft\": 1"));
     assertTrue(output.contains("\"pending\": 2"));
+  }
+
+  @Test
+  void listDefaultsToActiveStatusesIncludingAwaitingMerge() {
+    run("create", "--id", "queued", "--title", "Queued", "--status", "pending");
+    run("create", "--id", "merge-me", "--title", "Merge queue", "--status", "awaiting_merge");
+    run("create", "--id", "shipped", "--title", "Shipped", "--status", "done");
+    run("create", "--id", "buried", "--title", "Buried", "--status", "archived");
+
+    var output = run("list", "--json");
+    assertTrue(output.contains("\"id\": \"queued\""));
+    assertTrue(output.contains("\"id\": \"merge-me\""));
+    assertFalse(output.contains("\"id\": \"shipped\""));
+    assertFalse(output.contains("\"id\": \"buried\""));
+  }
+
+  @Test
+  void listAllIncludesDoneAndArchived() {
+    run("create", "--id", "shipped", "--title", "Shipped", "--status", "done");
+    run("create", "--id", "buried", "--title", "Buried", "--status", "archived");
+
+    var output = run("list", "--all", "--json");
+    assertTrue(output.contains("\"id\": \"shipped\""));
+    assertTrue(output.contains("\"id\": \"buried\""));
+  }
+
+  @Test
+  void listExplicitDoneStatusShowsDoneSpecs() {
+    run("create", "--id", "shipped", "--title", "Shipped", "--status", "done");
+
+    var output = run("list", "--status", "done", "--json");
+    assertTrue(output.contains("\"id\": \"shipped\""));
+  }
+
+  @Test
+  void listScopesToTheRequestedProjectOnly() {
+    run("create", "--id", "mine", "--title", "Mine", "--project", "test");
+    run("create", "--id", "theirs", "--title", "Theirs", "--project", "other");
+
+    var scoped = run("list", "--project", "test", "--json");
+    assertTrue(scoped.contains("\"id\": \"mine\""));
+    assertFalse(scoped.contains("\"id\": \"theirs\""));
+
+    var everywhere = run("list", "--all-projects", "--json");
+    assertTrue(everywhere.contains("\"id\": \"mine\""));
+    assertTrue(everywhere.contains("\"id\": \"theirs\""));
+  }
+
+  @Test
+  void updateIsAnAcceptedVerbForEdit() {
+    run("create", "--id", "renamed", "--title", "Original");
+    run("update", "renamed", "--title", "Via update verb");
+
+    var output = run("show", "renamed", "--json");
+    assertTrue(output.contains("\"title\": \"Via update verb\""));
   }
 
   @Test
