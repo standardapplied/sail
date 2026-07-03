@@ -19,6 +19,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransportException;
@@ -43,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
 class SyncServerCommandTest {
 
   @TempDir Path tempDir;
+  private SyncDatabase mainReplicaDb;
   private Sqlite mainDb;
   private Sqlite nodeDb;
   private SpecStore mainSpecs;
@@ -51,7 +53,8 @@ class SyncServerCommandTest {
 
   @BeforeEach
   void setUp() {
-    mainDb = open("main");
+    mainReplicaDb = SyncDatabase.converge(tempDir.resolve("main.db"), "main");
+    mainDb = mainReplicaDb.db();
     nodeDb = open("node");
     mainSpecs = new SpecStore(mainDb);
     nodeSpecs = new SpecStore(nodeDb);
@@ -67,7 +70,7 @@ class SyncServerCommandTest {
   @AfterEach
   void tearDown() {
     nodeDb.close();
-    mainDb.close();
+    mainReplicaDb.close();
   }
 
   private Sqlite open(String name) {
@@ -112,7 +115,7 @@ class SyncServerCommandTest {
             .start(
                 () -> {
                   try {
-                    SyncServerCommand.serve(mainDb, "main", token, serverIn, toClient);
+                    SyncServerCommand.serve(mainReplicaDb, "main", token, serverIn, toClient);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
                   }

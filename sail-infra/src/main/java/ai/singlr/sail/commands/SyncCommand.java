@@ -23,12 +23,12 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.ProjectReplica;
 import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.io.IOException;
@@ -47,7 +47,10 @@ import picocli.CommandLine.Option;
  * engine runs here on the node and drives a {@link RemoteMainReplica} across the channel:
  * local-only work pushes (main mints the rev), main-only work pulls, disjoint edits auto-merge, and
  * same-field conflicts are parked locally for {@code sail conflicts} — the node's row is never
- * clobbered. The round is idempotent; running it again after it converges does nothing.
+ * clobbered. The round is idempotent; running it again after it converges does nothing. The local
+ * replica is opened through {@link SyncDatabase}, so the schema is converged before any revision is
+ * applied — a binary the auto-updater just replaced can never sync against the previous release's
+ * schema.
  *
  * <p>With {@code --watch} it loops on an interval, staying up through a transient main outage and
  * resuming from the checkpoint when main returns. Each round that brings remote work (or raises a
@@ -98,23 +101,34 @@ public final class SyncCommand implements Callable<Integer> {
       return 0;
     }
     var target = resolution.target();
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var host = HostInfo.hostname();
-      var changeLog = new ChangeLog(db);
-      var conflicts = new SyncConflicts(db);
-      var syncState = new SyncState(db);
-      var fileStore = new FileStore(db);
-      var projectStore = new ProjectStore(db);
-      var boxes =
-          new Boxes(
-              new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
-              new FileReplica(host, fileStore, changeLog, conflicts, syncState),
-              new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
-              new FdeStore(db),
-              fileStore,
-              projectStore);
+    var host = HostInfo.hostname();
+    SyncDatabase replicaDb;
+    try {
+      replicaDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), host);
+    } catch (RuntimeException e) {
+      System.err.println(Banner.errorLine(SyncCommand.reason(e), Ansi.AUTO));
+      return 1;
+    }
+    try (replicaDb) {
+      var boxes = boxes(replicaDb, host);
       return watch ? watchLoop(boxes, target) : runOnce(boxes, target);
     }
+  }
+
+  private static Boxes boxes(SyncDatabase converged, String host) {
+    var db = converged.db();
+    var changeLog = new ChangeLog(db);
+    var conflicts = new SyncConflicts(db);
+    var syncState = new SyncState(db);
+    var fileStore = new FileStore(db);
+    var projectStore = new ProjectStore(db);
+    return new Boxes(
+        new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
+        new FileReplica(host, fileStore, changeLog, conflicts, syncState),
+        new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
+        new FdeStore(db),
+        fileStore,
+        projectStore);
   }
 
   private record Boxes(

@@ -23,6 +23,7 @@ import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.ProjectReplica;
 import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncRpcServer;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -42,7 +43,8 @@ import picocli.CommandLine.Command;
  * this with {@code SAIL_TOKEN} set, and the {@link SyncRpcServer} then exchanges {@link
  * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to the FDE's role:
  * only {@code member}+ may push (write), so a read-only FDE can pull but its commits are refused.
- * Not meant to be run by hand.
+ * The serving database is opened through {@link SyncDatabase}, so main's schema is converged before
+ * any revision is served or committed. Not meant to be run by hand.
  */
 @Command(
     name = "_sync",
@@ -52,15 +54,25 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+    var host = HostInfo.hostname();
+    SyncDatabase mainDb;
+    try {
+      mainDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), host);
+    } catch (RuntimeException e) {
+      System.err.println(SyncCommand.reason(e));
+      return 1;
+    }
+    try (mainDb) {
       var in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
       var out = new OutputStreamWriter(System.out, StandardCharsets.UTF_8);
-      return serve(db, HostInfo.hostname(), System.getenv("SAIL_TOKEN"), in, out);
+      return serve(mainDb, host, System.getenv("SAIL_TOKEN"), in, out);
     }
   }
 
-  static int serve(Sqlite db, String mainId, String token, BufferedReader in, Writer out)
+  static int serve(
+      SyncDatabase converged, String mainId, String token, BufferedReader in, Writer out)
       throws IOException {
+    var db = converged.db();
     var changeLog = new ChangeLog(db);
     var conflicts = new SyncConflicts(db);
     var syncState = new SyncState(db);
