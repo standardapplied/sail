@@ -51,7 +51,10 @@ public final class AgentSweepCommand implements Runnable {
 
       When done, write a summary to ~/sweep-report.md listing what was found and fixed.""";
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(
@@ -74,6 +77,7 @@ public final class AgentSweepCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     var shell = new ShellExecutor(dryRun);

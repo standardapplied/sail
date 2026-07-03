@@ -32,7 +32,10 @@ import picocli.CommandLine.Parameters;
     mixinStandardHelpOptions = true)
 public final class AgentReportCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -62,6 +65,7 @@ public final class AgentReportCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);

@@ -94,7 +94,7 @@ public final class SpecCliHelper {
         spec create --id <id> --title <title> [--body-file F] [--status pending]
                     [--depends-on a,b] [--repos a,b] [--agent A] [--model M]
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
-        spec update <id> [--status S] [--title T] [--assignee H] [--force] [--repos a,b] [...]
+        spec update <id> [--status S] [--title T] [--assignee H] [--force] [...]  (alias: edit)
         spec content <id> --body-file F [--plan-file F]   revise the body
         spec archive <id>
       USAGE
@@ -114,7 +114,7 @@ public final class SpecCliHelper {
         create)
           collect_fields "$@"
           api -X POST --data-urlencode "project=$PROJECT" "${FIELDS[@]}" "$BASE";;
-        update)
+        update|edit)
           [ $# -ge 1 ] || die "update needs a spec id"
           id="$1"; shift
           collect_fields "$@"

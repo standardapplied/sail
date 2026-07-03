@@ -34,7 +34,10 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentReviewCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String project;
 
   @Option(names = "--spec", description = "Only this spec (also prints its findings).")
@@ -54,6 +57,7 @@ public final class AgentReviewCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    project = CurrentProject.require(project);
     NameValidator.requireValidProjectName(project);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {

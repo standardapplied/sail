@@ -33,7 +33,10 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentContextRegenCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(
@@ -56,6 +59,7 @@ public final class AgentContextRegenCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     var singYamlPath = SailPaths.resolveSailYaml(name, file);

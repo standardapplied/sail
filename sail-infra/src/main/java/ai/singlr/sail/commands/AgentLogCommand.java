@@ -34,7 +34,10 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentLogCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String name;
 
   @Option(
@@ -61,6 +64,7 @@ public final class AgentLogCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);

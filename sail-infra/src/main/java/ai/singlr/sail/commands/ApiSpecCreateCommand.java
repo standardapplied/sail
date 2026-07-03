@@ -6,10 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -41,10 +39,10 @@ public final class ApiSpecCreateCommand implements Runnable {
   private String fromReview;
 
   @Option(
-      names = "--project",
+      names = {"-p", "--project"},
       description =
-          "Client project this spec belongs to. Inferred from sail.yaml in the current"
-              + " directory tree when omitted.")
+          "Client project this spec belongs to. Defaults to the current project, inferred from"
+              + " cwd's sail.yaml or 'sail project switch'.")
   private String project;
 
   @Option(names = "--status", description = "Initial status.", defaultValue = "draft")
@@ -98,11 +96,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     }
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
-    var resolvedProject = project != null ? project : projectFromCwd();
-    if (resolvedProject == null) {
-      throw new IllegalStateException(
-          "--project is required: no sail.yaml found in the current directory tree.");
-    }
+    var resolvedProject = CurrentProject.require(project);
 
     var body = new LinkedHashMap<String, Object>();
     body.put("id", id);
@@ -159,7 +153,7 @@ public final class ApiSpecCreateCommand implements Runnable {
                   + ")|@"));
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint Review and edit it, then promote: sail spec edit "
+              "  @|faint Review and edit it, then promote: sail spec update "
                   + spec.get("id")
                   + " --status pending|@"));
     }
@@ -180,19 +174,6 @@ public final class ApiSpecCreateCommand implements Runnable {
       throw new IllegalArgumentException(
           "--from-review derives title, body, priority, project, and repos from the review;"
               + " only --id may be combined with it.");
-    }
-  }
-
-  static String projectFromCwd() {
-    var yaml = SailPaths.findSailYamlUpward(Path.of(".")).orElse(null);
-    if (yaml == null) {
-      return null;
-    }
-    try {
-      var name = (String) YamlUtil.parseFile(yaml).get("name");
-      return Strings.isBlank(name) ? null : name;
-    } catch (Exception e) {
-      return null;
     }
   }
 }

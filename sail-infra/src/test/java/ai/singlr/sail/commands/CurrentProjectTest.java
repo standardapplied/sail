@@ -36,16 +36,61 @@ class CurrentProjectTest {
   }
 
   @Test
-  void requireFavoursTheExplicitNameThenTheCurrent() {
+  void requireFavoursTheExplicitNameThenCwdThenTheCurrent() {
     CurrentProject.set(state(), "acme");
-    assertEquals("globex", CurrentProject.require("globex", state()), "explicit wins");
-    assertEquals("acme", CurrentProject.require(null, state()), "falls back to current");
-    assertEquals("acme", CurrentProject.require("  ", state()), "blank is not explicit");
+    assertEquals("globex", CurrentProject.require("globex", "initech", state()), "explicit wins");
+    assertEquals("initech", CurrentProject.require(null, "initech", state()), "cwd beats current");
+    assertEquals("acme", CurrentProject.require(null, null, state()), "falls back to current");
+    assertEquals("acme", CurrentProject.require("  ", null, state()), "blank is not explicit");
   }
 
   @Test
-  void requireFailsWithGuidanceWhenNeitherIsAvailable() {
-    var e = assertThrows(IllegalStateException.class, () -> CurrentProject.require(null, state()));
+  void requireFailsWithGuidanceNamingBothOptionsWhenNothingIsAvailable() {
+    var e =
+        assertThrows(
+            IllegalStateException.class, () -> CurrentProject.require(null, null, state()));
+    assertTrue(e.getMessage().contains("sail project switch"), e.getMessage());
+    assertTrue(e.getMessage().contains("--project"), e.getMessage());
+  }
+
+  @Test
+  void inferPrefersCwdOverCurrent() {
+    CurrentProject.set(state(), "acme");
+    assertEquals("initech", CurrentProject.infer("initech", state()).orElseThrow());
+    assertEquals("acme", CurrentProject.infer(null, state()).orElseThrow());
+    assertTrue(CurrentProject.infer(null, tempDir.resolve("missing")).isEmpty());
+  }
+
+  @Test
+  void scopeResolvesExplicitThenInferred() {
+    CurrentProject.set(state(), "acme");
+    assertEquals("globex", CurrentProject.scope("globex", false, "initech", state()).orElseThrow());
+    assertEquals("initech", CurrentProject.scope(null, false, "initech", state()).orElseThrow());
+    assertEquals("acme", CurrentProject.scope(null, false, null, state()).orElseThrow());
+  }
+
+  @Test
+  void scopeIsUnboundedForAllProjectsOrStar() {
+    assertTrue(CurrentProject.scope(null, true, "initech", state()).isEmpty());
+    assertTrue(CurrentProject.scope("*", false, "initech", state()).isEmpty());
+    assertTrue(CurrentProject.scope("*", true, null, state()).isEmpty());
+  }
+
+  @Test
+  void scopeRejectsAProjectCombinedWithAllProjects() {
+    var e =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> CurrentProject.scope("globex", true, null, state()));
+    assertTrue(e.getMessage().contains("--all-projects"), e.getMessage());
+  }
+
+  @Test
+  void scopeFailsWithGuidanceWhenNothingIsAvailable() {
+    var e =
+        assertThrows(
+            IllegalStateException.class, () -> CurrentProject.scope(null, false, null, state()));
+    assertTrue(e.getMessage().contains("--all-projects"), e.getMessage());
     assertTrue(e.getMessage().contains("sail project switch"), e.getMessage());
   }
 }

@@ -126,7 +126,7 @@ attempt's iterations and findings; `sail agent log <project> --review` follows t
 negotiation live. Guardrails combine a `max_duration` and an action, so a runaway agent is
 stopped and rolled back to the pre-launch snapshot. A passing review parks the spec in
 `awaiting_merge` — sail never talks to the forge, so you merge the PR there and close the
-loop with `sail spec edit <id> --status done`.
+loop with `sail spec update <id> --status done`.
 
 Findings the gate let ship don't die in the review store: `sail spec create --from-review
 <spec-id>` drafts a follow-up spec from the latest review's open findings — one actionable

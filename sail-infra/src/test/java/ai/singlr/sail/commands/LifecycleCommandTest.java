@@ -294,12 +294,12 @@ class LifecycleCommandTest {
   }
 
   @Test
-  void agentLaunchWithNoNameShowsError() {
+  void agentLaunchWithInvalidNameShowsError() {
     var cmd = new CommandLine(new Sail());
     cmd.setOut(new PrintWriter(new StringWriter()));
     cmd.setErr(new PrintWriter(new StringWriter()));
 
-    var exitCode = cmd.execute("agent", "start");
+    var exitCode = cmd.execute("agent", "start", "INVALID NAME!");
 
     assertNotEquals(0, exitCode);
   }
@@ -636,12 +636,12 @@ class LifecycleCommandTest {
   }
 
   @Test
-  void agentContextRegenMissingArgsFails() {
+  void agentContextRegenInvalidNameFails() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setErr(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("agent", "context", "regen");
+    var exitCode = cmd.execute("agent", "context", "regen", "INVALID NAME!");
 
     assertNotEquals(0, exitCode);
   }

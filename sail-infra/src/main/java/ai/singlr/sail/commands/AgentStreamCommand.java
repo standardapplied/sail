@@ -30,7 +30,10 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentStreamCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String project;
 
   @Option(names = "--since", description = "Resume from line number.", defaultValue = "0")
@@ -46,6 +49,7 @@ public final class AgentStreamCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    project = CurrentProject.require(project);
     var config = connection.resolve();
     var path = "/v1/projects/" + project + "/agent/stream" + (since > 0 ? "?since=" + since : "");
     var uri = URI.create(config.serverUrl() + path);

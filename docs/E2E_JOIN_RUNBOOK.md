@@ -131,9 +131,9 @@ sail spec list                       # expect push-demo present
 ### 3. Auto-merge (disjoint fields)
 ```bash
 # MAIN
-sail spec edit pull-demo --assignee alice
+sail spec update pull-demo --assignee alice
 # NODE  (edit a DIFFERENT field on the same spec, before syncing)
-sail spec edit pull-demo --title "Pull works (node-edited)"
+sail spec update pull-demo --title "Pull works (node-edited)"
 sail sync                            # expect merged ≥ 1, conflicts = 0
 sail spec show pull-demo             # expect BOTH: assignee=alice AND the node title
 ```
@@ -141,9 +141,9 @@ sail spec show pull-demo             # expect BOTH: assignee=alice AND the node 
 ### 4. Conflict (same field), node row not clobbered
 ```bash
 # MAIN
-sail spec edit push-demo --title "Main's title"
+sail spec update push-demo --title "Main's title"
 # NODE  (same field, different value, before syncing)
-sail spec edit push-demo --title "Node's title"
+sail spec update push-demo --title "Node's title"
 sail sync                            # expect conflicts ≥ 1
 sail spec show push-demo             # expect STILL "Node's title" — local not clobbered
 sail conflicts                       # expect push-demo listed; resolve it (take main or local)

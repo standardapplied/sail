@@ -25,7 +25,10 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentSessionsCommand implements Runnable {
 
-  @Parameters(index = "0", description = "Project name.")
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name (default: the current project).")
   private String project;
 
   @Mixin private ConnectionOptions connection;
@@ -42,6 +45,7 @@ public final class AgentSessionsCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    project = CurrentProject.require(project);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var result = client.get("/v1/projects/" + project + "/agent/sessions");

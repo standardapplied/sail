@@ -364,7 +364,7 @@ in `review` for a human.
 
 A gate pass is not completion: the PR is still open on whatever forge hosts the repo, so the
 spec parks in `awaiting_merge`. Sail never talks to the forge — the FDE reviews and merges
-the PR there, then closes the loop with `sail spec edit <id> --status done`. Deciding about
+the PR there, then closes the loop with `sail spec update <id> --status done`. Deciding about
 escalated findings (parks in `review`) and merging a passed PR (parks in `awaiting_merge`)
 are different human acts and get distinct states. Because only `done` satisfies
 `depends_on`, a dependent spec never dispatches against a main that lacks its parent's
@@ -389,7 +389,7 @@ guardrail-killed or failed dispatch leaves the work committed, so `sail spec dis
 --restart` resumes on the branch; an escalated review parks in `review` with its findings (in
 the review store), its negotiation (`review.log`), and every fix commit intact, so the FDE
 reads it with `sail agent review <project>` plus `sail agent log <project> --review`, then
-resolves with `sail spec edit <id> --status done` (accept the work as-is) or `--status
+resolves with `sail spec update <id> --status done` (accept the work as-is) or `--status
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
 **Events:** an in-process `EventBus` (lock-light, with bounded per-subscriber queues that
