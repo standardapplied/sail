@@ -6,141 +6,116 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
-import ai.singlr.sail.config.SpecStatus;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.time.Duration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class MissedStopsTest {
 
-  private static SpecStore.SpecRow spec(String id, SpecStatus status) {
-    return new SpecStore.SpecRow(
-        id,
-        "acme",
-        "T",
-        status,
-        null,
-        "claude-code",
-        null,
-        null,
-        null,
-        0,
-        "me",
-        null,
-        null,
-        "me",
-        List.of(),
-        List.of());
-  }
+  private static final Instant NOW = Instant.parse("2026-07-06T12:00:00Z");
+  private static final Duration GRACE = Duration.ofMinutes(2);
 
-  private static SessionStore.SessionRow session(String specId, String status, Integer exitCode) {
+  private static SessionStore.SessionRow session(
+      String status, Integer exitCode, String startedAt) {
     return new SessionStore.SessionRow(
-        "s-" + specId,
+        "s-auth",
         "acme",
-        specId,
+        "auth",
         "claude-code",
         null,
         null,
         null,
         status,
-        "t0",
-        "t1",
-        exitCode);
+        startedAt,
+        null,
+        exitCode,
+        null);
   }
 
-  private static java.util.function.Function<String, Optional<SessionStore.SessionRow>> latest(
-      Map<String, SessionStore.SessionRow> byId) {
-    return id -> Optional.ofNullable(byId.get(id));
+  private static MissedStops.Outcome assess(SessionStore.SessionRow session, boolean observed) {
+    return MissedStops.assess(session, observed, NOW, GRACE);
   }
 
   @Test
-  void replaysAnInProgressSpecWhoseSessionStoppedCleanly() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("auth", SpecStatus.IN_PROGRESS)),
-            latest(Map.of("auth", session("auth", "stopped", 0))));
+  void replaysACleanlyStoppedSessionWithItsExitCode() {
+    var outcome = assess(session("stopped", 0, "2026-07-06T11:00:00Z"), false);
 
-    assertEquals(1, replays.size());
-    assertEquals("auth", replays.getFirst().spec().id());
-    assertEquals(0, replays.getFirst().exitCode());
+    var replay = assertInstanceOf(MissedStops.Outcome.ReplayStop.class, outcome);
+    assertEquals(0, replay.exitCode());
   }
 
   @Test
   void carriesTheExitCodeOfACrashedSession() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("auth", SpecStatus.IN_PROGRESS)),
-            latest(Map.of("auth", session("auth", "stopped", 137))));
+    var outcome = assess(session("stopped", 137, "2026-07-06T11:00:00Z"), false);
 
-    assertEquals(137, replays.getFirst().exitCode());
+    assertEquals(137, assertInstanceOf(MissedStops.Outcome.ReplayStop.class, outcome).exitCode());
   }
 
   @Test
-  void treatsCompletedAsTerminalToo() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("auth", SpecStatus.IN_PROGRESS)),
-            latest(Map.of("auth", session("auth", "completed", null))));
+  void treatsCompletedAsTerminalAndToleratesAMissingExitCode() {
+    var outcome = assess(session("completed", null, "2026-07-06T11:00:00Z"), false);
 
-    assertEquals(1, replays.size());
+    assertNull(assertInstanceOf(MissedStops.Outcome.ReplayStop.class, outcome).exitCode());
   }
 
   @Test
-  void neverReplaysASpecAlreadyPastTheGate() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("parked", SpecStatus.AWAITING_MERGE)),
-            latest(Map.of("parked", session("parked", "stopped", 0))));
+  void anAuthoritativeStopAlreadyRecordedSkipsEvenATerminalSession() {
+    var outcome = assess(session("stopped", 137, "2026-07-06T11:00:00Z"), true);
 
-    assertTrue(replays.isEmpty());
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
 
   @Test
-  void ignoresASpecWhoseSessionIsStillRunning() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("auth", SpecStatus.IN_PROGRESS)),
-            latest(Map.of("auth", session("auth", "running", null))));
+  void anAuthoritativeStopAlreadyRecordedSkipsARunningSession() {
+    var outcome = assess(session("running", null, "2026-07-06T11:00:00Z"), true);
 
-    assertTrue(replays.isEmpty());
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
 
   @Test
-  void ignoresASpecWithNoSession() {
-    var replays = MissedStops.find(List.of(spec("auth", SpecStatus.IN_PROGRESS)), latest(Map.of()));
+  void aRunningSessionPastTheGracePeriodIsProbed() {
+    var outcome = assess(session("running", null, "2026-07-06T11:57:59Z"), false);
 
-    assertTrue(replays.isEmpty());
+    assertInstanceOf(MissedStops.Outcome.ProbeUnit.class, outcome);
   }
 
   @Test
-  void ignoresSpecsThatAreNotInProgress() {
-    var replays =
-        MissedStops.find(
-            List.of(spec("auth", SpecStatus.REVIEW), spec("done", SpecStatus.DONE)),
-            latest(
-                Map.of(
-                    "auth", session("auth", "stopped", 0),
-                    "done", session("done", "stopped", 0))));
+  void aRunningSessionInsideTheGracePeriodIsLeftAlone() {
+    var outcome = assess(session("running", null, "2026-07-06T11:59:50Z"), false);
 
-    assertTrue(replays.isEmpty());
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
 
   @Test
-  void surfacesOnlyTheStrandedSpecAmongMany() {
-    var replays =
-        MissedStops.find(
-            List.of(
-                spec("stuck", SpecStatus.IN_PROGRESS),
-                spec("active", SpecStatus.IN_PROGRESS),
-                spec("fresh", SpecStatus.IN_PROGRESS)),
-            latest(
-                Map.of(
-                    "stuck", session("stuck", "stopped", 0),
-                    "active", session("active", "running", null))));
+  void aSessionExactlyAtTheGraceBoundaryIsProbed() {
+    var outcome = assess(session("running", null, "2026-07-06T11:58:00Z"), false);
 
-    assertEquals(List.of("stuck"), replays.stream().map(r -> r.spec().id()).toList());
+    assertInstanceOf(MissedStops.Outcome.ProbeUnit.class, outcome);
+  }
+
+  @Test
+  void aRunningSessionWithAnUnparseableStartIsTreatedAsFreshlyLaunched() {
+    var outcome = assess(session("running", null, "not-a-timestamp"), false);
+
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
+  }
+
+  @Test
+  void aFailedStatusSessionIsNeverReplayed() {
+    var outcome = assess(session("failed", 1, "2026-07-06T11:00:00Z"), false);
+
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
+  }
+
+  @Test
+  void parseOrFallsBackOnNullBlankAndGarbage() {
+    var fallback = Instant.EPOCH;
+    assertEquals(fallback, MissedStops.parseOr(null, fallback));
+    assertEquals(fallback, MissedStops.parseOr("  ", fallback));
+    assertEquals(fallback, MissedStops.parseOr("garbage", fallback));
+    assertEquals(NOW, MissedStops.parseOr("2026-07-06T12:00:00Z", fallback));
   }
 }

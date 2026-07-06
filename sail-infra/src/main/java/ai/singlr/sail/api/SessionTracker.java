@@ -65,10 +65,12 @@ public final class SessionTracker implements EventSubscriber {
   private void handleStarted(Event event) {
     var data = event.data();
     var pid = extractInt(data, "pid");
+    var watcherPid = extractInt(data, Event.WellKnownData.WATCHER_PID);
     var task = (String) data.get("task");
     var branch = (String) data.get("branch");
     var sessionId =
-        sessionStore.create(event.project(), event.spec(), event.agent(), branch, task, pid);
+        sessionStore.create(
+            event.project(), event.spec(), event.agent(), branch, task, pid, watcherPid);
     activeSessionsByProject.put(event.project(), sessionId);
   }
 

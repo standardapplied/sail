@@ -17,7 +17,8 @@ import java.util.Optional;
 public final class SessionStore {
 
   private static final String COLUMNS =
-      "id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at, exit_code";
+      "id, project, spec_id, agent, branch, task, pid, status, started_at, completed_at,"
+          + " exit_code, watcher_pid";
 
   private final Sqlite db;
 
@@ -36,15 +37,28 @@ public final class SessionStore {
       String status,
       String startedAt,
       String completedAt,
-      Integer exitCode) {}
+      Integer exitCode,
+      Integer watcherPid) {}
 
   public String create(
       String project, String specId, String agent, String branch, String task, Integer pid) {
+    return create(project, specId, agent, branch, task, pid, null);
+  }
+
+  /** As the simpler overload, also recording the host-side guardrail watcher's pid (nullable). */
+  public String create(
+      String project,
+      String specId,
+      String agent,
+      String branch,
+      String task,
+      Integer pid,
+      Integer watcherPid) {
     var id = DateTimeUtils.newId().toString();
     db.execute(
         """
-        INSERT INTO agent_sessions (id, project, spec_id, agent, branch, task, pid, status, started_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)""",
+        INSERT INTO agent_sessions (id, project, spec_id, agent, branch, task, pid, status, started_at, watcher_pid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)""",
         id,
         project,
         specId,
@@ -52,7 +66,8 @@ public final class SessionStore {
         branch,
         task,
         pid != null ? pid.longValue() : null,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now().toString(),
+        watcherPid != null ? watcherPid.longValue() : null);
     return id;
   }
 
@@ -118,6 +133,14 @@ public final class SessionStore {
         id);
   }
 
+  /** Records the pid of the guardrail watcher currently covering this session. */
+  public void updateWatcherPid(String id, Integer watcherPid) {
+    db.execute(
+        "UPDATE agent_sessions SET watcher_pid = ? WHERE id = ?",
+        watcherPid != null ? watcherPid.longValue() : null,
+        id);
+  }
+
   private SessionRow mapSession(Sqlite.Row row) {
     return new SessionRow(
         row.text(0),
@@ -130,6 +153,7 @@ public final class SessionStore {
         row.text(7),
         row.text(8),
         row.text(9),
-        row.isNull(10) ? null : (int) row.integer(10));
+        row.isNull(10) ? null : (int) row.integer(10),
+        row.isNull(11) ? null : (int) row.integer(11));
   }
 }

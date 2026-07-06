@@ -49,8 +49,12 @@ import picocli.CommandLine.Spec;
  * sail-api {@code /v1/events/stream} and, via {@code BlockingQueue.poll}, wakes the moment the next
  * deadline fires — the wall-clock deadline or the stall deadline (last progress event + {@code
  * max_idle}), whichever is sooner. Progress events (tool calls, log chunks) push the stall deadline
- * out, so a long but active build is never mistaken for a hung agent. Supervision is on by default
- * (see {@code Guardrails.defaults()}); sail.yaml overrides every threshold and the action.
+ * out, so a long but active build is never mistaken for a hung agent. The stall clock starts at
+ * watch launch, not session start: idleness the watcher never observed is not idleness, which
+ * matters when the daemon re-arms a watcher onto a session already hours into its run. The
+ * wall-clock deadline stays anchored to the session's {@code started_at}, so a re-armed agent keeps
+ * only its remaining budget. Supervision is on by default (see {@code Guardrails.defaults()});
+ * sail.yaml overrides every threshold and the action.
  */
 @Command(
     name = "watch",
@@ -194,7 +198,7 @@ public final class AgentWatchCommand implements Runnable {
       throws Exception {
     var guardrailFired = false;
     var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
-    var lastProgressAt = startedAt;
+    var lastProgressAt = DateTimeUtils.now();
     while (true) {
       var stallDeadline = maxIdle != null ? lastProgressAt.plus(maxIdle) : Instant.MAX;
       var deadlineAt = earlier(deadline, stallDeadline);

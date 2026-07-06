@@ -7,20 +7,32 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.store.MissedStops;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,11 +40,15 @@ import org.junit.jupiter.api.io.TempDir;
 
 class MissedStopReconcilerTest {
 
+  private static final Supplier<Instant> PAST_GRACE =
+      () -> Instant.now().plus(Duration.ofMinutes(3));
+
   @TempDir Path tempDir;
   private Sqlite db;
   private SpecStore specStore;
   private ReviewStore reviewStore;
   private SessionStore sessionStore;
+  private EventStore eventStore;
   private EventBus bus;
 
   @BeforeEach
@@ -42,6 +58,7 @@ class MissedStopReconcilerTest {
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
     sessionStore = new SessionStore(db);
+    eventStore = new EventStore(db);
     bus = new EventBus();
   }
 
@@ -49,6 +66,26 @@ class MissedStopReconcilerTest {
   void tearDown() {
     bus.close();
     if (db != null) db.close();
+  }
+
+  private static final class CountingProbe implements MissedStopReconciler.UnitProbe {
+    final AtomicInteger calls = new AtomicInteger();
+    volatile boolean active;
+
+    CountingProbe(boolean active) {
+      this.active = active;
+    }
+
+    @Override
+    public boolean active(String project) {
+      calls.incrementAndGet();
+      return active;
+    }
+  }
+
+  private MissedStopReconciler reconciler(
+      MissedStopReconciler.UnitProbe probe, Supplier<Instant> clock) {
+    return new MissedStopReconciler(specStore, sessionStore, eventStore, bus, probe, clock);
   }
 
   private void createInProgressSpec(String id) {
@@ -72,9 +109,51 @@ class MissedStopReconcilerTest {
             List.of()));
   }
 
-  private void finishedSession(String specId, String status, Integer exitCode) {
+  private String finishedSession(String specId, String status, Integer exitCode) {
     var id = sessionStore.create("test-project", specId, "claude-code", "feat/test", "task", 1);
     sessionStore.complete(id, status, exitCode);
+    return id;
+  }
+
+  private String runningSession(String specId) {
+    return sessionStore.create("test-project", specId, "claude-code", "feat/test", "task", 1);
+  }
+
+  private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
+    eventStore.insert(
+        new EventStore.EventRow(
+            0,
+            timestamp,
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "test-project",
+            specId,
+            "claude-code",
+            HostInfo.hostname(),
+            YamlUtil.dumpJson(data)));
+  }
+
+  private ConcurrentLinkedQueue<Event> captureStops(CountDownLatch latch) {
+    var captured = new ConcurrentLinkedQueue<Event>();
+    bus.subscribe(
+        BusTesting.latching(
+            new EventSubscriber() {
+              @Override
+              public String name() {
+                return "capture";
+              }
+
+              @Override
+              public Predicate<Event> filter() {
+                return e -> Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(e.type());
+              }
+
+              @Override
+              public void onEvent(Event event) {
+                captured.add(event);
+              }
+            },
+            latch));
+    return captured;
   }
 
   private void subscribeController(CountDownLatch latch) {
@@ -113,7 +192,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    var replayed = new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
@@ -127,7 +206,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    var replayed = new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
@@ -141,7 +220,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
+    reconciler(new CountingProbe(true), Instant::now).sweep();
 
     BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -149,29 +228,258 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aStoreErrorIsSwallowedSoStartupIsNeverBlocked() {
+  void aStoreErrorIsSwallowedSoAPassNeverThrows() {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
-    var reconciler = new MissedStopReconciler(specStore, sessionStore, bus);
+    var reconciler = reconciler(new CountingProbe(true), Instant::now);
     db.close();
     db = null;
 
-    assertEquals(0, assertDoesNotThrow(reconciler::reconcile));
+    assertEquals(0, assertDoesNotThrow(reconciler::sweep));
   }
 
   @Test
-  void doesNothingWhenTheSessionIsStillRunning() {
+  void terminalReplaysAndSpecsWithoutSessionsNeverTouchSystemctl() {
     createInProgressSpec("auth");
-    sessionStore.create("test-project", "auth", "claude-code", "feat/test", "task", 1);
+    finishedSession("auth", "stopped", 0);
+    createInProgressSpec("billing");
+    var probe = new CountingProbe(true);
 
-    var replayed = new MissedStopReconciler(specStore, sessionStore, bus).reconcile();
+    var replayed = reconciler(probe, Instant::now).sweep();
+
+    assertEquals(1, replayed);
+    assertEquals(0, probe.calls.get());
+  }
+
+  @Test
+  void aRunningSessionInsideTheLaunchGraceIsNeverProbed() {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, Instant::now).sweep();
 
     assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test
-  void stopEventCarriesExitCodeAndStartupSource() {
+  void aRunningSessionWithALiveUnitIsLeftAlone() {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var probe = new CountingProbe(true);
+
+    var replayed = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(1, probe.calls.get());
+  }
+
+  @Test
+  void synthesizesAStopWithoutExitCodeWhenTheUnitDiedUnobserved() throws Exception {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var latch = new CountDownLatch(1);
+    var captured = captureStops(latch);
+
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, replayed);
+    BusTesting.awaitDelivery(latch);
+    var stop = captured.poll();
+    assertEquals("auth", stop.spec());
+    assertNull(stop.data().get(Event.WellKnownData.EXIT_CODE));
+    assertEquals(Event.WellKnownData.SOURCE_RECONCILE, stop.data().get(Event.WellKnownData.SOURCE));
+  }
+
+  @Test
+  void aRecordedAuthoritativeStopMakesTheSweepANoOpForeverAfter() {
+    createInProgressSpec("auth");
+    var sessionId = runningSession("auth");
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE));
+    var probe = new CountingProbe(false);
+    var reconciler = reconciler(probe, PAST_GRACE);
+
+    assertEquals(0, reconciler.sweep());
+    assertEquals(0, reconciler.sweep());
+    assertEquals(0, probe.calls.get());
+    assertEquals("running", sessionStore.findById(sessionId).orElseThrow().status());
+  }
+
+  @Test
+  void aWatcherObservedCrashIsNeverReplayedAgain() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 137);
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.EXIT_CODE,
+            137,
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER));
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void aRawTurnEndStopDoesNotBlockTheReplay() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", null);
+    recordStopEvent("auth", Instant.now().plusSeconds(1).toString(), Map.of());
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(1, replayed);
+  }
+
+  @Test
+  void anAuthoritativeStopFromASupersededSessionDoesNotBlockTheLatestOne() {
+    createInProgressSpec("auth");
+    recordStopEvent(
+        "auth",
+        Instant.now().minus(Duration.ofHours(2)).toString(),
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+    finishedSession("auth", "stopped", 0);
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(1, replayed);
+  }
+
+  @Test
+  void anUnreadableStopEventCountsAsCoveringSoTheSweepStaysConservative() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    eventStore.insert(
+        new EventStore.EventRow(
+            0,
+            Instant.now().plusSeconds(1).toString(),
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "test-project",
+            "auth",
+            "claude-code",
+            HostInfo.hostname(),
+            "{\"source\": "));
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void anAuthoritativeStopWithAMalformedTimestampCountsAsRecent() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordStopEvent(
+        "auth", "garbage", Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void aFailingProbeIsLoggedAndDoesNotShadowOtherSpecs() {
+    createInProgressSpec("broken");
+    runningSession("broken");
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+
+    var replayed =
+        reconciler(
+                project -> {
+                  throw new IllegalStateException("container unreachable");
+                },
+                PAST_GRACE)
+            .sweep();
+
+    assertEquals(1, replayed);
+  }
+
+  @Test
+  void aPassNeverOverlapsAStillRunningOne() {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var overlapped = new AtomicBoolean(true);
+    var reconciler = new MissedStopReconciler[1];
+    reconciler[0] =
+        reconciler(
+            project -> {
+              overlapped.set(reconciler[0].sweepIfIdle());
+              return true;
+            },
+            PAST_GRACE);
+
+    assertTrue(reconciler[0].sweepIfIdle());
+    assertFalse(overlapped.get());
+  }
+
+  @Test
+  void theScheduledSweepFiresAndSurvivesFailingPasses() throws Exception {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var latch = new CountDownLatch(2);
+    try (var reconciler =
+        reconciler(
+            project -> {
+              latch.countDown();
+              throw new IllegalStateException("boom");
+            },
+            PAST_GRACE)) {
+      reconciler.start(Duration.ofMillis(5));
+      BusTesting.awaitDelivery(latch);
+    }
+  }
+
+  @Test
+  void startUsesTheDefaultCadence() {
+    try (var reconciler = reconciler(new CountingProbe(true), Instant::now)) {
+      reconciler.start();
+    }
+  }
+
+  @Test
+  void systemdProbeReadsUnitLivenessThroughTheShell() throws Exception {
+    ShellExec activeShell = shellReturning("ActiveState=active\nExecMainStatus=0\n");
+    ShellExec inactiveShell = shellReturning("ActiveState=inactive\nExecMainStatus=0\n");
+    ShellExec failedShell = shellReturning("ActiveState=failed\nExecMainStatus=137\n");
+
+    assertTrue(MissedStopReconciler.systemdUnitProbe(activeShell).active("acme"));
+    assertFalse(MissedStopReconciler.systemdUnitProbe(inactiveShell).active("acme"));
+    assertFalse(MissedStopReconciler.systemdUnitProbe(failedShell).active("acme"));
+  }
+
+  private static ShellExec shellReturning(String systemctlShow) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command) {
+        if (String.join(" ", command).contains("systemctl")) {
+          return new Result(0, systemctlShow, "");
+        }
+        return new Result(1, "", "no such file");
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout) {
+        return exec(command);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
+  }
+
+  @Test
+  void stopEventCarriesExitCodeAndReconcileSource() {
     var spec =
         new SpecStore.SpecRow(
             "auth",
@@ -191,13 +499,13 @@ class MissedStopReconcilerTest {
             List.of(),
             List.of());
 
-    var event = MissedStopReconciler.stopEvent(new MissedStops.Replay(spec, 137));
+    var event = MissedStopReconciler.stopEvent(spec, 137);
 
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, event.type());
     assertEquals("auth", event.spec());
     assertEquals("codex", event.agent());
     assertEquals(137, event.data().get("exit_code"));
-    assertEquals("startup-reconcile", event.data().get("source"));
+    assertEquals("reconcile", event.data().get("source"));
   }
 
   @Test
@@ -221,10 +529,10 @@ class MissedStopReconcilerTest {
             List.of(),
             List.of());
 
-    var event = MissedStopReconciler.stopEvent(new MissedStops.Replay(spec, null));
+    var event = MissedStopReconciler.stopEvent(spec, null);
 
     assertEquals(Event.SAIL_AGENT, event.agent());
-    assertTrue(event.data().get("exit_code") == null);
-    assertEquals("startup-reconcile", event.data().get("source"));
+    assertNull(event.data().get("exit_code"));
+    assertEquals("reconcile", event.data().get("source"));
   }
 }

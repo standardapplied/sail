@@ -61,6 +61,16 @@ public final class EventStore {
         specId);
   }
 
+  public List<EventRow> forSpecAndType(String specId, String type) {
+    return db.query(
+        """
+        SELECT id, timestamp, type, project, spec_id, agent, host, data
+        FROM events WHERE spec_id = ? AND type = ? ORDER BY id ASC""",
+        this::mapEvent,
+        specId,
+        type);
+  }
+
   public List<EventRow> since(long afterId, int limit) {
     return db.query(
         """

@@ -324,6 +324,46 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aWatcherStopAndAReconcilerReplayBackToBackProduceExactlyOneReview() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    ctrl.onEvent(reconcilerStoppedEvent("auth"));
+
+    assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aReconcilerReplayLandingMidPipelineIsShedByTheStatusGuard() {
+    createSpec("auth", "in_progress");
+    var ctrl = new AtomicReference<ReviewPipelineController>();
+    ctrl.set(
+        controller(
+            singleAgentStage("no_critical"),
+            (p, a, pr) -> {
+              ctrl.get().onEvent(reconcilerStoppedEvent("auth"));
+              return "[]";
+            }));
+
+    ctrl.get().onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  private Event reconcilerStoppedEvent(String specId) {
+    return Event.of(
+        "test-project",
+        specId,
+        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+        "claude-code",
+        "host",
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE));
+  }
+
+  @Test
   void findingsStoredInDatabase() {
     createSpec("auth", "in_progress");
     var agentOutput =

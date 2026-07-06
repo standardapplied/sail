@@ -703,6 +703,7 @@ class SailApiOperationsTest {
             (command, logPath) -> {
               launched.put("command", command);
               launched.put("log_path", logPath.toString());
+              return 4242L;
             });
 
     operations.dispatch("acme", request("auth"));
@@ -733,12 +734,89 @@ class SailApiOperationsTest {
   }
 
   @Test
-  void watcherProcessLauncherStartsCommand() throws Exception {
+  void watcherProcessLauncherStartsCommandAndReturnsItsPid() throws Exception {
     var logPath = tempDir.resolve("watch.log");
 
-    SailApiOperations.launchWatcherProcess(List.of("sh", "-c", "true"), logPath);
+    var pid = SailApiOperations.launchWatcherProcess(List.of("sh", "-c", "true"), logPath);
 
+    assertTrue(pid > 0);
     assertTrue(Files.exists(logPath));
+  }
+
+  @Test
+  void dispatchRecordsTheWatcherPidOnTheSessionStartedEvent() throws Exception {
+    var yaml = tempDir.resolve("sail-watcher-pid.yaml");
+    Files.writeString(yaml, guardrailsYaml());
+    var db = Sqlite.open(tempDir.resolve("watcher-pid.db"));
+    new SchemaManager(db).migrate();
+    var store = new SpecStore(db);
+    seedAuthBillingSetup(store);
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", "123")
+            .onSequence(
+                "kill -0 123", new ShellExec.Result(1, "", ""), new ShellExec.Result(0, "", ""))
+            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+            .on("mkdir -p /home/dev/workspace/specs", "")
+            .on("printf '%s'", "")
+            .on("-- mkdir -p /home/dev/.sail", "")
+            .on("claude", "");
+    try (var bus = new EventBus()) {
+      var started = new java.util.concurrent.atomic.AtomicReference<Event>();
+      var latch = new java.util.concurrent.CountDownLatch(1);
+      bus.subscribe(
+          BusTesting.latching(
+              new EventSubscriber() {
+                @Override
+                public String name() {
+                  return "capture";
+                }
+
+                @Override
+                public Predicate<Event> filter() {
+                  return e -> Event.WellKnownTypes.AGENT_SESSION_STARTED.equals(e.type());
+                }
+
+                @Override
+                public void onEvent(Event event) {
+                  started.set(event);
+                }
+              },
+              latch));
+      var operations =
+          new SailApiOperations(
+              shell, yaml.toString(), (cmd, log) -> 4242L, bus, null, store, null);
+
+      operations.dispatch("acme", request("auth"));
+
+      BusTesting.awaitDelivery(latch);
+      assertEquals(4242L, started.get().data().get(Event.WellKnownData.WATCHER_PID));
+    } finally {
+      db.close();
+    }
+  }
+
+  @Test
+  void relaunchWatcherReturnsTheNewWatcherPid() throws Exception {
+    var operations =
+        operations(
+            guardrailsYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            (command, logPath) -> 4242L);
+
+    var pid = operations.relaunchWatcher("acme");
+
+    assertEquals(4242L, pid.orElseThrow());
+  }
+
+  @Test
+  void relaunchWatcherIsEmptyWhenTheProjectDeclaresNoGuardrails() throws Exception {
+    var operations =
+        operations(
+            baseYaml(), shell().on("incus list ^acme$", RUNNING_JSON), (command, logPath) -> 4242L);
+
+    assertTrue(operations.relaunchWatcher("acme").isEmpty());
   }
 
   @Test
