@@ -16,8 +16,20 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
+  public Result<ProjectListResponse> projects() {
+    return Result.success(
+        new ProjectListResponse(List.of(new ProjectListItemView("acme", "running"))));
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null));
+  }
+
+  @Override
+  public Result<ConnectResponse> connect(String project) {
+    return Result.success(
+        new ConnectResponse(project, "203.0.113.7", "uday", "10.171.87.10", "dev", true));
   }
 
   @Override

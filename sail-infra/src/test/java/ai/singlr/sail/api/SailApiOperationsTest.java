@@ -11,8 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SessionStore;
@@ -57,6 +59,31 @@ class SailApiOperationsTest {
   private static final String STOPPED_JSON =
       """
       [{"name": "acme", "status": "Stopped", "state": {}}]
+      """;
+
+  private static final String RUNNING_NO_IP_JSON =
+      """
+      [{"name": "acme", "status": "Running", "state": {}}]
+      """;
+
+  private static final String LIST_ALL_JSON =
+      """
+      [
+        {
+          "name": "acme",
+          "status": "Running",
+          "state": {
+            "network": {
+              "eth0": {
+                "addresses": [
+                  {"family": "inet", "address": "10.0.0.42", "scope": "global"}
+                ]
+              }
+            }
+          }
+        },
+        {"name": "zeta", "status": "Stopped", "state": {}}
+      ]
       """;
 
   private static final String EMPTY_JSON = "[]";
@@ -113,6 +140,123 @@ class SailApiOperationsTest {
     var result = operations.project("acme");
 
     assertFalse(containsKey(result, "agent"));
+  }
+
+  @Test
+  void projectsListsContainersWhenNoCatalogIsWired() throws Exception {
+    var operations = operations(shell().on("incus list --format json", LIST_ALL_JSON));
+
+    var result = operations.projects();
+
+    assertEquals(2, get(result, "total"));
+    var encoded = ApiJson.withSchema(result.orThrow()).toString();
+    assertTrue(encoded.contains("name=acme, container_status=running"));
+    assertTrue(encoded.contains("name=zeta, container_status=stopped"));
+  }
+
+  @Test
+  void projectsMergesCatalogAndContainersSorted() throws Exception {
+    var operations =
+        operationsWith(
+            shell().on("incus list --format json", LIST_ALL_JSON),
+            store -> {
+              store.upsert("beta", "name: beta", "me");
+              store.upsert("acme", "name: acme", "me");
+            },
+            environment());
+
+    var result = operations.projects();
+
+    assertEquals(3, get(result, "total"));
+    var encoded = ApiJson.withSchema(result.orThrow()).toString();
+    assertTrue(encoded.contains("name=beta, container_status=not_created"));
+    assertTrue(
+        encoded.indexOf("name=acme") < encoded.indexOf("name=beta")
+            && encoded.indexOf("name=beta") < encoded.indexOf("name=zeta"));
+    assertTrue(encoded.contains("name=acme, container_status=running"), "live state wins");
+  }
+
+  @Test
+  void projectsFailsLegiblyWhenContainerListingFails() throws Exception {
+    var result = operations(shell()).projects();
+
+    assertError(ErrorCode.COMMAND_FAILED, result);
+  }
+
+  @Test
+  void catalogConstructorServesTheProjectList() throws Exception {
+    var yaml = baseYamlPath(tempDir);
+    var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var projectStore = new ProjectStore(db);
+    projectStore.upsert("beta", "name: beta", "me");
+    var operations =
+        new SailApiOperations(
+            shell().on("incus list --format json", EMPTY_JSON),
+            yaml.toString(),
+            null,
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            projectStore);
+
+    var result = operations.projects();
+
+    assertEquals(1, get(result, "total"));
+  }
+
+  @Test
+  void connectReturnsTheTwoHopSshTarget() throws Exception {
+    var operations =
+        operationsWith(shell().on("incus list ^acme$", RUNNING_JSON), store -> {}, environment());
+
+    var result = operations.connect("acme");
+
+    assertEquals("acme", get(result, "project"));
+    assertEquals("203.0.113.7", get(result, "server_ip"));
+    assertEquals("uday", get(result, "server_user"));
+    assertEquals("10.0.0.42", get(result, "container_ip"));
+    assertEquals("dev", get(result, "container_user"));
+    assertEquals(true, get(result, "workstation_key_set"));
+  }
+
+  @Test
+  void connectRejectsAProjectThatIsNotRunning() throws Exception {
+    assertError(
+        ErrorCode.PROJECT_STOPPED,
+        operationsWith(shell().on("incus list ^acme$", STOPPED_JSON), store -> {}, environment())
+            .connect("acme"));
+    assertError(
+        ErrorCode.PROJECT_NOT_CREATED,
+        operationsWith(shell().on("incus list ^acme$", EMPTY_JSON), store -> {}, environment())
+            .connect("acme"));
+    assertError(
+        ErrorCode.CONTAINER_ERROR,
+        operationsWith(
+                shell().on("incus list ^acme$", new ShellExec.Result(1, "", "boom")),
+                store -> {},
+                environment())
+            .connect("acme"));
+  }
+
+  @Test
+  void connectReportsAPendingContainerIp() throws Exception {
+    var operations =
+        operationsWith(
+            shell().on("incus list ^acme$", RUNNING_NO_IP_JSON), store -> {}, environment());
+
+    assertError(ErrorCode.CONTAINER_IP_UNAVAILABLE, operations.connect("acme"));
+  }
+
+  @Test
+  void connectReportsAnUnconfiguredServerIp() throws Exception {
+    var operations =
+        operationsWith(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            store -> {},
+            new ConnectEnvironment(null, "uday", false));
+
+    assertError(ErrorCode.SERVER_IP_NOT_CONFIGURED, operations.connect("acme"));
   }
 
   @Test
@@ -1261,6 +1405,37 @@ class SailApiOperationsTest {
     seedSessions.accept(sessionStore);
     return new SailApiOperations(
         shell, yaml.toString(), null, bus, null, specStore, reviewStore, sessionStore);
+  }
+
+  /** Builds operations with a seeded project catalog and a fixed connect environment. */
+  private SailApiOperations operationsWith(
+      FakeShell shell,
+      java.util.function.Consumer<ProjectStore> seedProjects,
+      ConnectEnvironment environment)
+      throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var specStore = new SpecStore(db);
+    seedAuthBillingSetup(specStore);
+    var projectStore = new ProjectStore(db);
+    seedProjects.accept(projectStore);
+    return new SailApiOperations(
+        shell,
+        yaml.toString(),
+        null,
+        null,
+        null,
+        specStore,
+        null,
+        null,
+        projectStore,
+        () -> environment);
+  }
+
+  private static ConnectEnvironment environment() {
+    return new ConnectEnvironment("203.0.113.7", "uday", true);
   }
 
   private SailApiOperations operationsWithStore(

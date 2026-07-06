@@ -36,6 +36,47 @@ record WhoamiResponse(String fde, String name, Role role, List<Capability> capab
   }
 }
 
+record ProjectListItemView(String name, String containerStatus) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("name", name);
+    m.put("container_status", containerStatus);
+    return m;
+  }
+}
+
+record ProjectListResponse(List<ProjectListItemView> projects) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("projects", projects);
+    m.put("total", projects.size());
+    return m;
+  }
+}
+
+record ConnectResponse(
+    String project,
+    String serverIp,
+    String serverUser,
+    String containerIp,
+    String containerUser,
+    boolean workstationKeySet)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", project);
+    m.put("server_ip", serverIp);
+    m.put("server_user", serverUser);
+    m.put("container_ip", containerIp);
+    m.put("container_user", containerUser);
+    m.put("workstation_key_set", workstationKeySet);
+    return m;
+  }
+}
+
 record ProjectResponse(String name, String containerStatus, AgentConfigView agent)
     implements Mappable {
   @Override

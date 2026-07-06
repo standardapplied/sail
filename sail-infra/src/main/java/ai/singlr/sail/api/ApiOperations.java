@@ -19,7 +19,13 @@ public interface ApiOperations {
 
   Result<HealthResponse> health();
 
+  /** Lists every project on this node with its container status. */
+  Result<ProjectListResponse> projects();
+
   Result<ProjectResponse> project(String project);
+
+  /** Returns the two-hop SSH target (server jump + container) for a running project. */
+  Result<ConnectResponse> connect(String project);
 
   Result<SpecsResponse> specs(String project);
 

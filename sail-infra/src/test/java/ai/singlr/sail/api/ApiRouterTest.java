@@ -347,6 +347,62 @@ class ApiRouterTest {
   }
 
   @Test
+  void projectsCollectionListsProjects() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"name\": \"acme\""));
+      assertTrue(response.body().contains("\"container_status\": \"not_created\""));
+      assertTrue(response.body().contains("\"total\": 2"));
+    }
+  }
+
+  @Test
+  void projectsCollectionRequiresAuth() throws Exception {
+    try (var server = server()) {
+      assertEquals(401, get(server, "/v1/projects", null).statusCode());
+    }
+  }
+
+  @Test
+  void projectsCollectionRejectsWrites() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/projects", "token", "{}");
+
+      assertEquals(405, response.statusCode());
+      assertTrue(response.body().contains("method_not_allowed"));
+    }
+  }
+
+  @Test
+  void connectReturnsTheStructuredSshTarget() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects/acme/connect", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"server_ip\": \"203.0.113.7\""));
+      assertTrue(response.body().contains("\"container_ip\": \"10.171.87.10\""));
+      assertTrue(response.body().contains("\"container_user\": \"dev\""));
+      assertTrue(response.body().contains("\"workstation_key_set\": true"));
+    }
+  }
+
+  @Test
+  void connectRejectsWrites() throws Exception {
+    try (var server = server()) {
+      assertEquals(405, post(server, "/v1/projects/acme/connect", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
+  void connectSubResourcesReturnNotFound() throws Exception {
+    try (var server = server()) {
+      assertEquals(404, get(server, "/v1/projects/acme/connect/extra", "token").statusCode());
+    }
+  }
+
+  @Test
   void routesAgentAndSpecEndpoints() throws Exception {
     try (var server = server()) {
       assertEquals(200, get(server, "/v1/projects/acme", "token").statusCode());
@@ -952,8 +1008,23 @@ class ApiRouterTest {
     }
 
     @Override
+    public Result<ProjectListResponse> projects() {
+      return Result.success(
+          new ProjectListResponse(
+              java.util.List.of(
+                  new ProjectListItemView("acme", "running"),
+                  new ProjectListItemView("beta", "not_created"))));
+    }
+
+    @Override
     public Result<ProjectResponse> project(String project) {
       return Result.success(new ProjectResponse(project, "running", null));
+    }
+
+    @Override
+    public Result<ConnectResponse> connect(String project) {
+      return Result.success(
+          new ConnectResponse(project, "203.0.113.7", "uday", "10.171.87.10", "dev", true));
     }
 
     @Override

@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -27,6 +28,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
@@ -40,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.function.Supplier;
 
 public final class SailApiOperations implements ApiOperations {
@@ -54,6 +57,8 @@ public final class SailApiOperations implements ApiOperations {
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final SessionStore sessionStore;
+  private final ProjectStore projectStore;
+  private final Supplier<ConnectEnvironment> connectEnvironment;
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
 
@@ -104,6 +109,28 @@ public final class SailApiOperations implements ApiOperations {
     this(shell, file, eventBus, auditSubscriber, specStore, null);
   }
 
+  /** Construct with the project catalog included; used by {@code sail server start}. */
+  public SailApiOperations(
+      ShellExec shell,
+      String file,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      ProjectStore projectStore) {
+    this(
+        shell,
+        file,
+        SailApiOperations::launchWatcherProcess,
+        eventBus,
+        auditSubscriber instanceof AuditPersister ap ? ap : null,
+        specStore,
+        reviewStore,
+        null,
+        projectStore,
+        ConnectEnvironment::detect);
+  }
+
   SailApiOperations(
       ShellExec shell,
       String file,
@@ -133,6 +160,30 @@ public final class SailApiOperations implements ApiOperations {
       SpecStore specStore,
       ReviewStore reviewStore,
       SessionStore sessionStore) {
+    this(
+        shell,
+        file,
+        watcherLauncher,
+        eventBus,
+        auditPersister,
+        specStore,
+        reviewStore,
+        sessionStore,
+        null,
+        ConnectEnvironment::detect);
+  }
+
+  SailApiOperations(
+      ShellExec shell,
+      String file,
+      WatcherLauncher watcherLauncher,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      SessionStore sessionStore,
+      ProjectStore projectStore,
+      Supplier<ConnectEnvironment> connectEnvironment) {
     this.shell = shell;
     this.file = file;
     this.watcherLauncher = watcherLauncher;
@@ -141,6 +192,8 @@ public final class SailApiOperations implements ApiOperations {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.sessionStore = sessionStore;
+    this.projectStore = projectStore;
+    this.connectEnvironment = connectEnvironment;
     this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
   }
@@ -151,8 +204,18 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
+  public Result<ProjectListResponse> projects() {
+    return safe(this::projectsValue);
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return safe(() -> projectValue(project));
+  }
+
+  @Override
+  public Result<ConnectResponse> connect(String project) {
+    return safe(() -> connectValue(project));
   }
 
   @Override
@@ -194,6 +257,60 @@ public final class SailApiOperations implements ApiOperations {
     var loaded = loadProject(project);
     var agent = loaded.config().agent() != null ? agentConfigView(loaded.config()) : null;
     return new ProjectResponse(project, statusName(loaded.state()), agent);
+  }
+
+  /**
+   * The full project roster, mirroring {@code sail project list}: every catalogued project plus any
+   * container without a catalog entry. Catalogued-but-unprovisioned projects surface as {@code
+   * not_created}; a live container's state wins over the catalog placeholder.
+   */
+  private ProjectListResponse projectsValue() {
+    var statuses = new TreeMap<String, String>();
+    if (projectStore != null) {
+      for (var row : projectStore.list()) {
+        statuses.put(row.name(), statusName(new ContainerState.NotCreated()));
+      }
+    }
+    for (var container : listContainers()) {
+      statuses.put(container.name(), statusName(container.state()));
+    }
+    return new ProjectListResponse(
+        statuses.entrySet().stream()
+            .map(entry -> new ProjectListItemView(entry.getKey(), entry.getValue()))
+            .toList());
+  }
+
+  private List<ContainerManager.ContainerInfo> listContainers() {
+    try {
+      return new ContainerManager(shell).listAll();
+    } catch (Exception e) {
+      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to list project containers.", e);
+    }
+  }
+
+  private ConnectResponse connectValue(String project) {
+    var loaded = loadRunningProject(project);
+    var containerIp = ((ContainerState.Running) loaded.state()).ipv4();
+    if (containerIp == null) {
+      throw new ApiException(
+          ErrorCode.CONTAINER_IP_UNAVAILABLE,
+          "Project '" + project + "' is running but has no IP address yet.",
+          "Wait a moment and retry.");
+    }
+    var environment = connectEnvironment.get();
+    if (Strings.isBlank(environment.serverIp())) {
+      throw new ApiException(
+          ErrorCode.SERVER_IP_NOT_CONFIGURED,
+          "Server IP is not configured on this node.",
+          "Run: sudo sail host config set server-ip <your-server-ip>");
+    }
+    return new ConnectResponse(
+        project,
+        environment.serverIp(),
+        environment.serverUser(),
+        containerIp,
+        loaded.config().sshUser(),
+        environment.workstationKeySet());
   }
 
   private SpecsResponse specsValue(String project) {
