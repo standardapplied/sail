@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.auth;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.PendingChallengeStore;
@@ -91,7 +93,7 @@ public final class PasskeyService implements PasskeyCeremonies {
       throw new PasskeyException(
           PasskeyException.Kind.BAD_REQUEST, "This passkey is already registered.");
     }
-    credentials.save(credential, pending.fdeId(), label);
+    credentials.save(credential, pending.fdeId(), effectiveLabel(label, credential.aaguid()));
     return new Registration(handleOf(pending.fdeId()), credential.credentialId());
   }
 
@@ -148,6 +150,14 @@ public final class PasskeyService implements PasskeyCeremonies {
       return true;
     }
     return Arrays.equals(userHandle, fdeId.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * A skipped label prompt falls back to a device-descriptive default (authenticator name plus
+   * enrollment date) so {@code sail fde passkey list} can still tell the FDE's credentials apart.
+   */
+  private static String effectiveLabel(String label, byte[] aaguid) {
+    return Strings.isBlank(label) ? Passkeys.defaultLabel(aaguid, DateTimeUtils.now()) : label;
   }
 
   private static PasskeyException loginFailed() {

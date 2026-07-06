@@ -146,6 +146,8 @@ public final class WebauthnPageHandler implements HttpHandler {
         const ticket = params.get('ticket');
         if (!ticket) { fail('Missing enrollment ticket in the URL.'); return; }
         const headers = { 'X-Enrollment-Ticket': ticket };
+        const button = document.getElementById('enroll');
+        button.disabled = true;
         try {
           setStatus('Starting enrollment…');
           const start = await postJson('/v1/auth/register/start', '{}', headers);
@@ -159,24 +161,38 @@ public final class WebauthnPageHandler implements HttpHandler {
           setStatus('Touch your authenticator to create a passkey…');
           const cred = await navigator.credentials.create({ publicKey: pk });
           const r = cred.response;
+          const label = document.getElementById('label').value.trim();
           const out = await postJson('/v1/auth/register/finish', JSON.stringify({
             challenge_id: start.challenge_id,
             client_data_json: bufToB64url(r.clientDataJSON),
             attestation_object: bufToB64url(r.attestationObject),
+            label: label || null,
           }), headers);
           setStatus('Passkey registered for ' + out.fde + '. You can close this tab.');
           handBack('');
         } catch (e) {
           fail('Enrollment failed: ' + e.message);
+          button.disabled = false;
         }
       }
-      window.addEventListener('load', run);
+      window.addEventListener('load', () => {
+        document.getElementById('enroll').addEventListener('click', run);
+        setStatus('Name this passkey so you can tell your devices apart, then create it.');
+      });
       """;
 
-  private static final String LOGIN_PAGE = page("Sign in to Sail", LOGIN_SCRIPT);
-  private static final String ENROLL_PAGE = page("Enroll a Sail passkey", ENROLL_SCRIPT);
+  private static final String ENROLL_FORM =
+      """
+      <label for="label">Passkey name (optional)</label>
+      <input id="label" placeholder="e.g. MacBook Pro" maxlength="64">
+      <button id="enroll">Create passkey</button>
+      """;
 
-  private static String page(String title, String script) {
+  private static final String LOGIN_PAGE = page("Sign in to Sail", "", LOGIN_SCRIPT);
+  private static final String ENROLL_PAGE =
+      page("Enroll a Sail passkey", ENROLL_FORM, ENROLL_SCRIPT);
+
+  private static String page(String title, String form, String script) {
     return """
         <!doctype html>
         <html lang="en">
@@ -191,10 +207,14 @@ public final class WebauthnPageHandler implements HttpHandler {
             #status { margin-top: 1rem; padding: 0.75rem 1rem; border-radius: 0.5rem;
                       background: #f1f5f9; }
             #status.err { background: #fee2e2; color: #991b1b; }
+            label { display: block; margin-top: 1rem; }
+            input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
+            button { margin-top: 1rem; padding: 0.5rem 1rem; }
           </style>
         </head>
         <body>
           <h1>%TITLE%</h1>
+        %FORM%
           <p id="status">Loading…</p>
           <script>
         %SHARED%
@@ -204,6 +224,7 @@ public final class WebauthnPageHandler implements HttpHandler {
         </html>
         """
         .replace("%TITLE%", title)
+        .replace("%FORM%", form)
         .replace("%SHARED%", SHARED_SCRIPT)
         .replace("%SCRIPT%", script);
   }

@@ -77,6 +77,14 @@ public final class WebauthnCredentialStore {
         SELECT + " WHERE fde_id = ? ORDER BY created_at", WebauthnCredentialStore::map, fdeId);
   }
 
+  /** Deletes a single credential; returns whether a row was removed. */
+  public boolean delete(byte[] credentialId) {
+    db.execute(
+        "DELETE FROM webauthn_credentials WHERE credential_id = ?",
+        URL.encodeToString(credentialId));
+    return db.changes() > 0;
+  }
+
   /** Records a successful assertion: advances the signature counter and stamps last-used. */
   public void recordUse(byte[] credentialId, long signCount) {
     db.execute(

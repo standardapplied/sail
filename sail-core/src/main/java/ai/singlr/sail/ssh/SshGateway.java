@@ -25,7 +25,8 @@ import java.util.Set;
  *   <li>{@link #API_COMMANDS} run for every active FDE — they talk to the loopback API, where the
  *       FDE's role decides what each request may do.
  *   <li>{@link #ADMIN_COMMANDS} are database-direct, so no downstream check exists; the gateway
- *       itself requires the {@code admin} role.
+ *       itself requires the {@code admin} role — except {@code fde passkey list|rm} on the caller's
+ *       own pinned handle, which any active FDE may run.
  *   <li>Everything else ({@code project}, {@code host}, {@code server}, {@code migrate}, …) runs
  *       with host privileges the {@code sail} user must never have, and is refused.
  * </ul>
@@ -90,10 +91,35 @@ public final class SshGateway {
     if (fde.isEmpty() || !"active".equals(fde.get().status())) {
       return new Rejected("Unknown or disabled FDE.");
     }
-    if (ADMIN_COMMANDS.contains(subcommand) && !"admin".equals(fde.get().role())) {
-      return new Rejected("'" + subcommand + "' requires the admin role.");
+    if (ADMIN_COMMANDS.contains(subcommand)
+        && !"admin".equals(fde.get().role())
+        && !isOwnPasskeyCommand(tokens, fdeHandle)) {
+      return new Rejected(
+          isPasskeyCommand(tokens)
+              ? "Managing another FDE's passkeys requires the admin role. You may manage your"
+                  + " own: sail fde passkey list "
+                  + fdeHandle
+              : "'" + subcommand + "' requires the admin role.");
     }
     var session = sessions.create(fde.get().id(), SESSION_TTL);
     return new Authorized(List.copyOf(tokens), session.token());
+  }
+
+  /**
+   * The one self-service carve-out in the admin-gated {@code fde} family: an FDE may list and
+   * revoke its own passkeys ({@code fde passkey list|rm <handle>}). The target handle is compared
+   * against the handle pinned to the calling key on the {@code authorized_keys} line, so a
+   * non-admin can never reach another FDE's credentials — and only when the handle sits directly
+   * after the verb, so an option-first spelling fails closed to the admin gate.
+   */
+  private static boolean isOwnPasskeyCommand(List<String> tokens, String fdeHandle) {
+    return isPasskeyCommand(tokens)
+        && tokens.size() >= 4
+        && Set.of("list", "rm").contains(tokens.get(2))
+        && tokens.get(3).equals(fdeHandle);
+  }
+
+  private static boolean isPasskeyCommand(List<String> tokens) {
+    return tokens.size() >= 2 && tokens.get(0).equals("fde") && tokens.get(1).equals("passkey");
   }
 }

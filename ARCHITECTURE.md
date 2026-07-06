@@ -161,6 +161,11 @@ The three replicas are pure delegation adapters that implement both `LocalReplic
 `MainReplica`, so the same box acts as the node when it syncs up and as the authority when
 another node syncs to it.
 
+Passkeys stay box-local by design: identity crosses boxes via the roster pull, but a
+WebAuthn credential is an RP-scoped secret bound to one box's origin and never leaves it.
+Each box enrolls its own passkeys (`sail fde enroll`), and each box lists and revokes them
+on its own (`sail fde passkey list|rm`).
+
 ### The engine
 
 `SyncEngine.reconcile(local, main)` is entity-agnostic, order-independent, idempotent, and
@@ -409,8 +414,9 @@ and `Authorizer`:
 1. **Terminal: SSH key to FDE.** Each registered key is pinned in the `sail` user's
    `authorized_keys` to `command="…/sail _gateway --fde <handle>",restrict`, with no shell
    and no forwarding. Command classification is default-deny: only `spec`, `agent`, and
-   `events` reach the loopback API, `fde` is admin-gated at the gateway, `_sync` is admitted,
-   and everything else is refused. A short-lived session is minted per invocation. `sail fde
+   `events` reach the loopback API, `fde` is admin-gated at the gateway (with one
+   self-service carve-out: any active FDE may `fde passkey list|rm` its own pinned handle),
+   `_sync` is admitted, and everything else is refused. A short-lived session is minted per invocation. `sail fde
    add <handle> --key "<pubkey>"` is the whole enrollment, and removing the key revokes SSH
    and API access in one step.
 2. **Web, opt-in and off by default: passkeys and WebAuthn.** For Mast and browser clients
