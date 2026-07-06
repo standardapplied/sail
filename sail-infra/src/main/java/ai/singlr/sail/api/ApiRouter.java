@@ -382,9 +382,12 @@ public final class ApiRouter implements HttpHandler {
   /**
    * Reflects the authenticated caller's identity back from the exchange attributes stamped by
    * {@link ApiAuth} — no store access. Mirrors {@link #actor}: {@code fde} is present only for
-   * FDE-owned credentials, {@code name} is the credential name. Capabilities are derived from the
-   * role so clients gate UI on a capability rather than a hardcoded role→power map. Marked {@code
-   * Cache-Control: no-store} because the response is per-credential session state.
+   * FDE-owned credentials, {@code name} is the credential name. {@code display_name} and {@code
+   * email} are present only on passkey/session logins (the {@link SessionAwareAuth} path resolves
+   * the FDE record); they are omitted for machine/CI tokens, which carry no personal identity.
+   * Capabilities are derived from the role so clients gate UI on a capability rather than a
+   * hardcoded role→power map. Marked {@code Cache-Control: no-store} because the response is
+   * per-credential session state.
    */
   private static ApiResponse whoami(HttpExchange exchange) {
     var role = Role.fromAttribute(exchange.getAttribute("token.role"));
@@ -393,6 +396,8 @@ public final class ApiRouter implements HttpHandler {
         new WhoamiResponse(
             Objects.toString(exchange.getAttribute("token.fde"), null),
             Objects.toString(exchange.getAttribute("token.name"), null),
+            Objects.toString(exchange.getAttribute("token.displayName"), null),
+            Objects.toString(exchange.getAttribute("token.email"), null),
             role,
             capabilities);
     return ApiResponse.ok(response).withHeader("Cache-Control", "no-store");
