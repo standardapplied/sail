@@ -77,6 +77,53 @@ class SshGatewayTest {
   }
 
   @Test
+  void memberManagesItsOwnPasskeys() {
+    for (var command :
+        List.of(
+            "sail fde passkey list uday",
+            "sail fde passkey rm uday --credential abc123 --revoke-sessions")) {
+      var authorized = assertInstanceOf(SshGateway.Authorized.class, authorize(command, "uday"));
+      assertEquals("fde", authorized.args().getFirst());
+      assertTrue(sessions.validate(authorized.sessionToken()).isPresent());
+    }
+  }
+
+  @Test
+  void memberCannotManageAnotherFdesPasskeys() {
+    fdes.add("ada", null, null, "member");
+    for (var command :
+        List.of("sail fde passkey list ada", "sail fde passkey rm ada --credential abc123")) {
+      var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
+      assertTrue(rejected.reason().contains("admin role"));
+      assertTrue(rejected.reason().contains("sail fde passkey list uday"));
+    }
+  }
+
+  @Test
+  void memberPasskeyCarveOutDoesNotLeakIntoOtherFdeSubcommands() {
+    for (var command :
+        List.of(
+            "sail fde passkey",
+            "sail fde passkey list",
+            "sail fde passkey add uday",
+            "sail fde passkey rm --credential abc123 uday",
+            "sail fde enroll uday",
+            "sail fde rm uday")) {
+      var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
+      assertTrue(rejected.reason().contains("admin role"));
+    }
+  }
+
+  @Test
+  void adminManagesAnyFdesPasskeys() {
+    fdes.add("ada", null, null, "admin");
+    var authorized =
+        assertInstanceOf(
+            SshGateway.Authorized.class, authorize("sail fde passkey list uday", "ada"));
+    assertEquals(List.of("fde", "passkey", "list", "uday"), authorized.args());
+  }
+
+  @Test
   void rejectsHostPrivilegedCommandsEvenForAdmins() {
     fdes.add("ada", null, null, "admin");
     for (var handle : List.of("uday", "ada")) {

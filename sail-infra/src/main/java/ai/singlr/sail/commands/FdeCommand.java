@@ -6,20 +6,25 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.auth.EnrollmentService;
+import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -41,7 +46,8 @@ import picocli.CommandLine.Spec;
       FdeCommand.Update.class,
       FdeCommand.Remove.class,
       FdeCommand.Enroll.class,
-      FdeCommand.Key.class
+      FdeCommand.Key.class,
+      FdeCommand.Passkey.class
     })
 public final class FdeCommand implements Runnable {
 
@@ -506,6 +512,180 @@ public final class FdeCommand implements Runnable {
           return Optional.empty();
         }
         return Optional.of(keys.getFirst().fingerprint());
+      }
+    }
+  }
+
+  @Command(
+      name = "passkey",
+      description = "Manage the passkeys an FDE signs in to the web door with.",
+      mixinStandardHelpOptions = true,
+      subcommands = {Passkey.ListPasskeys.class, Passkey.Remove.class})
+  static final class Passkey implements Runnable {
+
+    @Override
+    public void run() {
+      new picocli.CommandLine(this).usage(System.out);
+    }
+
+    private static FdeStore.Fde requireFde(Sqlite db, String handle) {
+      return new FdeStore(db)
+          .byHandle(handle)
+          .orElseThrow(() -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
+    }
+
+    static String noMatchMessage(
+        String handle, String prefix, List<WebauthnCredentialStore.Credential> credentials) {
+      if (credentials.isEmpty()) {
+        return "'"
+            + handle
+            + "' has no passkeys. Enroll one with 'sail fde enroll "
+            + handle
+            + "'.";
+      }
+      return "No passkey of '"
+          + handle
+          + "' matches '"
+          + prefix
+          + "'. Registered passkeys:\n"
+          + candidateLines(credentials);
+    }
+
+    static String ambiguousMessage(
+        String handle, String prefix, List<WebauthnCredentialStore.Credential> candidates) {
+      return "'"
+          + prefix
+          + "' matches "
+          + candidates.size()
+          + " passkeys of '"
+          + handle
+          + "'; use a longer prefix:\n"
+          + candidateLines(candidates);
+    }
+
+    private static String candidateLines(List<WebauthnCredentialStore.Credential> credentials) {
+      return credentials.stream()
+          .map(
+              credential ->
+                  "    "
+                      + Passkeys.encodeId(credential.credentialId())
+                      + "  "
+                      + Passkeys.displayLabel(credential))
+          .collect(Collectors.joining("\n"));
+    }
+
+    @Command(
+        name = "list",
+        description = "List an FDE's registered passkeys.",
+        mixinStandardHelpOptions = true)
+    static final class ListPasskeys implements Runnable {
+
+      @Parameters(index = "0", description = "FDE handle.")
+      private String handle;
+
+      @Spec private CommandSpec spec;
+
+      @Override
+      public void run() {
+        CliCommand.run(
+            spec,
+            () -> {
+              try (var db = Sqlite.open(dbPath())) {
+                var fde = requireFde(db, handle);
+                var credentials = new WebauthnCredentialStore(db).listForFde(fde.id());
+                if (credentials.isEmpty()) {
+                  System.out.println(
+                      "  No passkeys for '"
+                          + handle
+                          + "'. Enroll one with 'sail fde enroll "
+                          + handle
+                          + "'.");
+                  return;
+                }
+                Banner.printFdePasskeyTable(credentials, handle, System.out, Ansi.AUTO);
+              }
+            });
+      }
+    }
+
+    @Command(
+        name = "rm",
+        description =
+            "Revoke one of an FDE's passkeys by credential id prefix. Sessions it minted stay"
+                + " valid unless --revoke-sessions is passed.",
+        mixinStandardHelpOptions = true)
+    static final class Remove implements Runnable {
+
+      @Parameters(index = "0", description = "FDE handle.")
+      private String handle;
+
+      @Option(
+          names = "--credential",
+          required = true,
+          description =
+              "Credential id or an unambiguous prefix; see 'sail fde passkey list <handle>'.")
+      private String credential;
+
+      @Option(
+          names = "--revoke-sessions",
+          description = "Also end the FDE's active web sessions (the lost-device case).")
+      private boolean revokeSessions;
+
+      @Spec private CommandSpec spec;
+
+      @Override
+      public void run() {
+        CliCommand.run(
+            spec,
+            () -> {
+              try (var db = Sqlite.open(dbPath())) {
+                var fde = requireFde(db, handle);
+                var store = new WebauthnCredentialStore(db);
+                var credentials = store.listForFde(fde.id());
+                var match =
+                    switch (Passkeys.resolveByPrefix(credentials, credential)) {
+                      case Passkeys.Match m -> m.credential();
+                      case Passkeys.NotFound _ ->
+                          throw new IllegalArgumentException(
+                              noMatchMessage(handle, credential, credentials));
+                      case Passkeys.Ambiguous a ->
+                          throw new IllegalArgumentException(
+                              ambiguousMessage(handle, credential, a.candidates()));
+                    };
+                store.delete(match.credentialId());
+                System.out.println(
+                    Ansi.AUTO.string(
+                        "  @|green ✓|@ Revoked passkey '"
+                            + Passkeys.displayLabel(match)
+                            + "' ("
+                            + Passkeys.shortId(match.credentialId())
+                            + ") of "
+                            + handle));
+                if (revokeSessions) {
+                  var revoked = new AuthSessionStore(db).revokeForFde(fde.id());
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|green ✓|@ Revoked "
+                              + revoked
+                              + " active web session(s) of "
+                              + handle));
+                } else {
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|faint Sessions this passkey minted stay valid until they expire;"
+                              + " pass --revoke-sessions to end them now.|@"));
+                }
+                if (credentials.size() == 1) {
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|faint '"
+                              + handle
+                              + "' has no passkeys left. Re-enroll with 'sail fde enroll "
+                              + handle
+                              + "'.|@"));
+                }
+              }
+            });
       }
     }
   }

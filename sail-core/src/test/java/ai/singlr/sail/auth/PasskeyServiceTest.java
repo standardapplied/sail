@@ -98,6 +98,56 @@ class PasskeyServiceTest {
   }
 
   @Test
+  void providedLabelIsStored() {
+    enroll("uday");
+    var stored = credentials.findByCredentialId(authenticator.credentialId()).orElseThrow();
+    assertEquals("laptop", stored.label());
+  }
+
+  @Test
+  void skippedLabelDefaultsToAuthenticatorAndEnrollmentDate() {
+    var ceremony = service.startRegistration("uday");
+    var response = authenticator.register(challengeOf(ceremony), ORIGIN);
+    service.finishRegistration(
+        ceremony.challengeId(), response.clientDataJson(), response.attestationObject(), " ");
+    var stored = credentials.findByCredentialId(authenticator.credentialId()).orElseThrow();
+    assertTrue(
+        stored.label().matches("passkey · \\d{4}-\\d{2}-\\d{2}"),
+        "unexpected default label: " + stored.label());
+  }
+
+  @Test
+  void deletingACredentialDoesNotInvalidateSessionsItMinted() {
+    enroll("uday");
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+    var result =
+        service.finishLogin(
+            login.challengeId(),
+            assertion.credentialId(),
+            assertion.clientDataJson(),
+            assertion.authenticatorData(),
+            assertion.signature(),
+            null);
+
+    assertTrue(credentials.delete(authenticator.credentialId()));
+
+    assertTrue(sessions.validate(result.sessionToken()).isPresent());
+    var retry = service.startLogin();
+    var replay = authenticator.assertResponse(challengeOf(retry), ORIGIN);
+    assertThrows(
+        PasskeyException.class,
+        () ->
+            service.finishLogin(
+                retry.challengeId(),
+                replay.credentialId(),
+                replay.clientDataJson(),
+                replay.authenticatorData(),
+                replay.signature(),
+                null));
+  }
+
+  @Test
   void twoLoginsAdvanceSignCounter() {
     enroll("uday");
     for (var i = 0; i < 2; i++) {

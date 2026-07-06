@@ -15,6 +15,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -85,6 +86,53 @@ class BannerTest {
     assertTrue(text.contains("laptop"));
     assertTrue(text.contains("SHA256:abc"));
     assertTrue(text.contains("-"), "a missing comment renders as a dash");
+  }
+
+  @Test
+  void fdePasskeyTableShowsIdLabelAuthenticatorDatesAndSyncState() {
+    var out = new ByteArrayOutputStream();
+    var credentials =
+        List.of(
+            new WebauthnCredentialStore.Credential(
+                "alpha".getBytes(StandardCharsets.UTF_8),
+                "id1",
+                new byte[] {1},
+                -7,
+                0,
+                null,
+                true,
+                true,
+                "uday's macbook",
+                "2026-07-06T10:15:30Z",
+                "2026-07-07T08:00:00Z"),
+            new WebauthnCredentialStore.Credential(
+                "bravo".getBytes(StandardCharsets.UTF_8),
+                "id1",
+                new byte[] {1},
+                -7,
+                0,
+                null,
+                false,
+                false,
+                null,
+                "2026-01-02T00:00:00Z",
+                null));
+
+    Banner.printFdePasskeyTable(
+        credentials, "uday", new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
+    var text = out.toString(StandardCharsets.UTF_8);
+
+    assertTrue(text.contains("Passkeys: uday"));
+    assertTrue(text.contains("LABEL"));
+    assertTrue(text.contains("AUTHENTICATOR"));
+    assertTrue(text.contains("SYNCED"));
+    assertTrue(text.contains("uday's macbook"));
+    assertTrue(text.contains("passkey · 2026-01-02"), "unlabeled rows show the default label");
+    assertTrue(text.contains("2026-07-06"));
+    assertTrue(text.contains("2026-07-07"));
+    assertTrue(text.contains("yes"));
+    assertTrue(text.contains("no"));
+    assertTrue(text.contains("-"), "a never-used passkey renders last-used as a dash");
   }
 
   @Test

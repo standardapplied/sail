@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.SchemaManager;
@@ -70,6 +71,20 @@ class WebauthnPageHandlerTest {
     assertTrue(response.body().contains("navigator.credentials.create"));
     assertTrue(response.body().contains("X-Enrollment-Ticket"));
     assertTrue(response.body().contains("/v1/auth/register/finish"));
+  }
+
+  @Test
+  void enrollPagePromptsForAnOptionalPasskeyLabel() throws Exception {
+    var body = request("GET", "/enroll").body();
+    assertTrue(body.contains("id=\"label\""));
+    assertTrue(body.contains("Passkey name (optional)"));
+    assertTrue(body.contains("Create passkey"));
+    assertTrue(body.contains("label: label || null"));
+  }
+
+  @Test
+  void loginPageHasNoLabelPrompt() throws Exception {
+    assertFalse(request("GET", "/login").body().contains("id=\"label\""));
   }
 
   @Test

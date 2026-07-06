@@ -99,6 +99,32 @@ class WebauthnCredentialStoreTest {
   }
 
   @Test
+  void deleteRemovesOnlyTheGivenCredential() {
+    store.save(cred(new byte[] {1}, 0, null), fdeId, "keep");
+    store.save(cred(new byte[] {2}, 0, null), fdeId, "drop");
+
+    assertTrue(store.delete(new byte[] {2}));
+
+    var remaining = store.listForFde(fdeId);
+    assertEquals(1, remaining.size());
+    assertEquals("keep", remaining.getFirst().label());
+    assertTrue(store.findByCredentialId(new byte[] {2}).isEmpty());
+  }
+
+  @Test
+  void deleteReturnsFalseForUnknownCredential() {
+    assertFalse(store.delete(new byte[] {9, 9, 9}));
+  }
+
+  @Test
+  void deletingTheLastCredentialLeavesTheFdeIntact() {
+    store.save(cred(new byte[] {1}, 0, null), fdeId, null);
+    assertTrue(store.delete(new byte[] {1}));
+    assertTrue(store.listForFde(fdeId).isEmpty());
+    assertTrue(new FdeStore(db).byHandle("uday").isPresent());
+  }
+
+  @Test
   void recordUseAdvancesSignCountAndStampsLastUsed() {
     var credId = new byte[] {5};
     store.save(cred(credId, 5, null), fdeId, null);

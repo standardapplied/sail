@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
@@ -15,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.time.Duration;
@@ -641,6 +643,32 @@ public final class Banner {
       table.addRow(key.fdeHandle(), orDash(key.comment()), key.fingerprint());
     }
     table.render(out, ansi);
+  }
+
+  /** Prints a bordered table of an FDE's registered passkeys. */
+  public static void printFdePasskeyTable(
+      List<WebauthnCredentialStore.Credential> credentials,
+      String handle,
+      PrintStream out,
+      Ansi ansi) {
+    var table =
+        new TableFormatter(
+            " Passkeys: " + handle + " ",
+            List.of("ID", "LABEL", "AUTHENTICATOR", "CREATED", "LAST USED", "SYNCED"));
+    for (var credential : credentials) {
+      table.addRow(
+          Passkeys.shortId(credential.credentialId()),
+          Passkeys.displayLabel(credential),
+          Passkeys.authenticatorName(credential.aaguid()),
+          datePart(credential.createdAt()),
+          datePart(credential.lastUsedAt()),
+          credential.backupState() ? "yes" : "no");
+    }
+    table.render(out, ansi);
+  }
+
+  private static String datePart(String instant) {
+    return instant == null || instant.length() < 10 ? "-" : instant.substring(0, 10);
   }
 
   /** Prints a bordered table of a project's shared files. */
