@@ -37,6 +37,7 @@ import ai.singlr.sail.store.ExpiredRowSweeper;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SlackThreadStore;
@@ -171,7 +172,8 @@ public final class ServerStartCommand implements Runnable {
             bus,
             persister,
             specStore,
-            reviewStore);
+            reviewStore,
+            new ProjectStore(db));
     var orphaned = reviewStore.failOrphanedRunning();
     if (orphaned > 0) {
       System.out.println(

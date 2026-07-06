@@ -66,6 +66,13 @@ class AuthorizationTest {
   }
 
   @Test
+  void memberCanReadTheProjectListAndConnectTarget() throws Exception {
+    var member = tokenStore.create("m", "member").token();
+    assertEquals(200, send("GET", "/v1/projects", member, null).statusCode());
+    assertEquals(200, send("GET", "/v1/projects/acme/connect", member, null).statusCode());
+  }
+
+  @Test
   void adminCanWrite() throws Exception {
     var admin = tokenStore.create("a", "admin").token();
     assertNotEquals(403, send("POST", "/v1/specs", admin, "{}").statusCode());

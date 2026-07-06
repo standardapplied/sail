@@ -34,6 +34,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String SPECS = "specs";
   private static final String DISPATCH = "dispatch";
   private static final String AGENT = "agent";
+  private static final String CONNECT = "connect";
   private static final String LOG = "log";
   private static final String STOP = "stop";
   private static final String REPORT = "report";
@@ -130,6 +131,11 @@ public final class ApiRouter implements HttpHandler {
       throw notFound();
     }
 
+    if (request.isProjectCollection()) {
+      requireMethod(request, GET);
+      return ApiResponse.from(operations.projects());
+    }
+
     var project = request.project();
     NameValidator.requireValidProjectName(project);
     if (request.isProjectRoot()) {
@@ -140,6 +146,7 @@ public final class ApiRouter implements HttpHandler {
       case SPECS -> routeSpecs(request, project);
       case DISPATCH -> routeDispatch(exchange, request, project);
       case AGENT -> routeAgent(request, project);
+      case CONNECT -> routeConnect(request, project);
       default -> throw notFound();
     };
   }
@@ -164,6 +171,14 @@ public final class ApiRouter implements HttpHandler {
       return ApiResponse.from(operations.project(project));
     }
     throw methodNotAllowed();
+  }
+
+  private ApiResponse routeConnect(RouteRequest request, String project) {
+    if (request.size() != 4) {
+      throw notFound();
+    }
+    requireMethod(request, GET);
+    return ApiResponse.from(operations.connect(project));
   }
 
   private ApiResponse routeSpecs(RouteRequest request, String project) {
@@ -513,7 +528,11 @@ public final class ApiRouter implements HttpHandler {
     }
 
     boolean hasProjectPrefix() {
-      return segments.size() >= 3 && V1.equals(segments.get(0)) && PROJECTS.equals(segments.get(1));
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && PROJECTS.equals(segments.get(1));
+    }
+
+    boolean isProjectCollection() {
+      return segments.size() == 2;
     }
 
     boolean hasEventsPrefix() {
