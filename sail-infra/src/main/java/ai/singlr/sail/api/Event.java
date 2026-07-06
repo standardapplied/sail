@@ -96,11 +96,17 @@ public record Event(
     /** {@link #SOURCE} value: the guardrail watcher, which observed the process exit code. */
     public static final String SOURCE_WATCHER = "watcher";
 
-    /** {@link #SOURCE} value: startup replay of a stop missed while the control plane was down. */
-    public static final String SOURCE_STARTUP_RECONCILE = "startup-reconcile";
+    /**
+     * {@link #SOURCE} value: a reconciler replay of a stop the control plane missed — at daemon
+     * start or from the periodic missed-stop sweep. Marks the stop as reconstructed, not observed.
+     */
+    public static final String SOURCE_RECONCILE = "reconcile";
 
     /** The agent process's exit code, carried on an authoritative stop. */
     public static final String EXIT_CODE = "exit_code";
+
+    /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
+    public static final String WATCHER_PID = "watcher_pid";
 
     private WellKnownData() {}
   }

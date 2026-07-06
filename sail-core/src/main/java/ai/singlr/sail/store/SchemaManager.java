@@ -355,7 +355,8 @@ public final class SchemaManager {
                   rev, base_rev FROM specs""",
           "DROP TABLE specs",
           "ALTER TABLE specs_v2 RENAME TO specs",
-          "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)");
+          "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
+          "ALTER TABLE agent_sessions ADD COLUMN watcher_pid INTEGER");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

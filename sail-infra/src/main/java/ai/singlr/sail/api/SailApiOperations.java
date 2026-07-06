@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 
@@ -380,11 +381,19 @@ public final class SailApiOperations implements ApiOperations {
     var branchCreated = createBranchIfNeeded(project, loaded.config(), targetRepos, branch);
 
     if (!request.dryRun()) {
-      launchAgent(
-          project, loaded.config(), targetRepos, task, branch, request.mode(), taskSpec, agentType);
+      var watcherPid =
+          launchAgent(
+              project,
+              loaded.config(),
+              targetRepos,
+              task,
+              branch,
+              request.mode(),
+              taskSpec,
+              agentType);
       var status = querySession(agentSession, project);
       if (status != null && status.running()) {
-        publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid());
+        publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcherPid);
       }
       return new DispatchResponse(
           project,
@@ -441,13 +450,16 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private void publishAgentSessionStarted(
-      String project, String specId, String agentType, Integer pid) {
+      String project, String specId, String agentType, Integer pid, OptionalLong watcherPid) {
     if (eventBus == null) {
       return;
     }
     var data = new LinkedHashMap<String, Object>();
     if (pid != null) {
       data.put("pid", pid);
+    }
+    if (watcherPid.isPresent()) {
+      data.put(Event.WellKnownData.WATCHER_PID, watcherPid.getAsLong());
     }
     eventBus.publish(
         Event.of(
@@ -665,7 +677,7 @@ public final class SailApiOperations implements ApiOperations {
     return created;
   }
 
-  private void launchAgent(
+  private OptionalLong launchAgent(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
@@ -709,7 +721,7 @@ public final class SailApiOperations implements ApiOperations {
       if (!result.ok()) {
         throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
       }
-      launchWatcherIfGuardrails(project, config);
+      return launchWatcherIfGuardrails(project, config);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
@@ -727,9 +739,22 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
-  private void launchWatcherIfGuardrails(String project, SailYaml config) throws IOException {
+  /**
+   * Relaunches the guardrail watcher for a project whose original watcher died (e.g. with a daemon
+   * restart mid-run). The relaunched {@code sail agent watch} recomputes its deadlines from the
+   * session's original {@code started_at} inside the container, so a re-armed agent keeps its
+   * remaining budget rather than getting a fresh one. Returns the new watcher pid, or empty when
+   * the project declares no guardrails (no watcher existed to re-arm).
+   */
+  public OptionalLong relaunchWatcher(String project) throws IOException {
+    var loaded = loadProject(project);
+    return launchWatcherIfGuardrails(project, loaded.config());
+  }
+
+  private OptionalLong launchWatcherIfGuardrails(String project, SailYaml config)
+      throws IOException {
     if (config.agent() == null || config.agent().guardrails() == null) {
-      return;
+      return OptionalLong.empty();
     }
     var cmd =
         List.of(
@@ -742,14 +767,15 @@ public final class SailApiOperations implements ApiOperations {
             SailPaths.resolveSailYaml(project, file).toAbsolutePath().toString());
     var watchLog = SailPaths.projectDir(project).resolve("watch.log");
     Files.createDirectories(watchLog.getParent());
-    watcherLauncher.launch(cmd, watchLog);
+    return OptionalLong.of(watcherLauncher.launch(cmd, watchLog));
   }
 
-  static void launchWatcherProcess(List<String> command, Path logPath) throws IOException {
-    new ProcessBuilder(command)
+  static long launchWatcherProcess(List<String> command, Path logPath) throws IOException {
+    return new ProcessBuilder(command)
         .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
         .redirectErrorStream(true)
-        .start();
+        .start()
+        .pid();
   }
 
   private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {
@@ -994,8 +1020,9 @@ public final class SailApiOperations implements ApiOperations {
 
   private record LoadedProject(SailYaml config, ContainerState state) {}
 
+  /** Spawns the host-side guardrail watcher process and returns its pid. */
   @FunctionalInterface
   interface WatcherLauncher {
-    void launch(List<String> command, Path logPath) throws IOException;
+    long launch(List<String> command, Path logPath) throws IOException;
   }
 }

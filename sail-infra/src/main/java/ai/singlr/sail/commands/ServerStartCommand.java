@@ -17,9 +17,11 @@ import ai.singlr.sail.api.SessionTracker;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.TokenAuth;
+import ai.singlr.sail.api.WatcherRearmer;
 import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.WebauthnConfig;
@@ -189,7 +191,8 @@ public final class ServerStartCommand implements Runnable {
             bus,
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false));
-    bus.subscribe(new SessionTracker(new SessionStore(db)));
+    var sessionStore = new SessionStore(db);
+    bus.subscribe(new SessionTracker(sessionStore));
     bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 
     var webauthn = resolveWebauthn();
@@ -220,16 +223,36 @@ public final class ServerStartCommand implements Runnable {
     var reconciler =
         new StuckSpecReconciler(
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
-    shutdown.register(server).register(sweeper).register(reconciler);
+    var unitProbe = MissedStopReconciler.systemdUnitProbe(new ShellExecutor(false));
+    var missedStops =
+        new MissedStopReconciler(
+            specStore, sessionStore, eventStore, bus, unitProbe, DateTimeUtils::now);
+    shutdown.register(server).register(sweeper).register(reconciler).register(missedStops);
     try {
       server.start();
       sweeper.start();
       reconciler.start();
-      var replayed = new MissedStopReconciler(specStore, new SessionStore(db), bus).reconcile();
+      var replayed = missedStops.sweep();
       if (replayed > 0) {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Replayed " + replayed + " agent stop(s) missed while offline"));
+      }
+      missedStops.start();
+      var rearmed =
+          new WatcherRearmer(
+                  specStore,
+                  sessionStore,
+                  unitProbe,
+                  WatcherRearmer.livingProcess(),
+                  operations::relaunchWatcher)
+              .rearm();
+      if (rearmed > 0) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Re-armed "
+                    + rearmed
+                    + " guardrail watcher(s) for agents still running unwatched"));
       }
       System.out.println(
           Ansi.AUTO.string(

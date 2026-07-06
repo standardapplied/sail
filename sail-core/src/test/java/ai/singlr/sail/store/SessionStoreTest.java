@@ -60,6 +60,30 @@ class SessionStoreTest {
     assertNull(session.branch());
     assertNull(session.task());
     assertNull(session.pid());
+    assertNull(session.watcherPid());
+  }
+
+  @Test
+  void createRecordsTheWatcherPid() {
+    var id = store.create("backend", "auth", "claude-code", null, null, 1234, 5678);
+
+    assertEquals(5678, store.findById(id).orElseThrow().watcherPid());
+  }
+
+  @Test
+  void updateWatcherPidReplacesTheRecordedWatcher() {
+    var id = store.create("backend", "auth", "claude-code", null, null, 1234, 5678);
+    store.updateWatcherPid(id, 9012);
+
+    assertEquals(9012, store.findById(id).orElseThrow().watcherPid());
+  }
+
+  @Test
+  void updateWatcherPidClearsWhenNull() {
+    var id = store.create("backend", "auth", "claude-code", null, null, 1234, 5678);
+    store.updateWatcherPid(id, null);
+
+    assertNull(store.findById(id).orElseThrow().watcherPid());
   }
 
   @Test

@@ -858,7 +858,8 @@ class ApiRouterTest {
             "completed",
             "t0",
             "t1",
-            7);
+            7,
+            null);
     var view = SessionView.from(row);
     assertEquals("s1", view.id());
     assertEquals("proj", view.project());

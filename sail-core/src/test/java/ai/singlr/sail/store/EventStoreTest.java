@@ -87,6 +87,19 @@ class EventStoreTest {
   }
 
   @Test
+  void forSpecAndTypeFiltersOnBothAndKeepsInsertionOrder() {
+    store.insert(event("stopped", "backend", "auth"));
+    store.insert(event("started", "backend", "auth"));
+    store.insert(event("stopped", "backend", "payment"));
+    store.insert(event("stopped", "backend", "auth"));
+
+    var events = store.forSpecAndType("auth", "stopped");
+    assertEquals(2, events.size());
+    assertTrue(events.getFirst().id() < events.getLast().id());
+    assertTrue(store.forSpecAndType("auth", "missing").isEmpty());
+  }
+
+  @Test
   void sinceReturnsEventsAfterGivenId() {
     var id1 = store.insert(event("first", "p", null));
     var id2 = store.insert(event("second", "p", null));

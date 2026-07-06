@@ -90,6 +90,21 @@ class SessionTrackerTest {
     assertEquals("implement OAuth", session.get().task());
     assertEquals(1234, session.get().pid());
     assertEquals("running", session.get().status());
+    assertNull(session.get().watcherPid());
+  }
+
+  @Test
+  void startedRecordsTheWatcherPidWhenTheEventCarriesOne() {
+    tracker.onEvent(
+        Event.of(
+            "backend",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STARTED,
+            "claude-code",
+            "host",
+            Map.of("pid", 1234, Event.WellKnownData.WATCHER_PID, 5678L)));
+
+    assertEquals(5678, sessionStore.latestForProject("backend").orElseThrow().watcherPid());
   }
 
   @Test
