@@ -23,13 +23,21 @@ record HealthResponse(String status) implements Mappable {
   }
 }
 
-record WhoamiResponse(String fde, String name, Role role, List<Capability> capabilities)
+record WhoamiResponse(
+    String fde,
+    String name,
+    String displayName,
+    String email,
+    Role role,
+    List<Capability> capabilities)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("fde", fde);
     m.put("name", name);
+    m.put("display_name", displayName);
+    m.put("email", email);
     m.put("role", role);
     m.put("capabilities", capabilities);
     return m;

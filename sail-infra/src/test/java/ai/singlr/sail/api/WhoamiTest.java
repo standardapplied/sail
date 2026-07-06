@@ -58,7 +58,7 @@ class WhoamiTest {
 
   @Test
   void adminPasskeySessionSeesFullIdentity() throws Exception {
-    var fde = fdes.add("uday", null, null, "admin");
+    var fde = fdes.add("uday", "Uday K", "uday@singlr.ai", "admin");
     var session = sessions.create(fde.id(), Duration.ofMinutes(30)).token();
     var response = get(session);
     assertEquals(200, response.statusCode());
@@ -66,8 +66,20 @@ class WhoamiTest {
     var body = YamlUtil.parseMap(response.body());
     assertEquals(1, body.get("schema_version"));
     assertEquals("uday", body.get("fde"));
+    assertEquals("Uday K", body.get("display_name"));
+    assertEquals("uday@singlr.ai", body.get("email"));
     assertEquals("admin", body.get("role"));
     assertEquals(List.of("read", "write", "admin"), body.get("capabilities"));
+  }
+
+  @Test
+  void passkeySessionOmitsUnsetNameAndEmail() throws Exception {
+    var fde = fdes.add("uday", null, null, "member");
+    var session = sessions.create(fde.id(), Duration.ofMinutes(30)).token();
+    var body = YamlUtil.parseMap(get(session).body());
+    assertEquals("uday", body.get("fde"));
+    assertFalse(body.containsKey("display_name"), body.toString());
+    assertFalse(body.containsKey("email"), body.toString());
   }
 
   @Test
