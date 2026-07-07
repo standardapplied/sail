@@ -110,25 +110,7 @@ public final class AgentLogStreamer implements HttpHandler {
             new BufferedReader(
                 new InputStreamReader(tailProcess.getInputStream(), StandardCharsets.UTF_8))) {
       writeComment(out, "streaming " + project);
-      var lineNumber = since > 0 ? since : 1;
-      var lastHeartbeat = System.nanoTime();
-
-      while (true) {
-        if (reader.ready()) {
-          var line = reader.readLine();
-          if (line == null) break;
-          writeSseData(out, lineNumber, line);
-          lineNumber++;
-          lastHeartbeat = System.nanoTime();
-        } else {
-          if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
-            out.write(HEARTBEAT);
-            out.flush();
-            lastHeartbeat = System.nanoTime();
-          }
-          Thread.sleep(100);
-        }
-      }
+      pump(tailProcess, reader, out, since);
     } catch (IOException e) {
       // Client disconnected — expected during streaming
     } catch (InterruptedException e) {
@@ -136,6 +118,39 @@ public final class AgentLogStreamer implements HttpHandler {
     } finally {
       tailProcess.destroyForcibly();
       activeStreams.decrement();
+    }
+  }
+
+  /**
+   * Relays the tail's output as SSE until the client disconnects or the tail process exits. Ending
+   * on process death is the load-bearing part: {@code tail -f} in a container that never existed
+   * (bad project) or whose agent has stopped exits, and without this the loop would heartbeat onto
+   * a dead pipe forever, holding the connection open and never closing the stream. Buffered lines
+   * are drained through the ready() branch before the exit is observed, so no output is lost.
+   */
+  static void pump(Process tailProcess, BufferedReader reader, OutputStream out, int since)
+      throws IOException, InterruptedException {
+    var lineNumber = since > 0 ? since : 1;
+    var lastHeartbeat = System.nanoTime();
+    while (true) {
+      if (reader.ready()) {
+        var line = reader.readLine();
+        if (line == null) {
+          break;
+        }
+        writeSseData(out, lineNumber, line);
+        lineNumber++;
+        lastHeartbeat = System.nanoTime();
+      } else if (!tailProcess.isAlive()) {
+        break;
+      } else {
+        if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
+          out.write(HEARTBEAT);
+          out.flush();
+          lastHeartbeat = System.nanoTime();
+        }
+        Thread.sleep(100);
+      }
     }
   }
 

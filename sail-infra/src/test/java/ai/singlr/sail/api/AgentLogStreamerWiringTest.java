@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -52,25 +53,44 @@ class AgentLogStreamerWiringTest {
 
   @Test
   void authenticatedStreamRequestReachesHandlerNot404(@TempDir Path tmp) throws Exception {
-    try (var server = server(tmp)) {
-      server.start();
-      var response =
-          HttpClient.newHttpClient()
-              .send(streamRequest(server.port(), "tok"), HttpResponse.BodyHandlers.ofString());
-      assertNotEquals(404, response.statusCode(), "stream route must be mounted");
-      assertNotEquals(401, response.statusCode(), "authenticated caller must pass the auth gate");
-      assertNotEquals(403, response.statusCode(), "authenticated caller must pass the auth gate");
-    }
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(20),
+        () -> {
+          try (var server = server(tmp)) {
+            server.start();
+            var status = statusFromHeaders(server.port(), "tok");
+            assertNotEquals(404, status, "stream route must be mounted");
+            assertNotEquals(401, status, "authenticated caller must pass the auth gate");
+            assertNotEquals(403, status, "authenticated caller must pass the auth gate");
+          }
+        });
   }
 
   @Test
   void unauthenticatedStreamRequestIsRejected(@TempDir Path tmp) throws Exception {
-    try (var server = server(tmp)) {
-      server.start();
-      var response =
-          HttpClient.newHttpClient()
-              .send(streamRequest(server.port(), null), HttpResponse.BodyHandlers.ofString());
-      assertEquals(401, response.statusCode());
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(20),
+        () -> {
+          try (var server = server(tmp)) {
+            server.start();
+            assertEquals(401, statusFromHeaders(server.port(), null));
+          }
+        });
+  }
+
+  /**
+   * Reads only the response status from the headers and closes the body without draining it. The
+   * endpoint is an SSE stream over {@code tail -f}, which never reaches EOF against a live
+   * container, so consuming the body ({@code BodyHandlers.ofString()}) would block forever — the
+   * bug that hung this test for 34 minutes in the incus lane. The wiring assertion is a status
+   * check, and the status is in the headers.
+   */
+  private static int statusFromHeaders(int port, String token) throws Exception {
+    var response =
+        HttpClient.newHttpClient()
+            .send(streamRequest(port, token), HttpResponse.BodyHandlers.ofInputStream());
+    try (var body = response.body()) {
+      return response.statusCode();
     }
   }
 }
