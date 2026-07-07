@@ -11,15 +11,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongPredicate;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,13 @@ class WatcherRearmerTest {
 
   private static final LongPredicate DEAD = pid -> false;
   private static final LongPredicate ALIVE = pid -> true;
+  private static final Predicate<String> NO_UNIT = project -> false;
+  private static final Predicate<String> UNIT_ACTIVE = project -> true;
+
+  private static final WatcherSpawner.Unit LAUNCHED =
+      new WatcherSpawner.Unit("sail-watch-test-project", "user", false);
+  private static final WatcherSpawner.Unit ADOPTED =
+      new WatcherSpawner.Unit("sail-watch-test-project", "system", true);
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -75,37 +85,39 @@ class WatcherRearmerTest {
   }
 
   private WatcherRearmer rearmer(
-      MissedStopReconciler.UnitProbe unitProbe,
+      MissedStopReconciler.UnitProbe agentUnitProbe,
+      Predicate<String> watcherUnitActive,
       LongPredicate watcherAlive,
       WatcherRearmer.WatcherRelauncher relauncher) {
-    return new WatcherRearmer(specStore, sessionStore, unitProbe, watcherAlive, relauncher);
+    return new WatcherRearmer(
+        specStore, sessionStore, agentUnitProbe, watcherUnitActive, watcherAlive, relauncher);
   }
 
   @Test
-  void rearmsADeadWatcherOverAStillActiveUnitAndRecordsTheNewPid() {
+  void rearmsAnUncoveredRunningAgentAsAUnit() {
     createInProgressSpec("auth");
-    var sessionId = runningSession("auth", 5678);
+    runningSession("auth", 5678);
     var relaunches = new AtomicInteger();
 
     var rearmed =
         rearmer(
                 project -> true,
+                NO_UNIT,
                 DEAD,
                 project -> {
                   relaunches.incrementAndGet();
-                  return OptionalLong.of(9012);
+                  return Optional.of(LAUNCHED);
                 })
             .rearm();
 
     assertEquals(1, rearmed);
     assertEquals(1, relaunches.get());
-    assertEquals(9012, sessionStore.findById(sessionId).orElseThrow().watcherPid());
   }
 
   @Test
-  void aLiveWatcherIsLeftAloneWithoutProbingTheUnit() {
+  void anActiveWatcherUnitCoversTheProjectWithoutConsultingPidOrAgentUnit() {
     createInProgressSpec("auth");
-    runningSession("auth", 5678);
+    runningSession("auth", null);
     var probed = new AtomicInteger();
 
     var rearmed =
@@ -114,8 +126,9 @@ class WatcherRearmerTest {
                   probed.incrementAndGet();
                   return true;
                 },
-                ALIVE,
-                project -> OptionalLong.of(9012))
+                UNIT_ACTIVE,
+                DEAD,
+                project -> Optional.of(LAUNCHED))
             .rearm();
 
     assertEquals(0, rearmed);
@@ -123,18 +136,38 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void aSessionWithoutARecordedWatcherPidIsSkippedNotDoubled() {
+  void aLiveRecordedWatcherPidCoversTheProject() {
     createInProgressSpec("auth");
-    var sessionId = runningSession("auth", null);
+    runningSession("auth", 5678);
+    var relaunches = new AtomicInteger();
 
-    var rearmed = rearmer(project -> true, DEAD, project -> OptionalLong.of(9012)).rearm();
+    var rearmed =
+        rearmer(
+                project -> true,
+                NO_UNIT,
+                ALIVE,
+                project -> {
+                  relaunches.incrementAndGet();
+                  return Optional.of(LAUNCHED);
+                })
+            .rearm();
 
     assertEquals(0, rearmed);
-    assertTrue(sessionStore.findById(sessionId).orElseThrow().watcherPid() == null);
+    assertEquals(0, relaunches.get());
   }
 
   @Test
-  void anInactiveUnitIsTheSweepsJobNotARearm() {
+  void aSessionWithNoRecordedPidAndNoUnitIsRearmedBecauseDoublingIsUnrepresentable() {
+    createInProgressSpec("auth");
+    runningSession("auth", null);
+
+    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(ADOPTED)).rearm();
+
+    assertEquals(1, rearmed);
+  }
+
+  @Test
+  void anInactiveAgentUnitIsTheSweepsJobNotARearm() {
     createInProgressSpec("auth");
     runningSession("auth", 5678);
     var relaunches = new AtomicInteger();
@@ -142,10 +175,11 @@ class WatcherRearmerTest {
     var rearmed =
         rearmer(
                 project -> false,
+                NO_UNIT,
                 DEAD,
                 project -> {
                   relaunches.incrementAndGet();
-                  return OptionalLong.of(9012);
+                  return Optional.of(LAUNCHED);
                 })
             .rearm();
 
@@ -160,20 +194,19 @@ class WatcherRearmerTest {
     sessionStore.complete(completed, "stopped", 0);
     createInProgressSpec("bare");
 
-    var rearmed = rearmer(project -> true, DEAD, project -> OptionalLong.of(9012)).rearm();
+    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED)).rearm();
 
     assertEquals(0, rearmed);
   }
 
   @Test
-  void aProjectWithoutGuardrailsHasNothingToRearm() {
+  void anEmptyRelaunchIsLoggedNotCounted() {
     createInProgressSpec("auth");
-    var sessionId = runningSession("auth", 5678);
+    runningSession("auth", 5678);
 
-    var rearmed = rearmer(project -> true, DEAD, project -> OptionalLong.empty()).rearm();
+    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.empty()).rearm();
 
     assertEquals(0, rearmed);
-    assertEquals(5678, sessionStore.findById(sessionId).orElseThrow().watcherPid());
   }
 
   @Test
@@ -187,12 +220,13 @@ class WatcherRearmerTest {
     var rearmed =
         rearmer(
                 project -> true,
+                NO_UNIT,
                 DEAD,
                 project -> {
                   if (attempts.incrementAndGet() == 1) {
                     throw new IllegalStateException("relaunch failed");
                   }
-                  return OptionalLong.of(9012);
+                  return Optional.of(LAUNCHED);
                 })
             .rearm();
 
@@ -204,11 +238,23 @@ class WatcherRearmerTest {
   void aStoreErrorIsSwallowedSoStartupIsNeverBlocked() {
     createInProgressSpec("auth");
     runningSession("auth", 5678);
-    var rearmer = rearmer(project -> true, DEAD, project -> OptionalLong.of(9012));
+    var rearmer = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED));
     db.close();
     db = null;
 
     assertEquals(0, assertDoesNotThrow(rearmer::rearm));
+  }
+
+  @Test
+  void periodicRearmSchedulesRunsAndClosesWithoutStackingPasses() {
+    createInProgressSpec("auth");
+    runningSession("auth", 5678);
+    try (var rearmer = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED))) {
+      rearmer.start();
+      rearmer.start(Duration.ofHours(1));
+
+      assertTrue(rearmer.rearmIfIdle());
+    }
   }
 
   @Test

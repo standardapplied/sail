@@ -31,6 +31,7 @@ import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.EnrollmentTicketStore;
@@ -223,11 +224,26 @@ public final class ServerStartCommand implements Runnable {
     var reconciler =
         new StuckSpecReconciler(
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
-    var unitProbe = MissedStopReconciler.systemdUnitProbe(new ShellExecutor(false));
+    var reconcileShell = new ShellExecutor(false);
+    var unitProbe = MissedStopReconciler.systemdUnitProbe(reconcileShell);
     var missedStops =
         new MissedStopReconciler(
             specStore, sessionStore, eventStore, bus, unitProbe, DateTimeUtils::now);
-    shutdown.register(server).register(sweeper).register(reconciler).register(missedStops);
+    var watcherSpawner = new WatcherSpawner(reconcileShell, null);
+    var rearmer =
+        new WatcherRearmer(
+            specStore,
+            sessionStore,
+            unitProbe,
+            watcherSpawner::watcherProcessRunning,
+            WatcherRearmer.livingProcess(),
+            operations::relaunchWatcher);
+    shutdown
+        .register(server)
+        .register(sweeper)
+        .register(reconciler)
+        .register(missedStops)
+        .register(rearmer);
     try {
       server.start();
       sweeper.start();
@@ -239,14 +255,8 @@ public final class ServerStartCommand implements Runnable {
                 "  @|green ✓|@ Replayed " + replayed + " agent stop(s) missed while offline"));
       }
       missedStops.start();
-      var rearmed =
-          new WatcherRearmer(
-                  specStore,
-                  sessionStore,
-                  unitProbe,
-                  WatcherRearmer.livingProcess(),
-                  operations::relaunchWatcher)
-              .rearm();
+      var rearmed = rearmer.rearm();
+      rearmer.start();
       if (rearmed > 0) {
         System.out.println(
             Ansi.AUTO.string(

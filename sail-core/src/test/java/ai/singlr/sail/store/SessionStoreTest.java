@@ -71,22 +71,6 @@ class SessionStoreTest {
   }
 
   @Test
-  void updateWatcherPidReplacesTheRecordedWatcher() {
-    var id = store.create("backend", "auth", "claude-code", null, null, 1234, 5678);
-    store.updateWatcherPid(id, 9012);
-
-    assertEquals(9012, store.findById(id).orElseThrow().watcherPid());
-  }
-
-  @Test
-  void updateWatcherPidClearsWhenNull() {
-    var id = store.create("backend", "auth", "claude-code", null, null, 1234, 5678);
-    store.updateWatcherPid(id, null);
-
-    assertNull(store.findById(id).orElseThrow().watcherPid());
-  }
-
-  @Test
   void completeSession() {
     var id = store.create("backend", "auth", "claude-code", null, null, null);
     store.complete(id, "completed", 0);

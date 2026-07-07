@@ -327,7 +327,7 @@ public final class RunCommand implements Runnable {
     Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
 
     if (!dryRun) {
-      GuardrailWatcher.launch(name, file, config);
+      GuardrailWatcher.launch(name, file, config, shell);
     }
   }
 

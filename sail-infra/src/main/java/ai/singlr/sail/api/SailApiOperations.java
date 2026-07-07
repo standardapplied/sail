@@ -28,13 +28,13 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
@@ -42,7 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 
@@ -52,7 +52,7 @@ public final class SailApiOperations implements ApiOperations {
 
   private final ShellExec shell;
   private final String file;
-  private final WatcherLauncher watcherLauncher;
+  private final WatcherSpawner watcherSpawner;
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
   private final SpecStore specStore;
@@ -68,18 +68,17 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   public SailApiOperations(ShellExec shell, String file) {
-    this(shell, file, SailApiOperations::launchWatcherProcess);
+    this(shell, file, WatcherSpawner::spawnProcess);
   }
 
-  SailApiOperations(ShellExec shell, String file, WatcherLauncher watcherLauncher) {
-    this(shell, file, watcherLauncher, null, null);
+  SailApiOperations(ShellExec shell, String file, WatcherSpawner.ProcessSpawner watcherFallback) {
+    this(shell, file, watcherFallback, null, null);
   }
 
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
   public SailApiOperations(
       ShellExec shell, String file, EventBus eventBus, AuditPersister auditPersister) {
-    this(
-        shell, file, SailApiOperations::launchWatcherProcess, eventBus, auditPersister, null, null);
+    this(shell, file, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
   }
 
   /** Construct with database-backed stores; used by the control plane server. */
@@ -93,7 +92,7 @@ public final class SailApiOperations implements ApiOperations {
     this(
         shell,
         file,
-        SailApiOperations::launchWatcherProcess,
+        WatcherSpawner::spawnProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
@@ -122,7 +121,7 @@ public final class SailApiOperations implements ApiOperations {
     this(
         shell,
         file,
-        SailApiOperations::launchWatcherProcess,
+        WatcherSpawner::spawnProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
@@ -135,27 +134,27 @@ public final class SailApiOperations implements ApiOperations {
   SailApiOperations(
       ShellExec shell,
       String file,
-      WatcherLauncher watcherLauncher,
+      WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister) {
-    this(shell, file, watcherLauncher, eventBus, auditPersister, null, null);
+    this(shell, file, watcherFallback, eventBus, auditPersister, null, null);
   }
 
   SailApiOperations(
       ShellExec shell,
       String file,
-      WatcherLauncher watcherLauncher,
+      WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore) {
-    this(shell, file, watcherLauncher, eventBus, auditPersister, specStore, reviewStore, null);
+    this(shell, file, watcherFallback, eventBus, auditPersister, specStore, reviewStore, null);
   }
 
   SailApiOperations(
       ShellExec shell,
       String file,
-      WatcherLauncher watcherLauncher,
+      WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
       SpecStore specStore,
@@ -164,7 +163,7 @@ public final class SailApiOperations implements ApiOperations {
     this(
         shell,
         file,
-        watcherLauncher,
+        watcherFallback,
         eventBus,
         auditPersister,
         specStore,
@@ -177,7 +176,7 @@ public final class SailApiOperations implements ApiOperations {
   SailApiOperations(
       ShellExec shell,
       String file,
-      WatcherLauncher watcherLauncher,
+      WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
       SpecStore specStore,
@@ -187,7 +186,7 @@ public final class SailApiOperations implements ApiOperations {
       Supplier<ConnectEnvironment> connectEnvironment) {
     this.shell = shell;
     this.file = file;
-    this.watcherLauncher = watcherLauncher;
+    this.watcherSpawner = new WatcherSpawner(shell, watcherFallback);
     this.eventBus = eventBus;
     this.auditPersister = auditPersister;
     this.specStore = specStore;
@@ -381,7 +380,7 @@ public final class SailApiOperations implements ApiOperations {
     var branchCreated = createBranchIfNeeded(project, loaded.config(), targetRepos, branch);
 
     if (!request.dryRun()) {
-      var watcherPid =
+      var watcher =
           launchAgent(
               project,
               loaded.config(),
@@ -393,7 +392,7 @@ public final class SailApiOperations implements ApiOperations {
               agentType);
       var status = querySession(agentSession, project);
       if (status != null && status.running()) {
-        publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcherPid);
+        publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcher);
       }
       return new DispatchResponse(
           project,
@@ -450,7 +449,11 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private void publishAgentSessionStarted(
-      String project, String specId, String agentType, Integer pid, OptionalLong watcherPid) {
+      String project,
+      String specId,
+      String agentType,
+      Integer pid,
+      Optional<WatcherSpawner.Spawned> watcher) {
     if (eventBus == null) {
       return;
     }
@@ -458,8 +461,8 @@ public final class SailApiOperations implements ApiOperations {
     if (pid != null) {
       data.put("pid", pid);
     }
-    if (watcherPid.isPresent()) {
-      data.put(Event.WellKnownData.WATCHER_PID, watcherPid.getAsLong());
+    if (watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback) {
+      data.put(Event.WellKnownData.WATCHER_PID, fallback.pid());
     }
     eventBus.publish(
         Event.of(
@@ -677,7 +680,7 @@ public final class SailApiOperations implements ApiOperations {
     return created;
   }
 
-  private OptionalLong launchAgent(
+  private Optional<WatcherSpawner.Spawned> launchAgent(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
@@ -721,7 +724,7 @@ public final class SailApiOperations implements ApiOperations {
       if (!result.ok()) {
         throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
       }
-      return launchWatcherIfGuardrails(project, config);
+      return launchWatcherIfAgent(project, config);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
@@ -741,41 +744,38 @@ public final class SailApiOperations implements ApiOperations {
 
   /**
    * Relaunches the guardrail watcher for a project whose original watcher died (e.g. with a daemon
-   * restart mid-run). The relaunched {@code sail agent watch} recomputes its deadlines from the
-   * session's original {@code started_at} inside the container, so a re-armed agent keeps its
-   * remaining budget rather than getting a fresh one. Returns the new watcher pid, or empty when
-   * the project declares no guardrails (no watcher existed to re-arm).
+   * restart mid-run). Unit-or-nothing: the relaunch never falls back to a plain process, so a
+   * doubled watcher is unrepresentable on this path — empty means the project declares no agent
+   * block or no systemd scope accepted the unit. The relaunched {@code sail agent watch} recomputes
+   * its deadlines from the session's original {@code started_at} inside the container, so a
+   * re-armed agent keeps its remaining budget rather than getting a fresh one.
    */
-  public OptionalLong relaunchWatcher(String project) throws IOException {
+  public Optional<WatcherSpawner.Unit> relaunchWatcher(String project) throws IOException {
     var loaded = loadProject(project);
-    return launchWatcherIfGuardrails(project, loaded.config());
-  }
-
-  private OptionalLong launchWatcherIfGuardrails(String project, SailYaml config)
-      throws IOException {
-    if (config.agent() == null || config.agent().guardrails() == null) {
-      return OptionalLong.empty();
+    if (loaded.config().agent() == null) {
+      return Optional.empty();
     }
-    var cmd =
-        List.of(
-            "nohup",
-            SailPaths.binaryPath().toString(),
-            "agent",
-            "watch",
-            project,
-            "-f",
-            SailPaths.resolveSailYaml(project, file).toAbsolutePath().toString());
-    var watchLog = SailPaths.projectDir(project).resolve("watch.log");
-    Files.createDirectories(watchLog.getParent());
-    return OptionalLong.of(watcherLauncher.launch(cmd, watchLog));
+    return watcherSpawner.spawnUnit(
+        project,
+        SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
+        SailPaths.projectDir(project).resolve("watch.log"));
   }
 
-  static long launchWatcherProcess(List<String> command, Path logPath) throws IOException {
-    return new ProcessBuilder(command)
-        .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
-        .redirectErrorStream(true)
-        .start()
-        .pid();
+  /**
+   * Spawns the detached watcher whenever the project declares an agent block — supervision is on by
+   * default, with {@code Guardrails.defaults()} applying when none are declared, and the watcher is
+   * also the authoritative stop observer the review pipeline depends on.
+   */
+  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(String project, SailYaml config)
+      throws IOException {
+    if (config.agent() == null) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        watcherSpawner.spawn(
+            project,
+            SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
+            SailPaths.projectDir(project).resolve("watch.log")));
   }
 
   private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {
@@ -1019,10 +1019,4 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private record LoadedProject(SailYaml config, ContainerState state) {}
-
-  /** Spawns the host-side guardrail watcher process and returns its pid. */
-  @FunctionalInterface
-  interface WatcherLauncher {
-    long launch(List<String> command, Path logPath) throws IOException;
-  }
 }
