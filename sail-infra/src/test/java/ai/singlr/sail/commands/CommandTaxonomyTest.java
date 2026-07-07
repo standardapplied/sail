@@ -34,6 +34,7 @@ class CommandTaxonomyTest {
             "server",
             "fde",
             "login",
+            "enroll",
             "spec",
             "agent",
             "events",

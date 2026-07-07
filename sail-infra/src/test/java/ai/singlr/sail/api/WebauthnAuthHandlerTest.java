@@ -431,7 +431,9 @@ class WebauthnAuthHandlerTest {
             new AuthSessionStore(db),
             new PendingChallengeStore(db));
     startWith(
-        service, new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)), ORIGIN);
+        service,
+        new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+        List.of(ORIGIN));
     var authenticator = new TestAuthenticator(RP_ID);
 
     var mint =

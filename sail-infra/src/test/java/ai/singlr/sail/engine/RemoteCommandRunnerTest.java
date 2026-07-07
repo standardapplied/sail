@@ -158,6 +158,7 @@ class RemoteCommandRunnerTest {
     assertTrue(RemoteCommandRunner.isLocalCommand("upgrade"));
     assertTrue(RemoteCommandRunner.isLocalCommand("init"));
     assertTrue(RemoteCommandRunner.isLocalCommand("login"));
+    assertTrue(RemoteCommandRunner.isLocalCommand("enroll"));
     assertFalse(RemoteCommandRunner.isLocalCommand("spec"));
     assertFalse(RemoteCommandRunner.isLocalCommand("dispatch"));
   }

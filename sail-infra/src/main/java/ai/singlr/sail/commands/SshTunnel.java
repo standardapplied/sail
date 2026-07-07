@@ -84,12 +84,7 @@ public final class SshTunnel implements AutoCloseable {
   }
 
   static SshTunnel open(
-      String host,
-      int port,
-      Launcher launcher,
-      HealthProbe probe,
-      int attempts,
-      Duration interval)
+      String host, int port, Launcher launcher, HealthProbe probe, int attempts, Duration interval)
       throws IOException, InterruptedException {
     requirePlainHost(host);
     requireFreePort(port);
