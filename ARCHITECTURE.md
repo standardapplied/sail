@@ -359,6 +359,17 @@ On a trip it snapshots or kills the agent and fires notifications. Rollback uses
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
+The watcher runs detached, as the systemd transient unit `sail-watch-<project>` — the same
+mechanism that runs the agent — so it survives Ctrl-C on the dispatch stream, the SSH
+session ending, and daemon restarts. The unit name is deterministic and one agent runs per
+project, so coverage is probed rather than bookkept: spawning against an active unit adopts
+it, the periodic re-armer relaunches a unit for any running agent nothing covers (resuming
+the original deadline, never granting a fresh budget), and the missed-stop sweep replays the
+stop of any agent that still manages to finish unobserved. Where no systemd scope is
+available (busless test environments) the spawn falls back to a plain detached process,
+loudly marked degraded. Every lane — CLI dispatch and API dispatch — spawns through the one
+`WatcherSpawner`, so their survival properties cannot diverge.
+
 **Multi-agent review loop:** review is agent-agnostic across claude-code and codex. When the
 coder's dispatch stops cleanly, the spec moves to `review` and a secondary reviewer runs at
 spec completion (falling back to self-review when only one agent is installed; a per-spec

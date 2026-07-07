@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -734,16 +735,6 @@ class SailApiOperationsTest {
   }
 
   @Test
-  void watcherProcessLauncherStartsCommandAndReturnsItsPid() throws Exception {
-    var logPath = tempDir.resolve("watch.log");
-
-    var pid = SailApiOperations.launchWatcherProcess(List.of("sh", "-c", "true"), logPath);
-
-    assertTrue(pid > 0);
-    assertTrue(Files.exists(logPath));
-  }
-
-  @Test
   void dispatchRecordsTheWatcherPidOnTheSessionStartedEvent() throws Exception {
     var yaml = tempDir.resolve("sail-watcher-pid.yaml");
     Files.writeString(yaml, guardrailsYaml());
@@ -798,23 +789,46 @@ class SailApiOperationsTest {
   }
 
   @Test
-  void relaunchWatcherReturnsTheNewWatcherPid() throws Exception {
+  void relaunchWatcherLaunchesAUnitAndNeverFallsBackToAPlainProcess() throws Exception {
+    var operations =
+        operations(
+            guardrailsYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("systemd-run --user", new ShellExec.Result(0, "", "")),
+            (command, logPath) -> {
+              throw new IOException("relaunch must never use the process fallback");
+            });
+
+    var unit = operations.relaunchWatcher("acme").orElseThrow();
+
+    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", false), unit);
+  }
+
+  @Test
+  void relaunchWatcherIsEmptyWhenNoSystemdScopeAccepts() throws Exception {
     var operations =
         operations(
             guardrailsYaml(),
             shell().on("incus list ^acme$", RUNNING_JSON),
             (command, logPath) -> 4242L);
 
-    var pid = operations.relaunchWatcher("acme");
-
-    assertEquals(4242L, pid.orElseThrow());
+    assertTrue(operations.relaunchWatcher("acme").isEmpty());
   }
 
   @Test
-  void relaunchWatcherIsEmptyWhenTheProjectDeclaresNoGuardrails() throws Exception {
+  void relaunchWatcherIsEmptyWhenTheProjectDeclaresNoAgent() throws Exception {
     var operations =
         operations(
-            baseYaml(), shell().on("incus list ^acme$", RUNNING_JSON), (command, logPath) -> 4242L);
+            """
+            name: acme
+            ssh:
+              user: dev
+            """,
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("systemd-run --user", new ShellExec.Result(0, "", "")),
+            (command, logPath) -> 4242L);
 
     assertTrue(operations.relaunchWatcher("acme").isEmpty());
   }
@@ -1482,7 +1496,14 @@ class SailApiOperationsTest {
     seedSpecs.accept(specStore);
     seedSessions.accept(sessionStore);
     return new SailApiOperations(
-        shell, yaml.toString(), null, bus, null, specStore, reviewStore, sessionStore);
+        shell,
+        yaml.toString(),
+        (command, logPath) -> 4242L,
+        bus,
+        null,
+        specStore,
+        reviewStore,
+        sessionStore);
   }
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
@@ -1520,7 +1541,7 @@ class SailApiOperationsTest {
       String yamlContent,
       FakeShell shell,
       java.util.function.Consumer<SpecStore> seed,
-      SailApiOperations.WatcherLauncher watcher)
+      WatcherSpawner.ProcessSpawner watcher)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
@@ -1528,9 +1549,9 @@ class SailApiOperationsTest {
     new SchemaManager(db).migrate();
     var store = new SpecStore(db);
     seed.accept(store);
-    return watcher == null
-        ? new SailApiOperations(shell, yaml.toString(), null, (EventSubscriber) null, store)
-        : new SailApiOperations(shell, yaml.toString(), watcher, null, null, store, null);
+    WatcherSpawner.ProcessSpawner fallback =
+        watcher != null ? watcher : (command, logPath) -> 4242L;
+    return new SailApiOperations(shell, yaml.toString(), fallback, null, null, store, null);
   }
 
   /**
@@ -1584,7 +1605,7 @@ class SailApiOperationsTest {
   }
 
   private SailApiOperations operations(
-      String yamlContent, FakeShell shell, SailApiOperations.WatcherLauncher watcherLauncher)
+      String yamlContent, FakeShell shell, WatcherSpawner.ProcessSpawner watcherLauncher)
       throws Exception {
     return operationsWithStore(
         yamlContent, shell, SailApiOperationsTest::seedAuthBillingSetup, watcherLauncher);

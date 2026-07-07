@@ -16,10 +16,6 @@ import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
@@ -71,8 +67,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final EventBus bus;
   private final UnitProbe unitProbe;
   private final Supplier<Instant> clock;
-  private final ScheduledExecutorService scheduler;
-  private final AtomicBoolean sweeping = new AtomicBoolean();
+  private final PeriodicPass pass;
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -87,9 +82,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.bus = bus;
     this.unitProbe = unitProbe;
     this.clock = clock;
-    this.scheduler =
-        Executors.newSingleThreadScheduledExecutor(
-            Thread.ofVirtual().name("sail-missed-stop-", 0).factory());
+    this.pass = new PeriodicPass("reconcile", this::sweep);
   }
 
   /**
@@ -109,8 +102,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   public void start(Duration interval) {
-    scheduler.scheduleAtFixedRate(
-        this::sweepIfIdle, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+    pass.start(interval);
   }
 
   /**
@@ -118,15 +110,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * whether the pass ran; never throws, so the schedule survives any failure.
    */
   boolean sweepIfIdle() {
-    if (!sweeping.compareAndSet(false, true)) {
-      return false;
-    }
-    try {
-      sweep();
-    } finally {
-      sweeping.set(false);
-    }
-    return true;
+    return pass.runIfIdle();
   }
 
   /**
@@ -243,6 +227,6 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   @Override
   public void close() {
-    scheduler.close();
+    pass.close();
   }
 }
