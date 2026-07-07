@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.NameValidator;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.BufferedReader;
@@ -14,12 +15,31 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
  * SSE handler that streams agent log output from a container. Tails the agent log file via {@code
  * incus exec} and sends each line as an SSE {@code data:} event. Supports {@code ?since=N} to
  * replay from a specific line number for client reconnection.
+ *
+ * <p>Mounted by {@link ApiRouter}, which delegates {@code GET /v1/projects/{p}/agent/stream}
+ * straight to this handler so the long-lived connection never runs through the buffered
+ * request/response path. It is not registered as its own {@link
+ * com.sun.net.httpserver.HttpServer#createContext} because the path carries a variable project
+ * segment, which prefix-matching cannot isolate from the rest of {@code /v1/projects/...}.
+ *
+ * <p>Authentication is the {@code Authorization: Bearer} header only — the same gate {@code
+ * /v1/events/stream} uses (accepting {@code sess_} login sessions via {@link SessionAwareAuth}).
+ * There is deliberately no query-parameter token: a browser {@code EventSource} cannot set headers
+ * and is unsupported, but a native client that sets the header (Mast's Rust core, {@code sail agent
+ * stream}) authenticates normally.
+ *
+ * <p>The tail runs as a raw long-lived {@link Process} rather than through {@link
+ * ai.singlr.sail.engine.ShellExec}: {@code tail -f} never terminates, so the streaming loop needs
+ * the live process handle and incremental stdout, not a run-to-completion executor. The command
+ * itself is built through {@link ContainerExec#asDevUser} for parity with every other in-container
+ * invocation.
  */
 public final class AgentLogStreamer implements HttpHandler {
 
@@ -28,12 +48,10 @@ public final class AgentLogStreamer implements HttpHandler {
   private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
 
   private final ApiAuth auth;
-  private final ShellExec shell;
   private final LongAdder activeStreams = new LongAdder();
 
-  public AgentLogStreamer(ApiAuth auth, ShellExec shell) {
+  public AgentLogStreamer(ApiAuth auth) {
     this.auth = auth;
-    this.shell = shell;
   }
 
   @Override
@@ -53,6 +71,12 @@ public final class AgentLogStreamer implements HttpHandler {
       var project = extractProject(exchange.getRequestURI().getPath());
       if (project == null) {
         sendError(exchange, 400, "Missing project name");
+        return;
+      }
+      try {
+        NameValidator.requireValidProjectName(project);
+      } catch (IllegalArgumentException e) {
+        sendError(exchange, 400, "Invalid project name");
         return;
       }
 
@@ -120,20 +144,9 @@ public final class AgentLogStreamer implements HttpHandler {
   }
 
   static String[] buildTailCommand(String project, int since) {
-    var tailArgs = since > 0 ? "tail -n +" + since + " -f" : "tail -f";
-    return new String[] {
-      "incus",
-      "exec",
-      project,
-      "--user",
-      "1000",
-      "--group",
-      "1000",
-      "--",
-      "bash",
-      "-c",
-      tailArgs + " " + LOG_PATH
-    };
+    var tail = since > 0 ? "tail -n +" + since + " -f " : "tail -f ";
+    return ContainerExec.asDevUser(project, List.of("bash", "-c", tail + LOG_PATH))
+        .toArray(String[]::new);
   }
 
   static String extractProject(String path) {
@@ -142,6 +155,16 @@ public final class AgentLogStreamer implements HttpHandler {
       return segments[3];
     }
     return null;
+  }
+
+  /** True when {@code path} is exactly {@code /v1/projects/{project}/agent/stream}. */
+  static boolean isStreamPath(String path) {
+    var segments = path.split("/");
+    return segments.length == 6
+        && "v1".equals(segments[1])
+        && "projects".equals(segments[2])
+        && "agent".equals(segments[4])
+        && "stream".equals(segments[5]);
   }
 
   static int parseSince(String query) {

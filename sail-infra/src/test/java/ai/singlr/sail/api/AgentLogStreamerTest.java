@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,5 +76,22 @@ class AgentLogStreamerTest {
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
+  }
+
+  @Test
+  void isStreamPathMatchesCanonicalPath() {
+    assertTrue(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/stream"));
+  }
+
+  @Test
+  void isStreamPathRejectsOtherAgentSubResources() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/log"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent"));
+  }
+
+  @Test
+  void isStreamPathRejectsWrongPrefix() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/backend/agent/stream"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
   }
 }
