@@ -107,11 +107,44 @@ class SshGatewayTest {
             "sail fde passkey list",
             "sail fde passkey add uday",
             "sail fde passkey rm --credential abc123 uday",
-            "sail fde enroll uday",
             "sail fde rm uday")) {
       var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
       assertTrue(rejected.reason().contains("admin role"));
     }
+  }
+
+  @Test
+  void memberMintsItsOwnEnrollmentTicket() {
+    var authorized =
+        assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde enroll uday", "uday"));
+    assertEquals(List.of("fde", "enroll", "uday"), authorized.args());
+    assertTrue(sessions.validate(authorized.sessionToken()).isPresent());
+  }
+
+  @Test
+  void bareEnrollIsPinnedToTheCallersHandle() {
+    var bare = assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde enroll", "uday"));
+    assertEquals(List.of("fde", "enroll", "uday"), bare.args());
+    var withFlag =
+        assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde enroll --json", "uday"));
+    assertEquals(List.of("fde", "enroll", "uday", "--json"), withFlag.args());
+  }
+
+  @Test
+  void memberCannotMintAnEnrollmentTicketForAnotherFde() {
+    fdes.add("ada", null, null, "member");
+    var rejected =
+        assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde enroll ada", "uday"));
+    assertTrue(rejected.reason().contains("admin role"));
+    assertTrue(rejected.reason().contains("sail enroll"));
+  }
+
+  @Test
+  void adminMintsEnrollmentTicketsForAnyFde() {
+    fdes.add("ada", null, null, "admin");
+    var authorized =
+        assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde enroll uday", "ada"));
+    assertEquals(List.of("fde", "enroll", "uday"), authorized.args());
   }
 
   @Test

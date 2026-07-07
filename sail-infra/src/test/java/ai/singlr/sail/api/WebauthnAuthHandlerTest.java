@@ -33,6 +33,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -73,11 +74,11 @@ class WebauthnAuthHandlerTest {
     startWith(
         ceremonies,
         ceremonies == null ? null : new FakeEnrollment(),
-        ceremonies == null ? null : ORIGIN);
+        ceremonies == null ? null : List.of(ORIGIN));
   }
 
   private void startWith(
-      PasskeyCeremonies ceremonies, EnrollmentTickets enrollment, String enrollOrigin)
+      PasskeyCeremonies ceremonies, EnrollmentTickets enrollment, List<String> origins)
       throws Exception {
     server =
         new SailApiServer(
@@ -87,8 +88,7 @@ class WebauthnAuthHandlerTest {
             tokenStore,
             new EventBus(),
             null,
-            new WebauthnAuthHandler(
-                ceremonies, enrollment, new TokenAuth(tokenStore), enrollOrigin));
+            new WebauthnAuthHandler(ceremonies, enrollment, new TokenAuth(tokenStore), origins));
     server.start();
   }
 
@@ -200,6 +200,20 @@ class WebauthnAuthHandlerTest {
     var response = post("/v1/auth/login/start", null, "{}");
     assertEquals(200, response.statusCode());
     assertEquals("wac_login", YamlUtil.parseMap(response.body()).get("challenge_id"));
+  }
+
+  @Test
+  void loginStartAdvertisesTheAllowedOrigins() throws Exception {
+    startWith(new FakeCeremonies());
+    var body = YamlUtil.parseMap(post("/v1/auth/login/start", null, "{}").body());
+    assertEquals(List.of(ORIGIN), body.get("origins"));
+  }
+
+  @Test
+  void loginStartOmitsOriginsWhenNoneConfigured() throws Exception {
+    startWith(new FakeCeremonies(), new FakeEnrollment(), null);
+    var body = YamlUtil.parseMap(post("/v1/auth/login/start", null, "{}").body());
+    assertFalse(body.containsKey("origins"));
   }
 
   @Test
@@ -417,7 +431,9 @@ class WebauthnAuthHandlerTest {
             new AuthSessionStore(db),
             new PendingChallengeStore(db));
     startWith(
-        service, new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)), ORIGIN);
+        service,
+        new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+        List.of(ORIGIN));
     var authenticator = new TestAuthenticator(RP_ID);
 
     var mint =

@@ -8,16 +8,13 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.RuntimeMode;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -30,6 +27,11 @@ import picocli.CommandLine.Spec;
  * loopback {@code /callback} as the redirect target and a one-time {@code state} nonce; the page
  * redirects the minted session token back to that loopback, which this command captures and writes
  * to the client config so subsequent {@code sail} calls authenticate as the FDE.
+ *
+ * <p>On a thin client (a box with a client config and no host config) there is no local origin to
+ * sign in at, so the command opens a supervised {@link SshTunnel} to the configured host and runs
+ * the ceremony at the canonical tunnel origin {@link SshTunnel#ORIGIN}, which the box must
+ * allowlist. {@code --origin} (a reverse-proxy URL) or {@code --no-tunnel} keeps the direct path.
  */
 @Command(
     name = "login",
@@ -40,9 +42,14 @@ public final class LoginCommand implements Runnable {
   @Option(
       names = "--origin",
       description =
-          "Control-plane origin, e.g. https://sail.example.dev. Defaults to the configured"
-              + " webauthn origin from host.yaml.")
+          "Control-plane origin, e.g. https://sail.example.dev. Defaults to an SSH tunnel to the"
+              + " configured client host, or to the webauthn origin from host.yaml on a box.")
   private String origin;
+
+  @Option(
+      names = "--no-tunnel",
+      description = "Do not open an SSH tunnel; sign in at the configured origin directly.")
+  private boolean noTunnel;
 
   @Option(
       names = "--timeout",
@@ -57,32 +64,50 @@ public final class LoginCommand implements Runnable {
     CliCommand.run(
         spec,
         () -> {
+          if (origin == null
+              && !noTunnel
+              && RuntimeMode.detect() instanceof RuntimeMode.Client client) {
+            tunneledCeremony(client.config().host());
+            return;
+          }
           var resolvedOrigin = origin != null ? origin : configuredOrigin();
           if (resolvedOrigin == null) {
             throw new IllegalArgumentException(
                 "No control-plane origin. Pass --origin or configure the webauthn block in"
                     + " host.yaml.");
           }
-          var state = randomState();
-          try (var callback = new LoopbackCallbackServer(state)) {
-            callback.start();
-            var url =
-                resolvedOrigin
-                    + "/login?redirect_uri="
-                    + URLEncoder.encode(callback.redirectUri(), StandardCharsets.UTF_8)
-                    + "&state="
-                    + state;
-            System.out.println("  Opening your browser to sign in:");
-            System.out.println(Ansi.AUTO.string("    @|cyan " + url + "|@"));
-            openBrowser(url);
-            System.out.println("  Waiting for sign-in to complete…");
-            var token = callback.awaitToken(Duration.ofSeconds(timeoutSeconds));
-            var configPath = SailPaths.clientConfigPath();
-            ServerConnectionConfig.saveSessionToken(token, configPath);
-            System.out.println(
-                Ansi.AUTO.string("  @|green ✓|@ Signed in. Session saved to " + configPath));
-          }
+          ceremony(resolvedOrigin, () -> {});
         });
+  }
+
+  private void tunneledCeremony(String host) throws Exception {
+    System.out.println("  Opening an SSH tunnel to " + host + "…");
+    try (var tunnel = SshTunnel.open(host)) {
+      OriginPreflight.requireCanonicalOrigin(host);
+      ceremony(SshTunnel.ORIGIN, tunnel::ensureAlive);
+    }
+  }
+
+  private void ceremony(String resolvedOrigin, Runnable liveness) throws Exception {
+    var state = LoopbackCallbackServer.newState();
+    try (var callback = new LoopbackCallbackServer(state)) {
+      callback.start();
+      var url =
+          resolvedOrigin
+              + "/login?redirect_uri="
+              + URLEncoder.encode(callback.redirectUri(), StandardCharsets.UTF_8)
+              + "&state="
+              + state;
+      System.out.println("  Opening your browser to sign in:");
+      System.out.println(Ansi.AUTO.string("    @|cyan " + url + "|@"));
+      Browser.open(url);
+      System.out.println("  Waiting for sign-in to complete…");
+      var token = callback.awaitToken(Duration.ofSeconds(timeoutSeconds), liveness);
+      var configPath = SailPaths.clientConfigPath();
+      ServerConnectionConfig.saveSessionToken(token, configPath);
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ Signed in. Session saved to " + configPath));
+    }
   }
 
   private static String configuredOrigin() throws IOException {
@@ -92,21 +117,5 @@ public final class LoginCommand implements Runnable {
     }
     var webauthn = HostYaml.fromMap(YamlUtil.parseFile(path)).webauthn();
     return webauthn.isConfigured() ? webauthn.origins().getFirst() : null;
-  }
-
-  private static void openBrowser(String url) {
-    var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-    var command = os.contains("mac") ? List.of("open", url) : List.of("xdg-open", url);
-    try {
-      new ProcessBuilder(command).start();
-    } catch (IOException ignored) {
-      System.out.println("  (Could not open a browser automatically — open the URL above.)");
-    }
-  }
-
-  private static String randomState() {
-    var bytes = new byte[16];
-    new SecureRandom().nextBytes(bytes);
-    return HexFormat.of().formatHex(bytes);
   }
 }

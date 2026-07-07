@@ -431,8 +431,9 @@ and `Authorizer`:
 1. **Terminal: SSH key to FDE.** Each registered key is pinned in the `sail` user's
    `authorized_keys` to `command="…/sail _gateway --fde <handle>",restrict`, with no shell
    and no forwarding. Command classification is default-deny: only `spec`, `agent`, and
-   `events` reach the loopback API, `fde` is admin-gated at the gateway (with one
-   self-service carve-out: any active FDE may `fde passkey list|rm` its own pinned handle),
+   `events` reach the loopback API, `fde` is admin-gated at the gateway (with two
+   self-service carve-outs: any active FDE may `fde passkey list|rm` and `fde enroll` its
+   own pinned handle, which is what lets `sail enroll` self-mint an enrollment ticket),
    `_sync` is admitted, and everything else is refused. A short-lived session is minted per invocation. `sail fde
    add <handle> --key "<pubkey>"` is the whole enrollment, and removing the key revokes SSH
    and API access in one step.
@@ -499,8 +500,10 @@ support Mast and direct-API clients:
 3. **Two remote-config models.** `ClientConfig` (SSH-forward through `host` and `user`) and
    `ServerConnectionConfig` (HTTP API through `server` and `token`) both read
    `~/.sail/config.yaml` with different keys. SSH-forwarding papers over this today, but a
-   direct-API client (Mast, or a future direct-mode CLI) needs them reconciled. A passkey
-   `sail login` session has no CLI consumer on a forwarding client yet.
+   direct-API client (Mast, or a future direct-mode CLI) needs them reconciled. `sail login`
+   and `sail enroll` now run their passkey ceremonies from a forwarding client over a
+   supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
+   session token still has no forwarded-command consumer.
 4. **Sync identity is the box hostname.** Replicas key off the hostname rather than a stable
    per-box id, so renames or collisions could confuse sync identity. A stable id is the
    robust fix. The risk is low for a known small fleet and worth doing before larger ones.
