@@ -189,7 +189,7 @@ public final class SailApiServer implements AutoCloseable {
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
-    server.createContext("/", new ApiRouter(operations, auth));
+    server.createContext("/", new ApiRouter(operations, auth, new AgentLogStreamer(auth)));
     if (passkeyHandler != null) {
       server.createContext("/v1/auth", passkeyHandler);
       var pages = new WebauthnPageHandler();

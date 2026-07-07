@@ -63,19 +63,38 @@ public final class ApiRouter implements HttpHandler {
   private final ApiOperations operations;
   private final ApiAuth auth;
   private final RateLimiter rateLimiter;
-
-  public ApiRouter(ApiOperations operations, ApiAuth auth) {
-    this(operations, auth, RateLimiter.perMinute(DEFAULT_PERMITS_PER_MINUTE, DEFAULT_BURST));
-  }
+  private final AgentLogStreamer agentStreamer;
 
   public ApiRouter(ApiOperations operations, ApiAuth auth, RateLimiter rateLimiter) {
+    this(operations, auth, rateLimiter, null);
+  }
+
+  public ApiRouter(ApiOperations operations, ApiAuth auth, AgentLogStreamer agentStreamer) {
+    this(
+        operations,
+        auth,
+        RateLimiter.perMinute(DEFAULT_PERMITS_PER_MINUTE, DEFAULT_BURST),
+        agentStreamer);
+  }
+
+  public ApiRouter(
+      ApiOperations operations,
+      ApiAuth auth,
+      RateLimiter rateLimiter,
+      AgentLogStreamer agentStreamer) {
     this.operations = operations;
     this.auth = auth;
     this.rateLimiter = rateLimiter;
+    this.agentStreamer = agentStreamer;
   }
 
   @Override
   public void handle(HttpExchange exchange) throws IOException {
+    if (agentStreamer != null
+        && AgentLogStreamer.isStreamPath(exchange.getRequestURI().getPath())) {
+      agentStreamer.handle(exchange);
+      return;
+    }
     try {
       var response = route(exchange);
       write(exchange, response);

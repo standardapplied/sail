@@ -6,9 +6,16 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class AgentLogStreamerTest {
@@ -75,5 +82,59 @@ class AgentLogStreamerTest {
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
+  }
+
+  @Test
+  void isStreamPathMatchesCanonicalPath() {
+    assertTrue(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/stream"));
+  }
+
+  @Test
+  void isStreamPathRejectsOtherAgentSubResources() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/log"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent"));
+  }
+
+  @Test
+  void isStreamPathRejectsWrongPrefix() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/backend/agent/stream"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
+  }
+
+  @Test
+  void pumpTerminatesWhenTheTailProcessExitsInsteadOfHeartbeatingForever() {
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () -> {
+          var process = new ProcessBuilder("sh", "-c", "printf 'first\\nsecond\\n'").start();
+          var reader =
+              new BufferedReader(
+                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+          var out = new ByteArrayOutputStream();
+
+          AgentLogStreamer.pump(process, reader, out, 0);
+
+          var body = out.toString(StandardCharsets.UTF_8);
+          assertTrue(body.contains("first"), body);
+          assertTrue(body.contains("second"), body);
+          assertFalse(process.isAlive());
+        });
+  }
+
+  @Test
+  void pumpStopsPromptlyWhenAnAlreadyDeadProcessHasNoOutput() {
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () -> {
+          var process = new ProcessBuilder("sh", "-c", "true").start();
+          process.waitFor();
+          var reader =
+              new BufferedReader(
+                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+
+          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0);
+
+          assertFalse(process.isAlive());
+        });
   }
 }
