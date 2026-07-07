@@ -17,8 +17,11 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -322,6 +325,118 @@ class GlobalSpecOperationsTest {
   void boardReturnsSummary() {
     ops.create(createReq(Map.of("status", "pending")));
     assertNotNull(ops.board("manatee").board());
+  }
+
+  @Test
+  void updateStatusChangePublishesSpecStatusChangedWithFromTo() throws Exception {
+    ops.create(createReq(Map.of("status", "pending")));
+    var event =
+        captureOne(
+            bus ->
+                bus.update(
+                    "auth",
+                    SpecUpdateRequest.fromMap(Map.of("status", "in_progress"))
+                        .withUpdatedBy("nova")));
+    assertEquals(Event.WellKnownTypes.SPEC_STATUS_CHANGED, event.type());
+    assertEquals("manatee", event.project());
+    assertEquals("auth", event.spec());
+    assertEquals("nova", event.agent());
+    assertEquals("pending", event.data().get("from"));
+    assertEquals("in_progress", event.data().get("to"));
+  }
+
+  @Test
+  void updateNonStatusChangePublishesBoardUpdatedAttributedToActor() throws Exception {
+    ops.create(createReq(Map.of("status", "pending")));
+    var event =
+        captureOne(
+            bus ->
+                bus.update(
+                    "auth",
+                    SpecUpdateRequest.fromMap(Map.of("title", "Renamed")).withUpdatedBy("nova")));
+    assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
+    assertEquals("auth", event.spec());
+    assertEquals("nova", event.agent());
+  }
+
+  @Test
+  void updateWithoutActorFallsBackToSailAgent() throws Exception {
+    ops.create(createReq(Map.of("status", "pending")));
+    var event =
+        captureOne(
+            bus -> bus.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "Renamed"))));
+    assertEquals(Event.SAIL_AGENT, event.agent());
+  }
+
+  @Test
+  void createPublishesBoardUpdatedAttributedToAuthor() throws Exception {
+    var event = captureOne(bus -> bus.create(createReq(Map.of()).withCreatedBy("uday")));
+    assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
+    assertEquals("manatee", event.project());
+    assertEquals("auth", event.spec());
+    assertEquals("uday", event.agent());
+  }
+
+  @Test
+  void deletePublishesBoardUpdatedForTheSpecProject() throws Exception {
+    ops.create(createReq(Map.of()));
+    var event = captureOne(bus -> bus.delete("auth"));
+    assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
+    assertEquals("manatee", event.project());
+    assertEquals("auth", event.spec());
+    assertEquals(Event.SAIL_AGENT, event.agent());
+  }
+
+  @Test
+  void setContentPublishesBoardUpdated() throws Exception {
+    ops.create(createReq(Map.of()));
+    var event =
+        captureOne(
+            bus -> bus.setContent("auth", SpecContentRequest.fromMap(Map.of("body", "Body"))));
+    assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
+    assertEquals("auth", event.spec());
+  }
+
+  @Test
+  void restorePublishesBoardUpdated() throws Exception {
+    ops.create(createReq(Map.of()));
+    ops.setContent("auth", new SpecContentRequest("good", "good plan"));
+    var goodRev = ops.history("auth").revisions().getLast().rev();
+    ops.setContent("auth", new SpecContentRequest("clobbered", "clobbered"));
+    var event = captureOne(bus -> bus.restore("auth", new SpecRestoreRequest(goodRev)));
+    assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
+    assertEquals("auth", event.spec());
+  }
+
+  private Event captureOne(java.util.function.Consumer<GlobalSpecOperations> mutation)
+      throws Exception {
+    try (var bus = new EventBus()) {
+      var seen = new ArrayList<Event>();
+      var latch = new CountDownLatch(1);
+      bus.subscribe(BusTesting.latching(capture(seen), latch));
+      mutation.accept(new GlobalSpecOperations(specStore, reviewStore, bus));
+      BusTesting.awaitDelivery(latch);
+      return seen.getFirst();
+    }
+  }
+
+  private static EventSubscriber capture(List<Event> sink) {
+    return new EventSubscriber() {
+      @Override
+      public String name() {
+        return "capture";
+      }
+
+      @Override
+      public Predicate<Event> filter() {
+        return EventSubscriber.all();
+      }
+
+      @Override
+      public void onEvent(Event event) {
+        sink.add(event);
+      }
+    };
   }
 
   @Test
