@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -25,8 +26,10 @@ import java.util.Set;
  *   <li>{@link #API_COMMANDS} run for every active FDE — they talk to the loopback API, where the
  *       FDE's role decides what each request may do.
  *   <li>{@link #ADMIN_COMMANDS} are database-direct, so no downstream check exists; the gateway
- *       itself requires the {@code admin} role — except {@code fde passkey list|rm} on the caller's
- *       own pinned handle, which any active FDE may run.
+ *       itself requires the {@code admin} role — except {@code fde passkey list|rm} and {@code fde
+ *       enroll} on the caller's own pinned handle, which any active FDE may run. A bare {@code fde
+ *       enroll} is pinned to the caller's handle first, so a thin client can self-enroll without
+ *       knowing it.
  *   <li>Everything else ({@code project}, {@code host}, {@code server}, {@code migrate}, …) runs
  *       with host privileges the {@code sail} user must never have, and is refused.
  * </ul>
@@ -77,6 +80,7 @@ public final class SshGateway {
     if (tokens.isEmpty()) {
       return new Rejected("No 'sail' subcommand supplied.");
     }
+    tokens = withSelfEnrollHandle(tokens, fdeHandle);
     var subcommand = tokens.getFirst();
     if (!API_COMMANDS.contains(subcommand)
         && !ADMIN_COMMANDS.contains(subcommand)
@@ -93,13 +97,9 @@ public final class SshGateway {
     }
     if (ADMIN_COMMANDS.contains(subcommand)
         && !"admin".equals(fde.get().role())
-        && !isOwnPasskeyCommand(tokens, fdeHandle)) {
-      return new Rejected(
-          isPasskeyCommand(tokens)
-              ? "Managing another FDE's passkeys requires the admin role. You may manage your"
-                  + " own: sail fde passkey list "
-                  + fdeHandle
-              : "'" + subcommand + "' requires the admin role.");
+        && !isOwnPasskeyCommand(tokens, fdeHandle)
+        && !isOwnEnrollCommand(tokens, fdeHandle)) {
+      return new Rejected(adminRequiredReason(tokens, fdeHandle, subcommand));
     }
     var session = sessions.create(fde.get().id(), SESSION_TTL);
     return new Authorized(List.copyOf(tokens), session.token());
@@ -121,5 +121,47 @@ public final class SshGateway {
 
   private static boolean isPasskeyCommand(List<String> tokens) {
     return tokens.size() >= 2 && tokens.get(0).equals("fde") && tokens.get(1).equals("passkey");
+  }
+
+  /**
+   * Pins a bare {@code fde enroll} (no target handle) to the caller. A thin client cannot know its
+   * own handle — the handle bound to the calling key on the {@code authorized_keys} line is the
+   * identity the gateway trusts — so self-enrollment sends {@code fde enroll} and the gateway fills
+   * in the caller before authorization runs.
+   */
+  private static List<String> withSelfEnrollHandle(List<String> tokens, String fdeHandle) {
+    if (isEnrollCommand(tokens) && (tokens.size() == 2 || tokens.get(2).startsWith("-"))) {
+      var pinned = new ArrayList<>(tokens);
+      pinned.add(2, fdeHandle);
+      return List.copyOf(pinned);
+    }
+    return tokens;
+  }
+
+  /**
+   * The second self-service carve-out: an FDE may mint an enrollment ticket for itself ({@code fde
+   * enroll <own-handle>}), compared against the pinned handle exactly like {@link
+   * #isOwnPasskeyCommand}. Minting for anyone else stays admin-only.
+   */
+  private static boolean isOwnEnrollCommand(List<String> tokens, String fdeHandle) {
+    return isEnrollCommand(tokens) && tokens.size() >= 3 && tokens.get(2).equals(fdeHandle);
+  }
+
+  private static boolean isEnrollCommand(List<String> tokens) {
+    return tokens.size() >= 2 && tokens.get(0).equals("fde") && tokens.get(1).equals("enroll");
+  }
+
+  private static String adminRequiredReason(
+      List<String> tokens, String fdeHandle, String subcommand) {
+    if (isPasskeyCommand(tokens)) {
+      return "Managing another FDE's passkeys requires the admin role. You may manage your"
+          + " own: sail fde passkey list "
+          + fdeHandle;
+    }
+    if (isEnrollCommand(tokens)) {
+      return "Minting an enrollment ticket for another FDE requires the admin role."
+          + " Enroll yourself with: sail enroll";
+    }
+    return "'" + subcommand + "' requires the admin role.";
   }
 }

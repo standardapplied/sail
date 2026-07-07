@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -31,6 +32,10 @@ import java.util.Objects;
  * fields, delegates to {@link PasskeyCeremonies}, and maps {@link PasskeyException} to an HTTP
  * status. When no relying party is configured ({@code ceremonies} is null) every route returns
  * {@link ErrorCode#PASSKEY_NOT_CONFIGURED} so the feature stays cleanly disabled.
+ *
+ * <p>{@code /login/start} additionally advertises the allowed WebAuthn {@code origins} — they are
+ * public by nature (they are the URLs a browser signs in at), and a tunneled CLI preflights them to
+ * fail with configuration guidance instead of a doomed browser ceremony.
  */
 public final class WebauthnAuthHandler implements HttpHandler {
 
@@ -41,17 +46,19 @@ public final class WebauthnAuthHandler implements HttpHandler {
   private final PasskeyCeremonies ceremonies;
   private final EnrollmentTickets enrollment;
   private final ApiAuth auth;
+  private final List<String> origins;
   private final String enrollOrigin;
 
   public WebauthnAuthHandler(
       PasskeyCeremonies ceremonies,
       EnrollmentTickets enrollment,
       ApiAuth auth,
-      String enrollOrigin) {
+      List<String> origins) {
     this.ceremonies = ceremonies;
     this.enrollment = enrollment;
     this.auth = Objects.requireNonNull(auth, "auth");
-    this.enrollOrigin = enrollOrigin;
+    this.origins = origins == null ? List.of() : List.copyOf(origins);
+    this.enrollOrigin = this.origins.isEmpty() ? null : this.origins.getFirst();
   }
 
   @Override
@@ -168,7 +175,11 @@ public final class WebauthnAuthHandler implements HttpHandler {
 
   private ApiResponse loginStart(HttpExchange exchange) throws IOException {
     JsonBody.readMap(exchange);
-    return ApiResponse.ok(ceremonyBody(ceremonies.startLogin()));
+    var body = ceremonyBody(ceremonies.startLogin());
+    if (!origins.isEmpty()) {
+      body.put("origins", origins);
+    }
+    return ApiResponse.ok(body);
   }
 
   private ApiResponse loginFinish(HttpExchange exchange) throws IOException {

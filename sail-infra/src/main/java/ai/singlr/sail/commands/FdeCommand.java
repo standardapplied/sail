@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.auth.EnrollmentService;
+import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -22,7 +23,9 @@ import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
@@ -311,6 +314,9 @@ public final class FdeCommand implements Runnable {
     @Parameters(index = "0", description = "FDE handle to enroll (must already exist).")
     private String handle;
 
+    @Option(names = "--json", description = "Print the ticket as JSON.")
+    private boolean json;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -322,6 +328,10 @@ public final class FdeCommand implements Runnable {
               var ticket =
                   new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db))
                       .issue(handle);
+              if (json) {
+                System.out.println(YamlUtil.dumpJson(ticketJson(ticket, enrollOrigin())));
+                return;
+              }
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|green ✓|@ Enrollment ticket for "
@@ -345,6 +355,17 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
+    }
+
+    static Map<String, Object> ticketJson(EnrollmentTickets.Ticket ticket, String origin) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("ticket", ticket.ticket());
+      map.put("fde", ticket.fdeHandle());
+      map.put("expires_at", ticket.expiresAt());
+      if (origin != null) {
+        map.put("enroll_url", origin + "/enroll?ticket=" + ticket.ticket());
+      }
+      return map;
     }
 
     private static String enrollOrigin() throws Exception {

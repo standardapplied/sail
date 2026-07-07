@@ -201,10 +201,12 @@ public final class ServerStartCommand implements Runnable {
     var passkeyService = configured ? buildPasskeyService(db, webauthn) : null;
     var enrollment =
         configured ? new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)) : null;
-    var enrollOrigin = configured ? webauthn.origins().getFirst() : null;
     var passkeyHandler =
         new WebauthnAuthHandler(
-            passkeyService, enrollment, new TokenAuth(tokenStore), enrollOrigin);
+            passkeyService,
+            enrollment,
+            new TokenAuth(tokenStore),
+            configured ? webauthn.origins() : null);
     var auth =
         new SessionAwareAuth(new AuthSessionStore(db), new FdeStore(db), new TokenAuth(tokenStore));
 
