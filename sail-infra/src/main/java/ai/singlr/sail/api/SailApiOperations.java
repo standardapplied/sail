@@ -194,7 +194,7 @@ public final class SailApiOperations implements ApiOperations {
     this.sessionStore = sessionStore;
     this.projectStore = projectStore;
     this.connectEnvironment = connectEnvironment;
-    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore);
+    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
   }
 

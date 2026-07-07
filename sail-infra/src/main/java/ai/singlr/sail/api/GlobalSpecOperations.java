@@ -5,11 +5,14 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -22,14 +25,20 @@ final class GlobalSpecOperations {
 
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
+  private final EventBus eventBus;
 
   GlobalSpecOperations(SpecStore specStore) {
-    this(specStore, null);
+    this(specStore, null, null);
   }
 
   GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore) {
+    this(specStore, reviewStore, null);
+  }
+
+  GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore, EventBus eventBus) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
+    this.eventBus = eventBus;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -94,6 +103,7 @@ final class GlobalSpecOperations {
           Objects.requireNonNullElse(request.plan(), ""));
     }
     var created = specStore.findById(request.id()).orElseThrow();
+    publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
     return new GlobalSpecCreatedResponse(GlobalSpecView.from(created));
   }
 
@@ -128,6 +138,16 @@ final class GlobalSpecOperations {
       reviewStore.resolveSourceFindings(specId);
     }
     var result = specStore.findById(specId).orElseThrow();
+    if (result.status() != existing.status()) {
+      publishStatusChanged(
+          result.project(),
+          specId,
+          existing.status(),
+          result.status(),
+          principal(request.updatedBy()));
+    } else {
+      publishBoardUpdated(result.project(), specId, principal(request.updatedBy()));
+    }
     return new GlobalSpecUpdatedResponse(GlobalSpecView.from(result));
   }
 
@@ -153,8 +173,9 @@ final class GlobalSpecOperations {
 
   GlobalSpecDeletedResponse delete(String specId) {
     requireStore();
-    findOrThrow(specId);
+    var existing = findOrThrow(specId);
     specStore.delete(specId);
+    publishBoardUpdated(existing.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecDeletedResponse(specId);
   }
 
@@ -167,12 +188,13 @@ final class GlobalSpecOperations {
 
   GlobalSpecContentResponse setContent(String specId, SpecContentRequest request) {
     requireStore();
-    findOrThrow(specId);
+    var existing = findOrThrow(specId);
     specStore.setContent(
         specId,
         Objects.requireNonNullElse(request.body(), ""),
         Objects.requireNonNullElse(request.plan(), ""));
     var content = specStore.getContent(specId).orElseThrow();
+    publishBoardUpdated(existing.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
@@ -217,7 +239,36 @@ final class GlobalSpecOperations {
       throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
     }
     var row = specStore.findById(specId).orElseThrow();
+    publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecRestoredResponse(GlobalSpecView.from(row), request.rev());
+  }
+
+  private void publishStatusChanged(
+      String project, String specId, SpecStatus from, SpecStatus to, String principal) {
+    if (eventBus == null) {
+      return;
+    }
+    eventBus.publish(
+        Event.of(
+            project,
+            specId,
+            Event.WellKnownTypes.SPEC_STATUS_CHANGED,
+            principal,
+            HostInfo.hostname(),
+            Map.of("from", from.wire(), "to", to.wire())));
+  }
+
+  private void publishBoardUpdated(String project, String specId, String principal) {
+    if (eventBus == null) {
+      return;
+    }
+    eventBus.publish(
+        Event.of(
+            project, specId, Event.WellKnownTypes.BOARD_UPDATED, principal, HostInfo.hostname()));
+  }
+
+  private static String principal(String actor) {
+    return Strings.isNotBlank(actor) ? actor : Event.SAIL_AGENT;
   }
 
   private SpecStore.SpecRow findOrThrow(String specId) {
