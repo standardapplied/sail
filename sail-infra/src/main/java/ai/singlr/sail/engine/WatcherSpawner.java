@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.SystemdServiceInstaller.Mode;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,20 +18,30 @@ import java.util.Optional;
  * Spawns the guardrail watcher ({@code sail agent watch}) detached from the caller, as a systemd
  * transient unit named {@code sail-watch-<project>} — the same mechanism that keeps the agent
  * itself alive, so the watcher is immune to Ctrl-C on the dispatch stream, SSH hangup, and daemon
- * restarts alike. The unit name is deterministic and one agent runs per project, so liveness is
- * probed ({@link #unitActive}) rather than recorded, and spawning against an already-active unit
- * adopts it instead of stacking a second watcher.
+ * restarts alike. Scope ladder: the caller's user manager first, the system scope second, and —
+ * only when a {@link ProcessSpawner} fallback is supplied — a plain detached process last, loudly
+ * marked degraded because no unit name can address it.
  *
- * <p>Scope ladder: a user-manager unit first, a system-scope unit second, and — only when a {@link
- * ProcessSpawner} fallback is supplied — a plain detached process last, loudly marked degraded
- * because nothing can re-arm or address it. Unit-only callers (the re-armer) pass no fallback, so a
- * doubled watcher is unrepresentable on that path. The unit needs no explicit teardown: the watcher
- * exits on its own after observing the agent unit stop, and {@code --collect} garbage-collects the
+ * <p>Two spawn intents with different collision semantics. {@link #spawn} serves dispatch: a fresh
+ * session must get a fresh watcher whose deadline anchors to it, so any unit still active from the
+ * previous session is stopped and replaced — an adopted stale watcher would enforce the old
+ * session's nearly-spent deadline against a brand-new agent. {@link #spawnUnit} serves the
+ * re-armer: it only runs against a session already verified uncovered, so an active unit means a
+ * concurrent pass won the race and is adopted, never doubled.
+ *
+ * <p>{@code Type=exec} makes exec-phase failures (unopenable log path, missing binary) fail the
+ * rung visibly instead of reporting a unit that died at birth, and the {@code SAIL_*} environment a
+ * shell-configured deployment relies on is forwarded explicitly — a transient unit starts from
+ * systemd's clean environment, not the dispatcher's. The unit needs no teardown of its own: the
+ * watcher exits after observing the agent unit stop, and {@code --collect} garbage-collects the
  * unit whatever its exit status.
  */
 public final class WatcherSpawner {
 
   static final String UNIT_PREFIX = "sail-watch-";
+
+  private static final List<String> FORWARDED_ENV =
+      List.of("SAIL_TOKEN", "SAIL_TOKEN_FILE", "SAIL_SERVER", "SAIL_DATA_DIR");
 
   /** How a watcher ended up running. */
   public sealed interface Spawned permits Unit, Fallback {}
@@ -48,9 +60,6 @@ public final class WatcherSpawner {
   public interface ProcessSpawner {
     long spawn(List<String> command, Path logPath) throws IOException;
   }
-
-  private static final String USER_SCOPE = "user";
-  private static final String SYSTEM_SCOPE = "system";
 
   private final ShellExec shell;
   private final ProcessSpawner fallback;
@@ -86,15 +95,20 @@ public final class WatcherSpawner {
   }
 
   /**
-   * Spawns the project's watcher: adopt an active unit, else launch one, else fall back to a
-   * detached process when a fallback was supplied. Throws only when every rung failed — the
-   * caller's dispatch flow treats that as a launch failure.
+   * Spawns a fresh watcher for a fresh session: any unit still active from a previous session is
+   * stopped first — never adopted, because its wall-clock deadline anchors to the old session and
+   * would be enforced against the new agent. Falls back to a detached process when no systemd scope
+   * accepts and a fallback was supplied; throws when every rung failed or the thread was
+   * interrupted mid-ladder, which the dispatch flow treats as a launch failure.
    */
   public Spawned spawn(String project, Path sailYaml, Path watchLog) throws IOException {
-    var unit = spawnUnit(project, sailYaml, watchLog);
+    stopExisting(project);
+    ensureLogDirectory(watchLog);
+    var unit = launch(project, watchCommand(project, sailYaml), watchLog);
     if (unit.isPresent()) {
       return unit.get();
     }
+    requireNotInterrupted(project);
     if (fallback == null) {
       throw new IOException(
           "No systemd scope accepted unit " + unitName(project) + " and no fallback is allowed.");
@@ -102,7 +116,6 @@ public final class WatcherSpawner {
     var command = new ArrayList<String>();
     command.add("nohup");
     command.addAll(watchCommand(project, sailYaml));
-    ensureLogDirectory(watchLog);
     var pid = fallback.spawn(command, watchLog);
     System.err.println(
         "  [watch] degraded: no systemd scope accepted unit "
@@ -114,37 +127,71 @@ public final class WatcherSpawner {
   }
 
   /**
-   * Unit-or-nothing spawn: adopts the active unit when one covers the project, otherwise tries the
-   * user then system scope. Empty means no systemd scope is available — never a plain process, so
-   * callers that must not risk a doubled watcher use this path.
+   * Unit-or-nothing spawn for the re-armer, which has already verified the session is uncovered: an
+   * active unit means a concurrent pass won the race and is adopted. Never falls back to a plain
+   * process. Empty means no systemd scope is available.
    */
-  public Optional<Unit> spawnUnit(String project, Path sailYaml, Path watchLog) {
+  public Optional<Unit> spawnUnit(String project, Path sailYaml, Path watchLog) throws IOException {
     return spawnUnit(project, watchCommand(project, sailYaml), watchLog);
   }
 
-  Optional<Unit> spawnUnit(String project, List<String> argv, Path watchLog) {
+  Optional<Unit> spawnUnit(String project, List<String> argv, Path watchLog) throws IOException {
     var adopted = activeScope(project);
     if (adopted.isPresent()) {
-      return Optional.of(new Unit(unitName(project), adopted.get(), true));
+      return Optional.of(new Unit(unitName(project), scopeName(adopted.get()), true));
     }
     ensureLogDirectory(watchLog);
-    for (var scope : List.of(USER_SCOPE, SYSTEM_SCOPE)) {
-      if (execOk(systemdRun(project, argv, watchLog, scope))) {
-        return Optional.of(new Unit(unitName(project), scope, false));
-      }
+    var launched = launch(project, argv, watchLog);
+    if (launched.isPresent()) {
+      return launched;
     }
-    return activeScope(project).map(scope -> new Unit(unitName(project), scope, true));
+    return activeScope(project).map(mode -> new Unit(unitName(project), scopeName(mode), true));
   }
 
-  /** Whether a watcher unit for the project is active in either systemd scope. */
+  /** Whether a watcher unit for the project is active in either scope of this systemd view. */
   public boolean unitActive(String project) {
     return activeScope(project).isPresent();
   }
 
-  private Optional<String> activeScope(String project) {
-    for (var scope : List.of(USER_SCOPE, SYSTEM_SCOPE)) {
-      if (execOk(systemctlIsActive(project, scope))) {
-        return Optional.of(scope);
+  /**
+   * Whether any {@code sail agent watch} process for the project is running on this host —
+   * unit-spawned in any user's manager, fallback-spawned, or run by hand. Process visibility is
+   * global where unit visibility is scoped to one systemd view, so this is the coverage probe the
+   * re-armer trusts: a watcher it cannot address is still a watcher it must not double.
+   */
+  public boolean watcherProcessRunning(String project) {
+    return execOk(List.of("pgrep", "-f", "--", "agent watch " + project + " -f "));
+  }
+
+  private Optional<Unit> launch(String project, List<String> argv, Path watchLog) {
+    for (var mode : Mode.values()) {
+      if (execOk(systemdRun(project, argv, watchLog, mode))) {
+        return Optional.of(new Unit(unitName(project), scopeName(mode), false));
+      }
+    }
+    return Optional.empty();
+  }
+
+  private void stopExisting(String project) {
+    for (var mode : Mode.values()) {
+      if (execOk(
+          SystemdServiceInstaller.systemctl(mode, "--quiet", "is-active", unitName(project)))) {
+        execOk(SystemdServiceInstaller.systemctl(mode, "stop", unitName(project)));
+        System.err.println(
+            "  [watch] stopped stale watcher unit "
+                + unitName(project)
+                + " ("
+                + scopeName(mode)
+                + " scope) from a previous session before arming the new one");
+      }
+    }
+  }
+
+  private Optional<Mode> activeScope(String project) {
+    for (var mode : Mode.values()) {
+      if (execOk(
+          SystemdServiceInstaller.systemctl(mode, "--quiet", "is-active", unitName(project)))) {
+        return Optional.of(mode);
       }
     }
     return Optional.empty();
@@ -153,28 +200,29 @@ public final class WatcherSpawner {
   private boolean execOk(List<String> command) {
     try {
       return shell.exec(command).ok();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
     } catch (Exception e) {
       return false;
     }
   }
 
-  private static List<String> systemctlIsActive(String project, String scope) {
-    var command = new ArrayList<String>();
-    command.add("systemctl");
-    if (USER_SCOPE.equals(scope)) {
-      command.add("--user");
+  private static void requireNotInterrupted(String project) throws IOException {
+    if (Thread.currentThread().isInterrupted()) {
+      throw new IOException(
+          "Interrupted while spawning watcher for " + project + "; not falling back.");
     }
-    command.add("--quiet");
-    command.add("is-active");
-    command.add(unitName(project));
-    return command;
   }
 
-  private static List<String> systemdRun(
-      String project, List<String> argv, Path watchLog, String scope) {
+  private static String scopeName(Mode mode) {
+    return mode == Mode.USER ? "user" : "system";
+  }
+
+  private List<String> systemdRun(String project, List<String> argv, Path watchLog, Mode mode) {
     var command = new ArrayList<String>();
     command.add("systemd-run");
-    if (USER_SCOPE.equals(scope)) {
+    if (mode == Mode.USER) {
       command.add("--user");
     }
     command.add("--collect");
@@ -182,18 +230,23 @@ public final class WatcherSpawner {
     command.add("--unit");
     command.add(unitName(project));
     command.add("--property");
+    command.add("Type=exec");
+    command.add("--property");
     command.add("StandardOutput=append:" + watchLog.toAbsolutePath());
     command.add("--property");
     command.add("StandardError=append:" + watchLog.toAbsolutePath());
+    for (var name : FORWARDED_ENV) {
+      var value = System.getenv(name);
+      if (Strings.isNotBlank(value)) {
+        command.add("--setenv");
+        command.add(name + "=" + value);
+      }
+    }
     command.addAll(argv);
     return command;
   }
 
-  private static void ensureLogDirectory(Path watchLog) {
-    try {
-      Files.createDirectories(watchLog.toAbsolutePath().getParent());
-    } catch (IOException e) {
-      System.err.println("  [watch] could not create log directory: " + e.getMessage());
-    }
+  private static void ensureLogDirectory(Path watchLog) throws IOException {
+    Files.createDirectories(watchLog.toAbsolutePath().getParent());
   }
 }

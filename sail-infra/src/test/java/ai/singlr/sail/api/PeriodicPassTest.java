@@ -40,20 +40,23 @@ class PeriodicPassTest {
   }
 
   @Test
-  void aThrowingPassIsLoggedAndDoesNotPoisonLaterRuns() {
+  void aThrowingPassEvenAnErrorIsLoggedAndDoesNotPoisonLaterRuns() {
     var runs = new AtomicInteger();
     try (var pass =
         new PeriodicPass(
             "test",
             () -> {
-              if (runs.incrementAndGet() == 1) {
-                throw new IllegalStateException("boom");
+              switch (runs.incrementAndGet()) {
+                case 1 -> throw new IllegalStateException("boom");
+                case 2 -> throw new AssertionError("an Error must not cancel the schedule");
+                default -> {}
               }
             })) {
 
       assertTrue(pass.runIfIdle());
       assertTrue(pass.runIfIdle());
-      assertEquals(2, runs.get());
+      assertTrue(pass.runIfIdle());
+      assertEquals(3, runs.get());
     }
   }
 

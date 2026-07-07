@@ -224,17 +224,18 @@ public final class ServerStartCommand implements Runnable {
     var reconciler =
         new StuckSpecReconciler(
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
-    var unitProbe = MissedStopReconciler.systemdUnitProbe(new ShellExecutor(false));
+    var reconcileShell = new ShellExecutor(false);
+    var unitProbe = MissedStopReconciler.systemdUnitProbe(reconcileShell);
     var missedStops =
         new MissedStopReconciler(
             specStore, sessionStore, eventStore, bus, unitProbe, DateTimeUtils::now);
-    var watcherSpawner = new WatcherSpawner(new ShellExecutor(false), null);
+    var watcherSpawner = new WatcherSpawner(reconcileShell, null);
     var rearmer =
         new WatcherRearmer(
             specStore,
             sessionStore,
             unitProbe,
-            watcherSpawner::unitActive,
+            watcherSpawner::watcherProcessRunning,
             WatcherRearmer.livingProcess(),
             operations::relaunchWatcher);
     shutdown

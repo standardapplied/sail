@@ -13,9 +13,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * One recurring maintenance pass on its own single-threaded scheduler: passes never overlap (a slow
- * pass makes the next tick a no-op rather than stacking), a throwing pass is logged and never
- * cancels the schedule, and {@link #close()} stops the timer. Shared by the reconciliation loops so
- * their scheduling discipline cannot drift apart.
+ * pass makes the next tick a no-op rather than stacking), a throwing pass — {@link Throwable}
+ * included, since an escaped {@link Error} would silently cancel every future tick — is logged with
+ * its stack and never cancels the schedule, and {@link #close()} stops the timer after waiting out
+ * any in-flight pass, so shutdown never interrupts a half-applied reconciliation. Shared by the
+ * reconciliation loops so their scheduling discipline cannot drift apart.
  */
 final class PeriodicPass implements AutoCloseable {
 
@@ -44,8 +46,9 @@ final class PeriodicPass implements AutoCloseable {
     }
     try {
       pass.run();
-    } catch (RuntimeException e) {
-      System.err.println("  [" + name + "] pass failed: " + e.getMessage());
+    } catch (Throwable t) {
+      System.err.println("  [" + name + "] pass failed: " + t);
+      t.printStackTrace();
     } finally {
       running.set(false);
     }
@@ -54,6 +57,6 @@ final class PeriodicPass implements AutoCloseable {
 
   @Override
   public void close() {
-    scheduler.shutdownNow();
+    scheduler.close();
   }
 }

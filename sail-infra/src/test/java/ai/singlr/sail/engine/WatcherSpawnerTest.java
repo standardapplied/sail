@@ -19,8 +19,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -67,13 +69,28 @@ class WatcherSpawnerTest {
     assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", false), unit);
     assertEquals(
         String.join(
-            " ",
-            "systemd-run --user --collect --quiet --unit sail-watch-acme",
-            "--property StandardOutput=append:" + log().toAbsolutePath(),
-            "--property StandardError=append:" + log().toAbsolutePath(),
-            SailPaths.binaryPath().toString(),
-            "agent watch acme -f " + yaml().toAbsolutePath()),
+                " ",
+                "systemd-run --user --collect --quiet --unit sail-watch-acme",
+                "--property Type=exec",
+                "--property StandardOutput=append:" + log().toAbsolutePath(),
+                "--property StandardError=append:" + log().toAbsolutePath(),
+                forwardedEnvArgs(),
+                SailPaths.binaryPath().toString(),
+                "agent watch acme -f " + yaml().toAbsolutePath())
+            .replace("  ", " "),
         shell.invocationsMatching("systemd-run").getFirst());
+  }
+
+  private static String forwardedEnvArgs() {
+    var parts = new ArrayList<String>();
+    for (var name : List.of("SAIL_TOKEN", "SAIL_TOKEN_FILE", "SAIL_SERVER", "SAIL_DATA_DIR")) {
+      var value = System.getenv(name);
+      if (value != null && !value.isBlank()) {
+        parts.add("--setenv");
+        parts.add(name + "=" + value);
+      }
+    }
+    return String.join(" ", parts);
   }
 
   @Test
@@ -119,18 +136,53 @@ class WatcherSpawnerTest {
   }
 
   @Test
-  void spawnAdoptsAnAlreadyActiveUnitInsteadOfStackingASecondWatcher() throws Exception {
-    var shell = new FakeShell().on("--quiet is-active sail-watch-acme", ok());
+  void spawnStopsAStaleUnitAndLaunchesFreshInsteadOfAdoptingItsOldDeadline() throws Exception {
+    var shell =
+        new FakeShell()
+            .onSequence("systemctl --user --quiet is-active", ok(), fail())
+            .on("systemctl --user stop sail-watch-acme", ok())
+            .on("systemd-run --user", ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
     var spawned = spawner.spawn("acme", yaml(), log());
 
-    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", true), spawned);
+    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", false), spawned);
+    assertEquals(1, shell.invocationsMatching("stop sail-watch-acme").size());
+    assertEquals(1, shell.invocationsMatching("systemd-run").size());
+  }
+
+  @Test
+  void spawnUnitAdoptsAnAlreadyActiveUnitInsteadOfStackingASecondWatcher() throws Exception {
+    var shell = new FakeShell().on("--quiet is-active sail-watch-acme", ok());
+    var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
+
+    var spawned = spawner.spawnUnit("acme", yaml(), log());
+
+    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", true), spawned.orElseThrow());
     assertTrue(shell.invocationsMatching("systemd-run").isEmpty());
   }
 
   @Test
-  void spawnAdoptsTheUnitALostRaceJustLaunched() {
+  void anInterruptMidLadderAbortsInsteadOfCascadingToTheFallback() {
+    var shell = new FakeShell().interruptOn("systemd-run");
+    var spawner = new WatcherSpawner(shell, (command, logPath) -> 4242L);
+
+    var error = assertThrows(IOException.class, () -> spawner.spawn("acme", yaml(), log()));
+
+    assertTrue(error.getMessage().contains("Interrupted"));
+    assertTrue(Thread.interrupted(), "interrupt flag must be restored");
+  }
+
+  @Test
+  void watcherProcessRunningProbesByProcessPattern() {
+    var shell = new FakeShell().on("pgrep -f -- agent watch acme -f ", ok());
+
+    assertTrue(new WatcherSpawner(shell, null).watcherProcessRunning("acme"));
+    assertFalse(new WatcherSpawner(new FakeShell(), null).watcherProcessRunning("acme"));
+  }
+
+  @Test
+  void spawnAdoptsTheUnitALostRaceJustLaunched() throws Exception {
     var shell =
         new FakeShell()
             .onSequence("systemctl --user --quiet is-active", fail(), ok())
@@ -144,7 +196,7 @@ class WatcherSpawnerTest {
   }
 
   @Test
-  void spawnUnitIsEmptyWhenNoSystemdScopeExists() {
+  void spawnUnitIsEmptyWhenNoSystemdScopeExists() throws Exception {
     var spawner = new WatcherSpawner(new FakeShell(), null);
 
     assertTrue(spawner.spawnUnit("acme", yaml(), log()).isEmpty());
@@ -195,6 +247,7 @@ class WatcherSpawnerTest {
     private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
     private final Map<String, Deque<ShellExec.Result>> sequences = new LinkedHashMap<>();
     private final Map<String, IOException> failures = new LinkedHashMap<>();
+    private final Set<String> interrupts = new LinkedHashSet<>();
     private final List<String> invocations = new ArrayList<>();
 
     FakeShell on(String pattern, ShellExec.Result result) {
@@ -212,14 +265,24 @@ class WatcherSpawnerTest {
       return this;
     }
 
+    FakeShell interruptOn(String pattern) {
+      interrupts.add(pattern);
+      return this;
+    }
+
     List<String> invocationsMatching(String pattern) {
       return invocations.stream().filter(line -> line.contains(pattern)).toList();
     }
 
     @Override
-    public Result exec(List<String> command) throws IOException {
+    public Result exec(List<String> command) throws IOException, InterruptedException {
       var joined = String.join(" ", command);
       invocations.add(joined);
+      for (var pattern : interrupts) {
+        if (joined.contains(pattern)) {
+          throw new InterruptedException("interrupted");
+        }
+      }
       for (var entry : failures.entrySet()) {
         if (joined.contains(entry.getKey())) {
           throw entry.getValue();
@@ -240,7 +303,8 @@ class WatcherSpawnerTest {
     }
 
     @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+    public Result exec(List<String> command, Path workDir, Duration timeout)
+        throws IOException, InterruptedException {
       return exec(command);
     }
 

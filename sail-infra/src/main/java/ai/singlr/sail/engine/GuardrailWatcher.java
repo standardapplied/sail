@@ -22,16 +22,17 @@ public final class GuardrailWatcher {
   private GuardrailWatcher() {}
 
   /**
-   * Spawns a detached watcher for the project's agent (no-op only when there is no agent block).
+   * Spawns a detached watcher for the project's agent (no-op only when there is no agent block),
+   * through the caller's own shell so wiring matches the rest of the command.
    */
-  public static void launch(String project, String file, SailYaml config) {
+  public static void launch(String project, String file, SailYaml config, ShellExec shell) {
     if (config == null || config.agent() == null) {
       return;
     }
     try {
       var sailYamlPath = SailPaths.resolveSailYaml(project, file);
       var watchLog = SailPaths.projectDir(project).resolve("watch.log");
-      var spawner = new WatcherSpawner(new ShellExecutor(false), WatcherSpawner::spawnProcess);
+      var spawner = new WatcherSpawner(shell, WatcherSpawner::spawnProcess);
       var spawned = spawner.spawn(project, sailYamlPath, watchLog);
       System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + describe(spawned, watchLog)));
     } catch (Exception e) {

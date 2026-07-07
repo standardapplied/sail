@@ -45,6 +45,6 @@ class GuardrailWatcherTest {
 
   @Test
   void launchIsANoOpWithoutAnAgentBlock() {
-    assertDoesNotThrow(() -> GuardrailWatcher.launch("acme", "sail.yaml", null));
+    assertDoesNotThrow(() -> GuardrailWatcher.launch("acme", "sail.yaml", null, null));
   }
 }

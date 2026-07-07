@@ -134,13 +134,6 @@ public final class SessionStore {
   }
 
   /** Records the pid of the guardrail watcher currently covering this session. */
-  public void updateWatcherPid(String id, Integer watcherPid) {
-    db.execute(
-        "UPDATE agent_sessions SET watcher_pid = ? WHERE id = ?",
-        watcherPid != null ? watcherPid.longValue() : null,
-        id);
-  }
-
   private SessionRow mapSession(Sqlite.Row row) {
     return new SessionRow(
         row.text(0),

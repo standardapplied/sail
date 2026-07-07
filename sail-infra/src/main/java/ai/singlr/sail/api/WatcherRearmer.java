@@ -22,13 +22,14 @@ import java.util.function.Predicate;
  * original {@code started_at}, so an agent three hours into a four-hour budget gets the remaining
  * hour, not a fresh four.
  *
- * <p>Coverage is probed, not bookkept: the watcher unit name is deterministic per project ({@code
- * sail-watch-<project>}), so an active unit means covered; a recorded watcher pid that is still
- * alive means covered by a pre-unit or degraded-fallback watcher. Relaunching is unit-or-nothing
- * ({@link WatcherSpawner#spawnUnit}), so a doubled watcher — whose guardrail actions would fire
- * twice — is unrepresentable on this path; where systemd is unavailable the relaunch is empty and
- * the missed-stop sweep still replays the stop when the agent ends. A session whose agent unit is
- * already dead is that sweep's job, not this one's.
+ * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
+ * that is still alive (free, in-process check) or any {@code sail agent watch} process for the
+ * project ({@link WatcherSpawner#watcherProcessRunning}, which sees every systemd scope, every
+ * user's manager, and plain fallback processes alike) means covered. Unit-name probes alone would
+ * be blind to a watcher armed in another user's manager and re-arm a double whose guardrail actions
+ * fire twice. Relaunching is unit-or-nothing ({@link WatcherSpawner#spawnUnit}); where systemd is
+ * unavailable the relaunch is empty and the missed-stop sweep still replays the stop when the agent
+ * ends. A session whose agent unit is already dead is that sweep's job, not this one's.
  */
 public final class WatcherRearmer implements AutoCloseable {
 
@@ -47,7 +48,7 @@ public final class WatcherRearmer implements AutoCloseable {
   private final SpecStore specStore;
   private final SessionStore sessionStore;
   private final MissedStopReconciler.UnitProbe agentUnitProbe;
-  private final Predicate<String> watcherUnitActive;
+  private final Predicate<String> watcherRunning;
   private final LongPredicate watcherAlive;
   private final WatcherRelauncher relauncher;
   private final PeriodicPass pass;
@@ -56,13 +57,13 @@ public final class WatcherRearmer implements AutoCloseable {
       SpecStore specStore,
       SessionStore sessionStore,
       MissedStopReconciler.UnitProbe agentUnitProbe,
-      Predicate<String> watcherUnitActive,
+      Predicate<String> watcherRunning,
       LongPredicate watcherAlive,
       WatcherRelauncher relauncher) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.agentUnitProbe = agentUnitProbe;
-    this.watcherUnitActive = watcherUnitActive;
+    this.watcherRunning = watcherRunning;
     this.watcherAlive = watcherAlive;
     this.relauncher = relauncher;
     this.pass = new PeriodicPass("rearm", this::rearm);
@@ -115,10 +116,10 @@ public final class WatcherRearmer implements AutoCloseable {
       return false;
     }
     var session = latest.get();
-    if (watcherUnitActive.test(spec.project())) {
+    if (session.watcherPid() != null && watcherAlive.test(session.watcherPid())) {
       return false;
     }
-    if (session.watcherPid() != null && watcherAlive.test(session.watcherPid())) {
+    if (watcherRunning.test(spec.project())) {
       return false;
     }
     if (!agentUnitProbe.active(spec.project())) {
