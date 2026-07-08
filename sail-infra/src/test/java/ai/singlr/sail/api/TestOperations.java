@@ -75,7 +75,7 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<AgentLogResponse> agentLog(String project, int tail) {
+  public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
     return Result.success(new AgentLogResponse(project, List.of(), null));
   }
 

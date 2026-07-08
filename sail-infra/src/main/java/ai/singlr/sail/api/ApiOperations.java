@@ -35,7 +35,7 @@ public interface ApiOperations {
 
   Result<AgentStatusResponse> agentStatus(String project);
 
-  Result<AgentLogResponse> agentLog(String project, int tail);
+  Result<AgentLogResponse> agentLog(String project, int tail, String role);
 
   Result<StopAgentResponse> stopAgent(String project);
 

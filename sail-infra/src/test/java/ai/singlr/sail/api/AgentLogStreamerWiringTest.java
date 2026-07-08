@@ -28,9 +28,14 @@ import org.junit.jupiter.api.io.TempDir;
 class AgentLogStreamerWiringTest {
 
   private static HttpRequest streamRequest(int port, String token) {
+    return streamRequest(port, token, "");
+  }
+
+  private static HttpRequest streamRequest(int port, String token, String query) {
     var builder =
         HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + port + "/v1/projects/backend/agent/stream"))
+                URI.create(
+                    "http://127.0.0.1:" + port + "/v1/projects/backend/agent/stream" + query))
             .header("Accept", "text/event-stream")
             .timeout(Duration.ofSeconds(15))
             .GET();
@@ -74,6 +79,23 @@ class AgentLogStreamerWiringTest {
           try (var server = server(tmp)) {
             server.start();
             assertEquals(401, statusFromHeaders(server.port(), null));
+          }
+        });
+  }
+
+  @Test
+  void invalidRoleRequestReturnsBadRequest(@TempDir Path tmp) throws Exception {
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(20),
+        () -> {
+          try (var server = server(tmp)) {
+            server.start();
+            var response =
+                HttpClient.newHttpClient()
+                    .send(
+                        streamRequest(server.port(), "tok", "?role=bogus"),
+                        HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, response.statusCode());
           }
         });
   }

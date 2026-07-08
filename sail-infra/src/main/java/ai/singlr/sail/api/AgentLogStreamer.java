@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NameValidator;
 import com.sun.net.httpserver.HttpExchange;
@@ -21,7 +22,9 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * SSE handler that streams agent log output from a container. Tails the agent log file via {@code
  * incus exec} and sends each line as an SSE {@code data:} event. Supports {@code ?since=N} to
- * replay from a specific line number for client reconnection.
+ * replay from a specific line number for client reconnection, and {@code ?role=build|review}
+ * (default {@code build}) to select the coder's {@code agent.log} or the reviewer/fix {@code
+ * review.log}.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates {@code GET /v1/projects/{p}/agent/stream}
  * straight to this handler so the long-lived connection never runs through the buffered
@@ -43,7 +46,6 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public final class AgentLogStreamer implements HttpHandler {
 
-  private static final String LOG_PATH = "/home/dev/.sail/agent.log";
   private static final byte[] HEARTBEAT = ": heartbeat\n\n".getBytes(StandardCharsets.UTF_8);
   private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
 
@@ -80,15 +82,24 @@ public final class AgentLogStreamer implements HttpHandler {
         return;
       }
 
-      var since = parseSince(exchange.getRequestURI().getQuery());
-      streamLog(exchange, project, since);
+      var query = exchange.getRequestURI().getQuery();
+      var since = parseSince(query);
+      var role = parseRole(query);
+      try {
+        AgentUnit.fromRole(role);
+      } catch (IllegalArgumentException e) {
+        sendError(exchange, 400, "Invalid role");
+        return;
+      }
+      streamLog(exchange, project, since, role);
     } finally {
       exchange.close();
     }
   }
 
-  private void streamLog(HttpExchange exchange, String project, int since) throws IOException {
-    var tailCommand = buildTailCommand(project, since);
+  private void streamLog(HttpExchange exchange, String project, int since, String role)
+      throws IOException {
+    var tailCommand = buildTailCommand(project, since, role);
     Process tailProcess;
     try {
       tailProcess = new ProcessBuilder(tailCommand).redirectErrorStream(true).start();
@@ -158,10 +169,17 @@ public final class AgentLogStreamer implements HttpHandler {
     return activeStreams.sum();
   }
 
-  static String[] buildTailCommand(String project, int since) {
+  /**
+   * Tails the log for the selected {@code role} ({@code build} → {@code agent.log}, {@code review}
+   * → {@code review.log}). Touches the file first so a review stream opened before any review
+   * session has written {@code review.log} starts clean and empty — waiting for lines — rather than
+   * emitting tail's "cannot open" error onto the stream.
+   */
+  static String[] buildTailCommand(String project, int since, String role) {
+    var logPath = AgentUnit.fromRole(role).logPath();
     var tail = since > 0 ? "tail -n +" + since + " -f " : "tail -f ";
-    return ContainerExec.asDevUser(project, List.of("bash", "-c", tail + LOG_PATH))
-        .toArray(String[]::new);
+    var script = "touch " + logPath + " 2>/dev/null; " + tail + logPath;
+    return ContainerExec.asDevUser(project, List.of("bash", "-c", script)).toArray(String[]::new);
   }
 
   static String extractProject(String path) {
@@ -194,6 +212,16 @@ public final class AgentLogStreamer implements HttpHandler {
       }
     }
     return 0;
+  }
+
+  static String parseRole(String query) {
+    if (query == null) return "build";
+    for (var part : query.split("&")) {
+      if (part.startsWith("role=")) {
+        return part.substring(5);
+      }
+    }
+    return "build";
   }
 
   private static void writeSseData(OutputStream out, int lineNumber, String line)

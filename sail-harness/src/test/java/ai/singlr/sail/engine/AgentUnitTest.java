@@ -7,6 +7,8 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
@@ -31,5 +33,16 @@ class AgentUnitTest {
     assertNotEquals(AgentUnit.BUILD.taskPath(), AgentUnit.REVIEW.taskPath());
     assertEquals("sail-review", AgentUnit.REVIEW.unitName());
     assertEquals("/home/dev/.sail/review.log", AgentUnit.REVIEW.logPath());
+  }
+
+  @Test
+  void fromRoleResolvesTheLogSelectingRoleNames() {
+    assertSame(AgentUnit.BUILD, AgentUnit.fromRole("build"));
+    assertSame(AgentUnit.REVIEW, AgentUnit.fromRole("review"));
+  }
+
+  @Test
+  void fromRoleRejectsUnknownRole() {
+    assertThrows(IllegalArgumentException.class, () -> AgentUnit.fromRole("bogus"));
   }
 }

@@ -305,6 +305,36 @@ class ApiRouterTest {
   }
 
   @Test
+  void missingRoleDefaultsToBuild() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects/acme/agent/log?tail=5", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("5:build"));
+    }
+  }
+
+  @Test
+  void reviewRoleIsPassedToOperations() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects/acme/agent/log?tail=5&role=review", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("5:review"));
+    }
+  }
+
+  @Test
+  void invalidRoleReturnsUnprocessableEntity() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/projects/acme/agent/log?role=bogus", "token");
+
+      assertEquals(422, response.statusCode());
+      assertTrue(response.body().contains("invalid_role"));
+    }
+  }
+
+  @Test
   void shortUnknownRoutesReturnNotFound() throws Exception {
     try (var server = server()) {
       assertEquals(404, get(server, "/", "token").statusCode());
@@ -1082,9 +1112,9 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<AgentLogResponse> agentLog(String project, int tail) {
+    public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
       return Result.success(
-          new AgentLogResponse(project, java.util.List.of(String.valueOf(tail)), null));
+          new AgentLogResponse(project, java.util.List.of(tail + ":" + role), null));
     }
 
     @Override
