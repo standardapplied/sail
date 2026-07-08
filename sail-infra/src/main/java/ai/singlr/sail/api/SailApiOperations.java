@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
@@ -239,8 +240,8 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<AgentLogResponse> agentLog(String project, int tail) {
-    return safe(() -> agentLogValue(project, tail));
+  public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
+    return safe(() -> agentLogValue(project, tail, role));
   }
 
   @Override
@@ -487,11 +488,12 @@ public final class SailApiOperations implements ApiOperations {
         info != null ? info.logPath() : null);
   }
 
-  private AgentLogResponse agentLogValue(String project, int tail) {
+  private AgentLogResponse agentLogValue(String project, int tail, String role) {
     requireProjectExists(project);
     var cmd =
         ContainerExec.asDevUser(
-            project, List.of("tail", "-n", String.valueOf(tail), AgentSession.logPath()));
+            project,
+            List.of("tail", "-n", String.valueOf(tail), AgentUnit.fromRole(role).logPath()));
     var result = exec(cmd);
     if (!result.ok()) {
       if (result.stderr().contains("No such file")) {

@@ -61,8 +61,23 @@ class AgentLogStreamerTest {
   }
 
   @Test
+  void parseRoleDefaultsToBuildForNull() {
+    assertEquals("build", AgentLogStreamer.parseRole(null));
+  }
+
+  @Test
+  void parseRoleDefaultsToBuildWhenMissing() {
+    assertEquals("build", AgentLogStreamer.parseRole("since=10"));
+  }
+
+  @Test
+  void parseRoleReadsReviewFromQuery() {
+    assertEquals("review", AgentLogStreamer.parseRole("since=10&role=review"));
+  }
+
+  @Test
   void buildTailCommandWithoutSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "build");
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
@@ -71,14 +86,28 @@ class AgentLogStreamerTest {
   }
 
   @Test
+  void buildTailCommandReviewRoleTailsReviewLog() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
+    var script = cmd[cmd.length - 1];
+    assertTrue(script.contains("review.log"));
+    assertFalse(script.contains("agent.log"));
+  }
+
+  @Test
+  void buildTailCommandTouchesLogSoMissingReviewLogStartsClean() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
+    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/review.log"));
+  }
+
+  @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 50);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", 50, "build");
     assertTrue(cmd[cmd.length - 1].contains("tail -n +50 -f"));
   }
 
   @Test
   void buildTailCommandIncludesUserFlags() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("proj", 0, "build");
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));

@@ -52,4 +52,19 @@ public record AgentUnit(
   public String service() {
     return unitName + ".service";
   }
+
+  /**
+   * Resolves the log-selecting role name — {@code build} or {@code review}, the API/CLI equivalent
+   * of {@code --review} — to its unit, so the log endpoints share one mapping instead of hardcoding
+   * a second path. Throws {@link IllegalArgumentException} for any other value.
+   */
+  public static AgentUnit fromRole(String role) {
+    return switch (role) {
+      case "build" -> BUILD;
+      case "review" -> REVIEW;
+      default ->
+          throw new IllegalArgumentException(
+              "Unknown role: " + role + " (expected build or review)");
+    };
+  }
 }

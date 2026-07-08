@@ -532,7 +532,7 @@ class SailApiOperationsTest {
                     "tail -n 200 /home/dev/.sail/agent.log",
                     new ShellExec.Result(1, "", "No such file")));
 
-    var result = operations.agentLog("acme", 200);
+    var result = operations.agentLog("acme", 200, "build");
 
     assertEquals("No agent log found", get(result, "error"));
   }
@@ -545,9 +545,37 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("tail -n 2 /home/dev/.sail/agent.log", "one\ntwo\n"));
 
-    var result = operations.agentLog("acme", 2);
+    var result = operations.agentLog("acme", 2, "build");
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
+  }
+
+  @Test
+  void agentLogReviewRoleTailsReviewLog() throws Exception {
+    var operations =
+        operations(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("tail -n 2 /home/dev/.sail/review.log", "reviewed\n"));
+
+    var result = operations.agentLog("acme", 2, "review");
+
+    assertEquals(List.of("reviewed"), get(result, "lines"));
+  }
+
+  @Test
+  void agentLogReviewRoleHandlesMissingReviewLog() throws Exception {
+    var operations =
+        operations(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on(
+                    "tail -n 200 /home/dev/.sail/review.log",
+                    new ShellExec.Result(1, "", "No such file")));
+
+    var result = operations.agentLog("acme", 200, "review");
+
+    assertEquals("No agent log found", get(result, "error"));
   }
 
   @Test
@@ -558,7 +586,7 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .throwOn("tail -n 200 /home/dev/.sail/agent.log", new IOException("no shell")));
 
-    var error = operations.agentLog("acme", 200);
+    var error = operations.agentLog("acme", 200, "build");
 
     assertError(ErrorCode.COMMAND_FAILED, error);
   }
@@ -1086,7 +1114,7 @@ class SailApiOperationsTest {
                     "tail -n 200 /home/dev/.sail/agent.log",
                     new ShellExec.Result(1, "", "permission denied")));
 
-    var error = operations.agentLog("acme", 200);
+    var error = operations.agentLog("acme", 200, "build");
 
     assertError(ErrorCode.AGENT_LOG_FAILED, error);
   }
