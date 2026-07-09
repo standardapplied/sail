@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.store.RunStore;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * EventBus subscriber that closes out a {@link RunStore} run when its agent stops. The run row
@@ -19,6 +20,13 @@ import java.util.function.Predicate;
  * trigger: "sumesh's agent finished" reaches main promptly and every box can see the run is done.
  * On main and standalone boxes the injected {@link SyncScheduler} is {@link
  * SyncScheduler#disabled()}, so the trigger is a no-op there.
+ *
+ * <p>Completion is scoped to this box's own runs by {@code localHandle}. The {@code runs} table now
+ * holds foreign runs adopted via sync, so an agent-completion event (which names only the project)
+ * must resolve to a run that executed <em>here</em> — never a concurrently-running run of the same
+ * project on another box. Without that scoping this box could stamp another node's live run as
+ * finished and propagate that lie to main; single-writer only holds if each box writes solely its
+ * own runs.
  */
 public final class RunTracker implements EventSubscriber {
 
@@ -28,10 +36,12 @@ public final class RunTracker implements EventSubscriber {
 
   private final RunStore runStore;
   private final SyncScheduler syncScheduler;
+  private final Supplier<String> localHandle;
 
-  public RunTracker(RunStore runStore, SyncScheduler syncScheduler) {
+  public RunTracker(RunStore runStore, SyncScheduler syncScheduler, Supplier<String> localHandle) {
     this.runStore = runStore;
     this.syncScheduler = syncScheduler;
+    this.localHandle = localHandle;
   }
 
   @Override
@@ -65,7 +75,8 @@ public final class RunTracker implements EventSubscriber {
 
   private void complete(Event event, String status) {
     var exitCode = extractInt(event.data().get(Event.WellKnownData.EXIT_CODE));
-    var running = runStore.runningForProject(event.project());
+    var node = localHandle.get();
+    var running = runStore.runningForProjectOnNode(event.project(), node);
     if (running.isPresent()) {
       runStore.complete(running.get().id(), status, exitCode);
       syncScheduler.afterWrite();
@@ -75,7 +86,7 @@ public final class RunTracker implements EventSubscriber {
       return;
     }
     runStore
-        .latestForProject(event.project())
+        .latestForProjectOnNode(event.project(), node)
         .filter(run -> run.exitCode() == null)
         .ifPresent(
             run -> {

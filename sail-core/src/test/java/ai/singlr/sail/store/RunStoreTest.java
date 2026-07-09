@@ -127,33 +127,77 @@ class RunStoreTest {
     assertEquals(42, store.findById(id).orElseThrow().exitCode());
   }
 
+  private String newRunOn(String project, String specId, String node) {
+    return store.create(
+        DateTimeUtils.newId().toString(),
+        project,
+        specId,
+        node,
+        "build",
+        "claude-code",
+        "feat/x",
+        "do it",
+        1234,
+        5678,
+        "/home/dev/.sail/runs/r/agent.log");
+  }
+
   @Test
-  void latestForProjectReturnsNewest() {
+  void latestForProjectOnNodeReturnsNewest() {
     newRun("backend", "spec-1");
     newRun("backend", "spec-2");
     newRun("other", "spec-3");
 
-    assertEquals("spec-2", store.latestForProject("backend").orElseThrow().specId());
-    assertTrue(store.latestForProject("nonexistent").isEmpty());
+    assertEquals(
+        "spec-2", store.latestForProjectOnNode("backend", "node-a").orElseThrow().specId());
+    assertTrue(store.latestForProjectOnNode("nonexistent", "node-a").isEmpty());
   }
 
   @Test
-  void runningForProjectFindsActiveRun() {
+  void latestForProjectOnNodeExcludesForeignRuns() {
+    newRunOn("backend", "mine", "node-a");
+    newRunOn("backend", "theirs", "node-b");
+
+    assertEquals("mine", store.latestForProjectOnNode("backend", "node-a").orElseThrow().specId());
+    assertEquals(
+        "theirs", store.latestForProjectOnNode("backend", "node-b").orElseThrow().specId());
+  }
+
+  @Test
+  void latestForProjectOnNodeWithNoHandleOwnsOnlyBlankNodeRuns() {
+    newRunOn("backend", "legacy", "");
+    newRunOn("backend", "theirs", "node-b");
+
+    assertEquals("legacy", store.latestForProjectOnNode("backend", null).orElseThrow().specId());
+    assertEquals("legacy", store.latestForProjectOnNode("backend", "").orElseThrow().specId());
+  }
+
+  @Test
+  void runningForProjectOnNodeFindsActiveRun() {
     var id1 = newRun("backend", "spec-1");
     store.complete(id1, "completed", 0);
     newRun("backend", "spec-2");
 
-    var running = store.runningForProject("backend").orElseThrow();
+    var running = store.runningForProjectOnNode("backend", "node-a").orElseThrow();
     assertEquals("spec-2", running.specId());
     assertEquals("running", running.status());
   }
 
   @Test
-  void runningForProjectReturnsEmptyWhenAllCompleted() {
+  void runningForProjectOnNodeIgnoresAForeignRunningRun() {
+    newRunOn("backend", "theirs", "node-b");
+
+    assertTrue(store.runningForProjectOnNode("backend", "node-a").isEmpty());
+    assertEquals(
+        "theirs", store.runningForProjectOnNode("backend", "node-b").orElseThrow().specId());
+  }
+
+  @Test
+  void runningForProjectOnNodeReturnsEmptyWhenAllCompleted() {
     var id = newRun("backend", "spec-1");
     store.complete(id, "completed", 0);
 
-    assertTrue(store.runningForProject("backend").isEmpty());
+    assertTrue(store.runningForProjectOnNode("backend", "node-a").isEmpty());
   }
 
   @Test

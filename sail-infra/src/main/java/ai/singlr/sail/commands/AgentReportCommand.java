@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ControlPlaneDb;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
@@ -107,7 +108,7 @@ public final class AgentReportCommand implements Runnable {
 
   RunStore.RunRow latestSession(String project) {
     try (var db = controlPlaneDb.open()) {
-      return new RunStore(db).latestForProject(project).orElse(null);
+      return new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle()).orElse(null);
     } catch (Exception ignored) {
       return null;
     }

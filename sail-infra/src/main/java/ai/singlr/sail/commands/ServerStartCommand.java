@@ -29,6 +29,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
 import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -196,7 +197,7 @@ public final class ServerStartCommand implements Runnable {
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false));
     var runStore = new RunStore(db);
-    bus.subscribe(new RunTracker(runStore, syncScheduler));
+    bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
     bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 
     var webauthn = resolveWebauthn();

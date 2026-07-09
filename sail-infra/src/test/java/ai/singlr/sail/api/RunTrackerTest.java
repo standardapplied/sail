@@ -51,7 +51,7 @@ class RunTrackerTest {
             },
             Duration.ofMillis(1),
             Duration.ofMillis(1));
-    tracker = new RunTracker(runStore, scheduler);
+    tracker = new RunTracker(runStore, scheduler, () -> "node-a");
   }
 
   @AfterEach
@@ -66,6 +66,21 @@ class RunTrackerTest {
         project,
         specId,
         "node-a",
+        "build",
+        "claude-code",
+        "feat/x",
+        "do it",
+        123,
+        null,
+        "/home/dev/.sail/runs/r/agent.log");
+  }
+
+  private String runningRunOn(String project, String specId, String node) {
+    return runStore.create(
+        DateTimeUtils.newId().toString(),
+        project,
+        specId,
+        node,
         "build",
         "claude-code",
         "feat/x",
@@ -109,7 +124,7 @@ class RunTrackerTest {
 
     tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 137)));
 
-    var run = runStore.latestForProject("backend").orElseThrow();
+    var run = runStore.latestForProjectOnNode("backend", "node-a").orElseThrow();
     assertEquals("stopped", run.status());
     assertEquals(137, run.exitCode());
     assertNotNull(run.completedAt());
@@ -127,7 +142,8 @@ class RunTrackerTest {
             "claude-code",
             "host"));
 
-    assertEquals("completed", runStore.latestForProject("backend").orElseThrow().status());
+    assertEquals(
+        "completed", runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().status());
   }
 
   @Test
@@ -136,7 +152,7 @@ class RunTrackerTest {
 
     tracker.onEvent(stopped("backend", Map.of()));
 
-    assertNull(runStore.latestForProject("backend").orElseThrow().exitCode());
+    assertNull(runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().exitCode());
   }
 
   @Test
@@ -180,7 +196,7 @@ class RunTrackerTest {
   void aStopWithNoRunningRunAndNoExitCodeIsANoOp() {
     tracker.onEvent(stopped("backend", Map.of()));
 
-    assertTrue(runStore.latestForProject("backend").isEmpty());
+    assertTrue(runStore.latestForProjectOnNode("backend", "node-a").isEmpty());
   }
 
   @Test
@@ -211,7 +227,8 @@ class RunTrackerTest {
         Event.of(
             "backend", "auth", Event.WellKnownTypes.AGENT_SESSION_STARTED, "claude-code", "host"));
 
-    assertEquals("running", runStore.latestForProject("backend").orElseThrow().status());
+    assertEquals(
+        "running", runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().status());
   }
 
   @Test
@@ -219,6 +236,38 @@ class RunTrackerTest {
     db.close();
     db = null;
     assertDoesNotThrow(() -> tracker.onEvent(stopped("p", Map.of())));
+  }
+
+  @Test
+  void aForeignNodesRunningRunIsNeverCompletedByThisNodesStop() {
+    var foreign = runningRunOn("backend", "theirs", "node-b");
+
+    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    var run = runStore.findById(foreign).orElseThrow();
+    assertEquals("running", run.status(), "another box's live run must be left untouched");
+    assertNull(run.exitCode());
+  }
+
+  @Test
+  void onlyThisNodesRunIsClosedWhenBothNodesRunTheSameProject() {
+    var mine = runningRunOn("backend", "mine", "node-a");
+    var theirs = runningRunOn("backend", "theirs", "node-b");
+
+    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    assertEquals("stopped", runStore.findById(mine).orElseThrow().status());
+    assertEquals("running", runStore.findById(theirs).orElseThrow().status());
+  }
+
+  @Test
+  void aStandaloneBoxWithNoHandleClosesOutItsOwnBlankNodeRun() {
+    var standalone = new RunTracker(runStore, scheduler, () -> null);
+    var id = runningRunOn("backend", "auth", "");
+
+    standalone.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    assertEquals("stopped", runStore.findById(id).orElseThrow().status());
   }
 
   @Test
@@ -231,7 +280,8 @@ class RunTrackerTest {
 
       BusTesting.awaitDelivery(latch);
 
-      assertEquals(5, runStore.latestForProject("backend").orElseThrow().exitCode());
+      assertEquals(
+          5, runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().exitCode());
     }
   }
 }

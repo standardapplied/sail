@@ -111,7 +111,7 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<AgentReportResponse> agentReport(String project) {
+  public Result<AgentReportResponse> agentReport(String project, String localHandle) {
     return Result.success(
         new AgentReportResponse(
             project,

@@ -20,7 +20,7 @@ import java.util.function.Supplier;
 
 /**
  * Replays the {@code agent_session_stopped} events the control plane missed, so the subscribers
- * that handle a live stop ({@link ReviewPipelineController}, {@link SessionTracker}) drive each
+ * that handle a live stop ({@link ReviewPipelineController}, {@link RunTracker}) drive each
  * orphaned spec to its real outcome instead of leaving it parked until the stranded-spec alarm. One
  * routine serves two callers: the daemon start hook runs a pass immediately, and {@link #start}
  * repeats the same pass periodically, so an agent that finishes unobserved mid-run (its watcher

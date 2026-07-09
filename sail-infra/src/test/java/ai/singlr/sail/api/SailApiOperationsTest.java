@@ -706,6 +706,38 @@ class SailApiOperationsTest {
   }
 
   @Test
+  void aBlankNodeRunIsLocalToABoxThatHasNoHandle() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 " + RUN_LOG, "hi\n"),
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    "r2",
+                    "acme",
+                    "auth",
+                    "",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    RUN_LOG));
+
+    assertEquals(List.of("hi"), get(operations.runLog("r2", 2, ""), "lines"));
+  }
+
+  @Test
+  void aStampedRunIsForeignToABoxThatHasNoHandle() throws Exception {
+    var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog("r1", 200, ""));
+  }
+
+  @Test
   void runLogUnknownRunIsNotFound() throws Exception {
     var operations = opsWithRun(shell());
 
@@ -737,6 +769,52 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
     assertEquals(false, get(operations.stopRun("r1", "node-a"), "stopped"));
+  }
+
+  @Test
+  void stopRunOnAnAlreadyFinishedRunKillsNothing() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            s -> {},
+            runs -> {
+              runs.create(
+                  "r1",
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/auth",
+                  "do it",
+                  123,
+                  null,
+                  RUN_LOG);
+              runs.complete("r1", "completed", 0);
+            });
+
+    var result = operations.stopRun("r1", "node-a");
+
+    assertEquals(false, get(result, "stopped"));
+    assertEquals("run_not_running", get(result, "reason"));
+  }
+
+  @Test
+  void stopRunDoesNotKillADifferentActiveRunOfTheSameProject() throws Exception {
+    var operations =
+        opsWithRun(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", "999")
+                .on("kill -0 999", new ShellExec.Result(0, "", ""))
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"other\"}"));
+
+    var result = operations.stopRun("r1", "node-a");
+
+    assertEquals(false, get(result, "stopped"), "r1's pid is 123; the live agent is 999");
+    assertEquals("run_not_active", get(result, "reason"));
   }
 
   @Test
@@ -1200,7 +1278,7 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
-    var result = operations.agentReport("acme");
+    var result = operations.agentReport("acme", "node-a");
 
     assertEquals("acme", get(result, "name"));
     assertEquals("No session", get(result, "session_status"));
@@ -1217,7 +1295,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             store -> seedSpec(store, "search", "Add search", "done", List.of(), "Do search"));
 
-    var result = operations.agentReport("acme");
+    var result = operations.agentReport("acme", "node-a");
 
     var specs = (List<Map<String, Object>>) get(result, "specs");
     assertEquals(1, specs.size());
@@ -1232,7 +1310,7 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .throwOn("cat /home/dev/.sail/agent.pid", new IOException("boom")));
 
-    var error = operations.agentReport("acme");
+    var error = operations.agentReport("acme", "node-a");
 
     assertError(ErrorCode.AGENT_REPORT_FAILED, error);
   }

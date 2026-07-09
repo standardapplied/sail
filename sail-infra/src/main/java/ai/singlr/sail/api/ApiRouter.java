@@ -436,7 +436,7 @@ public final class ApiRouter implements HttpHandler {
     }
     if (REPORT.equals(request.subResource())) {
       requireMethod(request, POST);
-      return ApiResponse.from(operations.agentReport(project));
+      return ApiResponse.from(operations.agentReport(project, nodeHandle.get()));
     }
     throw notFound();
   }

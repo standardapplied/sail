@@ -108,20 +108,41 @@ public final class RunStore implements ConflictResolver {
     return db.queryOne("SELECT " + COLUMNS + " FROM runs WHERE id = ?", this::mapRow, id);
   }
 
-  public Optional<RunRow> latestForProject(String project) {
-    return db.queryOne(
-        "SELECT " + COLUMNS + " FROM runs WHERE project = ? ORDER BY started_at DESC LIMIT 1",
-        this::mapRow,
-        project);
-  }
-
-  public Optional<RunRow> runningForProject(String project) {
+  /**
+   * The latest run of {@code project} that executed on this box, or empty. Ownership is by node: a
+   * box with a handle owns exactly the runs stamped with it; a box with no handle owns exactly its
+   * own blank-node runs and never a run adopted from another box via sync. So "the project's latest
+   * run" can never resolve to a foreign run — the guarantee the completion and report paths rely on
+   * now that the {@code runs} table also holds synced foreign rows.
+   */
+  public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
-            + " FROM runs WHERE project = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+            + " FROM runs WHERE project = ? AND IFNULL(node, '') = ? ORDER BY started_at DESC"
+            + " LIMIT 1",
         this::mapRow,
-        project);
+        project,
+        ownerKey(localHandle));
+  }
+
+  /**
+   * The running run of {@code project} that executed on this box, or empty. Node-scoped like {@link
+   * #latestForProjectOnNode}.
+   */
+  public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE project = ? AND status = 'running' AND IFNULL(node, '') = ?"
+            + " ORDER BY started_at DESC LIMIT 1",
+        this::mapRow,
+        project,
+        ownerKey(localHandle));
+  }
+
+  private static String ownerKey(String localHandle) {
+    return Strings.isBlank(localHandle) ? "" : localHandle;
   }
 
   public List<RunRow> listForProject(String project) {

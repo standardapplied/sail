@@ -364,7 +364,9 @@ public final class SchemaManager {
           "ALTER TABLE agent_sessions ADD COLUMN base_rev TEXT",
           "ALTER TABLE agent_sessions RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "DROP INDEX IF EXISTS idx_agent_sessions_project",
+          "DROP INDEX IF EXISTS idx_agent_sessions_spec");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

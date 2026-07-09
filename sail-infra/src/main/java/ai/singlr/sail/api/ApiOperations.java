@@ -36,7 +36,12 @@ public interface ApiOperations {
 
   Result<AgentStatusResponse> agentStatus(String project);
 
-  Result<AgentReportResponse> agentReport(String project);
+  /**
+   * The morning-after report for {@code project}'s agent on this box. {@code localHandle} scopes
+   * the "latest run" it summarizes to a run that executed here, so a run adopted from another box
+   * via sync never stands in for this box's own work.
+   */
+  Result<AgentReportResponse> agentReport(String project, String localHandle);
 
   /** Lists runs, org-wide (synced) and optionally scoped to a project and/or spec. */
   Result<RunListResponse> runs(String project, String spec);

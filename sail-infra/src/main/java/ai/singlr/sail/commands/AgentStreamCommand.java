@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -12,6 +14,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -79,7 +83,11 @@ public final class AgentStreamCommand implements Runnable {
     try (var client = HttpClient.newHttpClient()) {
       var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() != 200) {
-        System.err.println("Server returned HTTP " + response.statusCode());
+        try (var body = response.body()) {
+          System.err.println(
+              formatHttpError(
+                  response.statusCode(), new String(body.readAllBytes(), StandardCharsets.UTF_8)));
+        }
         return;
       }
 
@@ -93,6 +101,30 @@ public final class AgentStreamCommand implements Runnable {
         }
       }
     }
+  }
+
+  /**
+   * A human-readable line for a non-200 stream response: the server's structured {@code message}
+   * (and, for a {@code run_on_other_node} refusal, the box its logs live on) instead of a bare HTTP
+   * status. So "logs live on sumesh's box" survives to the terminal rather than being swallowed as
+   * "HTTP 409".
+   */
+  static String formatHttpError(int status, String body) {
+    Map<String, Object> parsed;
+    try {
+      parsed = YamlUtil.parseMap(body);
+    } catch (RuntimeException e) {
+      parsed = Map.of();
+    }
+    var message = Objects.toString(parsed.get("message"), "");
+    if (Strings.isBlank(message)) {
+      return "Server returned HTTP " + status + ".";
+    }
+    var node = Objects.toString(parsed.get("node"), "");
+    if (Strings.isNotBlank(node)) {
+      return message + " Connect to " + node + "'s box to stream it there.";
+    }
+    return message;
   }
 
   @SuppressWarnings("unchecked")

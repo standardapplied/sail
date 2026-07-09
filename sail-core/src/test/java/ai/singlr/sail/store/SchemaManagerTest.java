@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -173,5 +174,24 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_events_project"));
     assertTrue(indexes.contains("idx_events_spec"));
     assertTrue(indexes.contains("idx_events_timestamp"));
+  }
+
+  @Test
+  void migrateRenamesAgentSessionsToRunsAndDropsStaleIndexes() {
+    new SchemaManager(db).migrate();
+
+    var tables =
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
+    assertTrue(tables.contains("runs"));
+    assertFalse(tables.contains("agent_sessions"));
+
+    var indexes =
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'",
+            row -> row.text(0));
+    assertTrue(indexes.contains("idx_runs_project"));
+    assertTrue(indexes.contains("idx_runs_spec"));
+    assertFalse(indexes.contains("idx_agent_sessions_project"));
+    assertFalse(indexes.contains("idx_agent_sessions_spec"));
   }
 }
