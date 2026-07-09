@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentLogRenderer;
 import ai.singlr.sail.engine.AgentUnit;
@@ -12,7 +13,11 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -20,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -72,7 +78,7 @@ public final class AgentLogCommand implements Runnable {
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var logPath = logPathFor(review);
+    var logPath = resolveLogPath(name, review);
 
     if (follow) {
       var tailCmd = ContainerExec.asDevUser(name, List.of("tail", "-f", logPath));
@@ -130,8 +136,34 @@ public final class AgentLogCommand implements Runnable {
   }
 
   /**
-   * The log to tail: the reviewer/fix negotiation ({@code review.log}) with {@code --review}, else
-   * the coder's build log ({@code agent.log}).
+   * The log file to tail. With {@code --review}, the reviewer/fix negotiation log. Otherwise the
+   * latest build run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}) — since dispatch
+   * moved off the shared {@code agent.log}, tailing the shared file would show nothing for a
+   * dispatched run. Falls back to the shared build log when no run row exists (a manual {@code sail
+   * agent start}) or the control-plane database cannot be read.
+   */
+  private String resolveLogPath(String project, boolean review) {
+    if (review) {
+      return logPathFor(true);
+    }
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return logPathFrom(new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle()));
+    } catch (RuntimeException e) {
+      return logPathFor(false);
+    }
+  }
+
+  /** The latest local run's run-scoped log path, or the shared build log when there is none. */
+  static String logPathFrom(Optional<RunStore.RunRow> latestRun) {
+    return latestRun
+        .map(RunStore.RunRow::logPath)
+        .filter(Strings::isNotBlank)
+        .orElseGet(() -> logPathFor(false));
+  }
+
+  /**
+   * The static log path for a unit: the reviewer/fix negotiation ({@code review.log}) with {@code
+   * --review}, else the coder's shared build log ({@code agent.log}).
    */
   static String logPathFor(boolean review) {
     return (review ? AgentUnit.REVIEW : AgentUnit.BUILD).logPath();

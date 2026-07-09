@@ -280,6 +280,36 @@ public final class AgentSession {
       String reasoningEffort,
       String specId,
       String agentType) {
+    return buildBackgroundLaunchCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        specId,
+        agentType,
+        AgentUnit.BUILD.logPath());
+  }
+
+  /**
+   * As the other overload, redirecting the agent's stdout/stderr to {@code logPath} — a run-scoped
+   * {@code ~/.sail/runs/<runId>/agent.log} so consecutive dispatches never clobber or interleave
+   * one shared file and a log address names exactly one execution. The log's parent directory is
+   * created before the redirect.
+   */
+  public static List<String> buildBackgroundLaunchCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String logPath) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
@@ -290,6 +320,7 @@ public final class AgentSession {
     var script =
         """
         mkdir -p "$1"
+        mkdir -p "$(dirname "$4")"
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
@@ -318,7 +349,7 @@ public final class AgentSession {
             SAIL_DIR,
             workDir,
             agentCmd,
-            AgentUnit.BUILD.logPath(),
+            logPath,
             AgentUnit.BUILD.pidPath(),
             effectiveSpec,
             effectiveAgent));

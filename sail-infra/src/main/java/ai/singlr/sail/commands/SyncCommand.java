@@ -22,11 +22,13 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.ProjectReplica;
+import ai.singlr.sail.sync.RunReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -126,6 +128,7 @@ public final class SyncCommand implements Callable<Integer> {
         new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
         new FileReplica(host, fileStore, changeLog, conflicts, syncState),
         new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
+        new RunReplica(host, new RunStore(db), changeLog, conflicts, syncState),
         new FdeStore(db),
         fileStore,
         projectStore);
@@ -135,6 +138,7 @@ public final class SyncCommand implements Callable<Integer> {
       SpecReplica spec,
       FileReplica file,
       ProjectReplica project,
+      RunReplica run,
       FdeStore fdes,
       FileStore files,
       ProjectStore projects) {}
@@ -208,6 +212,7 @@ public final class SyncCommand implements Callable<Integer> {
       var specReport = new SyncEngine().reconcile(boxes.spec(), session.replica("spec"));
       var fileReport = new SyncEngine().reconcile(boxes.file(), session.replica("file"));
       var projectReport = new SyncEngine().reconcile(boxes.project(), session.replica("project"));
+      var runReport = new SyncEngine().reconcile(boxes.run(), session.replica("run"));
       var rejected = applyFdes(boxes.fdes(), session.fetchFdes());
       if (!rejected.isEmpty()) {
         System.err.println(
@@ -221,7 +226,7 @@ public final class SyncCommand implements Callable<Integer> {
       materialize(boxes.files());
       materializeProjects(boxes.projects());
       reconcileLiveResources(boxes.projects(), projectReport);
-      return combine(combine(specReport, fileReport), projectReport);
+      return combine(combine(combine(specReport, fileReport), projectReport), runReport);
     }
   }
 

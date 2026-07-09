@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -18,8 +19,8 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -47,7 +48,7 @@ class MissedStopReconcilerTest {
   private Sqlite db;
   private SpecStore specStore;
   private ReviewStore reviewStore;
-  private SessionStore sessionStore;
+  private RunStore sessionStore;
   private EventStore eventStore;
   private EventBus bus;
 
@@ -57,7 +58,7 @@ class MissedStopReconcilerTest {
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
-    sessionStore = new SessionStore(db);
+    sessionStore = new RunStore(db);
     eventStore = new EventStore(db);
     bus = new EventBus();
   }
@@ -110,13 +111,24 @@ class MissedStopReconcilerTest {
   }
 
   private String finishedSession(String specId, String status, Integer exitCode) {
-    var id = sessionStore.create("test-project", specId, "claude-code", "feat/test", "task", 1);
+    var id = runningSession(specId);
     sessionStore.complete(id, status, exitCode);
     return id;
   }
 
   private String runningSession(String specId) {
-    return sessionStore.create("test-project", specId, "claude-code", "feat/test", "task", 1);
+    return sessionStore.create(
+        DateTimeUtils.newId().toString(),
+        "test-project",
+        specId,
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/test",
+        "task",
+        1,
+        null,
+        "/home/dev/.sail/runs/r/agent.log");
   }
 
   private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {

@@ -17,8 +17,8 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -607,86 +607,214 @@ class SailApiOperationsTest {
     assertError(ErrorCode.AGENT_STATUS_FAILED, error);
   }
 
-  @Test
-  void agentLogHandlesMissingLog() throws Exception {
-    var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on(
-                    "tail -n 200 /home/dev/.sail/agent.log",
-                    new ShellExec.Result(1, "", "No such file")));
+  private static final String RUN_LOG = "/home/dev/.sail/runs/r1/agent.log";
 
-    var result = operations.agentLog("acme", 200, "build");
-
-    assertEquals("No agent log found", get(result, "error"));
+  private SailApiOperations opsWithRun(FakeShell shell) throws Exception {
+    return operationsWithStores(
+        baseYaml(),
+        shell,
+        null,
+        s -> {},
+        runs ->
+            runs.create(
+                "r1",
+                "acme",
+                "auth",
+                "node-a",
+                "build",
+                "claude-code",
+                "feat/auth",
+                "do it",
+                123,
+                null,
+                RUN_LOG));
   }
 
   @Test
-  void agentLogReturnsLines() throws Exception {
+  void runLogTailsTheRunScopedLogForALocalRun() throws Exception {
     var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("tail -n 2 /home/dev/.sail/agent.log", "one\ntwo\n"));
+        opsWithRun(
+            shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 " + RUN_LOG, "one\ntwo\n"));
 
-    var result = operations.agentLog("acme", 2, "build");
+    var result = operations.runLog("r1", 2, "node-a");
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
+    assertEquals("r1", get(result, "run_id"));
   }
 
   @Test
-  void agentLogReviewRoleTailsReviewLog() throws Exception {
+  void runLogHandlesAMissingLogFile() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("tail -n 2 /home/dev/.sail/review.log", "reviewed\n"));
+                .on("tail -n 200 " + RUN_LOG, new ShellExec.Result(1, "", "No such file")));
 
-    var result = operations.agentLog("acme", 2, "review");
-
-    assertEquals(List.of("reviewed"), get(result, "lines"));
+    assertEquals(
+        "No log found for this run.", get(operations.runLog("r1", 200, "node-a"), "error"));
   }
 
   @Test
-  void agentLogReviewRoleHandlesMissingReviewLog() throws Exception {
+  void runLogMapsThrownCommandsToApiError() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on(
-                    "tail -n 200 /home/dev/.sail/review.log",
-                    new ShellExec.Result(1, "", "No such file")));
+                .throwOn("tail -n 200 " + RUN_LOG, new IOException("no shell")));
 
-    var result = operations.agentLog("acme", 200, "review");
-
-    assertEquals("No agent log found", get(result, "error"));
+    assertError(ErrorCode.COMMAND_FAILED, operations.runLog("r1", 200, "node-a"));
   }
 
   @Test
-  void agentLogMapsThrownCommandsToApiError() throws Exception {
-    var operations =
-        operations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .throwOn("tail -n 200 /home/dev/.sail/agent.log", new IOException("no shell")));
+  void runLogRefusesAForeignRunWithStructuredProvenance() throws Exception {
+    var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    var error = operations.agentLog("acme", 200, "build");
+    var result = operations.runLog("r1", 200, "sumesh");
 
-    assertError(ErrorCode.COMMAND_FAILED, error);
+    assertError(ErrorCode.RUN_ON_OTHER_NODE, result);
+    var fields =
+        result.fieldErrors().stream()
+            .collect(java.util.stream.Collectors.toMap(FieldError::field, FieldError::message));
+    assertEquals("node-a", fields.get("node"));
+    assertEquals("auth", fields.get("spec"));
+    assertEquals("acme", fields.get("project"));
   }
 
   @Test
-  void stopAgentReturnsNoAgentRunning() throws Exception {
+  void aRunWithABlankNodeFailsClosedAsForeign() throws Exception {
     var operations =
-        operations(
+        operationsWithStores(
+            baseYaml(),
+            shell(),
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    "r2",
+                    "acme",
+                    "auth",
+                    "",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    RUN_LOG));
+
+    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog("r2", 200, "node-a"));
+  }
+
+  @Test
+  void aBlankNodeRunIsLocalToABoxThatHasNoHandle() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 " + RUN_LOG, "hi\n"),
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    "r2",
+                    "acme",
+                    "auth",
+                    "",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    RUN_LOG));
+
+    assertEquals(List.of("hi"), get(operations.runLog("r2", 2, ""), "lines"));
+  }
+
+  @Test
+  void aStampedRunIsForeignToABoxThatHasNoHandle() throws Exception {
+    var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog("r1", 200, ""));
+  }
+
+  @Test
+  void runLogUnknownRunIsNotFound() throws Exception {
+    var operations = opsWithRun(shell());
+
+    assertError(ErrorCode.RUN_NOT_FOUND, operations.runLog("nope", 200, "node-a"));
+  }
+
+  @Test
+  void runsListAndDetailExposeNodeProvenance() throws Exception {
+    var operations = opsWithRun(shell());
+
+    assertEquals(1, ((List<?>) get(operations.runs("acme", null), "runs")).size());
+    assertEquals("node-a", get(operations.run("r1"), "node"));
+    assertError(ErrorCode.RUN_NOT_FOUND, operations.run("nope"));
+  }
+
+  @Test
+  void stopRunRefusesAForeignRun() throws Exception {
+    var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.stopRun("r1", "sumesh"));
+  }
+
+  @Test
+  void stopRunReturnsNoAgentRunningForALocalRunWithNoLiveProcess() throws Exception {
+    var operations =
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
-    var result = operations.stopAgent("acme");
+    assertEquals(false, get(operations.stopRun("r1", "node-a"), "stopped"));
+  }
+
+  @Test
+  void stopRunOnAnAlreadyFinishedRunKillsNothing() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            s -> {},
+            runs -> {
+              runs.create(
+                  "r1",
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/auth",
+                  "do it",
+                  123,
+                  null,
+                  RUN_LOG);
+              runs.complete("r1", "completed", 0);
+            });
+
+    var result = operations.stopRun("r1", "node-a");
 
     assertEquals(false, get(result, "stopped"));
+    assertEquals("run_not_running", get(result, "reason"));
+  }
+
+  @Test
+  void stopRunDoesNotKillADifferentActiveRunOfTheSameProject() throws Exception {
+    var operations =
+        opsWithRun(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", "999")
+                .on("kill -0 999", new ShellExec.Result(0, "", ""))
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"other\"}"));
+
+    var result = operations.stopRun("r1", "node-a");
+
+    assertEquals(false, get(result, "stopped"), "r1's pid is 123; the live agent is 999");
+    assertEquals("run_not_active", get(result, "reason"));
   }
 
   @Test
@@ -1109,9 +1237,9 @@ class SailApiOperationsTest {
   }
 
   @Test
-  void stopAgentKillsRunningAgent() throws Exception {
+  void stopRunKillsARunningLocalAgent() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
@@ -1122,16 +1250,16 @@ class SailApiOperationsTest {
                 .on("kill -9 123", "")
                 .on("rm -f /home/dev/.sail/agent.pid", ""));
 
-    var result = operations.stopAgent("acme");
+    var result = operations.stopRun("r1", "node-a");
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(123, get(result, "pid"));
   }
 
   @Test
-  void stopAgentMapsKillFailure() throws Exception {
+  void stopRunMapsKillFailure() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
@@ -1139,9 +1267,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
                 .throwOn("kill 123", new IOException("permission denied")));
 
-    var error = operations.stopAgent("acme");
-
-    assertError(ErrorCode.AGENT_STOP_FAILED, error);
+    assertError(ErrorCode.AGENT_STOP_FAILED, operations.stopRun("r1", "node-a"));
   }
 
   @Test
@@ -1152,7 +1278,7 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
-    var result = operations.agentReport("acme");
+    var result = operations.agentReport("acme", "node-a");
 
     assertEquals("acme", get(result, "name"));
     assertEquals("No session", get(result, "session_status"));
@@ -1169,7 +1295,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             store -> seedSpec(store, "search", "Add search", "done", List.of(), "Do search"));
 
-    var result = operations.agentReport("acme");
+    var result = operations.agentReport("acme", "node-a");
 
     var specs = (List<Map<String, Object>>) get(result, "specs");
     assertEquals(1, specs.size());
@@ -1184,24 +1310,20 @@ class SailApiOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .throwOn("cat /home/dev/.sail/agent.pid", new IOException("boom")));
 
-    var error = operations.agentReport("acme");
+    var error = operations.agentReport("acme", "node-a");
 
     assertError(ErrorCode.AGENT_REPORT_FAILED, error);
   }
 
   @Test
-  void agentLogFailureMapsToApiError() throws Exception {
+  void runLogFailureMapsToApiError() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on(
-                    "tail -n 200 /home/dev/.sail/agent.log",
-                    new ShellExec.Result(1, "", "permission denied")));
+                .on("tail -n 200 " + RUN_LOG, new ShellExec.Result(1, "", "permission denied")));
 
-    var error = operations.agentLog("acme", 200, "build");
-
-    assertError(ErrorCode.AGENT_LOG_FAILED, error);
+    assertError(ErrorCode.AGENT_LOG_FAILED, operations.runLog("r1", 200, "node-a"));
   }
 
   @Test
@@ -1486,28 +1608,99 @@ class SailApiOperationsTest {
   }
 
   @Test
-  void agentSessionsFailWithoutSessionStore() throws Exception {
+  void runsFailWithoutARunStore() throws Exception {
     var operations = operations(baseYaml(), shell());
 
-    assertError(ErrorCode.INTERNAL, operations.agentSessions("acme"));
+    assertError(ErrorCode.INTERNAL, operations.runs("acme", null));
+    assertError(ErrorCode.INTERNAL, operations.run("r1"));
+    assertError(ErrorCode.INTERNAL, operations.runLog("r1", 200, "node-a"));
+    assertError(ErrorCode.INTERNAL, operations.stopRun("r1", "node-a"));
   }
 
   @Test
-  void agentSessionsListsSessionsFromStore() throws Exception {
+  void runLogReportsWhenTheRunHasNoLogFile() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    "r1",
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+
+    assertEquals("This run has no log file.", get(operations.runLog("r1", 200, "node-a"), "error"));
+  }
+
+  @Test
+  void runsListRunsFromStore() throws Exception {
     var operations =
         operationsWithStores(
             baseYaml(),
             shell(),
             null,
             s -> {},
-            sessions -> sessions.create("acme", "auth", "claude-code", "feat/auth", "do it", 123));
+            runs ->
+                runs.create(
+                    "r1",
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    "feat/auth",
+                    "do it",
+                    123,
+                    null,
+                    "/home/dev/.sail/runs/r1/agent.log"));
 
-    var result = operations.agentSessions("acme");
+    var result = operations.runs("acme", null);
 
     assertTrue(result.isSuccess());
     @SuppressWarnings("unchecked")
-    var sessions = (List<Map<String, Object>>) get(result, "sessions");
-    assertEquals(1, sessions.size());
+    var runs = (List<Map<String, Object>>) get(result, "runs");
+    assertEquals(1, runs.size());
+    assertEquals("node-a", runs.getFirst().get("node"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void globalSpecEmbedsTheLatestRunSummaryWithItsNode() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell(),
+            null,
+            store -> seedSpec(store, "auth", "Add auth", "pending", List.of(), ""),
+            runs ->
+                runs.create(
+                    "r1",
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    "/home/dev/.sail/runs/r1/agent.log"));
+
+    var latest = (Map<String, Object>) get(operations.globalSpec("auth"), "latest_run");
+
+    assertEquals("r1", latest.get("id"));
+    assertEquals("node-a", latest.get("node"));
+    assertEquals("running", latest.get("status"));
   }
 
   @Test
@@ -1637,7 +1830,7 @@ class SailApiOperationsTest {
       FakeShell shell,
       EventBus bus,
       java.util.function.Consumer<SpecStore> seedSpecs,
-      java.util.function.Consumer<SessionStore> seedSessions)
+      java.util.function.Consumer<RunStore> seedSessions)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
@@ -1645,7 +1838,7 @@ class SailApiOperationsTest {
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
     var reviewStore = new ReviewStore(db);
-    var sessionStore = new SessionStore(db);
+    var sessionStore = new RunStore(db);
     seedSpecs.accept(specStore);
     seedSessions.accept(sessionStore);
     return new SailApiOperations(

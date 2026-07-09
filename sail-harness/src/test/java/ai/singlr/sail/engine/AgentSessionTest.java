@@ -207,6 +207,31 @@ class AgentSessionTest {
   }
 
   @Test
+  void buildBackgroundLaunchCommandRedirectsToARunScopedLog() {
+    var runLog = AgentUnit.BUILD.runLogPath("run-xyz");
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            runLog);
+
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains(runLog), "the agent's output is redirected to the run-scoped log");
+    assertTrue(
+        joined.contains("mkdir -p \"$(dirname \"$4\")\""), "the run's log directory is created");
+    assertFalse(
+        joined.contains("/home/dev/.sail/agent.log "),
+        "the shared per-container log is no longer the redirect target");
+  }
+
+  @Test
   void resetLogTruncatesTheGivenRolesLog() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 

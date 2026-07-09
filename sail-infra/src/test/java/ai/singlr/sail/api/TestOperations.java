@@ -76,17 +76,42 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
-    return Result.success(new AgentLogResponse(project, List.of(), null));
+  public Result<RunListResponse> runs(String project, String spec) {
+    return Result.success(new RunListResponse(project, spec, List.of()));
   }
 
   @Override
-  public Result<StopAgentResponse> stopAgent(String project) {
-    return Result.success(new StopAgentResponse(project, false, null, null));
+  public Result<RunDetailResponse> run(String runId) {
+    return Result.success(
+        new RunDetailResponse(
+            new RunView(
+                runId,
+                "acme",
+                "auth",
+                "node-a",
+                "build",
+                "claude-code",
+                "feat/auth",
+                null,
+                "running",
+                "t0",
+                null,
+                null,
+                "/home/dev/.sail/runs/" + runId + "/agent.log")));
   }
 
   @Override
-  public Result<AgentReportResponse> agentReport(String project) {
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
+    return Result.success(new RunLogResponse(runId, List.of(), null));
+  }
+
+  @Override
+  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
+    return Result.success(new StopRunResponse(runId, false, null, null));
+  }
+
+  @Override
+  public Result<AgentReportResponse> agentReport(String project, String localHandle) {
     return Result.success(
         new AgentReportResponse(
             project,
@@ -148,7 +173,8 @@ class TestOperations implements ApiOperations {
                 null),
             null,
             null,
-            0));
+            0,
+            null));
   }
 
   @Override
@@ -302,23 +328,5 @@ class TestOperations implements ApiOperations {
   @Override
   public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
     return Result.success(new FindingDismissResponse(findingId, true));
-  }
-
-  @Override
-  public Result<SessionListResponse> agentSessions(String project) {
-    var session =
-        new SessionView(
-            "s1",
-            project,
-            "auth",
-            "claude-code",
-            "feat/auth",
-            "task",
-            1234,
-            "running",
-            "t0",
-            null,
-            null);
-    return Result.success(new SessionListResponse(project, List.of(session)));
   }
 }

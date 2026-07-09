@@ -6,8 +6,8 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,23 +19,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Proves {@code GET /v1/projects/{p}/agent/stream} is mounted: the real {@link SailApiServer}
- * wiring routes it to {@link AgentLogStreamer} rather than returning 404, and it rejects an
+ * Proves {@code GET /v1/runs/{id}/stream} is mounted: the real {@link SailApiServer} wiring routes
+ * it to {@link AgentLogStreamer} rather than to the generic router, and it rejects an
  * unauthenticated caller exactly as {@code /v1/events/stream} does. The tail itself is not
- * exercised here (no live container), so the authenticated request lands on the handler and fails
- * to spawn the container tail — the point is that it reaches the handler at all.
+ * exercised here (no live container); the request lands on the handler, which — finding no such run
+ * — answers with the streamer's own {@code run_not_found}, distinguishing it from the router's
+ * generic {@code not_found}.
  */
 class AgentLogStreamerWiringTest {
 
   private static HttpRequest streamRequest(int port, String token) {
-    return streamRequest(port, token, "");
-  }
-
-  private static HttpRequest streamRequest(int port, String token, String query) {
     var builder =
-        HttpRequest.newBuilder(
-                URI.create(
-                    "http://127.0.0.1:" + port + "/v1/projects/backend/agent/stream" + query))
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/v1/runs/nope/stream"))
             .header("Accept", "text/event-stream")
             .timeout(Duration.ofSeconds(15))
             .GET();
@@ -57,16 +52,21 @@ class AgentLogStreamerWiringTest {
   }
 
   @Test
-  void authenticatedStreamRequestReachesHandlerNot404(@TempDir Path tmp) throws Exception {
+  void authenticatedStreamRequestReachesTheRunStreamer(@TempDir Path tmp) throws Exception {
     assertTimeoutPreemptively(
         Duration.ofSeconds(20),
         () -> {
           try (var server = server(tmp)) {
             server.start();
-            var status = statusFromHeaders(server.port(), "tok");
-            assertNotEquals(404, status, "stream route must be mounted");
-            assertNotEquals(401, status, "authenticated caller must pass the auth gate");
-            assertNotEquals(403, status, "authenticated caller must pass the auth gate");
+            var response =
+                HttpClient.newHttpClient()
+                    .send(
+                        streamRequest(server.port(), "tok"), HttpResponse.BodyHandlers.ofString());
+            assertEquals(404, response.statusCode());
+            assertTrue(
+                response.body().contains("run_not_found"),
+                "the stream path must reach AgentLogStreamer, not the generic router: "
+                    + response.body());
           }
         });
   }
@@ -78,41 +78,15 @@ class AgentLogStreamerWiringTest {
         () -> {
           try (var server = server(tmp)) {
             server.start();
-            assertEquals(401, statusFromHeaders(server.port(), null));
-          }
-        });
-  }
-
-  @Test
-  void invalidRoleRequestReturnsBadRequest(@TempDir Path tmp) throws Exception {
-    assertTimeoutPreemptively(
-        Duration.ofSeconds(20),
-        () -> {
-          try (var server = server(tmp)) {
-            server.start();
             var response =
                 HttpClient.newHttpClient()
                     .send(
-                        streamRequest(server.port(), "tok", "?role=bogus"),
-                        HttpResponse.BodyHandlers.ofString());
-            assertEquals(400, response.statusCode());
+                        streamRequest(server.port(), null),
+                        HttpResponse.BodyHandlers.ofInputStream());
+            try (var body = response.body()) {
+              assertEquals(401, response.statusCode());
+            }
           }
         });
-  }
-
-  /**
-   * Reads only the response status from the headers and closes the body without draining it. The
-   * endpoint is an SSE stream over {@code tail -f}, which never reaches EOF against a live
-   * container, so consuming the body ({@code BodyHandlers.ofString()}) would block forever — the
-   * bug that hung this test for 34 minutes in the incus lane. The wiring assertion is a status
-   * check, and the status is in the headers.
-   */
-  private static int statusFromHeaders(int port, String token) throws Exception {
-    var response =
-        HttpClient.newHttpClient()
-            .send(streamRequest(port, token), HttpResponse.BodyHandlers.ofInputStream());
-    try (var body = response.body()) {
-      return response.statusCode();
-    }
   }
 }

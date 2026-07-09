@@ -12,6 +12,7 @@ import ai.singlr.sail.api.DispatchPolicy;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -31,11 +32,14 @@ import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -290,6 +294,9 @@ public final class DispatchCommand implements Runnable {
     agentSession.writeSession(
         name, task, Objects.requireNonNullElse(branchName, ""), nextSpec.id(), agentType);
 
+    var runId = DateTimeUtils.newId().toString();
+    var runLogPath = AgentUnit.BUILD.runLogPath(runId);
+
     if (background) {
       var sshCmd =
           AgentSession.buildBackgroundLaunchCommand(
@@ -301,7 +308,8 @@ public final class DispatchCommand implements Runnable {
               taskSpec.model(),
               taskSpec.reasoningEffort(),
               nextSpec.id(),
-              agentType);
+              agentType,
+              runLogPath);
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Launching agent in background...|@"));
         if (dryRun) {
@@ -317,6 +325,8 @@ public final class DispatchCommand implements Runnable {
         if (exitCode != 0) {
           throw new IOException("Failed to launch background agent; see output above.");
         }
+        recordRun(
+            name, runId, nextSpec.id(), agentType, branchName, task, runLogPath, agentSession);
       }
       Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
       if (!dryRun) {
@@ -505,6 +515,66 @@ public final class DispatchCommand implements Runnable {
                 + "). sail-api may be unreachable; the dispatch itself is unaffected and"
                 + " audit.jsonl is authoritative.",
             Ansi.AUTO));
+  }
+
+  /**
+   * Records the launched execution as a {@link RunStore} run — stamped with this box's FDE handle
+   * as its {@code node} so the provenance guard can tell a local run from a foreign one — and
+   * prunes the container's oldest run-log directories. Never fatal: a bookkeeping failure must not
+   * fail a launch that already succeeded, since the agent is running regardless.
+   */
+  private void recordRun(
+      String project,
+      String runId,
+      String specId,
+      String agentType,
+      String branch,
+      String task,
+      String logPath,
+      AgentSession agentSession) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      var runStore = new RunStore(db);
+      Integer pid = null;
+      try {
+        var status = agentSession.queryStatus(project);
+        pid = status != null ? status.pid() : null;
+      } catch (Exception ignored) {
+        // pid is a best-effort convenience; the run row is authoritative without it
+      }
+      runStore.create(
+          runId,
+          project,
+          specId,
+          NodeIdentity.handle(),
+          "build",
+          agentType,
+          branch,
+          task,
+          pid,
+          null,
+          logPath);
+      pruneRuns(project, runStore);
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine("Could not record run " + runId + ": " + e.getMessage(), Ansi.AUTO));
+    }
+  }
+
+  private void pruneRuns(String project, RunStore runStore) {
+    try {
+      var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
+      var pruned =
+          RunRetention.prune(new ShellExecutor(false), project, ids, RunRetention.DEFAULT_KEEP);
+      if (!pruned.isEmpty() && !json) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|faint Pruned " + pruned.size() + " old run log(s) in " + project + ".|@"));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine(
+              "Run-log pruning skipped for " + project + ": " + e.getMessage(), Ansi.AUTO));
+    }
   }
 
   private void ensureSailSetup(ShellExecutor shell, String container) {

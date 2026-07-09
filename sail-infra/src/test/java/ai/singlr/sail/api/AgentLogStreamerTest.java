@@ -11,28 +11,94 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.RunStore;
+import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpContext;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpPrincipal;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class AgentLogStreamerTest {
 
-  @Test
-  void extractProjectFromValidPath() {
-    assertEquals("backend", AgentLogStreamer.extractProject("/v1/projects/backend/agent/stream"));
+  private static RunStore.RunRow runOn(String node) {
+    return new RunStore.RunRow(
+        "r1",
+        "acme",
+        "auth",
+        node,
+        "build",
+        "claude-code",
+        "feat/x",
+        "do it",
+        1,
+        null,
+        "running",
+        null,
+        "/home/dev/.sail/runs/r1/agent.log",
+        "t0",
+        null);
+  }
+
+  private static AgentLogStreamer streamer(
+      java.util.function.Function<String, Optional<RunStore.RunRow>> lookup, String localHandle) {
+    return new AgentLogStreamer(exchange -> {}, lookup, () -> localHandle);
   }
 
   @Test
-  void extractProjectFromShortPath() {
-    assertNull(AgentLogStreamer.extractProject("/v1/health"));
+  void handleRefusesAForeignRunWithA409AndNames() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream");
+
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(out);
+
+    assertEquals(409, out.status);
+    assertTrue(out.body().contains("run_on_other_node"), out.body());
+    assertTrue(out.body().contains("node-b"), out.body());
   }
 
   @Test
-  void extractProjectFromInvalidPrefix() {
-    assertNull(AgentLogStreamer.extractProject("/v1/other/backend/agent/stream"));
+  void handleReturns404ForAnUnknownRun() throws Exception {
+    var out = new CapturingExchange("/v1/runs/nope/stream");
+
+    streamer(id -> Optional.empty(), "node-a").handle(out);
+
+    assertEquals(404, out.status);
+    assertTrue(out.body().contains("run_not_found"), out.body());
+  }
+
+  @Test
+  void handleFailsClosedOnABlankNodeRun() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream");
+
+    streamer(id -> Optional.of(runOn("")), "node-a").handle(out);
+
+    assertEquals(409, out.status);
+    assertTrue(out.body().contains("run_on_other_node"), out.body());
+  }
+
+  @Test
+  void extractRunIdFromValidPath() {
+    assertEquals("run-1", AgentLogStreamer.extractRunId("/v1/runs/run-1/stream"));
+  }
+
+  @Test
+  void extractRunIdFromShortPath() {
+    assertNull(AgentLogStreamer.extractRunId("/v1/health"));
+  }
+
+  @Test
+  void extractRunIdFromInvalidPrefix() {
+    assertNull(AgentLogStreamer.extractRunId("/v1/other/run-1/stream"));
   }
 
   @Test
@@ -61,72 +127,49 @@ class AgentLogStreamerTest {
   }
 
   @Test
-  void parseRoleDefaultsToBuildForNull() {
-    assertEquals("build", AgentLogStreamer.parseRole(null));
-  }
-
-  @Test
-  void parseRoleDefaultsToBuildWhenMissing() {
-    assertEquals("build", AgentLogStreamer.parseRole("since=10"));
-  }
-
-  @Test
-  void parseRoleReadsReviewFromQuery() {
-    assertEquals("review", AgentLogStreamer.parseRole("since=10&role=review"));
-  }
-
-  @Test
-  void buildTailCommandWithoutSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "build");
+  void buildTailCommandTailsTheRunScopedLog() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
     assertTrue(cmd[cmd.length - 1].contains("tail -f"));
-    assertTrue(cmd[cmd.length - 1].contains("agent.log"));
+    assertTrue(cmd[cmd.length - 1].contains("/home/dev/.sail/runs/r1/agent.log"));
   }
 
   @Test
-  void buildTailCommandReviewRoleTailsReviewLog() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
-    var script = cmd[cmd.length - 1];
-    assertTrue(script.contains("review.log"));
-    assertFalse(script.contains("agent.log"));
-  }
-
-  @Test
-  void buildTailCommandTouchesLogSoMissingReviewLogStartsClean() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
-    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/review.log"));
+  void buildTailCommandTouchesTheLogSoAnEmptyRunStreamsClean() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
+    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/runs/r1/agent.log"));
   }
 
   @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 50, "build");
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 50);
     assertTrue(cmd[cmd.length - 1].contains("tail -n +50 -f"));
   }
 
   @Test
-  void buildTailCommandIncludesUserFlags() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", 0, "build");
+  void buildTailCommandRunsAsTheDevUser() {
+    var cmd = AgentLogStreamer.buildTailCommand("proj", "/home/dev/.sail/runs/r1/agent.log", 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
   }
 
   @Test
-  void isStreamPathMatchesCanonicalPath() {
-    assertTrue(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/stream"));
+  void isStreamPathMatchesCanonicalRunPath() {
+    assertTrue(AgentLogStreamer.isStreamPath("/v1/runs/run-1/stream"));
   }
 
   @Test
-  void isStreamPathRejectsOtherAgentSubResources() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/log"));
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent"));
+  void isStreamPathRejectsOtherRunSubResources() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1/log"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1"));
   }
 
   @Test
   void isStreamPathRejectsWrongPrefix() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/backend/agent/stream"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/run-1/stream"));
     assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
   }
 
@@ -165,5 +208,99 @@ class AgentLogStreamerTest {
 
           assertFalse(process.isAlive());
         });
+  }
+
+  private static final class CapturingExchange extends HttpExchange {
+    private final URI uri;
+    private final Headers responseHeaders = new Headers();
+    private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+    private int status = -1;
+
+    private CapturingExchange(String path) {
+      this.uri = URI.create(path);
+    }
+
+    private String body() {
+      return responseBody.toString(StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public String getRequestMethod() {
+      return "GET";
+    }
+
+    @Override
+    public URI getRequestURI() {
+      return uri;
+    }
+
+    @Override
+    public Headers getRequestHeaders() {
+      return new Headers();
+    }
+
+    @Override
+    public Headers getResponseHeaders() {
+      return responseHeaders;
+    }
+
+    @Override
+    public void sendResponseHeaders(int rCode, long responseLength) {
+      this.status = rCode;
+    }
+
+    @Override
+    public OutputStream getResponseBody() {
+      return responseBody;
+    }
+
+    @Override
+    public InputStream getRequestBody() {
+      return new ByteArrayInputStream(new byte[0]);
+    }
+
+    @Override
+    public void close() {}
+
+    @Override
+    public Object getAttribute(String name) {
+      return null;
+    }
+
+    @Override
+    public void setAttribute(String name, Object value) {}
+
+    @Override
+    public HttpContext getHttpContext() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InetSocketAddress getRemoteAddress() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getResponseCode() {
+      return status;
+    }
+
+    @Override
+    public InetSocketAddress getLocalAddress() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String getProtocol() {
+      return "HTTP/1.1";
+    }
+
+    @Override
+    public void setStreams(InputStream i, OutputStream o) {}
+
+    @Override
+    public HttpPrincipal getPrincipal() {
+      throw new UnsupportedOperationException();
+    }
   }
 }

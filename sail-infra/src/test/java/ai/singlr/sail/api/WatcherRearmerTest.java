@@ -10,10 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -43,14 +44,14 @@ class WatcherRearmerTest {
   @TempDir Path tempDir;
   private Sqlite db;
   private SpecStore specStore;
-  private SessionStore sessionStore;
+  private RunStore sessionStore;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("rearm.db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
-    sessionStore = new SessionStore(db);
+    sessionStore = new RunStore(db);
   }
 
   @AfterEach
@@ -81,7 +82,17 @@ class WatcherRearmerTest {
 
   private String runningSession(String specId, Integer watcherPid) {
     return sessionStore.create(
-        "test-project", specId, "claude-code", "feat/test", "task", 1, watcherPid);
+        DateTimeUtils.newId().toString(),
+        "test-project",
+        specId,
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/test",
+        "task",
+        1,
+        watcherPid,
+        "/home/dev/.sail/runs/r/agent.log");
   }
 
   private WatcherRearmer rearmer(

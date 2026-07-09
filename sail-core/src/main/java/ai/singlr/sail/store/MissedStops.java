@@ -59,10 +59,7 @@ public final class MissedStops {
    * the systemd unit exists, so a young running session is never probed, let alone declared dead.
    */
   public static Outcome assess(
-      SessionStore.SessionRow session,
-      boolean authoritativeStopObserved,
-      Instant now,
-      Duration grace) {
+      RunStore.RunRow session, boolean authoritativeStopObserved, Instant now, Duration grace) {
     if (authoritativeStopObserved) {
       return new Outcome.Skip("an authoritative stop is already recorded");
     }

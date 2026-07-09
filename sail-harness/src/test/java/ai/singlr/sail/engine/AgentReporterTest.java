@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
@@ -231,19 +231,22 @@ class AgentReporterTest {
     var start = Instant.now().minusSeconds(7200);
     var end = Instant.now().minusSeconds(3600);
     var session =
-        new SessionStore.SessionRow(
+        new RunStore.RunRow(
             "s1",
             CONTAINER,
             "auth",
+            "node-a",
+            "build",
             "claude-code",
             "feat/auth",
             "do it",
             123,
+            null,
             "completed",
-            start.toString(),
-            end.toString(),
             0,
-            null);
+            null,
+            start.toString(),
+            end.toString());
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")
@@ -264,19 +267,22 @@ class AgentReporterTest {
   void aNonZeroExitIsReportedAsFailed(@TempDir java.nio.file.Path stateDir) throws Exception {
     var start = Instant.now().minusSeconds(120);
     var session =
-        new SessionStore.SessionRow(
+        new RunStore.RunRow(
             "s1",
             CONTAINER,
             "auth",
+            "node-a",
+            "build",
             "claude-code",
             "feat/auth",
             "do it",
             123,
+            null,
             "stopped",
-            start.toString(),
-            Instant.now().toString(),
             137,
-            null);
+            null,
+            start.toString(),
+            Instant.now().toString());
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")

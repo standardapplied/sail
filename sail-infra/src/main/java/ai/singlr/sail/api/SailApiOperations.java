@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -32,7 +33,7 @@ import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -59,7 +60,7 @@ public final class SailApiOperations implements ApiOperations {
   private final AuditPersister auditPersister;
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
-  private final SessionStore sessionStore;
+  private final RunStore runStore;
   private final ProjectStore projectStore;
   private final Supplier<ConnectEnvironment> connectEnvironment;
   private final SyncScheduler syncScheduler;
@@ -189,7 +190,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore) {
+      RunStore runStore) {
     this(
         shell,
         file,
@@ -198,7 +199,7 @@ public final class SailApiOperations implements ApiOperations {
         auditPersister,
         specStore,
         reviewStore,
-        sessionStore,
+        runStore,
         null,
         ConnectEnvironment::detect,
         SyncScheduler.disabled());
@@ -212,7 +213,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore,
+      RunStore runStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment) {
     this(
@@ -223,7 +224,7 @@ public final class SailApiOperations implements ApiOperations {
         auditPersister,
         specStore,
         reviewStore,
-        sessionStore,
+        runStore,
         projectStore,
         connectEnvironment,
         SyncScheduler.disabled());
@@ -237,7 +238,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore,
+      RunStore runStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler) {
@@ -248,11 +249,11 @@ public final class SailApiOperations implements ApiOperations {
     this.auditPersister = auditPersister;
     this.specStore = specStore;
     this.reviewStore = reviewStore;
-    this.sessionStore = sessionStore;
+    this.runStore = runStore;
     this.projectStore = projectStore;
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
-    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus);
+    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
   }
 
@@ -304,18 +305,114 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
-    return safe(() -> agentLogValue(project, tail, role));
+  public Result<AgentReportResponse> agentReport(String project, String localHandle) {
+    return safe(() -> agentReportValue(project, localHandle));
   }
 
   @Override
-  public Result<StopAgentResponse> stopAgent(String project) {
-    return safe(() -> stopAgentValue(project));
+  public Result<RunListResponse> runs(String project, String spec) {
+    return safe(
+        () -> {
+          syncScheduler.freshenRead();
+          var rows = requireRunStore().list(project, spec).stream().map(RunView::from).toList();
+          return new RunListResponse(project, spec, rows);
+        });
   }
 
   @Override
-  public Result<AgentReportResponse> agentReport(String project) {
-    return safe(() -> agentReportValue(project));
+  public Result<RunDetailResponse> run(String runId) {
+    return safe(
+        () -> {
+          syncScheduler.freshenRead();
+          var run = requireRunStore().findById(runId).orElseThrow(() -> runNotFound(runId));
+          return new RunDetailResponse(RunView.from(run));
+        });
+  }
+
+  @Override
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
+    return onLocalRun(runId, localHandle, run -> safe(() -> runLogValue(run, tail)));
+  }
+
+  @Override
+  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
+    return onLocalRun(runId, localHandle, run -> safe(() -> stopRunValue(run)));
+  }
+
+  /**
+   * Resolves a run and applies the provenance guard before handing it to {@code served}: an absent
+   * store is an internal error, an unknown run a 404, and a run that executed elsewhere a
+   * structured {@code run_on_other_node} refusal. The served branch only ever sees a run that ran
+   * on this box.
+   */
+  private <T> Result<T> onLocalRun(
+      String runId,
+      String localHandle,
+      java.util.function.Function<RunStore.RunRow, Result<T>> served) {
+    if (runStore == null) {
+      return Result.failure(
+          ErrorCode.INTERNAL,
+          "Run store not available. Start the server with 'sail server start'.");
+    }
+    var run = runStore.findById(runId).orElse(null);
+    if (run == null) {
+      return Result.failure(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+    }
+    if (isForeign(run, localHandle)) {
+      return foreignRun(run);
+    }
+    return served.apply(run);
+  }
+
+  private RunStore requireRunStore() {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Run store not available. Start the server with 'sail server start'.");
+    }
+    return runStore;
+  }
+
+  private static ApiException runNotFound(String runId) {
+    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+  }
+
+  /**
+   * Whether a run did not execute on this box — the provenance test, the inverse of {@link
+   * #ownsRun}. A box with a handle serves only runs stamped with it, so a blank {@code node} fails
+   * closed to foreign; a box with no handle serves only its own blank-node runs and never a synced
+   * run stamped by another box.
+   */
+  static boolean isForeign(RunStore.RunRow run, String localHandle) {
+    return !ownsRun(run.node(), localHandle);
+  }
+
+  /**
+   * Whether a run whose execution node is {@code runNode} belongs to the box whose handle is {@code
+   * localHandle}. One predicate for every ownership question — the read guard here and the
+   * completion/report lookups in {@link RunStore#latestForProjectOnNode} — so they can never
+   * disagree. A handled box owns the runs stamped with its handle (blank node → not owned, fail
+   * closed); an unhandled box (standalone / not yet bound to an FDE) owns its own blank-node runs.
+   */
+  static boolean ownsRun(String runNode, String localHandle) {
+    return Strings.isBlank(localHandle) ? Strings.isBlank(runNode) : localHandle.equals(runNode);
+  }
+
+  /**
+   * The structured {@code run_on_other_node} refusal: the worst case becomes an honest, actionable
+   * no ("logs live on {node}'s box") rather than a foreign box's local file tailed as if it were
+   * this run's. The clashing {@code node}/{@code spec}/{@code project} ride as field errors so a
+   * client can offer to switch.
+   */
+  private static <T> Result<T> foreignRun(RunStore.RunRow run) {
+    var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
+    return Result.failure(
+        ErrorCode.RUN_ON_OTHER_NODE,
+        "Run " + run.id() + " executed on " + node + "; its logs live there, not on this box.",
+        List.of(
+            new FieldError("node", Objects.toString(run.node(), "")),
+            new FieldError("spec", Objects.toString(run.specId(), "")),
+            new FieldError("project", Objects.toString(run.project(), ""))));
   }
 
   private ProjectResponse projectValue(String project) {
@@ -453,6 +550,8 @@ public final class SailApiOperations implements ApiOperations {
     var branchCreated = createBranchIfNeeded(project, loaded.config(), targetRepos, branch);
 
     if (!request.dryRun()) {
+      var runId = DateTimeUtils.newId().toString();
+      var runLogPath = AgentUnit.BUILD.runLogPath(runId);
       var watcher =
           launchAgent(
               project,
@@ -462,8 +561,20 @@ public final class SailApiOperations implements ApiOperations {
               branch,
               request.mode(),
               taskSpec,
-              agentType);
+              agentType,
+              runLogPath);
       var status = querySession(agentSession, project);
+      recordRun(
+          runId,
+          project,
+          nextSpec.id(),
+          localHandle,
+          agentType,
+          branch,
+          task,
+          runLogPath,
+          status,
+          watcher);
       if (status != null && status.running()) {
         publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcher);
       }
@@ -516,6 +627,51 @@ public final class SailApiOperations implements ApiOperations {
             Map.of("label", label)));
   }
 
+  /**
+   * Records the launched execution as a run stamped with this box's handle as its {@code node}, so
+   * the provenance guard can serve local runs and refuse foreign ones, and prunes the container's
+   * oldest run-log directories. Never fatal: the agent is already running, so a bookkeeping failure
+   * only forfeits the run's metadata, never the launch. A run store is absent only in tests that do
+   * not exercise dispatch.
+   */
+  private void recordRun(
+      String runId,
+      String project,
+      String specId,
+      String node,
+      String agentType,
+      String branch,
+      String task,
+      String logPath,
+      AgentSession.SessionInfo status,
+      Optional<WatcherSpawner.Spawned> watcher) {
+    if (runStore == null) {
+      return;
+    }
+    try {
+      Integer watcherPid =
+          watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
+              ? (int) fallback.pid()
+              : null;
+      runStore.create(
+          runId,
+          project,
+          specId,
+          node,
+          "build",
+          agentType,
+          branch,
+          task,
+          status != null ? status.pid() : null,
+          watcherPid,
+          logPath);
+      var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
+      RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
+    } catch (Exception e) {
+      System.err.println("  [api] Warning: could not record run " + runId + ": " + e.getMessage());
+    }
+  }
+
   private void publishAgentSessionStarted(
       String project,
       String specId,
@@ -555,44 +711,66 @@ public final class SailApiOperations implements ApiOperations {
         info != null ? info.logPath() : null);
   }
 
-  private AgentLogResponse agentLogValue(String project, int tail, String role) {
-    requireProjectExists(project);
+  /**
+   * Tails a local run's own log file — the run-scoped {@code ~/.sail/runs/<runId>/agent.log} the
+   * run row records — so a log address names exactly one execution, never whatever the shared
+   * per-container file currently holds. The provenance guard already established the run is local.
+   */
+  private RunLogResponse runLogValue(RunStore.RunRow run, int tail) {
+    requireProjectExists(run.project());
+    var logPath = run.logPath();
+    if (Strings.isBlank(logPath)) {
+      return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
+    }
     var cmd =
         ContainerExec.asDevUser(
-            project,
-            List.of("tail", "-n", String.valueOf(tail), AgentUnit.fromRole(role).logPath()));
+            run.project(), List.of("tail", "-n", String.valueOf(tail), logPath));
     var result = exec(cmd);
     if (!result.ok()) {
       if (result.stderr().contains("No such file")) {
-        return new AgentLogResponse(project, List.of(), "No agent log found");
+        return new RunLogResponse(run.id(), List.of(), "No log found for this run.");
       }
-      throw new ApiException(ErrorCode.AGENT_LOG_FAILED, "Failed to read agent log.");
+      throw new ApiException(ErrorCode.AGENT_LOG_FAILED, "Failed to read run log.");
     }
     var lines = Arrays.stream(result.stdout().split("\n")).filter(line -> !line.isEmpty()).toList();
-    return new AgentLogResponse(project, lines, null);
+    return new RunLogResponse(run.id(), lines, null);
   }
 
-  private StopAgentResponse stopAgentValue(String project) {
-    requireProjectExists(project);
+  /**
+   * Stops the agent process only when {@code run} is genuinely the one executing now: an
+   * already-finished run, or a run whose recorded pid does not match the live agent, is a no-op —
+   * so stopping a stale run id can never kill a different, newer run of the same project. The
+   * provenance guard has already established the run is local.
+   */
+  private StopRunResponse stopRunValue(RunStore.RunRow run) {
+    requireProjectExists(run.project());
+    if (!"running".equals(run.status())) {
+      return new StopRunResponse(run.id(), false, "run_not_running", null);
+    }
     var agentSession = new AgentSession(shell);
-    var info = querySession(agentSession, project);
+    var info = querySession(agentSession, run.project());
     if (info == null || !info.running()) {
-      return new StopAgentResponse(project, false, "no_agent_running", null);
+      return new StopRunResponse(run.id(), false, "no_agent_running", null);
+    }
+    if (run.pid() == null || info.pid() != run.pid()) {
+      return new StopRunResponse(run.id(), false, "run_not_active", info.pid());
     }
     try {
-      agentSession.killAgent(project);
+      agentSession.killAgent(run.project());
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
     }
-    return new StopAgentResponse(project, true, null, info.pid());
+    return new StopRunResponse(run.id(), true, null, info.pid());
   }
 
-  private AgentReportResponse agentReportValue(String project) {
+  private AgentReportResponse agentReportValue(String project, String localHandle) {
     var loaded = loadProject(project);
     try {
       var specs = specStore != null ? specStore.projectSpecs(project) : List.<Spec>of();
       var session =
-          sessionStore != null ? sessionStore.latestForProject(project).orElse(null) : null;
+          runStore != null
+              ? runStore.latestForProjectOnNode(project, localHandle).orElse(null)
+              : null;
       return agentReportView(
           new AgentReporter(shell).generate(project, loaded.config(), specs, session));
     } catch (Exception e) {
@@ -761,7 +939,8 @@ public final class SailApiOperations implements ApiOperations {
       String branch,
       String mode,
       Spec spec,
-      String agentType) {
+      String agentType,
+      String logPath) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -782,7 +961,8 @@ public final class SailApiOperations implements ApiOperations {
                   spec.model(),
                   spec.reasoningEffort(),
                   spec.id(),
-                  agentType)
+                  agentType,
+                  logPath)
               : AgentSession.buildForegroundTaskCommand(
                   project,
                   config.sshUser(),
@@ -1121,21 +1301,6 @@ public final class SailApiOperations implements ApiOperations {
   @Override
   public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
     return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId));
-  }
-
-  @Override
-  public Result<SessionListResponse> agentSessions(String project) {
-    return safe(
-        () -> {
-          if (sessionStore == null) {
-            throw new ApiException(
-                ErrorCode.INTERNAL,
-                "Session store not available. Start the server with 'sail server start'.");
-          }
-          var sessions =
-              sessionStore.listForProject(project).stream().map(SessionView::from).toList();
-          return new SessionListResponse(project, sessions);
-        });
   }
 
   private record LoadedProject(SailYaml config, ContainerState state) {}

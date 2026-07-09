@@ -18,24 +18,26 @@ class MissedStopsTest {
   private static final Instant NOW = Instant.parse("2026-07-06T12:00:00Z");
   private static final Duration GRACE = Duration.ofMinutes(2);
 
-  private static SessionStore.SessionRow session(
-      String status, Integer exitCode, String startedAt) {
-    return new SessionStore.SessionRow(
+  private static RunStore.RunRow session(String status, Integer exitCode, String startedAt) {
+    return new RunStore.RunRow(
         "s-auth",
         "acme",
         "auth",
+        "node-a",
+        "build",
         "claude-code",
         null,
         null,
         null,
-        status,
-        startedAt,
         null,
+        status,
         exitCode,
+        null,
+        startedAt,
         null);
   }
 
-  private static MissedStops.Outcome assess(SessionStore.SessionRow session, boolean observed) {
+  private static MissedStops.Outcome assess(RunStore.RunRow session, boolean observed) {
     return MissedStops.assess(session, observed, NOW, GRACE);
   }
 
