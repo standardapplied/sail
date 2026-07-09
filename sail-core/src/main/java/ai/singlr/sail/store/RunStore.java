@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.LinkedHashMap;
@@ -188,6 +189,23 @@ public final class RunStore implements ConflictResolver {
               status,
               DateTimeUtils.now().toString(),
               exitCode != null ? exitCode.longValue() : null,
+              id);
+          recordRevision(id, "local", false);
+        });
+  }
+
+  /**
+   * Stamps the agent and watcher pids on a run once launch has produced them. The run row is
+   * created before launch (so terminal hook events can find it), then updated here with the pids
+   * the launch resolved. Journals a revision so the pids replicate.
+   */
+  public void updateProcess(String id, Integer pid, Integer watcherPid) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE runs SET pid = ?, watcher_pid = ? WHERE id = ?",
+              pid != null ? pid.longValue() : null,
+              watcherPid != null ? watcherPid.longValue() : null,
               id);
           recordRevision(id, "local", false);
         });
@@ -492,7 +510,7 @@ public final class RunStore implements ConflictResolver {
 
   private static RunRow rowFrom(String id, Map<String, Object> snapshot) {
     return new RunRow(
-        id,
+        Ids.requireUuid(id),
         text(snapshot, "project"),
         text(snapshot, "spec_id"),
         text(snapshot, "node"),

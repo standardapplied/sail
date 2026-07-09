@@ -108,6 +108,13 @@ public record Event(
     /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
     public static final String WATCHER_PID = "watcher_pid";
 
+    /**
+     * The run id this lifecycle event belongs to, carried on launch and terminal events so a
+     * completion addresses the exact execution rather than "the newest running run of the project".
+     * Absent on an ad-hoc (non-dispatch) session that minted no run.
+     */
+    public static final String RUN_ID = "run_id";
+
     private WellKnownData() {}
   }
 

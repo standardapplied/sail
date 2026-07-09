@@ -511,13 +511,14 @@ class MissedStopReconcilerTest {
             List.of(),
             List.of());
 
-    var event = MissedStopReconciler.stopEvent(spec, 137);
+    var event = MissedStopReconciler.stopEvent(spec, "run-7", 137);
 
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, event.type());
     assertEquals("auth", event.spec());
     assertEquals("codex", event.agent());
     assertEquals(137, event.data().get("exit_code"));
     assertEquals("reconcile", event.data().get("source"));
+    assertEquals("run-7", event.data().get("run_id"));
   }
 
   @Test
@@ -541,10 +542,11 @@ class MissedStopReconcilerTest {
             List.of(),
             List.of());
 
-    var event = MissedStopReconciler.stopEvent(spec, null);
+    var event = MissedStopReconciler.stopEvent(spec, "run-7", null);
 
     assertEquals(Event.SAIL_AGENT, event.agent());
     assertNull(event.data().get("exit_code"));
     assertEquals("reconcile", event.data().get("source"));
+    assertEquals("run-7", event.data().get("run_id"));
   }
 }

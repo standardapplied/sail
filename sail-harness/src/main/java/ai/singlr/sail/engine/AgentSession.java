@@ -46,8 +46,11 @@ public final class AgentSession {
    * @param specId the {@code SAIL_SPEC_ID} the unit was launched with, or {@code ""} for an ad-hoc
    *     non-spec session
    * @param agentType the {@code SAIL_AGENT} the unit was launched with, or {@code ""} when unknown
+   * @param runId the {@code SAIL_RUN_ID} the unit was launched with, or {@code ""} for an ad-hoc
+   *     session that minted no run; carried so a synthesized stop can address the exact run
    */
-  public record ExitState(boolean active, int exitCode, String specId, String agentType) {}
+  public record ExitState(
+      boolean active, int exitCode, String specId, String agentType, String runId) {}
 
   /** Ensures the ~/.sail directory exists inside the container. */
   public void ensureDirectory(String containerName)
@@ -109,7 +112,23 @@ public final class AgentSession {
   public void writeSession(
       String containerName, String task, String branch, String specId, String agentType)
       throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, AgentUnit.BUILD);
+    writeSession(containerName, task, branch, specId, agentType, "", AgentUnit.BUILD);
+  }
+
+  /**
+   * Writes session metadata carrying the run id, so the watcher can recover it from the durable
+   * file when the transient unit's environment is already gone and address its synthesized stop at
+   * the exact run.
+   */
+  public void writeSession(
+      String containerName,
+      String task,
+      String branch,
+      String specId,
+      String agentType,
+      String runId)
+      throws IOException, InterruptedException, TimeoutException {
+    writeSession(containerName, task, branch, specId, agentType, runId, AgentUnit.BUILD);
   }
 
   /** Writes session metadata for the given role's unit (its own session file and log path). */
@@ -119,6 +138,7 @@ public final class AgentSession {
       String branch,
       String specId,
       String agentType,
+      String runId,
       AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var map = new LinkedHashMap<String, Object>();
@@ -126,6 +146,7 @@ public final class AgentSession {
     map.put("branch", branch);
     map.put("spec_id", Objects.requireNonNullElse(specId, ""));
     map.put("agent_type", Objects.requireNonNullElse(agentType, ""));
+    map.put("run_id", Objects.requireNonNullElse(runId, ""));
     map.put("started_at", Instant.now().toString());
     map.put("log_path", unit.logPath());
     var json = YamlUtil.dumpJson(map);
@@ -290,14 +311,16 @@ public final class AgentSession {
         reasoningEffort,
         specId,
         agentType,
-        AgentUnit.BUILD.logPath());
+        AgentUnit.BUILD.logPath(),
+        "");
   }
 
   /**
    * As the other overload, redirecting the agent's stdout/stderr to {@code logPath} — a run-scoped
    * {@code ~/.sail/runs/<runId>/agent.log} so consecutive dispatches never clobber or interleave
    * one shared file and a log address names exactly one execution. The log's parent directory is
-   * created before the redirect.
+   * created before the redirect. {@code runId} flows in as {@code SAIL_RUN_ID} so the agent's hooks
+   * and the watcher can address terminal events at the exact run; blank for an ad-hoc launch.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -309,7 +332,8 @@ public final class AgentSession {
       String reasoningEffort,
       String specId,
       String agentType,
-      String logPath) {
+      String logPath,
+      String runId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
@@ -317,6 +341,7 @@ public final class AgentSession {
         cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath, true);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
+    var effectiveRunId = Objects.requireNonNullElse(runId, "");
     var script =
         """
         mkdir -p "$1"
@@ -324,7 +349,7 @@ public final class AgentSession {
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
@@ -352,7 +377,8 @@ public final class AgentSession {
             logPath,
             AgentUnit.BUILD.pidPath(),
             effectiveSpec,
-            effectiveAgent));
+            effectiveAgent,
+            effectiveRunId));
   }
 
   /**
@@ -420,6 +446,51 @@ public final class AgentSession {
             "bash", "-l", "-c", script, "bash", workDir, agentCmd, effectiveSpec, effectiveAgent));
   }
 
+  /**
+   * The dispatch foreground launcher: like the simpler overload but with {@code runId} carried in
+   * as {@code SAIL_RUN_ID} and the agent's stdout/stderr redirected to the run-scoped {@code
+   * logPath}, so a foreground dispatch's recorded log address names a file that actually holds its
+   * output and its terminal hook events can address the exact run.
+   */
+  public static List<String> buildForegroundTaskCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String logPath,
+      String runId) {
+    var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
+    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
+    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
+    var agentCmd =
+        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
+    var effectiveSpec = Objects.requireNonNullElse(specId, "");
+    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
+    var effectiveRunId = Objects.requireNonNullElse(runId, "");
+    var script =
+        "mkdir -p \"$(dirname \"$5\")\"; cd \"$1\" && "
+            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" bash -l -c \"$2\" > \"$5\" 2>&1";
+    return ContainerExec.asDevUser(
+        containerName,
+        List.of(
+            "bash",
+            "-l",
+            "-c",
+            script,
+            "bash",
+            workDir,
+            agentCmd,
+            effectiveSpec,
+            effectiveAgent,
+            logPath,
+            effectiveRunId));
+  }
+
   private static void warnIfReasoningEffortDropped(
       AgentCli cli, String specId, String reasoningEffort) {
     if (cli != AgentCli.CLAUDE_CODE || Strings.isBlank(reasoningEffort)) {
@@ -466,22 +537,24 @@ public final class AgentSession {
                 "--property=Environment"));
     var result = shell.exec(cmd);
     var state = parseExitState(result.ok() ? result.stdout() : "");
-    if (!state.specId().isBlank()) {
+    if (!state.specId().isBlank() && !state.runId().isBlank()) {
       return state;
     }
     var durable = readSessionDescriptor(containerName, unit);
     return new ExitState(
         state.active(),
         state.exitCode(),
-        durable.specId(),
-        state.agentType().isBlank() ? durable.agentType() : state.agentType());
+        state.specId().isBlank() ? durable.specId() : state.specId(),
+        state.agentType().isBlank() ? durable.agentType() : state.agentType(),
+        state.runId().isBlank() ? durable.runId() : state.runId());
   }
 
-  private record SessionDescriptor(String specId, String agentType) {}
+  private record SessionDescriptor(String specId, String agentType, String runId) {}
 
   /**
-   * Reads {@code spec_id}/{@code agent_type} from the durable session file. Used as the fallback
-   * when a collected unit no longer reports its environment; returns blanks for an ad-hoc session.
+   * Reads {@code spec_id}/{@code agent_type}/{@code run_id} from the durable session file. Used as
+   * the fallback when a collected unit no longer reports its environment; returns blanks for an
+   * ad-hoc session.
    */
   @SuppressWarnings("unchecked")
   private SessionDescriptor readSessionDescriptor(String containerName, AgentUnit unit)
@@ -489,11 +562,13 @@ public final class AgentSession {
     var cmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
     var result = shell.exec(cmd);
     if (!result.ok() || result.stdout().isBlank()) {
-      return new SessionDescriptor("", "");
+      return new SessionDescriptor("", "", "");
     }
     var meta = (Map<String, Object>) YamlUtil.parseMap(result.stdout());
     return new SessionDescriptor(
-        Objects.toString(meta.get("spec_id"), ""), Objects.toString(meta.get("agent_type"), ""));
+        Objects.toString(meta.get("spec_id"), ""),
+        Objects.toString(meta.get("agent_type"), ""),
+        Objects.toString(meta.get("run_id"), ""));
   }
 
   static ExitState parseExitState(String show) {
@@ -519,7 +594,8 @@ public final class AgentSession {
         active,
         exitCode,
         envValue(environment, "SAIL_SPEC_ID"),
-        envValue(environment, "SAIL_AGENT"));
+        envValue(environment, "SAIL_AGENT"),
+        envValue(environment, "SAIL_RUN_ID"));
   }
 
   private static String envValue(String environment, String key) {

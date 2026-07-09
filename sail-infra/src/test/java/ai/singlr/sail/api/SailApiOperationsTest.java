@@ -868,21 +868,31 @@ class SailApiOperationsTest {
 
   @Test
   void dispatchLaunchesBackgroundAgent() throws Exception {
+    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var operations =
-        operations(
+        operationsWithStores(
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
+                .on("cat /home/dev/.sail/agent.pid", "4242")
+                .on("kill -0 4242", new ShellExec.Result(1, "", "missing"))
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("mkdir -p /home/dev/.sail", "")
-                .on("claude", ""));
+                .on("claude", ""),
+            null,
+            SailApiOperationsTest::seedAuthBillingSetup,
+            runs::set);
 
     var result = dispatch(operations, "acme", request("auth"));
 
     assertEquals(true, get(result, "dispatched"));
     assertTrue(get(result, "agent").toString().contains("mode=background"));
+    var recorded = runs.get().listForProject("acme");
+    assertEquals(1, recorded.size(), "a background dispatch records its run in the aggregate");
+    assertEquals("running", recorded.getFirst().status());
+    assertEquals(4242, recorded.getFirst().pid(), "the launched agent's pid is stamped on the run");
   }
 
   @Test
@@ -962,8 +972,9 @@ class SailApiOperationsTest {
 
   @Test
   void dispatchMapsLaunchFailure() throws Exception {
+    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var operations =
-        operations(
+        operationsWithStores(
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
@@ -971,11 +982,17 @@ class SailApiOperationsTest {
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("-- mkdir -p /home/dev/.sail", "")
-                .on("claude", new ShellExec.Result(1, "", "missing cli")));
+                .on("claude", new ShellExec.Result(1, "", "missing cli")),
+            null,
+            SailApiOperationsTest::seedAuthBillingSetup,
+            runs::set);
 
     var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.AGENT_LAUNCH_FAILED, error);
+    var recorded = runs.get().listForProject("acme");
+    assertEquals(1, recorded.size(), "a failed launch still leaves its run row, marked failed");
+    assertEquals("failed", recorded.getFirst().status());
   }
 
   @Test

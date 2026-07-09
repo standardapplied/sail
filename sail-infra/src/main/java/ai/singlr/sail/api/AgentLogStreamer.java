@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
@@ -128,8 +130,12 @@ public final class AgentLogStreamer implements HttpHandler {
               run.specId(),
               specAssignee.apply(run.specId()).orElse(null))
           instanceof AccessDecision.Refused refused) {
+        var fix =
+            Strings.isBlank(refused.fix())
+                ? null
+                : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
         sendError(
-            exchange, refused.code().httpCode(), refused.code().code(), refused.message(), null);
+            exchange, refused.code().httpCode(), refused.code().code(), refused.message(), fix);
         return;
       }
       if (Strings.isBlank(run.logPath())) {
@@ -137,15 +143,23 @@ public final class AgentLogStreamer implements HttpHandler {
         return;
       }
       var since = parseSince(exchange.getRequestURI().getQuery());
-      streamLog(exchange, run.project(), run.logPath(), since);
+      String[] tailCommand;
+      try {
+        tailCommand =
+            buildTailCommand(
+                run.project(), run.id(), Objects.requireNonNullElse(run.role(), "build"), since);
+      } catch (IllegalArgumentException e) {
+        sendError(exchange, 400, "invalid_request", e.getMessage(), null);
+        return;
+      }
+      streamLog(exchange, run.project(), tailCommand, since);
     } finally {
       exchange.close();
     }
   }
 
-  private void streamLog(HttpExchange exchange, String project, String logPath, int since)
+  private void streamLog(HttpExchange exchange, String project, String[] tailCommand, int since)
       throws IOException {
-    var tailCommand = buildTailCommand(project, logPath, since);
     Process tailProcess;
     try {
       tailProcess = new ProcessBuilder(tailCommand).redirectErrorStream(true).start();
@@ -219,11 +233,22 @@ public final class AgentLogStreamer implements HttpHandler {
    * Tails the run's own log file, touched first so a stream opened before the agent has written any
    * output starts clean and empty — waiting for lines — rather than emitting tail's "cannot open"
    * error onto the stream.
+   *
+   * <p>The path is derived from the validated run id and its role, never from the run's persisted
+   * {@code log_path}: run rows arrive over sync from writable peers, so a replicated {@code
+   * log_path} is untrusted input that could name an arbitrary file or carry shell metacharacters.
+   * The derived path is then passed as a positional shell argument ({@code "$1"}) rather than
+   * interpolated into the script, so it can never be interpreted as shell syntax.
    */
-  static String[] buildTailCommand(String project, String logPath, int since) {
-    var tail = since > 0 ? "tail -n +" + since + " -f " : "tail -f ";
-    var script = "touch " + logPath + " 2>/dev/null; " + tail + logPath;
-    return ContainerExec.asDevUser(project, List.of("bash", "-c", script)).toArray(String[]::new);
+  static String[] buildTailCommand(String project, String runId, String role, int since) {
+    var logPath = AgentUnit.fromRole(role).runLogPath(Ids.requireUuid(runId));
+    var script =
+        since > 0
+            ? "touch -- \"$1\" 2>/dev/null; exec tail -n \"+$2\" -f -- \"$1\""
+            : "touch -- \"$1\" 2>/dev/null; exec tail -f -- \"$1\"";
+    return ContainerExec.asDevUser(
+            project, List.of("bash", "-c", script, "sail-run-tail", logPath, String.valueOf(since)))
+        .toArray(String[]::new);
   }
 
   /** The run id in {@code /v1/runs/{id}/stream}, or null when the path is not that shape. */

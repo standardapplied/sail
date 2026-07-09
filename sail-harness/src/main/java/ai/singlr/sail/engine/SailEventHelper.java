@@ -45,6 +45,7 @@ public final class SailEventHelper {
         exit 0
       fi
       AGENT="${SAIL_AGENT:-claude-code}"
+      RUN_ID="${SAIL_RUN_ID:-}"
       PROJECT="$(hostname)"
       HOST="$(hostname)"
       TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -54,7 +55,12 @@ public final class SailEventHelper {
         exit 0
       fi
 
-      BODY="{\\"v\\":1,\\"ts\\":\\"$TS\\",\\"project\\":\\"$PROJECT\\",\\"spec\\":\\"$SPEC_ID\\",\\"type\\":\\"$EVENT_TYPE\\",\\"agent\\":\\"$AGENT\\",\\"host\\":\\"$HOST\\",\\"data\\":{}}"
+      if [ -n "$RUN_ID" ]; then
+        DATA="{\\"run_id\\":\\"$RUN_ID\\"}"
+      else
+        DATA="{}"
+      fi
+      BODY="{\\"v\\":1,\\"ts\\":\\"$TS\\",\\"project\\":\\"$PROJECT\\",\\"spec\\":\\"$SPEC_ID\\",\\"type\\":\\"$EVENT_TYPE\\",\\"agent\\":\\"$AGENT\\",\\"host\\":\\"$HOST\\",\\"data\\":$DATA}"
 
       curl --silent --max-time 5 \\
         --unix-socket "$SOCKET" \\

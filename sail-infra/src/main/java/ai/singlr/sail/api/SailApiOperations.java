@@ -570,31 +570,34 @@ public final class SailApiOperations implements ApiOperations {
     if (!request.dryRun()) {
       var runId = DateTimeUtils.newId().toString();
       var runLogPath = AgentUnit.BUILD.runLogPath(runId);
-      var watcher =
-          launchAgent(
-              project,
-              loaded.config(),
-              targetRepos,
-              task,
-              branch,
-              request.mode(),
-              taskSpec,
-              agentType,
-              runLogPath);
-      var status = querySession(agentSession, project);
-      recordRun(
-          runId,
-          project,
-          nextSpec.id(),
-          localHandle,
-          agentType,
-          branch,
-          task,
-          runLogPath,
-          status,
-          watcher);
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcher);
+      recordRun(runId, project, nextSpec.id(), localHandle, agentType, branch, task, runLogPath);
+      AgentSession.SessionInfo status = null;
+      try {
+        var outcome =
+            launchAgent(
+                project,
+                loaded.config(),
+                targetRepos,
+                task,
+                branch,
+                request.mode(),
+                taskSpec,
+                agentType,
+                runLogPath,
+                runId);
+        status = querySession(agentSession, project);
+        if (request.mode().equals("foreground")) {
+          completeForegroundRun(runId, outcome.exitCode());
+        } else {
+          updateRunProcess(runId, status, outcome.watcher());
+        }
+        if (status != null && status.running()) {
+          publishAgentSessionStarted(
+              project, nextSpec.id(), agentType, status.pid(), runId, outcome.watcher());
+        }
+      } catch (RuntimeException e) {
+        failRun(runId);
+        throw e;
       }
       return new DispatchResponse(
           project,
@@ -660,33 +663,63 @@ public final class SailApiOperations implements ApiOperations {
       String agentType,
       String branch,
       String task,
-      String logPath,
-      AgentSession.SessionInfo status,
-      Optional<WatcherSpawner.Spawned> watcher) {
+      String logPath) {
     if (runStore == null) {
       return;
     }
     try {
-      Integer watcherPid =
-          watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
-              ? (int) fallback.pid()
-              : null;
       runStore.create(
-          runId,
-          project,
-          specId,
-          node,
-          "build",
-          agentType,
-          branch,
-          task,
-          status != null ? status.pid() : null,
-          watcherPid,
-          logPath);
+          runId, project, specId, node, "build", agentType, branch, task, null, null, logPath);
       var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
       RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not record run " + runId + ": " + e.getMessage());
+    }
+  }
+
+  /** Stamps the agent + watcher pids on a background run once launch has resolved them. */
+  private void updateRunProcess(
+      String runId, AgentSession.SessionInfo status, Optional<WatcherSpawner.Spawned> watcher) {
+    Integer watcherPid =
+        watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
+            ? (int) fallback.pid()
+            : null;
+    runBookkeeping(
+        "update run process " + runId,
+        () -> runStore.updateProcess(runId, status != null ? status.pid() : null, watcherPid));
+  }
+
+  /**
+   * Completes a foreground run explicitly: its launch command blocks until the agent exits, so the
+   * exit code is known here and the run must not be left {@code running} waiting for a terminal
+   * hook event that may never arrive.
+   */
+  private void completeForegroundRun(String runId, int exitCode) {
+    runBookkeeping(
+        "complete run " + runId,
+        () -> runStore.complete(runId, exitCode == 0 ? "completed" : "failed", exitCode));
+  }
+
+  /**
+   * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
+   */
+  private void failRun(String runId) {
+    runBookkeeping("mark run failed " + runId, () -> runStore.complete(runId, "failed", null));
+  }
+
+  /**
+   * Runs a best-effort run-store bookkeeping update. A missing store (a box that keeps no run
+   * aggregate) is a silent no-op, and a store error is logged but never propagated: bookkeeping
+   * must never fail a launch or mask the agent's real outcome.
+   */
+  private void runBookkeeping(String action, Runnable op) {
+    if (runStore == null) {
+      return;
+    }
+    try {
+      op.run();
+    } catch (RuntimeException e) {
+      System.err.println("  [api] Warning: could not " + action + ": " + e.getMessage());
     }
   }
 
@@ -695,6 +728,7 @@ public final class SailApiOperations implements ApiOperations {
       String specId,
       String agentType,
       Integer pid,
+      String runId,
       Optional<WatcherSpawner.Spawned> watcher) {
     if (eventBus == null) {
       return;
@@ -702,6 +736,9 @@ public final class SailApiOperations implements ApiOperations {
     var data = new LinkedHashMap<String, Object>();
     if (pid != null) {
       data.put("pid", pid);
+    }
+    if (Strings.isNotBlank(runId)) {
+      data.put(Event.WellKnownData.RUN_ID, runId);
     }
     if (watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback) {
       data.put(Event.WellKnownData.WATCHER_PID, fallback.pid());
@@ -949,7 +986,14 @@ public final class SailApiOperations implements ApiOperations {
     return created;
   }
 
-  private Optional<WatcherSpawner.Spawned> launchAgent(
+  /**
+   * The outcome of a launch attempt: the launch command's exit code (for foreground, the agent's
+   * own exit code, since its launch command blocks until the agent exits) and the guardrail
+   * watcher, if one was spawned (background only).
+   */
+  private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
+
+  private LaunchOutcome launchAgent(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
@@ -958,18 +1002,20 @@ public final class SailApiOperations implements ApiOperations {
       String mode,
       Spec spec,
       String agentType,
-      String logPath) {
+      String logPath,
+      String runId) {
+    var background = mode.equals("background");
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
       session.ensureDirectory(project);
       session.writeTaskFile(project, task);
       session.writeSession(
-          project, task, Objects.requireNonNullElse(branch, ""), spec.id(), agentType);
+          project, task, Objects.requireNonNullElse(branch, ""), spec.id(), agentType, runId);
       var agentCli = AgentCli.fromYamlName(agentType);
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var command =
-          mode.equals("background")
+          background
               ? AgentSession.buildBackgroundLaunchCommand(
                   project,
                   config.sshUser(),
@@ -980,7 +1026,8 @@ public final class SailApiOperations implements ApiOperations {
                   spec.reasoningEffort(),
                   spec.id(),
                   agentType,
-                  logPath)
+                  logPath,
+                  runId)
               : AgentSession.buildForegroundTaskCommand(
                   project,
                   config.sshUser(),
@@ -990,12 +1037,19 @@ public final class SailApiOperations implements ApiOperations {
                   spec.model(),
                   spec.reasoningEffort(),
                   spec.id(),
-                  agentType);
+                  agentType,
+                  logPath,
+                  runId);
       var result = exec(command);
-      if (!result.ok()) {
-        throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
+      if (background) {
+        if (!result.ok()) {
+          throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
+        }
+        return new LaunchOutcome(result.exitCode(), launchWatcherIfAgent(project, config));
       }
-      return launchWatcherIfAgent(project, config);
+      return new LaunchOutcome(result.exitCode(), Optional.empty());
+    } catch (ApiException e) {
+      throw e;
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
