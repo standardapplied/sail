@@ -6,12 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.SailPaths;
-import java.io.IOException;
-import java.nio.file.Files;
+import ai.singlr.sail.engine.NodeIdentity;
 
 /**
  * This box's sync role, read from {@code host.yaml}, and the questions the rest of the CLI asks of
@@ -26,15 +22,7 @@ final class HostSync {
 
   /** This box's configured sync role, or {@link SyncConfig#unset()} when none is set. */
   static SyncConfig config() {
-    var path = SailPaths.hostConfigPath();
-    if (!Files.exists(path)) {
-      return SyncConfig.unset();
-    }
-    try {
-      return HostYaml.fromMap(YamlUtil.parseFile(path)).sync();
-    } catch (IOException e) {
-      return SyncConfig.unset();
-    }
+    return NodeIdentity.config();
   }
 
   /**

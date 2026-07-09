@@ -56,7 +56,8 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<DispatchResponse> dispatch(String project, DispatchRequest request) {
+  public Result<DispatchResponse> dispatch(
+      String project, DispatchRequest request, Actor actor, String localHandle) {
     return Result.success(
         new DispatchResponse(
             project,

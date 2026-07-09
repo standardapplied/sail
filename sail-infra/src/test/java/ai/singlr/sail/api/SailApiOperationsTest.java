@@ -338,7 +338,7 @@ class SailApiOperationsTest {
             shell().on("incus list ^acme$", RUNNING_JSON),
             store -> seedSpec(store, "done", "Done", "done", List.of(), ""));
 
-    var result = operations.dispatch("acme", request());
+    var result = dispatch(operations, "acme", request());
 
     assertEquals(false, get(result, "dispatched"));
     assertEquals("no_pending_specs", get(result, "reason"));
@@ -354,7 +354,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             SailApiOperationsTest::seedAuthBillingSetup);
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertEquals(true, get(result, "dispatched"));
     assertTrue(get(result, "spec").toString().contains("status=in_progress"));
@@ -376,8 +376,8 @@ class SailApiOperationsTest {
             });
 
     var result =
-        operations.dispatch(
-            "acme", new DispatchRequest("auth", "background", true, List.of("web")));
+        dispatch(
+            operations, "acme", new DispatchRequest("auth", "background", true, List.of("web")));
 
     assertEquals(true, get(result, "dispatched"));
     var persisted = stores[0].findById("auth").orElseThrow();
@@ -395,7 +395,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             SailApiOperationsTest::seedAuthBillingSetup);
 
-    var error = operations.dispatch("acme", request("billing"));
+    var error = dispatch(operations, "acme", request("billing"));
 
     assertError(ErrorCode.SPEC_NOT_READY, error);
   }
@@ -404,7 +404,7 @@ class SailApiOperationsTest {
   void dispatchRejectsInvalidMode() throws Exception {
     var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    var error = operations.dispatch("acme", request(null, "sideways", false));
+    var error = dispatch(operations, "acme", request(null, "sideways", false));
 
     assertError(ErrorCode.INVALID_MODE, error);
   }
@@ -419,7 +419,7 @@ class SailApiOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             SailApiOperationsTest::seedAuthBillingSetup);
 
-    var error = operations.dispatch("acme", request("missing"));
+    var error = dispatch(operations, "acme", request("missing"));
 
     assertError(ErrorCode.SPEC_NOT_FOUND, error);
   }
@@ -434,9 +434,94 @@ class SailApiOperationsTest {
                 .on("kill -0 123", "")
                 .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}"));
 
-    var error = operations.dispatch("acme", request());
+    var error = dispatch(operations, "acme", request());
 
     assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
+  }
+
+  @Test
+  void memberDispatchesOwnSpecSucceeds() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
+
+    var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
+    var result =
+        operations.dispatch("acme", request("auth", "background", true), member, LOCAL_HANDLE);
+
+    assertEquals(true, get(result, "dispatched"));
+  }
+
+  @Test
+  void anotherFdesSpecIsRefusedNotYourSpec() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
+
+    var otherFde = new Actor("raj", Role.MEMBER, Actor.Lane.API);
+    var error = operations.dispatch("acme", request("auth"), otherFde, LOCAL_HANDLE);
+
+    assertError(ErrorCode.NOT_YOUR_SPEC, error);
+  }
+
+  @Test
+  void specAssignedToAnotherNodeIsRefusedRunsOnOtherNode() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
+
+    var error = operations.dispatch("acme", request("auth"), ADMIN, LOCAL_HANDLE);
+
+    assertError(ErrorCode.RUNS_ON_OTHER_NODE, error);
+    assertTrue(fullError(error).contains("raj"), fullError(error));
+  }
+
+  @Test
+  void viewerCredentialIsRefusedReadOnly() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
+
+    var viewer = new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API);
+    var error = operations.dispatch("acme", request("auth"), viewer, LOCAL_HANDLE);
+
+    assertError(ErrorCode.READ_ONLY_CREDENTIAL, error);
+  }
+
+  @Test
+  void blankLocalHandleIsRefusedNodeHandleUnset() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
+
+    var error = operations.dispatch("acme", request("auth"), ADMIN, "");
+
+    assertError(ErrorCode.NODE_HANDLE_UNSET, error);
+  }
+
+  @Test
+  void autoSelectSkipsSpecsAssignedToOtherNodesForAdmin() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
+
+    var result = operations.dispatch("acme", request(), ADMIN, LOCAL_HANDLE);
+
+    assertEquals(false, get(result, "dispatched"));
+    assertEquals("no_pending_specs", get(result, "reason"));
+  }
+
+  @Test
+  void autoSelectSkipsSpecsAssignedToOtherNodesForMember() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
+
+    var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
+    var result = operations.dispatch("acme", request(), member, LOCAL_HANDLE);
+
+    assertEquals(false, get(result, "dispatched"));
+    assertEquals("no_pending_specs", get(result, "reason"));
   }
 
   @Test
@@ -617,7 +702,7 @@ class SailApiOperationsTest {
                 .on("mkdir -p /home/dev/.sail", "")
                 .on("claude", ""));
 
-    var result = operations.dispatch("acme", request("auth"));
+    var result = dispatch(operations, "acme", request("auth"));
 
     assertEquals(true, get(result, "dispatched"));
     assertTrue(get(result, "agent").toString().contains("mode=background"));
@@ -650,7 +735,7 @@ class SailApiOperationsTest {
                     "high",
                     null));
 
-    var result = operations.dispatch("acme", request("auth"));
+    var result = dispatch(operations, "acme", request("auth"));
 
     assertEquals(true, get(result, "dispatched"));
     assertTrue(get(result, "spec").toString().contains("agent=codex"));
@@ -683,7 +768,7 @@ class SailApiOperationsTest {
                 .on("mkdir -p /home/dev/.sail", "")
                 .on("bash -l -c", ""));
 
-    var result = operations.dispatch("acme", request("auth", "foreground", false));
+    var result = dispatch(operations, "acme", request("auth", "foreground", false));
 
     assertTrue(get(result, "agent").toString().contains("mode=foreground"));
     assertTrue(get(result, "agent").toString().contains("pid=123"));
@@ -693,7 +778,7 @@ class SailApiOperationsTest {
   void dispatchMapsUnexpectedFailures() throws Exception {
     var operations = operations(baseYaml(), shell().on("incus list ^acme$", RUNNING_JSON));
 
-    var error = operations.dispatch("acme", null);
+    var error = dispatch(operations, "acme", null);
 
     assertError(ErrorCode.INTERNAL, error);
   }
@@ -711,7 +796,7 @@ class SailApiOperationsTest {
                 .on("-- mkdir -p /home/dev/.sail", "")
                 .on("claude", new ShellExec.Result(1, "", "missing cli")));
 
-    var error = operations.dispatch("acme", request("auth"));
+    var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.AGENT_LAUNCH_FAILED, error);
   }
@@ -735,7 +820,7 @@ class SailApiOperationsTest {
               return 4242L;
             });
 
-    operations.dispatch("acme", request("auth"));
+    dispatch(operations, "acme", request("auth"));
 
     assertTrue(launched.get("command").toString().contains("agent, watch, acme"));
     assertTrue(launched.get("log_path").toString().endsWith("watch.log"));
@@ -757,7 +842,7 @@ class SailApiOperationsTest {
               throw new IOException("watch failed");
             });
 
-    var error = operations.dispatch("acme", request("auth"));
+    var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.AGENT_LAUNCH_FAILED, error);
   }
@@ -807,7 +892,7 @@ class SailApiOperationsTest {
           new SailApiOperations(
               shell, yaml.toString(), (cmd, log) -> 4242L, bus, null, store, null);
 
-      operations.dispatch("acme", request("auth"));
+      dispatch(operations, "acme", request("auth"));
 
       BusTesting.awaitDelivery(latch);
       assertEquals(4242L, started.get().data().get(Event.WellKnownData.WATCHER_PID));
@@ -874,7 +959,7 @@ class SailApiOperationsTest {
                 .on("test -d /home/dev/workspace/app/.git", "")
                 .on("git -C /home/dev/workspace/app checkout -b sail/auth", ""));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertEquals(true, get(result, "branch_created"));
     assertTrue(get(result, "spec").toString().contains("sail/auth"));
@@ -905,7 +990,7 @@ class SailApiOperationsTest {
                     null,
                     "feat/custom"));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertTrue(get(result, "spec").toString().contains("feat/custom"));
   }
@@ -924,7 +1009,7 @@ class SailApiOperationsTest {
                     "test -d /home/dev/workspace/app/.git",
                     new ShellExec.Result(1, "", "missing")));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertEquals(false, get(result, "branch_created"));
   }
@@ -944,7 +1029,7 @@ class SailApiOperationsTest {
                     "git -C /home/dev/workspace/app checkout -b sail/auth",
                     new ShellExec.Result(1, "", "exists")));
 
-    var error = operations.dispatch("acme", request("auth", "background", true));
+    var error = dispatch(operations, "acme", request("auth", "background", true));
 
     assertError(ErrorCode.BRANCH_CREATE_FAILED, error);
   }
@@ -962,7 +1047,7 @@ class SailApiOperationsTest {
                 .on("incus snapshot list acme --format json", "[]")
                 .on("incus snapshot create acme", ""));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertFalse(get(result, "snapshot").toString().isBlank());
   }
@@ -980,7 +1065,7 @@ class SailApiOperationsTest {
                 .on("printf '%s'", "")
                 .on("incus snapshot list acme --format json", snapshots));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertEquals("", get(result, "snapshot"));
   }
@@ -1000,7 +1085,7 @@ class SailApiOperationsTest {
                     "[{\"name\": \"snap\", \"created_at\": \"bad\"}]")
                 .on("incus snapshot create acme", ""));
 
-    var result = operations.dispatch("acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", true));
 
     assertFalse(get(result, "snapshot").toString().isBlank());
   }
@@ -1018,7 +1103,7 @@ class SailApiOperationsTest {
                 .on("incus snapshot list acme --format json", "[]")
                 .on("incus snapshot create acme", new ShellExec.Result(1, "", "no space")));
 
-    var error = operations.dispatch("acme", request("auth", "background", true));
+    var error = dispatch(operations, "acme", request("auth", "background", true));
 
     assertError(ErrorCode.SNAPSHOT_FAILED, error);
   }
@@ -1328,7 +1413,7 @@ class SailApiOperationsTest {
         operationsWithStores(
             baseYaml(), shell, null, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
 
-    var result = operations.dispatch("acme", request("auth", "foreground", false));
+    var result = dispatch(operations, "acme", request("auth", "foreground", false));
 
     assertTrue(result.isSuccess());
   }
@@ -1348,7 +1433,7 @@ class SailApiOperationsTest {
           operationsWithStores(
               snapshotYaml(), shell, bus, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
 
-      var result = operations.dispatch("acme", request("auth", "background", true));
+      var result = dispatch(operations, "acme", request("auth", "background", true));
 
       assertTrue(result.isSuccess());
       assertFalse(get(result, "snapshot").toString().isBlank());
@@ -1367,7 +1452,7 @@ class SailApiOperationsTest {
 
     assertError(
         ErrorCode.PROJECT_STOPPED,
-        operations.dispatch("acme", request("auth", "background", false)));
+        dispatch(operations, "acme", request("auth", "background", false)));
   }
 
   @Test
@@ -1382,7 +1467,7 @@ class SailApiOperationsTest {
 
     assertError(
         ErrorCode.PROJECT_NOT_CREATED,
-        operations.dispatch("acme", request("auth", "background", false)));
+        dispatch(operations, "acme", request("auth", "background", false)));
   }
 
   @Test
@@ -1397,7 +1482,7 @@ class SailApiOperationsTest {
 
     assertError(
         ErrorCode.CONTAINER_ERROR,
-        operations.dispatch("acme", request("auth", "background", false)));
+        dispatch(operations, "acme", request("auth", "background", false)));
   }
 
   @Test
@@ -1445,7 +1530,7 @@ class SailApiOperationsTest {
           operationsWithStores(
               baseYaml(), shell, bus, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
 
-      var result = operations.dispatch("acme", request("auth", "foreground", false));
+      var result = dispatch(operations, "acme", request("auth", "foreground", false));
 
       assertTrue(result.isSuccess());
       assertEquals(2L, bus.stats().published());
@@ -1481,6 +1566,46 @@ class SailApiOperationsTest {
   private static void assertError(ErrorCode errorCode, Result<?> result) {
     assertTrue(result.isFailure());
     assertEquals(errorCode, result.errorCode());
+  }
+
+  private static String fullError(Result<?> result) {
+    return String.valueOf(result.fullError());
+  }
+
+  private FakeShell idleShell() {
+    return shell()
+        .on("incus list ^acme$", RUNNING_JSON)
+        .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"));
+  }
+
+  private static void seedAssigned(SpecStore store, String id, String status, String assignee) {
+    store.create(
+        new SpecStore.SpecRow(
+            id,
+            "acme",
+            "Title " + id,
+            SpecStatus.fromWire(status),
+            assignee,
+            null,
+            null,
+            null,
+            null,
+            0,
+            "me",
+            null,
+            null,
+            "me",
+            List.of(),
+            List.of()));
+    store.setContent(id, "Do " + id, "");
+  }
+
+  private static final String LOCAL_HANDLE = "me";
+  private static final Actor ADMIN = new Actor(LOCAL_HANDLE, Role.ADMIN, Actor.Lane.API);
+
+  private static Result<DispatchResponse> dispatch(
+      SailApiOperations operations, String project, DispatchRequest request) {
+    return operations.dispatch(project, request, ADMIN, LOCAL_HANDLE);
   }
 
   private static DispatchRequest request() {
@@ -1615,7 +1740,7 @@ class SailApiOperationsTest {
             "acme",
             title,
             SpecStatus.fromWire(status),
-            null,
+            LOCAL_HANDLE,
             agent,
             model,
             effort,

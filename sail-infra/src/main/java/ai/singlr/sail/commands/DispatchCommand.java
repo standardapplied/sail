@@ -5,10 +5,13 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.Actor;
+import ai.singlr.sail.api.DispatchDecision;
+import ai.singlr.sail.api.DispatchEvents;
+import ai.singlr.sail.api.DispatchPolicy;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -37,7 +40,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -193,7 +195,7 @@ public final class DispatchCommand implements Runnable {
     publishLifecycle(
         Event.WellKnownTypes.SPEC_DISPATCHED,
         nextSpec.id(),
-        dispatchedEventData(branchName, background));
+        DispatchEvents.dispatchedData(branchName, background ? "background" : "foreground"));
 
     var description = !specBody.isBlank() ? specBody : nextSpec.title();
     var task = AgentTaskPrompt.build(taskSpec, description);
@@ -445,27 +447,9 @@ public final class DispatchCommand implements Runnable {
     if (found == null) {
       throw new IllegalArgumentException("Spec '" + specId + "' not found");
     }
-    if (found.assignee() == null) {
-      throw new IllegalStateException(
-          "Spec '"
-              + specId
-              + "' is unassigned. Claim it first: sail spec update "
-              + specId
-              + " --assignee "
-              + fde);
-    }
-    if (!found.assignee().equals(fde)) {
-      throw new IllegalStateException(
-          "Spec '"
-              + specId
-              + "' is assigned to '"
-              + found.assignee()
-              + "', not this box's FDE '"
-              + fde
-              + "'. Reassign it first: sail spec update "
-              + specId
-              + " --assignee "
-              + fde);
+    if (DispatchPolicy.check(Actor.cliOperator(fde), found, fde)
+        instanceof DispatchDecision.Refused refused) {
+      throw new IllegalStateException(refused.message() + " " + refused.fix());
     }
     if (found.status() == SpecStatus.PENDING) {
       return SpecResolution.of(found);
@@ -521,20 +505,6 @@ public final class DispatchCommand implements Runnable {
                 + "). sail-api may be unreachable; the dispatch itself is unaffected and"
                 + " audit.jsonl is authoritative.",
             Ansi.AUTO));
-  }
-
-  /**
-   * Builds the {@code spec_dispatched} data payload. Order matches the HTTP path in {@code
-   * SailApiOperations#publishDispatched} so a downstream consumer sees the same field ordering
-   * regardless of which surface initiated the dispatch.
-   */
-  static Map<String, Object> dispatchedEventData(String branchName, boolean background) {
-    var data = new LinkedHashMap<String, Object>();
-    if (Strings.isNotBlank(branchName)) {
-      data.put("branch", branchName);
-    }
-    data.put("mode", background ? "background" : "foreground");
-    return data;
   }
 
   private void ensureSailSetup(ShellExecutor shell, String container) {

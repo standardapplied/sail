@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -20,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 public final class ApiRouter implements HttpHandler {
 
@@ -67,6 +69,7 @@ public final class ApiRouter implements HttpHandler {
   private final ApiAuth auth;
   private final RateLimiter rateLimiter;
   private final AgentLogStreamer agentStreamer;
+  private final Supplier<String> nodeHandle;
 
   public ApiRouter(ApiOperations operations, ApiAuth auth, RateLimiter rateLimiter) {
     this(operations, auth, rateLimiter, null);
@@ -85,17 +88,27 @@ public final class ApiRouter implements HttpHandler {
       ApiAuth auth,
       RateLimiter rateLimiter,
       AgentLogStreamer agentStreamer) {
+    this(operations, auth, rateLimiter, agentStreamer, NodeIdentity::handle);
+  }
+
+  ApiRouter(
+      ApiOperations operations,
+      ApiAuth auth,
+      RateLimiter rateLimiter,
+      AgentLogStreamer agentStreamer,
+      Supplier<String> nodeHandle) {
     this.operations = operations;
     this.auth = auth;
     this.rateLimiter = rateLimiter;
     this.agentStreamer = agentStreamer;
+    this.nodeHandle = nodeHandle;
   }
 
   @Override
   public void handle(HttpExchange exchange) throws IOException {
     if (agentStreamer != null
         && AgentLogStreamer.isStreamPath(exchange.getRequestURI().getPath())) {
-      agentStreamer.handle(exchange);
+      handleStream(exchange);
       return;
     }
     try {
@@ -123,6 +136,30 @@ public final class ApiRouter implements HttpHandler {
     } finally {
       exchange.close();
     }
+  }
+
+  /**
+   * Gates the long-lived agent-log SSE stream through the same authenticate → rate-limit →
+   * authorize(READ) sequence as every buffered route before handing off to {@link
+   * AgentLogStreamer}, which owns the streaming loop and closes the exchange. Previously the stream
+   * short-circuited ahead of the {@link Authorizer} and rate-limit gates, so a caller with any
+   * valid token — including a read-only credential — reached the tail unchecked; this closes that
+   * bypass.
+   */
+  private void handleStream(HttpExchange exchange) throws IOException {
+    try {
+      auth.require(exchange);
+      requireWithinRateLimit(exchange);
+      Authorizer.require(exchange, Capability.READ);
+    } catch (ApiException e) {
+      try {
+        write(exchange, ApiResponse.error(e.failure()));
+      } finally {
+        exchange.close();
+      }
+      return;
+    }
+    agentStreamer.handle(exchange);
   }
 
   ApiResponse route(HttpExchange exchange) throws IOException {
@@ -225,8 +262,23 @@ public final class ApiRouter implements HttpHandler {
       throw methodNotAllowed();
     }
     requireMethod(request, POST);
-    Authorizer.require(exchange, Capability.ADMIN);
-    return ApiResponse.from(operations.dispatch(project, JsonBody.readDispatchRequest(exchange)));
+    return ApiResponse.from(
+        operations.dispatch(
+            project, JsonBody.readDispatchRequest(exchange), actorOf(exchange), nodeHandle.get()));
+  }
+
+  /**
+   * Builds the {@link Actor} for a request from the exchange attributes {@link ApiAuth} stamped:
+   * {@code token.fde} is the caller's FDE handle (null for a machine credential owning no FDE) and
+   * {@code token.role} resolves to the caller's {@link Role}. Method-level authorization ({@code
+   * WRITE} for dispatch) has already passed; {@link DispatchPolicy} does the resource-scoped
+   * decision from this actor.
+   */
+  private static Actor actorOf(HttpExchange exchange) {
+    return new Actor(
+        Objects.toString(exchange.getAttribute("token.fde"), null),
+        Role.fromAttribute(exchange.getAttribute("token.role")),
+        Actor.Lane.API);
   }
 
   private ApiResponse routeGlobalSpecs(HttpExchange exchange, RouteRequest request)

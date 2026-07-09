@@ -79,9 +79,16 @@ class AuthorizationTest {
   }
 
   @Test
-  void memberCannotDispatch() throws Exception {
+  void memberCanReachDispatch() throws Exception {
     var member = tokenStore.create("m", "member").token();
     var response = send("POST", "/v1/projects/acme/dispatch", member, "{}");
+    assertNotEquals(403, response.statusCode(), response.body());
+  }
+
+  @Test
+  void viewerCannotDispatch() throws Exception {
+    var viewer = tokenStore.create("v", "viewer").token();
+    var response = send("POST", "/v1/projects/acme/dispatch", viewer, "{}");
     assertEquals(403, response.statusCode(), response.body());
     assertTrue(response.body().contains("forbidden"), response.body());
   }

@@ -31,7 +31,8 @@ public interface ApiOperations {
 
   Result<SpecResponse> spec(String project, String specId);
 
-  Result<DispatchResponse> dispatch(String project, DispatchRequest request);
+  Result<DispatchResponse> dispatch(
+      String project, DispatchRequest request, Actor actor, String localHandle);
 
   Result<AgentStatusResponse> agentStatus(String project);
 
