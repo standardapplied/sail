@@ -41,9 +41,6 @@ public final class ApiRouter implements HttpHandler {
   private static final String STOP = "stop";
   private static final String REPORT = "report";
   private static final String TAIL = "tail";
-  private static final String ROLE = "role";
-  private static final String DEFAULT_ROLE = "build";
-  private static final String REVIEW_ROLE = "review";
   private static final String EVENTS = "events";
   private static final String RECENT = "recent";
   private static final String STATS = "stats";
@@ -54,7 +51,6 @@ public final class ApiRouter implements HttpHandler {
   private static final String RUNS = "runs";
   private static final String HISTORY = "history";
   private static final String RESTORE = "restore";
-  private static final String SESSIONS = "sessions";
   private static final String APPROVE = "approve";
   private static final String DISMISS = "dismiss";
   private static final String FOLLOWUP = "followup";
@@ -717,17 +713,6 @@ public final class ApiRouter implements HttpHandler {
       } catch (NumberFormatException ignored) {
       }
       throw new ApiException(ErrorCode.INVALID_TAIL, "tail must be between 1 and 5000.");
-    }
-
-    String role() {
-      var value = values.get(ROLE);
-      if (value == null) {
-        return DEFAULT_ROLE;
-      }
-      if (DEFAULT_ROLE.equals(value) || REVIEW_ROLE.equals(value)) {
-        return value;
-      }
-      throw new ApiException(ErrorCode.INVALID_ROLE, "role must be build or review.");
     }
 
     int limit() {

@@ -319,6 +319,7 @@ class ApiRouterTest {
   void unknownRunSubResourceReturnsNotFound() throws Exception {
     try (var server = server()) {
       assertEquals(404, get(server, "/v1/runs/r1/bogus", "token").statusCode());
+      assertEquals(404, get(server, "/v1/runs/r1/log/extra", "token").statusCode());
       assertEquals(405, post(server, "/v1/runs/r1/log", "token", "{}").statusCode());
       assertEquals(405, get(server, "/v1/runs/r1/stop", "token").statusCode());
     }
@@ -886,6 +887,13 @@ class ApiRouterTest {
     assertEquals("proj", list.toMap().get("project"));
     assertEquals("auth", list.toMap().get("spec"));
     assertEquals(view.toMap(), new RunDetailResponse(view).toMap());
+
+    var summary = RunSummary.from(row).toMap();
+    assertEquals("s1", summary.get("id"));
+    assertEquals("node-a", summary.get("node"));
+    assertEquals(7, summary.get("exit_code"));
+    assertFalse(
+        new RunListResponse(null, null, java.util.List.of()).toMap().containsKey("project"));
   }
 
   @Test

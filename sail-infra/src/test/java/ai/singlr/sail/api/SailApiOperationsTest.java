@@ -1535,6 +1535,33 @@ class SailApiOperationsTest {
 
     assertError(ErrorCode.INTERNAL, operations.runs("acme", null));
     assertError(ErrorCode.INTERNAL, operations.run("r1"));
+    assertError(ErrorCode.INTERNAL, operations.runLog("r1", 200, "node-a"));
+    assertError(ErrorCode.INTERNAL, operations.stopRun("r1", "node-a"));
+  }
+
+  @Test
+  void runLogReportsWhenTheRunHasNoLogFile() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    "r1",
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null));
+
+    assertEquals("This run has no log file.", get(operations.runLog("r1", 200, "node-a"), "error"));
   }
 
   @Test
