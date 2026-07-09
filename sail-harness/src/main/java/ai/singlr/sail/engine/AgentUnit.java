@@ -23,6 +23,9 @@ public record AgentUnit(
 
   private static final String DIR = "/home/dev/.sail";
 
+  /** Root of the per-run log directories: {@code ~/.sail/runs/<runId>/}. */
+  public static final String RUNS_DIR = DIR + "/runs";
+
   /**
    * The dispatched build: launched as a detached systemd unit and streamed to {@code agent.log}.
    */
@@ -51,6 +54,21 @@ public record AgentUnit(
   /** The systemd unit name with the {@code .service} suffix, as {@code systemctl} expects it. */
   public String service() {
     return unitName + ".service";
+  }
+
+  /** The run-scoped directory holding one execution's log(s): {@code ~/.sail/runs/<runId>}. */
+  public static String runDir(String runId) {
+    return RUNS_DIR + "/" + runId;
+  }
+
+  /**
+   * This role's log path scoped to a single run: {@code ~/.sail/runs/<runId>/agent.log} (build) or
+   * {@code review.log} (review). The unit/pid/session/task paths stay per-container — only one run
+   * executes in a container at a time, so only the log needs to be run-addressed for consecutive
+   * dispatches to stop clobbering one shared file.
+   */
+  public String runLogPath(String runId) {
+    return runDir(runId) + "/" + logPath.substring(logPath.lastIndexOf('/') + 1);
   }
 
   /**

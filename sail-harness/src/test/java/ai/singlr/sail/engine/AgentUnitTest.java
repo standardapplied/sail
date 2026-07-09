@@ -45,4 +45,15 @@ class AgentUnitTest {
   void fromRoleRejectsUnknownRole() {
     assertThrows(IllegalArgumentException.class, () -> AgentUnit.fromRole("bogus"));
   }
+
+  @Test
+  void runScopedLogPathsNameExactlyOneExecutionUnderTheRunDir() {
+    assertEquals("/home/dev/.sail/runs/run-1", AgentUnit.runDir("run-1"));
+    assertEquals("/home/dev/.sail/runs/run-1/agent.log", AgentUnit.BUILD.runLogPath("run-1"));
+    assertEquals("/home/dev/.sail/runs/run-1/review.log", AgentUnit.REVIEW.runLogPath("run-1"));
+    assertNotEquals(
+        AgentUnit.BUILD.runLogPath("run-1"),
+        AgentUnit.BUILD.runLogPath("run-2"),
+        "two runs get isolated logs");
+  }
 }

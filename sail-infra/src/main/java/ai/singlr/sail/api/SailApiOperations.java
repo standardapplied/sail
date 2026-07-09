@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -453,6 +454,8 @@ public final class SailApiOperations implements ApiOperations {
     var branchCreated = createBranchIfNeeded(project, loaded.config(), targetRepos, branch);
 
     if (!request.dryRun()) {
+      var runId = DateTimeUtils.newId().toString();
+      var runLogPath = AgentUnit.BUILD.runLogPath(runId);
       var watcher =
           launchAgent(
               project,
@@ -462,8 +465,20 @@ public final class SailApiOperations implements ApiOperations {
               branch,
               request.mode(),
               taskSpec,
-              agentType);
+              agentType,
+              runLogPath);
       var status = querySession(agentSession, project);
+      recordRun(
+          runId,
+          project,
+          nextSpec.id(),
+          localHandle,
+          agentType,
+          branch,
+          task,
+          runLogPath,
+          status,
+          watcher);
       if (status != null && status.running()) {
         publishAgentSessionStarted(project, nextSpec.id(), agentType, status.pid(), watcher);
       }
@@ -514,6 +529,51 @@ public final class SailApiOperations implements ApiOperations {
             Event.SAIL_AGENT,
             HostInfo.hostname(),
             Map.of("label", label)));
+  }
+
+  /**
+   * Records the launched execution as a run stamped with this box's handle as its {@code node}, so
+   * the provenance guard can serve local runs and refuse foreign ones, and prunes the container's
+   * oldest run-log directories. Never fatal: the agent is already running, so a bookkeeping failure
+   * only forfeits the run's metadata, never the launch. A run store is absent only in tests that do
+   * not exercise dispatch.
+   */
+  private void recordRun(
+      String runId,
+      String project,
+      String specId,
+      String node,
+      String agentType,
+      String branch,
+      String task,
+      String logPath,
+      AgentSession.SessionInfo status,
+      Optional<WatcherSpawner.Spawned> watcher) {
+    if (sessionStore == null) {
+      return;
+    }
+    try {
+      Integer watcherPid =
+          watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
+              ? (int) fallback.pid()
+              : null;
+      sessionStore.create(
+          runId,
+          project,
+          specId,
+          node,
+          "build",
+          agentType,
+          branch,
+          task,
+          status != null ? status.pid() : null,
+          watcherPid,
+          logPath);
+      var ids = sessionStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
+      RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
+    } catch (Exception e) {
+      System.err.println("  [api] Warning: could not record run " + runId + ": " + e.getMessage());
+    }
   }
 
   private void publishAgentSessionStarted(
@@ -761,7 +821,8 @@ public final class SailApiOperations implements ApiOperations {
       String branch,
       String mode,
       Spec spec,
-      String agentType) {
+      String agentType,
+      String logPath) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -782,7 +843,8 @@ public final class SailApiOperations implements ApiOperations {
                   spec.model(),
                   spec.reasoningEffort(),
                   spec.id(),
-                  agentType)
+                  agentType,
+                  logPath)
               : AgentSession.buildForegroundTaskCommand(
                   project,
                   config.sshUser(),
