@@ -234,7 +234,13 @@ public final class ServerStartCommand implements Runnable {
     var unitProbe = MissedStopReconciler.systemdUnitProbe(reconcileShell);
     var missedStops =
         new MissedStopReconciler(
-            specStore, runStore, eventStore, bus, unitProbe, DateTimeUtils::now);
+            specStore,
+            runStore,
+            eventStore,
+            bus,
+            unitProbe,
+            NodeIdentity::handle,
+            DateTimeUtils::now);
     var watcherSpawner = new WatcherSpawner(reconcileShell, null);
     var rearmer =
         new WatcherRearmer(
@@ -243,6 +249,7 @@ public final class ServerStartCommand implements Runnable {
             unitProbe,
             watcherSpawner::watcherProcessRunning,
             WatcherRearmer.livingProcess(),
+            NodeIdentity::handle,
             operations::relaunchWatcher);
     shutdown
         .register(server)

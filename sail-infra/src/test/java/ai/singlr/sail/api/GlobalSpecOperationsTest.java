@@ -592,6 +592,47 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void restoreThatChangesTheAssigneeIsAdminOnly() {
+    ops.create(createReq(Map.of("assignee", "alice")).withCreatedBy("uday"));
+    ops.update(
+        "auth", SpecUpdateRequest.fromMap(Map.of("assignee", "bob")).withUpdatedBy("ops"), ADMIN);
+    var aliceRev = ops.history("auth").revisions().getFirst().rev();
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+
+    var ex =
+        assertThrows(
+            ApiException.class, () -> ops.restore("auth", new SpecRestoreRequest(aliceRev), bob));
+
+    assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, ex.failure().errorCode());
+    assertEquals("bob", ops.get("auth").spec().assignee());
+  }
+
+  @Test
+  void anAdminMayRestoreARevisionThatChangesTheAssignee() {
+    ops.create(createReq(Map.of("assignee", "alice")).withCreatedBy("uday"));
+    ops.update(
+        "auth", SpecUpdateRequest.fromMap(Map.of("assignee", "bob")).withUpdatedBy("ops"), ADMIN);
+    var aliceRev = ops.history("auth").revisions().getFirst().rev();
+
+    ops.restore("auth", new SpecRestoreRequest(aliceRev), ADMIN);
+
+    assertEquals("alice", ops.get("auth").spec().assignee());
+  }
+
+  @Test
+  void anAssigneeMayRestoreARevisionThatKeepsTheAssignee() {
+    ops.create(createReq(Map.of("assignee", "bob")).withCreatedBy("uday"));
+    ops.setContent("auth", new SpecContentRequest("good", ""), ADMIN);
+    var goodRev = ops.history("auth").revisions().getLast().rev();
+    ops.setContent("auth", new SpecContentRequest("clobbered", ""), ADMIN);
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+
+    ops.restore("auth", new SpecRestoreRequest(goodRev), bob);
+
+    assertEquals("good", ops.content("auth").body());
+  }
+
+  @Test
   void restoreRejectsAnUnknownRev() {
     ops.create(createReq(Map.of()));
     var ex =

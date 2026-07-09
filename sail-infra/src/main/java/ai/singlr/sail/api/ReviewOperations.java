@@ -163,8 +163,17 @@ final class ReviewOperations {
     requireStore();
     var review = findReviewOrThrow(reviewId);
     ReviewPolicy.decide(actor, reviewId, review.specId(), specAssignee(review.specId())).enforce();
-    reviewStore.resolveFinding(findingId, Finding.Resolution.DISMISSED);
-    return new FindingDismissResponse(findingId, true);
+    var finding =
+        reviewStore.findingsForReview(reviewId).stream()
+            .filter(candidate -> candidate.id().equals(findingId))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.NOT_FOUND,
+                        "Finding '" + findingId + "' is not part of review '" + reviewId + "'."));
+    reviewStore.resolveFinding(finding.id(), Finding.Resolution.DISMISSED);
+    return new FindingDismissResponse(finding.id(), true);
   }
 
   /** The current assignee of the review's spec, or null when the spec is absent — fail closed. */

@@ -26,6 +26,7 @@ import ai.singlr.sail.sync.ProjectReplica;
 import ai.singlr.sail.sync.RunReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
+import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -43,10 +44,12 @@ import picocli.CommandLine.Command;
  * Main's side of a sync session, reached only through the SSH-key gateway: a node's {@code sail
  * sync} opens {@code ssh sail@main sail _sync}, the gateway authorizes the calling FDE and re-execs
  * this with {@code SAIL_TOKEN} set, and the {@link SyncRpcServer} then exchanges {@link
- * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to the FDE's role:
- * only {@code member}+ may push (write), so a read-only FDE can pull but its commits are refused.
- * The serving database is opened through {@link SyncDatabase}, so main's schema is converged before
- * any revision is served or committed. Not meant to be run by hand.
+ * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to a {@link
+ * SyncPrincipal} — the FDE's handle plus its role's write capability: only {@code member}+ may push
+ * (write), a read-only FDE can pull but its commits are refused, and the handle binds run commits
+ * to the pushing node so no FDE can forge another node's execution provenance. The serving database
+ * is opened through {@link SyncDatabase}, so main's schema is converged before any revision is
+ * served or committed. Not meant to be run by hand.
  */
 @Command(
     name = "_sync",
@@ -85,7 +88,7 @@ public final class SyncServerCommand implements Callable<Integer> {
             "project",
                 new ProjectReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
             "run", new RunReplica(mainId, new RunStore(db), changeLog, conflicts, syncState));
-    new SyncRpcServer(replicas, canWrite(db, token), () -> roster(db)).serve(in, out);
+    new SyncRpcServer(replicas, principal(db, token), () -> roster(db)).serve(in, out);
     return 0;
   }
 
@@ -104,14 +107,18 @@ public final class SyncServerCommand implements Callable<Integer> {
     return map;
   }
 
-  private static boolean canWrite(Sqlite db, String token) {
+  private static SyncPrincipal principal(Sqlite db, String token) {
     if (Strings.isBlank(token)) {
-      return false;
+      return SyncPrincipal.readOnly();
     }
     return new AuthSessionStore(db)
         .validate(token)
         .flatMap(session -> new FdeStore(db).byId(session.fdeId()))
-        .map(fde -> Role.fromAttribute(fde.role()).allows(Capability.WRITE))
-        .orElse(false);
+        .map(SyncServerCommand::principalOf)
+        .orElse(SyncPrincipal.readOnly());
+  }
+
+  private static SyncPrincipal principalOf(FdeStore.Fde fde) {
+    return new SyncPrincipal(fde.handle(), Role.fromAttribute(fde.role()).allows(Capability.WRITE));
   }
 }

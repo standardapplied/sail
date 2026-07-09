@@ -28,14 +28,16 @@ import java.util.function.Supplier;
  * another restart.
  *
  * <p>Each pass walks the {@code in_progress} specs and applies {@link MissedStops#assess} to the
- * latest session — database-only checks first, so a pass with nothing to reconcile issues no
- * systemctl calls. A terminal session replays the stop with its recorded exit code. A running
- * session past the launch grace period whose systemd unit is inactive or absent gets a synthesized
- * stop with <em>no exit code</em>: the transient unit is garbage-collected on exit, so the real
- * code is unrecoverable, and the replay path makes the same choice for a terminal session that
- * never recorded one — the pipeline treats the absent code as not-a-failure and lets review judge
- * the work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
- * reconstructed, not observed.
+ * latest session <em>this node executed</em> — a synced foreign run is its executing node's to
+ * reconcile, and probing the local unit for it would synthesize an authoritative stop for an agent
+ * that is still alive elsewhere. Database-only checks come first, so a pass with nothing to
+ * reconcile issues no systemctl calls. A terminal session replays the stop with its recorded exit
+ * code. A running session past the launch grace period whose systemd unit is inactive or absent
+ * gets a synthesized stop with <em>no exit code</em>: the transient unit is garbage-collected on
+ * exit, so the real code is unrecoverable, and the replay path makes the same choice for a terminal
+ * session that never recorded one — the pipeline treats the absent code as not-a-failure and lets
+ * review judge the work. Every replayed stop carries {@code source=reconcile} so the event log
+ * shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -66,6 +68,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final EventStore eventStore;
   private final EventBus bus;
   private final UnitProbe unitProbe;
+  private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final PeriodicPass pass;
 
@@ -75,12 +78,14 @@ public final class MissedStopReconciler implements AutoCloseable {
       EventStore eventStore,
       EventBus bus,
       UnitProbe unitProbe,
+      Supplier<String> localHandle,
       Supplier<Instant> clock) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.eventStore = eventStore;
     this.bus = bus;
     this.unitProbe = unitProbe;
+    this.localHandle = localHandle;
     this.clock = clock;
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
@@ -142,7 +147,11 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   private boolean reconcile(SpecStore.SpecRow spec) throws Exception {
-    var latest = sessionStore.listForSpec(spec.id()).stream().findFirst();
+    var node = localHandle.get();
+    var latest =
+        sessionStore.listForSpec(spec.id()).stream()
+            .filter(run -> SailApiOperations.ownsRun(run.node(), node))
+            .findFirst();
     if (latest.isEmpty()) {
       return false;
     }

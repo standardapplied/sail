@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.ReviewStore;
@@ -268,12 +269,22 @@ final class GlobalSpecOperations {
     return GlobalSpecHistoryResponse.from(specId, specStore.history(specId));
   }
 
+  /**
+   * A historical snapshot carries the assignee, so a restore that changes it is a reassignment in
+   * disguise and must clear {@link SpecPolicy#reassign} on top of the plain mutation gate —
+   * otherwise an assignee could route around the admin-only reassign rule by restoring a revision
+   * owned by someone else.
+   */
   GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
     requireStore();
     var existing = findOrThrow(specId);
     SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
+    }
+    var targetAssignee = revisionAssignee(specId, request.rev());
+    if (!Objects.equals(existing.assignee(), targetAssignee)) {
+      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), targetAssignee).enforce();
     }
     try {
       specStore.restore(specId, request.rev());
@@ -283,6 +294,19 @@ final class GlobalSpecOperations {
     var row = specStore.findById(specId).orElseThrow();
     publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecRestoredResponse(GlobalSpecView.from(row), request.rev());
+  }
+
+  private String revisionAssignee(String specId, String rev) {
+    var entry =
+        specStore.history(specId).stream()
+            .filter(candidate -> rev.equals(candidate.rev()))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.INVALID_REQUEST,
+                        "No revision '" + rev + "' recorded for spec '" + specId + "'."));
+    return Objects.toString(YamlUtil.parseMap(entry.snapshot()).get("assignee"), null);
   }
 
   private void publishStatusChanged(

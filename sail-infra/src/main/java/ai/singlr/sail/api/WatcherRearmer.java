@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.function.LongPredicate;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Keeps every running agent guarded: for each {@code in_progress} spec whose latest session is
@@ -20,7 +21,9 @@ import java.util.function.Predicate;
  * mid-run (crash, OOM kill) leaves the agent unguarded for at most one pass interval. The
  * relaunched {@code sail agent watch} recomputes its wall-clock deadline from the session's
  * original {@code started_at}, so an agent three hours into a four-hour budget gets the remaining
- * hour, not a fresh four.
+ * hour, not a fresh four. Only sessions this node executed are considered — a synced foreign run is
+ * its executing node's to guard, and arming a local watcher against it would eventually enforce a
+ * foreign deadline on this box's container.
  *
  * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
  * that is still alive (free, in-process check) or any {@code sail agent watch} process for the
@@ -50,6 +53,7 @@ public final class WatcherRearmer implements AutoCloseable {
   private final MissedStopReconciler.UnitProbe agentUnitProbe;
   private final Predicate<String> watcherRunning;
   private final LongPredicate watcherAlive;
+  private final Supplier<String> localHandle;
   private final WatcherRelauncher relauncher;
   private final PeriodicPass pass;
 
@@ -59,12 +63,14 @@ public final class WatcherRearmer implements AutoCloseable {
       MissedStopReconciler.UnitProbe agentUnitProbe,
       Predicate<String> watcherRunning,
       LongPredicate watcherAlive,
+      Supplier<String> localHandle,
       WatcherRelauncher relauncher) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.agentUnitProbe = agentUnitProbe;
     this.watcherRunning = watcherRunning;
     this.watcherAlive = watcherAlive;
+    this.localHandle = localHandle;
     this.relauncher = relauncher;
     this.pass = new PeriodicPass("rearm", this::rearm);
   }
@@ -111,7 +117,11 @@ public final class WatcherRearmer implements AutoCloseable {
   }
 
   private boolean rearm(SpecStore.SpecRow spec) throws Exception {
-    var latest = sessionStore.listForSpec(spec.id()).stream().findFirst();
+    var node = localHandle.get();
+    var latest =
+        sessionStore.listForSpec(spec.id()).stream()
+            .filter(run -> SailApiOperations.ownsRun(run.node(), node))
+            .findFirst();
     if (latest.isEmpty() || !"running".equals(latest.get().status())) {
       return false;
     }

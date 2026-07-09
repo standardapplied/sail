@@ -157,6 +157,23 @@ class ReviewOperationsTest {
     assertThrows(ApiException.class, () -> ops.dismissFinding("nope", "f1", UDAY_ADMIN));
   }
 
+  @Test
+  void dismissFindingRefusesAFindingFromAnotherReview() {
+    var victimReview = seedReviewWithFinding();
+    var victimFinding = reviewStore.findingsForReview(victimReview).getFirst().id();
+    var otherReview = reviewStore.createReview("auth", 2);
+    reviewStore.createStage(otherReview, "security", "agent");
+
+    var ex =
+        assertThrows(
+            ApiException.class, () -> ops.dismissFinding(otherReview, victimFinding, UDAY_ADMIN));
+
+    assertEquals(ErrorCode.NOT_FOUND, ex.failure().errorCode());
+    assertEquals(
+        Finding.Resolution.OPEN,
+        reviewStore.findingsForReview(victimReview).getFirst().resolution());
+  }
+
   private String seedPassedReviewWithOpenFindings() {
     var reviewId = reviewStore.createReview("auth", 1);
     var stageId = reviewStore.createStage(reviewId, "security", "agent");

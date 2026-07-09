@@ -120,7 +120,9 @@ class SyncTransportTest {
     var clientIn = new BufferedReader(new PipedReader(toClient));
     var server =
         new SyncRpcServer(
-            Map.of("spec", main.replica, "file", mainFileReplica), true, FdeRoster.EMPTY);
+            Map.of("spec", main.replica, "file", mainFileReplica),
+            new SyncPrincipal("A", true),
+            FdeRoster.EMPTY);
     var serverThread =
         Thread.ofVirtual()
             .start(

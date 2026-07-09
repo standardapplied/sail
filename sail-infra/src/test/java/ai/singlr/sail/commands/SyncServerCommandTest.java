@@ -9,15 +9,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.sync.LocalReplica;
+import ai.singlr.sail.sync.RunReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -105,6 +109,11 @@ class SyncServerCommandTest {
   }
 
   private SyncEngine.Report syncWithToken(String token) throws Exception {
+    return syncWithToken(token, "spec", nodeReplica);
+  }
+
+  private SyncEngine.Report syncWithToken(String token, String entityType, LocalReplica replica)
+      throws Exception {
     var toServer = new PipedWriter();
     var serverIn = new BufferedReader(new PipedReader(toServer));
     var toClient = new PipedWriter();
@@ -122,7 +131,7 @@ class SyncServerCommandTest {
                 });
 
     try (var session = new SyncSession(clientIn, toServer)) {
-      return new SyncEngine().reconcile(nodeReplica, session.replica("spec"));
+      return new SyncEngine().reconcile(replica, session.replica(entityType));
     } finally {
       serverThread.join();
     }
@@ -156,6 +165,42 @@ class SyncServerCommandTest {
     nodeSpecs.create(spec("auth", "Auth"));
     assertThrows(SyncTransportException.class, () -> syncWithToken(null));
     assertTrue(mainSpecs.findById("auth").isEmpty());
+  }
+
+  private RunReplica nodeRunReplica() {
+    return new RunReplica(
+        "node",
+        new RunStore(nodeDb),
+        new ChangeLog(nodeDb),
+        new SyncConflicts(nodeDb),
+        new SyncState(nodeDb));
+  }
+
+  private String createNodeRun(String node) {
+    var id = DateTimeUtils.newId().toString();
+    new RunStore(nodeDb)
+        .create(
+            id, "proj", "auth", node, "build", "claude-code", "feat/x", "task", 1, null, "/log");
+    return id;
+  }
+
+  @Test
+  void aMemberMayPushARunStampedWithItsOwnHandle() throws Exception {
+    var runId = createNodeRun("uday");
+
+    var report = syncWithToken(tokenFor("member"), "run", nodeRunReplica());
+
+    assertEquals(1, report.pushed());
+    assertEquals("uday", new RunStore(mainDb).findById(runId).orElseThrow().node());
+  }
+
+  @Test
+  void aMemberCannotForgeARunStampedWithAnotherNode() throws Exception {
+    var runId = createNodeRun("grace");
+    var token = tokenFor("member");
+
+    assertThrows(SyncTransportException.class, () -> syncWithToken(token, "run", nodeRunReplica()));
+    assertTrue(new RunStore(mainDb).findById(runId).isEmpty());
   }
 
   @Test

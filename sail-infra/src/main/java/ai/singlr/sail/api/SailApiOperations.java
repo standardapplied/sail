@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
@@ -767,19 +768,24 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   /**
-   * Tails a local run's own log file — the run-scoped {@code ~/.sail/runs/<runId>/agent.log} the
-   * run row records — so a log address names exactly one execution, never whatever the shared
-   * per-container file currently holds. The provenance guard already established the run is local.
+   * Tails a local run's own log file — the run-scoped {@code ~/.sail/runs/<runId>/agent.log} — so a
+   * log address names exactly one execution, never whatever the shared per-container file currently
+   * holds. The path is derived from the run's canonical UUID and role rather than the persisted
+   * {@code log_path}: run rows replicate over sync, so a stored path is untrusted input that could
+   * point anywhere the container's dev user can read. The provenance guard already established the
+   * run is local.
    */
   private RunLogResponse runLogValue(RunStore.RunRow run, int tail) {
     requireProjectExists(run.project());
-    var logPath = run.logPath();
-    if (Strings.isBlank(logPath)) {
+    if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
+    var logPath =
+        AgentUnit.fromRole(Objects.requireNonNullElse(run.role(), "build"))
+            .runLogPath(Ids.requireUuid(run.id()));
     var cmd =
         ContainerExec.asDevUser(
-            run.project(), List.of("tail", "-n", String.valueOf(tail), logPath));
+            run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
     var result = exec(cmd);
     if (!result.ok()) {
       if (result.stderr().contains("No such file")) {

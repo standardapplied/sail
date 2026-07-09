@@ -84,6 +84,63 @@ class SyncRpcServerTest {
         SyncWire.Failed.class, serve(false, new SyncWire.Commit("spec", "a", Map.of(), null)));
   }
 
+  private static SyncWire.Response serveRun(
+      String handle, Map<String, Object> mainCurrent, SyncWire.Commit commit) throws Exception {
+    var main =
+        new FakeMain() {
+          @Override
+          public Map<String, Object> current(String entityId) {
+            return mainCurrent;
+          }
+        };
+    var out = new StringWriter();
+    new SyncRpcServer(Map.of("run", main), new SyncPrincipal(handle, true), FdeRoster.EMPTY)
+        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+    return SyncWire.decodeResponse(out.toString().strip());
+  }
+
+  @Test
+  void aSessionCommitsItsOwnRun() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), null);
+    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", null, commit));
+  }
+
+  @Test
+  void aRunStampedWithAnotherNodeIsRefused() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "grace"), null);
+    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, commit));
+  }
+
+  @Test
+  void overwritingAnotherNodesRunWithOnesOwnStampIsRefused() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "1-x");
+    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", Map.of("node", "grace"), commit));
+  }
+
+  @Test
+  void deletingAnotherNodesRunIsRefused() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", null, "1-x");
+    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", Map.of("node", "grace"), commit));
+  }
+
+  @Test
+  void deletingOnesOwnRunIsAccepted() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", null, "1-x");
+    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", Map.of("node", "ada"), commit));
+  }
+
+  @Test
+  void aRunWithoutANodeStampFailsClosed() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("status", "running"), null);
+    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, commit));
+  }
+
+  @Test
+  void aPrincipalWithoutAHandleCanNeverCommitARun() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), null);
+    assertInstanceOf(SyncWire.Failed.class, serveRun(null, null, commit));
+  }
+
   @Test
   void fetchFdesReturnsTheInjectedRoster() throws Exception {
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
