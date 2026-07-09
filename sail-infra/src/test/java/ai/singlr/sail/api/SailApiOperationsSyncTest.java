@@ -140,7 +140,12 @@ class SailApiOperationsSyncTest {
     var operations =
         operations(scheduler(), null, dispatchShell(), SailApiOperationsSyncTest::seedReady);
 
-    var result = operations.dispatch("acme", new DispatchRequest("auth", "background", true));
+    var result =
+        operations.dispatch(
+            "acme",
+            new DispatchRequest("auth", "background", true),
+            new Actor("uday", Role.ADMIN, Actor.Lane.API),
+            "uday");
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(2, rounds.get());
@@ -150,7 +155,12 @@ class SailApiOperationsSyncTest {
   void aDispatchWithNothingToClaimOnlyFreshens() throws Exception {
     var operations = operations(scheduler(), null, dispatchShell(), store -> {});
 
-    var result = operations.dispatch("acme", new DispatchRequest(null, "background", true));
+    var result =
+        operations.dispatch(
+            "acme",
+            new DispatchRequest(null, "background", true),
+            new Actor("uday", Role.ADMIN, Actor.Lane.API),
+            "uday");
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -214,7 +224,7 @@ class SailApiOperationsSyncTest {
             "acme",
             "Add auth",
             SpecStatus.PENDING,
-            null,
+            "uday",
             null,
             null,
             null,

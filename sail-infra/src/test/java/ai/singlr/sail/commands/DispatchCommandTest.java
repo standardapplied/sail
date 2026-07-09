@@ -285,31 +285,6 @@ class DispatchCommandTest {
   }
 
   @Test
-  void dispatchedEventDataIncludesBranchAndMode() {
-    var data = DispatchCommand.dispatchedEventData("sail/oauth-flow", true);
-
-    assertEquals("sail/oauth-flow", data.get("branch"));
-    assertEquals("background", data.get("mode"));
-    assertEquals(List.of("branch", "mode"), List.copyOf(data.keySet()));
-  }
-
-  @Test
-  void dispatchedEventDataOmitsBranchWhenNull() {
-    var data = DispatchCommand.dispatchedEventData(null, false);
-
-    assertFalse(data.containsKey("branch"));
-    assertEquals("foreground", data.get("mode"));
-  }
-
-  @Test
-  void dispatchedEventDataOmitsBranchWhenBlank() {
-    var data = DispatchCommand.dispatchedEventData("   ", true);
-
-    assertFalse(data.containsKey("branch"), "blank branch must not leak into the data payload");
-    assertEquals("background", data.get("mode"));
-  }
-
-  @Test
   void branchRepoDirUsesSingleTargetWorkDirDirectly() {
     var repo = new SailYaml.Repo("https://github.com/org/chorus.git", "chorus", null);
 

@@ -287,9 +287,10 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<DispatchResponse> dispatch(String project, DispatchRequest request) {
+  public Result<DispatchResponse> dispatch(
+      String project, DispatchRequest request, Actor actor, String localHandle) {
     freshenForRead();
-    var result = safe(() -> dispatchValue(project, request));
+    var result = safe(() -> dispatchValue(project, request, actor, localHandle));
     if (result instanceof Result.Success<DispatchResponse> success
         && success.value().dispatched()) {
       triggerSyncAfterWrite();
@@ -404,11 +405,15 @@ public final class SailApiOperations implements ApiOperations {
     return new SpecResponse(project, specView(specs, spec), null, content != null, content);
   }
 
-  private DispatchResponse dispatchValue(String project, DispatchRequest request) {
+  private DispatchResponse dispatchValue(
+      String project, DispatchRequest request, Actor actor, String localHandle) {
     var loaded = loadRunningProject(project);
     if (!request.mode().equals("background") && !request.mode().equals("foreground")) {
       throw new ApiException(
           ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
+    }
+    if (Strings.isBlank(localHandle)) {
+      throw refusal(DispatchPolicy.nodeHandleUnset());
     }
 
     var agentSession = new AgentSession(shell);
@@ -421,9 +426,13 @@ public final class SailApiOperations implements ApiOperations {
     }
 
     var specs = specStore.projectSpecs(project);
-    var nextSpec = resolveSpec(specs, request.specId());
+    var nextSpec = resolveSpec(specs, request.specId(), localHandle);
     if (nextSpec == null) {
       return new DispatchResponse(project, false, "no_pending_specs", null, null, "", false);
+    }
+    if (DispatchPolicy.check(actor, nextSpec, localHandle)
+        instanceof DispatchDecision.Refused refused) {
+      throw refusal(refused);
     }
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
@@ -483,11 +492,6 @@ public final class SailApiOperations implements ApiOperations {
     if (eventBus == null) {
       return;
     }
-    var data = new LinkedHashMap<String, Object>();
-    if (Strings.isNotBlank(branch)) {
-      data.put("branch", branch);
-    }
-    data.put("mode", mode);
     eventBus.publish(
         Event.of(
             project,
@@ -495,7 +499,7 @@ public final class SailApiOperations implements ApiOperations {
             Event.WellKnownTypes.SPEC_DISPATCHED,
             Event.SAIL_AGENT,
             HostInfo.hostname(),
-            data));
+            DispatchEvents.dispatchedData(branch, mode)));
   }
 
   private void publishSnapshotCreated(String project, String label) {
@@ -651,9 +655,13 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
-  private static Spec resolveSpec(List<Spec> specs, String specId) {
+  private static ApiException refusal(DispatchDecision.Refused refused) {
+    return new ApiException(refused.code(), refused.message(), refused.fix());
+  }
+
+  private static Spec resolveSpec(List<Spec> specs, String specId, String localHandle) {
     if (Strings.isBlank(specId)) {
-      return SpecDirectory.nextReady(specs);
+      return SpecDirectory.nextReadyAssignedTo(specs, localHandle);
     }
     var spec = SpecDirectory.findById(specs, specId);
     if (spec == null) {
