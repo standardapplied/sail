@@ -54,6 +54,17 @@ public final class ApiSpecCreateCommand implements Runnable {
   @Option(names = "--agent", description = "Agent override.")
   private String agent;
 
+  @Option(
+      names = "--model",
+      description = "Model id override (honored by agents that support it, e.g. Codex).")
+  private String model;
+
+  @Option(
+      names = "--reasoning-effort",
+      description =
+          "Reasoning effort (none|low|medium|high|xhigh). Codex-only; ignored by Claude Code.")
+  private String reasoningEffort;
+
   @Option(names = "--branch", description = "Git branch.")
   private String branch;
 
@@ -105,6 +116,8 @@ public final class ApiSpecCreateCommand implements Runnable {
     body.put("status", status);
     if (assignee != null) body.put("assignee", assignee);
     if (agent != null) body.put("agent", agent);
+    if (model != null) body.put("model", model);
+    if (reasoningEffort != null) body.put("reasoning_effort", reasoningEffort);
     if (branch != null) body.put("branch", branch);
     if (dependsOn != null) body.put("depends_on", List.of(dependsOn.split(",")));
     if (repos != null) body.put("repos", List.of(repos.split(",")));
@@ -166,6 +179,8 @@ public final class ApiSpecCreateCommand implements Runnable {
             || planFile != null
             || assignee != null
             || agent != null
+            || model != null
+            || reasoningEffort != null
             || branch != null
             || dependsOn != null
             || repos != null

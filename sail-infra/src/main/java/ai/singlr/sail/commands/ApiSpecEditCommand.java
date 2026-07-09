@@ -45,6 +45,17 @@ public final class ApiSpecEditCommand implements Runnable {
   @Option(names = "--agent", description = "Agent override.")
   private String agent;
 
+  @Option(
+      names = "--model",
+      description = "Model id override; pass \"\" to clear it back to the default.")
+  private String model;
+
+  @Option(
+      names = "--reasoning-effort",
+      description =
+          "Reasoning effort (none|low|medium|high|xhigh); pass \"\" to clear it. Codex-only.")
+  private String reasoningEffort;
+
   @Option(names = "--branch", description = "Git branch.")
   private String branch;
 
@@ -87,6 +98,8 @@ public final class ApiSpecEditCommand implements Runnable {
     if (status != null) body.put("status", status);
     if (assignee != null) body.put("assignee", assignee);
     if (agent != null) body.put("agent", agent);
+    if (model != null) body.put("model", model);
+    if (reasoningEffort != null) body.put("reasoning_effort", reasoningEffort);
     if (branch != null) body.put("branch", branch);
     if (priority != null) body.put("priority", priority);
     if (dependsOn != null) body.put("depends_on", List.of(dependsOn.split(",")));

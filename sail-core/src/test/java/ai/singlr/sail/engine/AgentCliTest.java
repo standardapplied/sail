@@ -119,6 +119,33 @@ class AgentCliTest {
   }
 
   @Test
+  void headlessCommandClaudeCodeToleratesModelAndReasoningEffort() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, true, "claude-opus-4", "high", null);
+
+    assertTrue(cmd.contains("claude --print"));
+    assertTrue(cmd.contains("--model claude-opus-4"), "an explicit model choice is honored");
+    assertFalse(cmd.contains("reasoning"), "reasoning_effort is dropped for Claude Code");
+    assertTrue(cmd.contains("-p \"$(cat " + TASK + ")\""));
+  }
+
+  @Test
+  void headlessCommandClaudeCodeToleratesReasoningEffortNone() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, true, null, "none", null);
+
+    assertTrue(cmd.contains("claude --print"));
+    assertFalse(cmd.contains("--model"), "no model flag when model is null");
+    assertFalse(cmd.contains("reasoning"));
+  }
+
+  @Test
+  void headlessCommandCodexStillReceivesModelAndReasoningEffort() {
+    var cmd = AgentCli.CODEX.headlessCommand(TASK, true, "gpt-5.5", "high", null);
+
+    assertTrue(cmd.contains("--model gpt-5.5"));
+    assertTrue(cmd.contains("model_reasoning_effort='\"high\"'"));
+  }
+
+  @Test
   void headlessCommandClaudeCodeWithoutPermissions() {
     var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, false);
 

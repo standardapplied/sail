@@ -127,12 +127,18 @@ public enum AgentCli {
     var task = "\"$(cat " + taskFile + ")\"";
     return switch (this) {
       case CLAUDE_CODE -> {
-        requireNoModelOptions(model, reasoningEffort);
         var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
         var settings =
             Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
         var streamFormat = stream ? " --output-format stream-json --verbose" : "";
-        yield binaryName + " --print" + streamFormat + settings + perm + " -p " + task;
+        yield binaryName
+            + " --print"
+            + streamFormat
+            + settings
+            + perm
+            + claudeModelOptions(model)
+            + " -p "
+            + task;
       }
       case CODEX -> {
         var perm = fullPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";
@@ -184,10 +190,7 @@ public enum AgentCli {
     return options.toString();
   }
 
-  private void requireNoModelOptions(String model, String reasoningEffort) {
-    if (model != null || reasoningEffort != null) {
-      throw new IllegalArgumentException(
-          yamlName + " does not support spec-level model or reasoning_effort options yet.");
-    }
+  private static String claudeModelOptions(String model) {
+    return model == null ? "" : " --model " + model;
   }
 }

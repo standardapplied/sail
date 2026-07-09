@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
@@ -346,18 +345,102 @@ class AgentSessionTest {
   }
 
   @Test
-  void buildBackgroundLaunchCommandRejectsUnsupportedModelOptions() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            AgentSession.buildBackgroundLaunchCommand(
-                "acme",
-                "dev",
-                "/home/dev/workspace",
-                true,
-                AgentCli.CLAUDE_CODE,
-                "gpt-5.5",
-                "high"));
+  void buildBackgroundLaunchCommandClaudeCodeToleratesModelAndDropsReasoningWithWarning() {
+    var originalErr = System.err;
+    var captured = new java.io.ByteArrayOutputStream();
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    List<String> cmd;
+    try {
+      cmd =
+          AgentSession.buildBackgroundLaunchCommand(
+              "acme",
+              "dev",
+              "/home/dev/workspace",
+              true,
+              AgentCli.CLAUDE_CODE,
+              "claude-opus-4",
+              "high",
+              "auth-flow",
+              "claude-code");
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("claude --print"));
+    assertTrue(joined.contains("--model claude-opus-4"), "explicit model choice is honored");
+    assertFalse(joined.contains("reasoning"), "reasoning_effort is dropped for Claude Code");
+
+    var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+    assertTrue(warning.contains("reasoning_effort"), "the drop must never be silent");
+    assertTrue(warning.contains("high"));
+    assertTrue(warning.contains("auth-flow"), "the warning names the spec");
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandClaudeCodeWarnsForReasoningEffortNone() {
+    var originalErr = System.err;
+    var captured = new java.io.ByteArrayOutputStream();
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      AgentSession.buildBackgroundLaunchCommand(
+          "acme",
+          "dev",
+          "/home/dev/workspace",
+          true,
+          AgentCli.CLAUDE_CODE,
+          null,
+          "none",
+          "auth-flow",
+          "claude-code");
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+    assertTrue(warning.contains("auth-flow"));
+    assertTrue(warning.contains("none"));
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandClaudeCodeWithoutReasoningEffortIsSilent() {
+    var originalErr = System.err;
+    var captured = new java.io.ByteArrayOutputStream();
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      AgentSession.buildBackgroundLaunchCommand(
+          "acme", "dev", "/home/dev/workspace", true, AgentCli.CLAUDE_CODE, "claude-opus-4", null);
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).isEmpty());
+  }
+
+  @Test
+  void buildForegroundTaskCommandClaudeCodeDropsReasoningWithWarning() {
+    var originalErr = System.err;
+    var captured = new java.io.ByteArrayOutputStream();
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    List<String> cmd;
+    try {
+      cmd =
+          AgentSession.buildForegroundTaskCommand(
+              "acme",
+              "dev",
+              "/home/dev/workspace",
+              true,
+              AgentCli.CLAUDE_CODE,
+              null,
+              "high",
+              "auth-flow",
+              "claude-code");
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertFalse(String.join(" ", cmd).contains("reasoning"));
+    assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).contains("auth-flow"));
   }
 
   @Test
