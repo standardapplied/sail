@@ -301,7 +301,8 @@ public final class ServerStartCommand implements Runnable {
     return new WebauthnConfig(
         rpId != null ? rpId : base.rpId(),
         rpName != null ? rpName : base.rpName(),
-        origins != null && !origins.isEmpty() ? origins : base.origins());
+        origins != null && !origins.isEmpty() ? origins : base.origins(),
+        base.sessionTtlHours());
   }
 
   private static PasskeyService buildPasskeyService(Sqlite db, WebauthnConfig webauthn) {
@@ -313,7 +314,8 @@ public final class ServerStartCommand implements Runnable {
         new FdeStore(db),
         new WebauthnCredentialStore(db),
         new AuthSessionStore(db),
-        new PendingChallengeStore(db));
+        new PendingChallengeStore(db),
+        webauthn.sessionTtl());
   }
 
   /**

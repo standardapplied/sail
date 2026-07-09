@@ -31,25 +31,30 @@ public final class PasskeyService implements PasskeyCeremonies {
   static final String REGISTER = "register";
   static final String ASSERT = "assert";
   private static final Duration CHALLENGE_TTL = Duration.ofMinutes(5);
-  private static final Duration SESSION_TTL = Duration.ofHours(12);
 
   private final RelyingParty relyingParty;
   private final FdeStore fdes;
   private final WebauthnCredentialStore credentials;
   private final AuthSessionStore sessions;
   private final PendingChallengeStore challenges;
+  private final Duration sessionTtl;
 
   public PasskeyService(
       RelyingParty relyingParty,
       FdeStore fdes,
       WebauthnCredentialStore credentials,
       AuthSessionStore sessions,
-      PendingChallengeStore challenges) {
+      PendingChallengeStore challenges,
+      Duration sessionTtl) {
     this.relyingParty = Objects.requireNonNull(relyingParty, "relyingParty");
     this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.challenges = Objects.requireNonNull(challenges, "challenges");
+    this.sessionTtl = Objects.requireNonNull(sessionTtl, "sessionTtl");
+    if (sessionTtl.isZero() || sessionTtl.isNegative()) {
+      throw new IllegalArgumentException("sessionTtl must be positive, got " + sessionTtl);
+    }
   }
 
   @Override
@@ -134,7 +139,7 @@ public final class PasskeyService implements PasskeyCeremonies {
       throw loginFailed();
     }
     credentials.recordUse(credentialId, newSignCount);
-    var session = sessions.create(credential.fdeId(), SESSION_TTL);
+    var session = sessions.create(credential.fdeId(), sessionTtl);
     return new LoginResult(session.token(), handleOf(credential.fdeId()), session.expiresAt());
   }
 

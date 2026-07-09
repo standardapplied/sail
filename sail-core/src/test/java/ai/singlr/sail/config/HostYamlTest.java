@@ -157,6 +157,27 @@ class HostYamlTest {
   }
 
   @Test
+  void partialWebauthnBlockSurvivesRoundTrip() throws Exception {
+    var host =
+        new HostYaml(
+            "dir",
+            "devpool",
+            null,
+            "incusbr0",
+            "singlr-base",
+            "ubuntu/24.04",
+            "6.21",
+            null,
+            "2026-02-18T01:00:00Z",
+            new WebauthnConfig(null, null, null, 48));
+
+    var reparsed = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(host.toMap())));
+
+    assertEquals(48, reparsed.webauthn().sessionTtlHours());
+    assertFalse(reparsed.webauthn().isConfigured());
+  }
+
+  @Test
   void syncBlockSurvivesRoundTripAndIsOmittedWhenUnset() throws Exception {
     var pointed =
         new HostYaml(

@@ -48,12 +48,13 @@ public final class HostConfigSetCommand implements Runnable {
           "webauthn-rp-id",
           "webauthn-rp-name",
           "webauthn-origin",
+          "webauthn-session-ttl-hours",
           "sync-role",
           "sync-main",
           "sync-handle",
           "slack-token");
   private static final Set<String> WEBAUTHN_KEYS =
-      Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin");
+      Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin", "webauthn-session-ttl-hours");
   private static final Pattern RP_ID = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
   private static final Pattern ORIGIN = Pattern.compile("https?://\\S+[^/]");
   private static final Pattern SSH_TARGET = Pattern.compile("([a-z_][a-z0-9_-]*@)?[a-zA-Z0-9.-]+");
@@ -410,6 +411,7 @@ public final class HostConfigSetCommand implements Runnable {
                   + " send the origin without one, and the match is exact).");
         }
       }
+      case "webauthn-session-ttl-hours" -> parseSessionTtlHours(value);
       case "sync-role" -> {
         if (!SyncConfig.ROLE_MAIN.equals(value) && !SyncConfig.ROLE_NODE.equals(value)) {
           throw new IllegalArgumentException(
@@ -434,17 +436,59 @@ public final class HostConfigSetCommand implements Runnable {
     return switch (key) {
       case "server-ip" -> withServerIp(current, value);
       case "webauthn-rp-id" ->
-          withWebauthn(current, new WebauthnConfig(value, webauthn.rpName(), webauthn.origins()));
+          withWebauthn(
+              current,
+              new WebauthnConfig(
+                  value, webauthn.rpName(), webauthn.origins(), webauthn.sessionTtlHours()));
       case "webauthn-rp-name" ->
-          withWebauthn(current, new WebauthnConfig(webauthn.rpId(), value, webauthn.origins()));
+          withWebauthn(
+              current,
+              new WebauthnConfig(
+                  webauthn.rpId(), value, webauthn.origins(), webauthn.sessionTtlHours()));
       case "webauthn-origin" ->
           withWebauthn(
-              current, new WebauthnConfig(webauthn.rpId(), webauthn.rpName(), List.of(value)));
+              current,
+              new WebauthnConfig(
+                  webauthn.rpId(), webauthn.rpName(), List.of(value), webauthn.sessionTtlHours()));
+      case "webauthn-session-ttl-hours" ->
+          withWebauthn(
+              current,
+              new WebauthnConfig(
+                  webauthn.rpId(),
+                  webauthn.rpName(),
+                  webauthn.origins(),
+                  parseSessionTtlHours(value)));
       case "sync-role" -> withSync(current, new SyncConfig(value, sync.main(), sync.handle()));
       case "sync-main" -> withSync(current, new SyncConfig(sync.role(), value, sync.handle()));
       case "sync-handle" -> withSync(current, new SyncConfig(sync.role(), sync.main(), value));
       default -> throw new IllegalArgumentException("Unhandled key: " + key);
     };
+  }
+
+  /**
+   * Parses and range-checks the session TTL, so both {@link #validate} and {@link #applyChange}
+   * reject an out-of-range value with the same actionable message.
+   */
+  static int parseSessionTtlHours(String value) {
+    int hours;
+    try {
+      hours = Integer.parseInt(value.strip());
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "Invalid session TTL: '" + value + "'. Expected a whole number of hours, e.g. 720.");
+    }
+    if (hours < WebauthnConfig.MIN_SESSION_TTL_HOURS
+        || hours > WebauthnConfig.MAX_SESSION_TTL_HOURS) {
+      throw new IllegalArgumentException(
+          "Invalid session TTL: "
+              + hours
+              + " hours. Expected "
+              + WebauthnConfig.MIN_SESSION_TTL_HOURS
+              + " to "
+              + WebauthnConfig.MAX_SESSION_TTL_HOURS
+              + " (1 hour to 90 days).");
+    }
+    return hours;
   }
 
   private static HostYaml withServerIp(HostYaml current, String serverIp) {

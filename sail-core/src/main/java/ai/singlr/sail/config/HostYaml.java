@@ -136,7 +136,7 @@ public record HostYaml(
     map.put("incus_version", incusVersion);
     map.put("server_ip", serverIp);
     map.put("initialized_at", initializedAt);
-    if (webauthn != null && webauthn.isConfigured()) {
+    if (webauthn != null && !webauthn.equals(WebauthnConfig.disabled())) {
       map.put("webauthn", webauthn.toMap());
     }
     if (sync != null && sync.role() != null) {
