@@ -129,12 +129,19 @@ public final class SyncRpcServer {
 
   /**
    * Whether this session may commit the run: both the incoming snapshot's {@code node} and the run
-   * main already holds (either absent for a create or a completed delete) must be the principal's
-   * own handle. Checking both sides refuses a forged foreign stamp and the clobbering of another
-   * node's run with a re-stamped one; a missing or blank stamp fails closed.
+   * main already holds must be the principal's own handle. Checking both sides refuses a forged
+   * foreign stamp and the clobbering of another node's run with a re-stamped one; a missing or
+   * blank stamp fails closed. A null current snapshot alongside a non-null revision is a tombstone,
+   * not a fresh ID — resurrecting it is refused outright, since the deleted run's owner is no
+   * longer readable and fetch hands every session the tombstone's revision to replay against.
    */
   private boolean ownsRunCommit(SyncWire.Commit commit, MainReplica main) {
-    return ownedByPrincipal(commit.snapshot()) && ownedByPrincipal(main.current(commit.entityId()));
+    var incoming = commit.snapshot();
+    var current = main.current(commit.entityId());
+    if (incoming != null && current == null && main.currentRev(commit.entityId()) != null) {
+      return false;
+    }
+    return ownedByPrincipal(incoming) && ownedByPrincipal(current);
   }
 
   private boolean ownedByPrincipal(Map<String, Object> run) {

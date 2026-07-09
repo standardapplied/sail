@@ -86,11 +86,22 @@ class SyncRpcServerTest {
 
   private static SyncWire.Response serveRun(
       String handle, Map<String, Object> mainCurrent, SyncWire.Commit commit) throws Exception {
+    return serveRun(handle, mainCurrent, mainCurrent == null ? null : "1-x", commit);
+  }
+
+  private static SyncWire.Response serveRun(
+      String handle, Map<String, Object> mainCurrent, String mainRev, SyncWire.Commit commit)
+      throws Exception {
     var main =
         new FakeMain() {
           @Override
           public Map<String, Object> current(String entityId) {
             return mainCurrent;
+          }
+
+          @Override
+          public String currentRev(String entityId) {
+            return mainRev;
           }
         };
     var out = new StringWriter();
@@ -127,6 +138,18 @@ class SyncRpcServerTest {
   void deletingOnesOwnRunIsAccepted() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", null, "1-x");
     assertInstanceOf(SyncWire.Committed.class, serveRun("ada", Map.of("node", "ada"), commit));
+  }
+
+  @Test
+  void recreatingATombstonedRunIdIsRefusedEvenWithOnesOwnStamp() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "2-x");
+    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, "2-x", commit));
+  }
+
+  @Test
+  void replayingADeleteOverATombstoneStaysAllowed() throws Exception {
+    var commit = new SyncWire.Commit("run", "r1", null, "2-x");
+    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", null, "2-x", commit));
   }
 
   @Test

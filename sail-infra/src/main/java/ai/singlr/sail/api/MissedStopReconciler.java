@@ -27,17 +27,19 @@ import java.util.function.Supplier;
  * died with a daemon restart or crashed) is reconciled within a sweep interval instead of requiring
  * another restart.
  *
- * <p>Each pass walks the {@code in_progress} specs and applies {@link MissedStops#assess} to the
- * latest session <em>this node executed</em> — a synced foreign run is its executing node's to
- * reconcile, and probing the local unit for it would synthesize an authoritative stop for an agent
- * that is still alive elsewhere. Database-only checks come first, so a pass with nothing to
- * reconcile issues no systemctl calls. A terminal session replays the stop with its recorded exit
- * code. A running session past the launch grace period whose systemd unit is inactive or absent
- * gets a synthesized stop with <em>no exit code</em>: the transient unit is garbage-collected on
- * exit, so the real code is unrecoverable, and the replay path makes the same choice for a terminal
- * session that never recorded one — the pipeline treats the absent code as not-a-failure and lets
- * review judge the work. Every replayed stop carries {@code source=reconcile} so the event log
- * shows it was reconstructed, not observed.
+ * <p>Each pass walks the {@code in_progress} specs and applies {@link MissedStops#assess} to each
+ * spec's newest session, and only when <em>this node executed it</em> — a synced foreign run is its
+ * executing node's to reconcile, and probing the local unit for it would synthesize an
+ * authoritative stop for an agent that is still alive elsewhere. Ownership is checked after
+ * selecting the newest run, never before: filtering first would fall back to a superseded local
+ * session and replay its stop over a newer foreign run that is still executing. Database-only
+ * checks come first, so a pass with nothing to reconcile issues no systemctl calls. A terminal
+ * session replays the stop with its recorded exit code. A running session past the launch grace
+ * period whose systemd unit is inactive or absent gets a synthesized stop with <em>no exit
+ * code</em>: the transient unit is garbage-collected on exit, so the real code is unrecoverable,
+ * and the replay path makes the same choice for a terminal session that never recorded one — the
+ * pipeline treats the absent code as not-a-failure and lets review judge the work. Every replayed
+ * stop carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -150,8 +152,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
-            .filter(run -> SailApiOperations.ownsRun(run.node(), node))
-            .findFirst();
+            .findFirst()
+            .filter(run -> SailApiOperations.ownsRun(run.node(), node));
     if (latest.isEmpty()) {
       return false;
     }

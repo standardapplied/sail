@@ -137,6 +137,19 @@ class MissedStopReconcilerTest {
         "/home/dev/.sail/runs/r/agent.log");
   }
 
+  private void adoptedForeignRunningSession(String specId, Instant startedAt) {
+    sessionStore.applyRevision(
+        DateTimeUtils.newId().toString(),
+        Map.of(
+            "project", "test-project",
+            "spec_id", specId,
+            "node", "node-b",
+            "agent", "claude-code",
+            "status", "running",
+            "started_at", startedAt.toString()),
+        "1-foreign");
+  }
+
   private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
     eventStore.insert(
         new EventStore.EventRow(
@@ -290,6 +303,20 @@ class MissedStopReconcilerTest {
     var replayed = reconciler(new CountingProbe(true), () -> "node-b", Instant::now).sweep();
 
     assertEquals(0, replayed);
+  }
+
+  @Test
+  void aSupersededLocalRunNeverReplaysOverANewerForeignRun() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    adoptedForeignRunningSession("auth", Instant.now().plus(Duration.ofHours(1)));
+    var probe = new CountingProbe(true);
+
+    var replayed = reconciler(probe, Instant::now).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test
