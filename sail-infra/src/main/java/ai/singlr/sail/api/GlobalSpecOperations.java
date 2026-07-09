@@ -128,9 +128,10 @@ final class GlobalSpecOperations {
     return new GlobalSpecCreatedResponse(GlobalSpecView.from(created));
   }
 
-  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
+  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {
     requireStore();
     var existing = findOrThrow(specId);
+    authorizeUpdate(actor, existing, request);
     guardReassignment(specId, existing, request);
     var updated =
         new SpecStore.SpecRow(
@@ -172,6 +173,22 @@ final class GlobalSpecOperations {
     return new GlobalSpecUpdatedResponse(GlobalSpecView.from(result));
   }
 
+  /**
+   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
+   * (admin-only, or a member self-claiming an unassigned spec); any other edit is governed by the
+   * general mutate policy (assignee or admin, creator or admin when unassigned). Runs before the
+   * status-based claim lock so identity is validated first.
+   */
+  private static void authorizeUpdate(
+      Actor actor, SpecStore.SpecRow existing, SpecUpdateRequest request) {
+    var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
+    if (reassigning) {
+      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), request.assignee()).enforce();
+    } else {
+      SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    }
+  }
+
   private static void guardReassignment(
       String specId, SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var stealingClaim =
@@ -192,9 +209,10 @@ final class GlobalSpecOperations {
     }
   }
 
-  GlobalSpecDeletedResponse delete(String specId) {
+  GlobalSpecDeletedResponse delete(String specId, Actor actor) {
     requireStore();
     var existing = findOrThrow(specId);
+    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
     specStore.delete(specId);
     publishBoardUpdated(existing.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecDeletedResponse(specId);
@@ -207,9 +225,10 @@ final class GlobalSpecOperations {
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
-  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request) {
+  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request, Actor actor) {
     requireStore();
     var existing = findOrThrow(specId);
+    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
     specStore.setContent(
         specId,
         Objects.requireNonNullElse(request.body(), ""),
@@ -249,8 +268,10 @@ final class GlobalSpecOperations {
     return GlobalSpecHistoryResponse.from(specId, specStore.history(specId));
   }
 
-  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request) {
+  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
     requireStore();
+    var existing = findOrThrow(specId);
+    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }

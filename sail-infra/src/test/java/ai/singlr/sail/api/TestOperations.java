@@ -101,12 +101,12 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
     return Result.success(new RunLogResponse(runId, List.of(), null));
   }
 
   @Override
-  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
+  public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
     return Result.success(new StopRunResponse(runId, false, null, null));
   }
 
@@ -229,7 +229,7 @@ class TestOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request) {
+      String specId, SpecUpdateRequest request, Actor actor) {
     return Result.success(
         new GlobalSpecUpdatedResponse(
             new GlobalSpecView(
@@ -252,7 +252,7 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
     return Result.success(new GlobalSpecDeletedResponse(specId));
   }
 
@@ -263,7 +263,7 @@ class TestOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request) {
+      String specId, SpecContentRequest request, Actor actor) {
     return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
   }
 
@@ -274,7 +274,7 @@ class TestOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-      String specId, SpecRestoreRequest request) {
+      String specId, SpecRestoreRequest request, Actor actor) {
     return Result.success(
         new GlobalSpecRestoredResponse(
             GlobalSpecView.from(
@@ -321,12 +321,13 @@ class TestOperations implements ApiOperations {
   }
 
   @Override
-  public Result<ReviewApproveResponse> approveReview(String reviewId, String actor) {
+  public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
     return Result.success(new ReviewApproveResponse(reviewId, true));
   }
 
   @Override
-  public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
+  public Result<FindingDismissResponse> dismissFinding(
+      String reviewId, String findingId, Actor actor) {
     return Result.success(new FindingDismissResponse(findingId, true));
   }
 }

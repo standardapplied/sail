@@ -186,7 +186,7 @@ public final class ApiRouter implements HttpHandler {
     }
 
     if (request.hasRunsPrefix()) {
-      return routeRuns(request, nodeHandle.get());
+      return routeRuns(request, nodeHandle.get(), actorOf(exchange));
     }
 
     if (!request.hasProjectPrefix()) {
@@ -272,10 +272,11 @@ public final class ApiRouter implements HttpHandler {
    * Builds the {@link Actor} for a request from the exchange attributes {@link ApiAuth} stamped:
    * {@code token.fde} is the caller's FDE handle (null for a machine credential owning no FDE) and
    * {@code token.role} resolves to the caller's {@link Role}. Method-level authorization ({@code
-   * WRITE} for dispatch) has already passed; {@link DispatchPolicy} does the resource-scoped
-   * decision from this actor.
+   * WRITE} for dispatch) has already passed; the aggregate {@code AccessPolicy} classes do the
+   * resource-scoped decision from this actor. Package-private so the SSE {@link AgentLogStreamer}
+   * builds the same actor from the same stamped attributes.
    */
-  private static Actor actorOf(HttpExchange exchange) {
+  static Actor actorOf(HttpExchange exchange) {
     return new Actor(
         Objects.toString(exchange.getAttribute("token.fde"), null),
         Role.fromAttribute(exchange.getAttribute("token.role")),
@@ -322,11 +323,12 @@ public final class ApiRouter implements HttpHandler {
               operations.updateGlobalSpec(
                   specId,
                   SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))
-                      .withUpdatedBy(actor(exchange))));
+                      .withUpdatedBy(actor(exchange)),
+                  actorOf(exchange)));
         }
         case DELETE -> {
           checkIfMatch(exchange, specId);
-          yield ApiResponse.from(operations.deleteGlobalSpec(specId));
+          yield ApiResponse.from(operations.deleteGlobalSpec(specId, actorOf(exchange)));
         }
         default -> throw methodNotAllowed();
       };
@@ -342,7 +344,9 @@ public final class ApiRouter implements HttpHandler {
             checkIfMatch(exchange, specId);
             yield ApiResponse.from(
                 operations.setGlobalSpecContent(
-                    specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
+                    specId,
+                    SpecContentRequest.fromMap(JsonBody.readMap(exchange)),
+                    actorOf(exchange)));
           }
           default -> throw methodNotAllowed();
         };
@@ -359,7 +363,7 @@ public final class ApiRouter implements HttpHandler {
         requireMethod(request, POST);
         return ApiResponse.from(
             operations.restoreGlobalSpec(
-                specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange))));
+                specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
       }
       if (FOLLOWUP.equals(sub)) {
         requireMethod(request, POST);
@@ -385,8 +389,7 @@ public final class ApiRouter implements HttpHandler {
       return switch (sub) {
         case APPROVE -> {
           requireMethod(request, POST);
-          Authorizer.require(exchange, Capability.ADMIN);
-          yield ApiResponse.from(operations.approveReview(reviewId, actor(exchange)));
+          yield ApiResponse.from(operations.approveReview(reviewId, actorOf(exchange)));
         }
         default -> throw notFound();
       };
@@ -397,8 +400,7 @@ public final class ApiRouter implements HttpHandler {
       var findingId = request.segments().get(4);
       if (DISMISS.equals(sub)) {
         requireMethod(request, POST);
-        Authorizer.require(exchange, Capability.ADMIN);
-        return ApiResponse.from(operations.dismissFinding(reviewId, findingId));
+        return ApiResponse.from(operations.dismissFinding(reviewId, findingId, actorOf(exchange)));
       }
     }
     throw notFound();
@@ -447,7 +449,7 @@ public final class ApiRouter implements HttpHandler {
    * here; it is intercepted up front like the agent stream. The log and stop handlers pass this
    * box's handle so the operation's provenance guard can refuse a run that executed elsewhere.
    */
-  private ApiResponse routeRuns(RouteRequest request, String localHandle) {
+  private ApiResponse routeRuns(RouteRequest request, String localHandle, Actor actor) {
     if (request.size() == 2) {
       requireMethod(request, GET);
       var params = QueryParameters.from(request.uri());
@@ -466,11 +468,12 @@ public final class ApiRouter implements HttpHandler {
       case LOG -> {
         requireMethod(request, GET);
         yield ApiResponse.from(
-            operations.runLog(runId, QueryParameters.from(request.uri()).tail(), localHandle));
+            operations.runLog(
+                runId, QueryParameters.from(request.uri()).tail(), localHandle, actor));
       }
       case STOP -> {
         requireMethod(request, POST);
-        yield ApiResponse.from(operations.stopRun(runId, localHandle));
+        yield ApiResponse.from(operations.stopRun(runId, localHandle, actor));
       }
       default -> throw notFound();
     };

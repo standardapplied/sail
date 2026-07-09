@@ -273,12 +273,13 @@ class RunStoreTest {
   @Test
   void commitAcceptsWhenExpectedRevMatchesAndRejectsWhenStale() {
     var other = freshStore("commit.db");
-    other.applyRevision("r1", base(), "rev-base");
+    other.applyRevision("00000000-0000-7000-8000-000000000001", base(), "rev-base");
 
-    var accepted = other.commitRevision("r1", moved(), "rev-base");
+    var accepted =
+        other.commitRevision("00000000-0000-7000-8000-000000000001", moved(), "rev-base");
     assertInstanceOf(PushOutcome.Accepted.class, accepted);
 
-    var stale = other.commitRevision("r1", moved(), "rev-base");
+    var stale = other.commitRevision("00000000-0000-7000-8000-000000000001", moved(), "rev-base");
     assertInstanceOf(PushOutcome.Stale.class, stale);
   }
 
@@ -324,11 +325,12 @@ class RunStoreTest {
   @Test
   void resolveConflictTakeTheirsAdoptsRemote() {
     var other = freshStore("resolve.db");
-    other.applyRevision("r1", base(), "rev-base");
+    other.applyRevision("00000000-0000-7000-8000-000000000001", base(), "rev-base");
 
-    other.resolveConflict("r1", theirs(), theirs());
+    other.resolveConflict("00000000-0000-7000-8000-000000000001", theirs(), theirs());
 
-    assertEquals("completed", other.findById("r1").orElseThrow().status());
+    assertEquals(
+        "completed", other.findById("00000000-0000-7000-8000-000000000001").orElseThrow().status());
   }
 
   private RunStore freshStore(String file) {

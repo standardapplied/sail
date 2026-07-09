@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Ids;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -36,12 +38,27 @@ public final class RunRetention {
     for (var i = Math.max(keep, 0); i < runIdsNewestFirst.size(); i++) {
       var runId = runIdsNewestFirst.get(i);
       var result =
-          shell.exec(
-              ContainerExec.asDevUser(container, List.of("rm", "-rf", AgentUnit.runDir(runId))));
+          shell.exec(ContainerExec.asDevUser(container, List.of("rm", "-rf", runDir(runId))));
       if (result.ok()) {
         pruned.add(runId);
       }
     }
     return pruned;
+  }
+
+  /**
+   * The absolute run-log directory for {@code runId}, guaranteed to be a direct child of the runs
+   * root. Run ids can arrive over sync from writable peers, so the id is validated as a canonical
+   * UUID and the resolved path is checked to sit immediately beneath {@link AgentUnit#RUNS_DIR}
+   * before it is handed to {@code rm -rf} — a {@code ..} segment can never escape the runs root to
+   * delete another directory owned by the container's dev user.
+   */
+  private static String runDir(String runId) {
+    var runsRoot = Path.of(AgentUnit.RUNS_DIR);
+    var runDir = runsRoot.resolve(Ids.requireUuid(runId)).normalize();
+    if (!runsRoot.equals(runDir.getParent())) {
+      throw new IllegalArgumentException("Run directory escapes runs root: " + runId);
+    }
+    return runDir.toString();
   }
 }

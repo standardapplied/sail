@@ -104,4 +104,29 @@ public final class Ids {
   public static OffsetDateTime now() {
     return OffsetDateTime.now(Clock.systemUTC());
   }
+
+  /**
+   * Validates that {@code value} is a canonical UUID string and returns it unchanged. Rejects any
+   * value that is not a well-formed UUID — including path-traversal segments and shell
+   * metacharacters — so an identifier that arrived over sync can never be trusted to select a file
+   * or shape a command. {@link UUID#fromString} is lenient (it accepts short groups), so the parse
+   * is re-serialized and compared to reject non-canonical spellings.
+   *
+   * @throws IllegalArgumentException when {@code value} is null or not a canonical UUID
+   */
+  public static String requireUuid(String value) {
+    if (value == null) {
+      throw new IllegalArgumentException("id is required");
+    }
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(value);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("Invalid id: " + value);
+    }
+    if (!parsed.toString().equals(value)) {
+      throw new IllegalArgumentException("Invalid id: " + value);
+    }
+    return value;
+  }
 }

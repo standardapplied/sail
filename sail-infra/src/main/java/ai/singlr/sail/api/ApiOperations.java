@@ -13,9 +13,9 @@ public interface ApiOperations {
 
   Result<ReviewDetailResponse> reviewDetail(String reviewId);
 
-  Result<ReviewApproveResponse> approveReview(String reviewId, String actor);
+  Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor);
 
-  Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId);
+  Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId, Actor actor);
 
   Result<HealthResponse> health();
 
@@ -54,10 +54,10 @@ public interface ApiOperations {
    * to the run's {@code node} and a mismatch returns a structured {@code run_on_other_node} refusal
    * rather than a foreign box's local file. Never tails the wrong execution's bytes.
    */
-  Result<RunLogResponse> runLog(String runId, int tail, String localHandle);
+  Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor);
 
   /** Stops a run, but only when it is executing on this box (same provenance guard as the log). */
-  Result<StopRunResponse> stopRun(String runId, String localHandle);
+  Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor);
 
   /** Publishes an event onto the bus and returns the stamped copy. */
   Result<EventPublishResponse> publishEvent(Event event);
@@ -77,17 +77,20 @@ public interface ApiOperations {
   /** Drafts a follow-up spec from the open findings of a spec's latest non-superseded review. */
   Result<FollowupSpecResponse> createFollowupSpec(String specId, FollowupCreateRequest request);
 
-  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(String specId, SpecUpdateRequest request);
+  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
+      String specId, SpecUpdateRequest request, Actor actor);
 
-  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId);
+  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor);
 
   Result<GlobalSpecContentResponse> globalSpecContent(String specId);
 
-  Result<GlobalSpecContentResponse> setGlobalSpecContent(String specId, SpecContentRequest request);
+  Result<GlobalSpecContentResponse> setGlobalSpecContent(
+      String specId, SpecContentRequest request, Actor actor);
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 
-  Result<GlobalSpecRestoredResponse> restoreGlobalSpec(String specId, SpecRestoreRequest request);
+  Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
+      String specId, SpecRestoreRequest request, Actor actor);
 
   Result<GlobalBoardResponse> globalBoard(String project);
 }

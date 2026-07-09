@@ -5,11 +5,14 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -30,9 +33,12 @@ import java.util.function.Supplier;
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
  * it resolves the run, applies the same provenance guard as the buffered log/stop endpoints — a run
  * whose {@code node} is not this box is refused with a structured {@code run_on_other_node} error
- * rather than tailing a foreign box's local file — and then tails the run's own {@code
- * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
- * event. {@code ?since=N} replays from a line number for client reconnection.
+ * rather than tailing a foreign box's local file — then applies the same {@link RunPolicy} the
+ * buffered log endpoint does (the run's spec assignee or an admin, else {@code
+ * forbidden_not_assignee}), and finally tails the run's own {@code ~/.sail/runs/<id>/agent.log} via
+ * {@code incus exec}, sending each line as an SSE {@code data:} event. Because REST and SSE call
+ * the one pure policy, they return an identical verdict for an identical caller. {@code ?since=N}
+ * replays from a line number for client reconnection.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
  * long-lived connection never runs through the buffered request/response path. It is not registered
@@ -51,25 +57,40 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
+  private final Function<String, Optional<String>> specAssignee;
   private final Supplier<String> localHandle;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
-    this(auth, AgentLogStreamer::lookupFromDb, NodeIdentity::handle);
+    this(
+        auth,
+        AgentLogStreamer::lookupFromDb,
+        AgentLogStreamer::assigneeFromDb,
+        NodeIdentity::handle);
   }
 
   AgentLogStreamer(
       ApiAuth auth,
       Function<String, Optional<RunStore.RunRow>> runLookup,
+      Function<String, Optional<String>> specAssignee,
       Supplier<String> localHandle) {
     this.auth = auth;
     this.runLookup = runLookup;
+    this.specAssignee = specAssignee;
     this.localHandle = localHandle;
   }
 
   private static Optional<RunStore.RunRow> lookupFromDb(String runId) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       return new RunStore(db).findById(runId);
+    } catch (RuntimeException e) {
+      return Optional.empty();
+    }
+  }
+
+  private static Optional<String> assigneeFromDb(String specId) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::assignee);
     } catch (RuntimeException e) {
       return Optional.empty();
     }
@@ -103,20 +124,42 @@ public final class AgentLogStreamer implements HttpHandler {
         sendForeign(exchange, run);
         return;
       }
+      if (RunPolicy.access(
+              ApiRouter.actorOf(exchange),
+              run.id(),
+              run.specId(),
+              specAssignee.apply(run.specId()).orElse(null))
+          instanceof AccessDecision.Refused refused) {
+        var fix =
+            Strings.isBlank(refused.fix())
+                ? null
+                : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
+        sendError(
+            exchange, refused.code().httpCode(), refused.code().code(), refused.message(), fix);
+        return;
+      }
       if (Strings.isBlank(run.logPath())) {
         sendError(exchange, 404, "run_not_found", "This run has no log file.", null);
         return;
       }
       var since = parseSince(exchange.getRequestURI().getQuery());
-      streamLog(exchange, run.project(), run.logPath(), since);
+      String[] tailCommand;
+      try {
+        tailCommand =
+            buildTailCommand(
+                run.project(), run.id(), Objects.requireNonNullElse(run.role(), "build"), since);
+      } catch (IllegalArgumentException e) {
+        sendError(exchange, 400, "invalid_request", e.getMessage(), null);
+        return;
+      }
+      streamLog(exchange, run.project(), tailCommand, since);
     } finally {
       exchange.close();
     }
   }
 
-  private void streamLog(HttpExchange exchange, String project, String logPath, int since)
+  private void streamLog(HttpExchange exchange, String project, String[] tailCommand, int since)
       throws IOException {
-    var tailCommand = buildTailCommand(project, logPath, since);
     Process tailProcess;
     try {
       tailProcess = new ProcessBuilder(tailCommand).redirectErrorStream(true).start();
@@ -190,11 +233,22 @@ public final class AgentLogStreamer implements HttpHandler {
    * Tails the run's own log file, touched first so a stream opened before the agent has written any
    * output starts clean and empty — waiting for lines — rather than emitting tail's "cannot open"
    * error onto the stream.
+   *
+   * <p>The path is derived from the validated run id and its role, never from the run's persisted
+   * {@code log_path}: run rows arrive over sync from writable peers, so a replicated {@code
+   * log_path} is untrusted input that could name an arbitrary file or carry shell metacharacters.
+   * The derived path is then passed as a positional shell argument ({@code "$1"}) rather than
+   * interpolated into the script, so it can never be interpreted as shell syntax.
    */
-  static String[] buildTailCommand(String project, String logPath, int since) {
-    var tail = since > 0 ? "tail -n +" + since + " -f " : "tail -f ";
-    var script = "touch " + logPath + " 2>/dev/null; " + tail + logPath;
-    return ContainerExec.asDevUser(project, List.of("bash", "-c", script)).toArray(String[]::new);
+  static String[] buildTailCommand(String project, String runId, String role, int since) {
+    var logPath = AgentUnit.fromRole(role).runLogPath(Ids.requireUuid(runId));
+    var script =
+        since > 0
+            ? "touch -- \"$1\" 2>/dev/null; exec tail -n \"+$2\" -f -- \"$1\""
+            : "touch -- \"$1\" 2>/dev/null; exec tail -f -- \"$1\"";
+    return ContainerExec.asDevUser(
+            project, List.of("bash", "-c", script, "sail-run-tail", logPath, String.valueOf(since)))
+        .toArray(String[]::new);
   }
 
   /** The run id in {@code /v1/runs/{id}/stream}, or null when the path is not that shape. */

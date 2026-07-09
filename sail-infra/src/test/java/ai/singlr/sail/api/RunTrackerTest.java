@@ -18,6 +18,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -95,6 +96,12 @@ class RunTrackerTest {
         project, "auth", Event.WellKnownTypes.AGENT_SESSION_STOPPED, "claude-code", "host", data);
   }
 
+  private static Event stopped(String project, String runId, Map<String, Object> data) {
+    var merged = new LinkedHashMap<String, Object>(data);
+    merged.put(Event.WellKnownData.RUN_ID, runId);
+    return stopped(project, merged);
+  }
+
   @Test
   void nameReturnsRunTracker() {
     assertEquals("run-tracker", tracker.name());
@@ -120,11 +127,11 @@ class RunTrackerTest {
 
   @Test
   void stoppedCompletesTheRunningRunWithItsExitCode() {
-    runningRun("backend", "auth");
+    var id = runningRun("backend", "auth");
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 137)));
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 137)));
 
-    var run = runStore.latestForProjectOnNode("backend", "node-a").orElseThrow();
+    var run = runStore.findById(id).orElseThrow();
     assertEquals("stopped", run.status());
     assertEquals(137, run.exitCode());
     assertNotNull(run.completedAt());
@@ -132,7 +139,7 @@ class RunTrackerTest {
 
   @Test
   void completedSetsCompletedStatus() {
-    runningRun("backend", "auth");
+    var id = runningRun("backend", "auth");
 
     tracker.onEvent(
         Event.of(
@@ -140,10 +147,36 @@ class RunTrackerTest {
             "auth",
             Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
             "claude-code",
-            "host"));
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, id)));
+
+    assertEquals("completed", runStore.findById(id).orElseThrow().status());
+  }
+
+  @Test
+  void aStaleStopAddressedToAnOldRunLeavesANewerRunUntouched() {
+    var older = runningRun("backend", "auth");
+    var newer = runningRun("backend", "auth");
+
+    tracker.onEvent(stopped("backend", older, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    assertEquals("stopped", runStore.findById(older).orElseThrow().status());
+    assertEquals(
+        "running",
+        runStore.findById(newer).orElseThrow().status(),
+        "a delayed stop for the old run must not complete the newer run of the same project");
+  }
+
+  @Test
+  void aStopCarryingNoRunIdIsIgnored() {
+    var id = runningRun("backend", "auth");
+
+    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     assertEquals(
-        "completed", runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().status());
+        "running",
+        runStore.findById(id).orElseThrow().status(),
+        "a stop with no run correlation cannot complete a run");
   }
 
   @Test
@@ -163,6 +196,7 @@ class RunTrackerTest {
     tracker.onEvent(
         stopped(
             "backend",
+            id,
             Map.of(
                 Event.WellKnownData.EXIT_CODE,
                 137,
@@ -177,7 +211,7 @@ class RunTrackerTest {
     var id = runningRun("backend", "auth");
     runStore.complete(id, "stopped", null);
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, "9")));
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "9")));
 
     assertEquals(9, runStore.findById(id).orElseThrow().exitCode());
   }
@@ -187,7 +221,7 @@ class RunTrackerTest {
     var id = runningRun("backend", "auth");
     runStore.complete(id, "stopped", null);
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, "nope")));
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "nope")));
 
     assertNull(runStore.findById(id).orElseThrow().exitCode());
   }
@@ -204,16 +238,16 @@ class RunTrackerTest {
     var id = runningRun("backend", "auth");
     runStore.complete(id, "stopped", 0);
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 137)));
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 137)));
 
     assertEquals(0, runStore.findById(id).orElseThrow().exitCode(), "the recorded exit stands");
   }
 
   @Test
   void completingARunFiresTheSyncOnWriteTrigger() throws Exception {
-    runningRun("backend", "auth");
+    var id = runningRun("backend", "auth");
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     assertTrue(reconciled.await(5, TimeUnit.SECONDS), "a completion propagates to main");
     assertTrue(reconciles.get() >= 1);
@@ -235,14 +269,15 @@ class RunTrackerTest {
   void exceptionInHandlerDoesNotPropagate() {
     db.close();
     db = null;
-    assertDoesNotThrow(() -> tracker.onEvent(stopped("p", Map.of())));
+    assertDoesNotThrow(
+        () -> tracker.onEvent(stopped("p", "some-run", Map.of(Event.WellKnownData.EXIT_CODE, 0))));
   }
 
   @Test
   void aForeignNodesRunningRunIsNeverCompletedByThisNodesStop() {
     var foreign = runningRunOn("backend", "theirs", "node-b");
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+    tracker.onEvent(stopped("backend", foreign, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     var run = runStore.findById(foreign).orElseThrow();
     assertEquals("running", run.status(), "another box's live run must be left untouched");
@@ -254,7 +289,7 @@ class RunTrackerTest {
     var mine = runningRunOn("backend", "mine", "node-a");
     var theirs = runningRunOn("backend", "theirs", "node-b");
 
-    tracker.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+    tracker.onEvent(stopped("backend", mine, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     assertEquals("stopped", runStore.findById(mine).orElseThrow().status());
     assertEquals("running", runStore.findById(theirs).orElseThrow().status());
@@ -265,23 +300,22 @@ class RunTrackerTest {
     var standalone = new RunTracker(runStore, scheduler, () -> null);
     var id = runningRunOn("backend", "auth", "");
 
-    standalone.onEvent(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+    standalone.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     assertEquals("stopped", runStore.findById(id).orElseThrow().status());
   }
 
   @Test
   void integrationWithEventBus() throws Exception {
-    runningRun("backend", "auth");
+    var id = runningRun("backend", "auth");
     try (var bus = new EventBus()) {
       var latch = new CountDownLatch(1);
       bus.subscribe(BusTesting.latching(tracker, latch));
-      bus.publish(stopped("backend", Map.of(Event.WellKnownData.EXIT_CODE, 5)));
+      bus.publish(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 5)));
 
       BusTesting.awaitDelivery(latch);
 
-      assertEquals(
-          5, runStore.latestForProjectOnNode("backend", "node-a").orElseThrow().exitCode());
+      assertEquals(5, runStore.findById(id).orElseThrow().exitCode());
     }
   }
 }

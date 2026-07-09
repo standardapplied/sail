@@ -35,6 +35,8 @@ class GlobalSpecOperationsTest {
   private ReviewStore reviewStore;
   private GlobalSpecOperations ops;
 
+  private static final Actor ADMIN = new Actor("ops", Role.ADMIN, Actor.Lane.API);
+
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
@@ -78,7 +80,8 @@ class GlobalSpecOperationsTest {
   @Test
   void updatePersistsUpdatedByWithoutTouchingCreatedBy() {
     ops.create(createReq(Map.of()).withCreatedBy("uday"));
-    ops.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "Auth v2")).withUpdatedBy("nova"));
+    ops.update(
+        "auth", SpecUpdateRequest.fromMap(Map.of("title", "Auth v2")).withUpdatedBy("nova"), ADMIN);
     var spec = ops.get("auth").spec();
     assertEquals("uday", spec.createdBy());
     assertEquals("nova", spec.updatedBy());
@@ -142,13 +145,14 @@ class GlobalSpecOperationsTest {
     ops.create(createReq(Map.of()));
     assertThrows(
         ApiException.class,
-        () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "bad model!"))));
+        () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "bad model!")), ADMIN));
   }
 
   @Test
   void updateAcceptsValidModel() {
     ops.create(createReq(Map.of()));
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "claude-opus-4")));
+    var updated =
+        ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "claude-opus-4")), ADMIN);
     assertEquals("claude-opus-4", updated.spec().model());
   }
 
@@ -156,7 +160,7 @@ class GlobalSpecOperationsTest {
   void updateClearsModelWhenBlank() {
     ops.create(createReq(Map.of("model", "claude-opus-4", "reasoning_effort", "high")));
 
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "")));
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "")), ADMIN);
 
     assertNull(updated.spec().model(), "an empty model clears the column back to null");
     assertEquals("high", updated.spec().reasoningEffort(), "reasoning_effort is untouched");
@@ -166,7 +170,8 @@ class GlobalSpecOperationsTest {
   void updateClearsReasoningEffortWhenBlank() {
     ops.create(createReq(Map.of("model", "claude-opus-4", "reasoning_effort", "high")));
 
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("reasoning_effort", "")));
+    var updated =
+        ops.update("auth", SpecUpdateRequest.fromMap(Map.of("reasoning_effort", "")), ADMIN);
 
     assertNull(updated.spec().reasoningEffort(), "an empty reasoning_effort clears it to null");
     assertEquals("claude-opus-4", updated.spec().model(), "model is untouched");
@@ -200,7 +205,8 @@ class GlobalSpecOperationsTest {
     var updated =
         ops.update(
             "auth",
-            SpecUpdateRequest.fromMap(Map.of("title", "New title", "reasoning_effort", "high")));
+            SpecUpdateRequest.fromMap(Map.of("title", "New title", "reasoning_effort", "high")),
+            ADMIN);
     assertEquals("New title", updated.spec().title());
     assertEquals("in_progress", updated.spec().status());
   }
@@ -232,7 +238,8 @@ class GlobalSpecOperationsTest {
                     "branch", "feat/x",
                     "priority", 9,
                     "depends_on", List.of("other"),
-                    "repos", List.of("api", "web"))));
+                    "repos", List.of("api", "web"))),
+            ADMIN);
 
     assertEquals("zenith", updated.spec().project());
     assertEquals("codex", updated.spec().agent());
@@ -256,7 +263,7 @@ class GlobalSpecOperationsTest {
   void updateMissingThrowsNotFound() {
     assertThrows(
         ApiException.class,
-        () -> ops.update("ghost", SpecUpdateRequest.fromMap(Map.of("title", "x"))));
+        () -> ops.update("ghost", SpecUpdateRequest.fromMap(Map.of("title", "x")), ADMIN));
   }
 
   @Test
@@ -265,7 +272,7 @@ class GlobalSpecOperationsTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "mady"))));
+            () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "mady")), ADMIN));
     assertEquals(ErrorCode.CONFLICT.httpCode(), ex.status());
     assertTrue(ex.getMessage().contains("dispatched"));
   }
@@ -273,7 +280,7 @@ class GlobalSpecOperationsTest {
   @Test
   void reassigningPendingSpecIsAllowed() {
     ops.create(createReq(Map.of("status", "pending", "assignee", "uday")));
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "mady")));
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "mady")), ADMIN);
     assertEquals("mady", updated.spec().assignee());
   }
 
@@ -282,34 +289,36 @@ class GlobalSpecOperationsTest {
     ops.create(createReq(Map.of("status", "in_progress", "assignee", "uday")));
     var updated =
         ops.update(
-            "auth", SpecUpdateRequest.fromMap(Map.of("assignee", "mady", "force", Boolean.TRUE)));
+            "auth",
+            SpecUpdateRequest.fromMap(Map.of("assignee", "mady", "force", Boolean.TRUE)),
+            ADMIN);
     assertEquals("mady", updated.spec().assignee());
   }
 
   @Test
   void reassigningToSameOwnerOnDispatchedSpecIsAllowed() {
     ops.create(createReq(Map.of("status", "in_progress", "assignee", "uday")));
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday")));
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday")), ADMIN);
     assertEquals("uday", updated.spec().assignee());
   }
 
   @Test
   void claimingUnassignedDispatchedSpecIsAllowed() {
     ops.create(createReq(Map.of("status", "in_progress")));
-    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday")));
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday")), ADMIN);
     assertEquals("uday", updated.spec().assignee());
   }
 
   @Test
   void deleteRemovesSpec() {
     ops.create(createReq(Map.of()));
-    assertEquals("auth", ops.delete("auth").id());
+    assertEquals("auth", ops.delete("auth", ADMIN).id());
     assertThrows(ApiException.class, () -> ops.get("auth"));
   }
 
   @Test
   void deleteMissingThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.delete("ghost"));
+    assertThrows(ApiException.class, () -> ops.delete("ghost", ADMIN));
   }
 
   @Test
@@ -328,7 +337,8 @@ class GlobalSpecOperationsTest {
   @Test
   void setContentThenReadBack() {
     ops.create(createReq(Map.of()));
-    ops.setContent("auth", SpecContentRequest.fromMap(Map.of("body", "Body", "plan", "Plan")));
+    ops.setContent(
+        "auth", SpecContentRequest.fromMap(Map.of("body", "Body", "plan", "Plan")), ADMIN);
     var content = ops.content("auth");
     assertEquals("Body", content.body());
     assertEquals("Plan", content.plan());
@@ -338,7 +348,7 @@ class GlobalSpecOperationsTest {
   void setContentMissingThrowsNotFound() {
     assertThrows(
         ApiException.class,
-        () -> ops.setContent("ghost", SpecContentRequest.fromMap(Map.of("body", "x"))));
+        () -> ops.setContent("ghost", SpecContentRequest.fromMap(Map.of("body", "x")), ADMIN));
   }
 
   @Test
@@ -356,7 +366,8 @@ class GlobalSpecOperationsTest {
                 bus.update(
                     "auth",
                     SpecUpdateRequest.fromMap(Map.of("status", "in_progress"))
-                        .withUpdatedBy("nova")));
+                        .withUpdatedBy("nova"),
+                    ADMIN));
     assertEquals(Event.WellKnownTypes.SPEC_STATUS_CHANGED, event.type());
     assertEquals("manatee", event.project());
     assertEquals("auth", event.spec());
@@ -373,7 +384,8 @@ class GlobalSpecOperationsTest {
             bus ->
                 bus.update(
                     "auth",
-                    SpecUpdateRequest.fromMap(Map.of("title", "Renamed")).withUpdatedBy("nova")));
+                    SpecUpdateRequest.fromMap(Map.of("title", "Renamed")).withUpdatedBy("nova"),
+                    ADMIN));
     assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
     assertEquals("auth", event.spec());
     assertEquals("nova", event.agent());
@@ -384,7 +396,8 @@ class GlobalSpecOperationsTest {
     ops.create(createReq(Map.of("status", "pending")));
     var event =
         captureOne(
-            bus -> bus.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "Renamed"))));
+            bus ->
+                bus.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "Renamed")), ADMIN));
     assertEquals(Event.SAIL_AGENT, event.agent());
   }
 
@@ -400,7 +413,7 @@ class GlobalSpecOperationsTest {
   @Test
   void deletePublishesBoardUpdatedForTheSpecProject() throws Exception {
     ops.create(createReq(Map.of()));
-    var event = captureOne(bus -> bus.delete("auth"));
+    var event = captureOne(bus -> bus.delete("auth", ADMIN));
     assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
     assertEquals("manatee", event.project());
     assertEquals("auth", event.spec());
@@ -412,7 +425,8 @@ class GlobalSpecOperationsTest {
     ops.create(createReq(Map.of()));
     var event =
         captureOne(
-            bus -> bus.setContent("auth", SpecContentRequest.fromMap(Map.of("body", "Body"))));
+            bus ->
+                bus.setContent("auth", SpecContentRequest.fromMap(Map.of("body", "Body")), ADMIN));
     assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
     assertEquals("auth", event.spec());
   }
@@ -420,10 +434,10 @@ class GlobalSpecOperationsTest {
   @Test
   void restorePublishesBoardUpdated() throws Exception {
     ops.create(createReq(Map.of()));
-    ops.setContent("auth", new SpecContentRequest("good", "good plan"));
+    ops.setContent("auth", new SpecContentRequest("good", "good plan"), ADMIN);
     var goodRev = ops.history("auth").revisions().getLast().rev();
-    ops.setContent("auth", new SpecContentRequest("clobbered", "clobbered"));
-    var event = captureOne(bus -> bus.restore("auth", new SpecRestoreRequest(goodRev)));
+    ops.setContent("auth", new SpecContentRequest("clobbered", "clobbered"), ADMIN);
+    var event = captureOne(bus -> bus.restore("auth", new SpecRestoreRequest(goodRev), ADMIN));
     assertEquals(Event.WellKnownTypes.BOARD_UPDATED, event.type());
     assertEquals("auth", event.spec());
   }
@@ -503,7 +517,9 @@ class GlobalSpecOperationsTest {
     reviewStore.linkSourceFindings("auth-followup", List.of(findingId));
 
     ops.update(
-        "auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"));
+        "auth-followup",
+        SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"),
+        ADMIN);
 
     assertEquals(
         Finding.Resolution.FIXED, reviewStore.findingsForReview(reviewId).getFirst().resolution());
@@ -519,7 +535,8 @@ class GlobalSpecOperationsTest {
 
     ops.update(
         "auth-followup",
-        SpecUpdateRequest.fromMap(Map.of("title", "Renamed")).withUpdatedBy("uday"));
+        SpecUpdateRequest.fromMap(Map.of("title", "Renamed")).withUpdatedBy("uday"),
+        ADMIN);
 
     assertEquals(
         Finding.Resolution.OPEN, reviewStore.findingsForReview(reviewId).getFirst().resolution());
@@ -537,7 +554,7 @@ class GlobalSpecOperationsTest {
   @Test
   void historyListsEveryRevisionOldestFirst() {
     ops.create(createReq(Map.of()).withCreatedBy("uday"));
-    ops.setContent("auth", new SpecContentRequest("body one", "plan"));
+    ops.setContent("auth", new SpecContentRequest("body one", "plan"), ADMIN);
 
     var history = ops.history("auth");
 
@@ -554,11 +571,11 @@ class GlobalSpecOperationsTest {
   @Test
   void restoreBringsBackPriorContentAsANewRevision() {
     ops.create(createReq(Map.of()).withCreatedBy("uday"));
-    ops.setContent("auth", new SpecContentRequest("good", "good plan"));
+    ops.setContent("auth", new SpecContentRequest("good", "good plan"), ADMIN);
     var goodRev = ops.history("auth").revisions().getLast().rev();
-    ops.setContent("auth", new SpecContentRequest("clobbered", "clobbered"));
+    ops.setContent("auth", new SpecContentRequest("clobbered", "clobbered"), ADMIN);
 
-    var restored = ops.restore("auth", new SpecRestoreRequest(goodRev));
+    var restored = ops.restore("auth", new SpecRestoreRequest(goodRev), ADMIN);
 
     assertEquals(goodRev, restored.fromRev());
     assertEquals("good", ops.content("auth").body());
@@ -569,7 +586,8 @@ class GlobalSpecOperationsTest {
   void restoreRejectsABlankRev() {
     ops.create(createReq(Map.of()));
     var ex =
-        assertThrows(ApiException.class, () -> ops.restore("auth", new SpecRestoreRequest("  ")));
+        assertThrows(
+            ApiException.class, () -> ops.restore("auth", new SpecRestoreRequest("  "), ADMIN));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
@@ -577,7 +595,8 @@ class GlobalSpecOperationsTest {
   void restoreRejectsAnUnknownRev() {
     ops.create(createReq(Map.of()));
     var ex =
-        assertThrows(ApiException.class, () -> ops.restore("auth", new SpecRestoreRequest("99-x")));
+        assertThrows(
+            ApiException.class, () -> ops.restore("auth", new SpecRestoreRequest("99-x"), ADMIN));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
     assertTrue(ex.failure().errorMessage().contains("99-x"));
   }
@@ -590,7 +609,9 @@ class GlobalSpecOperationsTest {
         assertThrows(ApiException.class, () -> noStore.history("x")).failure().errorCode());
     assertEquals(
         ErrorCode.INTERNAL,
-        assertThrows(ApiException.class, () -> noStore.restore("x", new SpecRestoreRequest("1-a")))
+        assertThrows(
+                ApiException.class,
+                () -> noStore.restore("x", new SpecRestoreRequest("1-a"), ADMIN))
             .failure()
             .errorCode());
   }

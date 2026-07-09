@@ -32,7 +32,6 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -418,17 +417,19 @@ public final class AgentWatchCommand implements Runnable {
    */
   static Event syntheticStop(String project, AgentSession.ExitState exit) {
     var agent = Strings.isBlank(exit.agentType()) ? Event.SAIL_AGENT : exit.agentType();
+    var data = new LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.EXIT_CODE, exit.exitCode());
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    if (Strings.isNotBlank(exit.runId())) {
+      data.put(Event.WellKnownData.RUN_ID, exit.runId());
+    }
     return Event.of(
         project,
         exit.specId(),
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         agent,
         HostInfo.hostname(),
-        Map.of(
-            Event.WellKnownData.EXIT_CODE,
-            exit.exitCode(),
-            Event.WellKnownData.SOURCE,
-            Event.WellKnownData.SOURCE_WATCHER));
+        data);
   }
 
   private void handleAgentExited(WebhookNotifier notifier, Notifications notifications) {

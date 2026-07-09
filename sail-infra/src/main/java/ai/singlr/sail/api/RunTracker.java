@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.RunStore;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -21,12 +23,14 @@ import java.util.function.Supplier;
  * On main and standalone boxes the injected {@link SyncScheduler} is {@link
  * SyncScheduler#disabled()}, so the trigger is a no-op there.
  *
- * <p>Completion is scoped to this box's own runs by {@code localHandle}. The {@code runs} table now
- * holds foreign runs adopted via sync, so an agent-completion event (which names only the project)
- * must resolve to a run that executed <em>here</em> — never a concurrently-running run of the same
- * project on another box. Without that scoping this box could stamp another node's live run as
- * finished and propagate that lie to main; single-writer only holds if each box writes solely its
- * own runs.
+ * <p>Completion addresses the exact run by the {@code run_id} the terminal event carries, not "the
+ * newest running run of the project". EventBus delivery is asynchronous, so a stop for run A can
+ * arrive after run B has started in the same project; resolving by project alone would let A's
+ * delayed stop complete B. A stop that carries no {@code run_id} (a bare agent-hook turn-end that
+ * minted no run correlation) is ignored here — the watcher's and reconciler's authoritative,
+ * run-addressed stops drive completion instead. Ownership is still enforced by {@code localHandle}
+ * so this box only ever writes its own runs, preserving the single-writer invariant now that the
+ * {@code runs} table also holds foreign rows adopted via sync.
  */
 public final class RunTracker implements EventSubscriber {
 
@@ -75,24 +79,25 @@ public final class RunTracker implements EventSubscriber {
 
   private void complete(Event event, String status) {
     var exitCode = extractInt(event.data().get(Event.WellKnownData.EXIT_CODE));
+    var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
+    if (Strings.isBlank(runId)) {
+      return;
+    }
     var node = localHandle.get();
-    var running = runStore.runningForProjectOnNode(event.project(), node);
-    if (running.isPresent()) {
-      runStore.complete(running.get().id(), status, exitCode);
-      syncScheduler.afterWrite();
-      return;
-    }
-    if (exitCode == null) {
-      return;
-    }
     runStore
-        .latestForProjectOnNode(event.project(), node)
-        .filter(run -> run.exitCode() == null)
-        .ifPresent(
-            run -> {
-              runStore.recordExitCode(run.id(), exitCode);
-              syncScheduler.afterWrite();
-            });
+        .findById(runId)
+        .filter(run -> SailApiOperations.ownsRun(run.node(), node))
+        .ifPresent(run -> completeOrRecord(run, status, exitCode));
+  }
+
+  private void completeOrRecord(RunStore.RunRow run, String status, Integer exitCode) {
+    if ("running".equals(run.status())) {
+      runStore.complete(run.id(), status, exitCode);
+      syncScheduler.afterWrite();
+    } else if (exitCode != null && run.exitCode() == null) {
+      runStore.recordExitCode(run.id(), exitCode);
+      syncScheduler.afterWrite();
+    }
   }
 
   private static Integer extractInt(Object value) {

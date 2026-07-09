@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -38,8 +39,12 @@ class RunRetentionTest {
     }
   }
 
+  private static String runId(int i) {
+    return String.format("00000000-0000-7000-8000-%012d", i);
+  }
+
   private static List<String> runIds(int n) {
-    return IntStream.range(0, n).mapToObj(i -> "run-" + i).toList();
+    return IntStream.range(0, n).mapToObj(RunRetentionTest::runId).toList();
   }
 
   @Test
@@ -48,12 +53,23 @@ class RunRetentionTest {
 
     var pruned = RunRetention.prune(shell, "acme", runIds(5), 2);
 
-    assertEquals(List.of("run-2", "run-3", "run-4"), pruned);
+    assertEquals(List.of(runId(2), runId(3), runId(4)), pruned);
     assertEquals(3, shell.commands.size());
     assertTrue(
-        shell.commands.get(0).contains(AgentUnit.runDir("run-2")),
+        shell.commands.get(0).contains(AgentUnit.runDir(runId(2))),
         "the removal targets the run's dir");
     assertTrue(shell.commands.get(0).contains("rm"));
+  }
+
+  @Test
+  void rejectsARunIdThatEscapesTheRunsRoot() {
+    var shell = new RecordingShell();
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> RunRetention.prune(shell, "acme", List.of("../../.ssh"), 0),
+        "a traversal run id must never reach rm -rf");
+    assertTrue(shell.commands.isEmpty(), "nothing is removed for an invalid id");
   }
 
   @Test

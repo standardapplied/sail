@@ -15,7 +15,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -202,20 +202,19 @@ public final class MissedStopReconciler implements AutoCloseable {
             + (exitCode != null ? exitCode : "unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(spec, exitCode));
+    bus.publish(stopEvent(spec, session.id(), exitCode));
   }
 
-  static Event stopEvent(SpecStore.SpecRow spec, Integer exitCode) {
+  static Event stopEvent(SpecStore.SpecRow spec, String runId, Integer exitCode) {
     var agent = spec.agent() != null ? spec.agent() : Event.SAIL_AGENT;
-    var data =
-        exitCode != null
-            ? Map.<String, Object>of(
-                Event.WellKnownData.EXIT_CODE,
-                exitCode,
-                Event.WellKnownData.SOURCE,
-                Event.WellKnownData.SOURCE_RECONCILE)
-            : Map.<String, Object>of(
-                Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
+    var data = new LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
+    if (exitCode != null) {
+      data.put(Event.WellKnownData.EXIT_CODE, exitCode);
+    }
+    if (runId != null && !runId.isBlank()) {
+      data.put(Event.WellKnownData.RUN_ID, runId);
+    }
     return Event.of(
         spec.project(),
         spec.id(),

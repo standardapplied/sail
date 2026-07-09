@@ -196,8 +196,8 @@ class AgentSessionTest {
     assertFalse(joined.contains("nohup"));
     assertTrue(
         joined.contains(
-            "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\" --unit"
-                + " sail-agent"));
+            "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\""
+                + " --setenv \"SAIL_RUN_ID=$8\" --unit sail-agent"));
     assertTrue(joined.contains("claude --print"));
     assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
     assertTrue(joined.contains("agent.log"));
@@ -220,15 +220,42 @@ class AgentSessionTest {
             null,
             "spec-1",
             "claude-code",
-            runLog);
+            runLog,
+            "run-xyz");
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains(runLog), "the agent's output is redirected to the run-scoped log");
+    assertTrue(cmd.contains("run-xyz"), "the run id is carried in as SAIL_RUN_ID");
     assertTrue(
         joined.contains("mkdir -p \"$(dirname \"$4\")\""), "the run's log directory is created");
     assertFalse(
         joined.contains("/home/dev/.sail/agent.log "),
         "the shared per-container log is no longer the redirect target");
+  }
+
+  @Test
+  void buildForegroundTaskCommandRedirectsToARunScopedLog() {
+    var runLog = AgentUnit.BUILD.runLogPath("run-fg");
+    var cmd =
+        AgentSession.buildForegroundTaskCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            runLog,
+            "run-fg");
+
+    var joined = String.join(" ", cmd);
+    assertTrue(
+        joined.contains(runLog), "the foreground agent's output is redirected to its run log");
+    assertTrue(cmd.contains("run-fg"), "the run id is carried in as SAIL_RUN_ID");
+    assertTrue(
+        joined.contains("SAIL_RUN_ID=\"$6\""), "the run id is exported into the launched process");
   }
 
   @Test
@@ -283,10 +310,12 @@ class AgentSessionTest {
         AgentSession.buildBackgroundLaunchCommand(
             "acme", "dev", "/home/dev/workspace", false, AgentCli.CLAUDE_CODE);
 
-    var specId = cmd.get(cmd.size() - 2);
-    var agent = cmd.getLast();
+    var specId = cmd.get(cmd.size() - 3);
+    var agent = cmd.get(cmd.size() - 2);
+    var runId = cmd.getLast();
     assertEquals("", specId, "ad-hoc launches pass empty specId so the in-container hook no-ops");
     assertEquals("claude-code", agent, "agent type defaults to CLI yamlName when blank");
+    assertEquals("", runId, "ad-hoc launches mint no run, so SAIL_RUN_ID is empty");
   }
 
   @Test

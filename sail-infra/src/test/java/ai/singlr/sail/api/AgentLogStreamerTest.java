@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,12 +27,17 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class AgentLogStreamerTest {
 
   private static RunStore.RunRow runOn(String node) {
+    return run(node, "/home/dev/.sail/runs/r1/agent.log");
+  }
+
+  private static RunStore.RunRow run(String node, String logPath) {
     return new RunStore.RunRow(
         "r1",
         "acme",
@@ -45,14 +51,53 @@ class AgentLogStreamerTest {
         null,
         "running",
         null,
-        "/home/dev/.sail/runs/r1/agent.log",
+        logPath,
         "t0",
         null);
   }
 
   private static AgentLogStreamer streamer(
       java.util.function.Function<String, Optional<RunStore.RunRow>> lookup, String localHandle) {
-    return new AgentLogStreamer(exchange -> {}, lookup, () -> localHandle);
+    return streamer(lookup, id -> Optional.empty(), localHandle);
+  }
+
+  private static AgentLogStreamer streamer(
+      java.util.function.Function<String, Optional<RunStore.RunRow>> lookup,
+      java.util.function.Function<String, Optional<String>> assignee,
+      String localHandle) {
+    return new AgentLogStreamer(exchange -> {}, lookup, assignee, () -> localHandle);
+  }
+
+  @Test
+  void streamRefusesAMemberWhoIsNotTheRunSpecAssignee() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
+
+    streamer(id -> Optional.of(runOn("node-a")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(403, out.status);
+    assertTrue(out.body().contains("forbidden_not_assignee"), out.body());
+    assertTrue(out.body().contains("uday"), out.body());
+    assertTrue(out.body().contains("\"fix\""), out.body());
+  }
+
+  @Test
+  void streamLetsTheRunSpecAssigneePastThePolicyGate() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("uday", "member");
+
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(404, out.status);
+    assertTrue(out.body().contains("This run has no log file."), out.body());
+  }
+
+  @Test
+  void streamLetsAnAdminPastThePolicyGate() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
+
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(404, out.status);
+    assertTrue(out.body().contains("This run has no log file."), out.body());
   }
 
   @Test
@@ -126,34 +171,57 @@ class AgentLogStreamerTest {
     assertEquals(0, AgentLogStreamer.parseSince("since=abc"));
   }
 
+  private static final String RUN_UUID = "0195e0a0-1111-7abc-8def-0123456789ab";
+  private static final String RUN_LOG = "/home/dev/.sail/runs/" + RUN_UUID + "/agent.log";
+
   @Test
-  void buildTailCommandTailsTheRunScopedLog() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
+  void buildTailCommandTailsTheRunScopedLogDerivedFromTheUuid() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 0);
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
-    assertTrue(cmd[cmd.length - 1].contains("tail -f"));
-    assertTrue(cmd[cmd.length - 1].contains("/home/dev/.sail/runs/r1/agent.log"));
+    assertTrue(String.join(" ", cmd).contains("tail -f"));
+    assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
   }
 
   @Test
-  void buildTailCommandTouchesTheLogSoAnEmptyRunStreamsClean() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
-    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/runs/r1/agent.log"));
+  void buildTailCommandPassesTheLogAsAPositionalArgNotShellSyntax() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 0);
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("touch -- \"$1\""), joined);
+    assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
   }
 
   @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 50);
-    assertTrue(cmd[cmd.length - 1].contains("tail -n +50 -f"));
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 50);
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("tail -n \"+$2\" -f"), joined);
+    assertTrue(Arrays.asList(cmd).contains("50"), Arrays.toString(cmd));
   }
 
   @Test
   void buildTailCommandRunsAsTheDevUser() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", "/home/dev/.sail/runs/r1/agent.log", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "build", 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
+  }
+
+  @Test
+  void buildTailCommandRejectsANonUuidRunId() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AgentLogStreamer.buildTailCommand(
+                "proj", "/home/dev/.sail/runs/x; id > /tmp/pwned #", "build", 0));
+  }
+
+  @Test
+  void buildTailCommandRejectsAnUnknownRole() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "../../etc", 0));
   }
 
   @Test
@@ -214,10 +282,18 @@ class AgentLogStreamerTest {
     private final URI uri;
     private final Headers responseHeaders = new Headers();
     private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+    private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
     private int status = -1;
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
+    }
+
+    private CapturingExchange as(String fde, String role) {
+      attributes.put("token.fde", fde);
+      attributes.put("token.role", role);
+      attributes.put("token.name", fde);
+      return this;
     }
 
     private String body() {
@@ -264,11 +340,13 @@ class AgentLogStreamerTest {
 
     @Override
     public Object getAttribute(String name) {
-      return null;
+      return attributes.get(name);
     }
 
     @Override
-    public void setAttribute(String name, Object value) {}
+    public void setAttribute(String name, Object value) {
+      attributes.put(name, value);
+    }
 
     @Override
     public HttpContext getHttpContext() {

@@ -106,8 +106,10 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpec(tail));
-      case "PUT" -> ApiResponse.from(operations.updateGlobalSpec(tail, updateFrom(request.form())));
-      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail));
+      case "PUT" ->
+          ApiResponse.from(
+              operations.updateGlobalSpec(tail, updateFrom(request.form()), actorFrom(request)));
+      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, actorFrom(request)));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
   }
@@ -119,7 +121,9 @@ final class LocalApiRouter implements LocalApiHandler {
         var form = request.form();
         yield ApiResponse.from(
             operations.setGlobalSpecContent(
-                id, new SpecContentRequest(form.get("body"), form.get("plan"))));
+                id,
+                new SpecContentRequest(form.get("body"), form.get("plan")),
+                actorFrom(request)));
       }
       default -> problem(405, "content accepts GET or PUT");
     };
@@ -175,6 +179,17 @@ final class LocalApiRouter implements LocalApiHandler {
   private static String actorOf(Map<String, String> form) {
     var actor = form.get("actor");
     return Strings.isBlank(actor) ? DEFAULT_ACTOR : actor;
+  }
+
+  /**
+   * The resource-scoped {@link Actor} for a socket request. The Unix socket is the trust boundary —
+   * an Incus container that can write it is trusted — so the in-container {@code spec} CLI operates
+   * with effective admin authority over its own box, the same authority {@code sail spec dispatch}
+   * has locally. Every spec mutation still flows through the aggregate policy seam, so the lane
+   * cannot diverge from the API's matrix; admin simply passes every gate.
+   */
+  private static Actor actorFrom(LocalApiRequest request) {
+    return Actor.cliOperator(actorOf(request.form()));
   }
 
   private static List<String> csv(String value) {

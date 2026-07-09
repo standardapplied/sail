@@ -291,11 +291,11 @@ public final class DispatchCommand implements Runnable {
     agentSession.ensureDirectory(name);
     agentSession.resetLog(name, AgentUnit.REVIEW);
     agentSession.writeTaskFile(name, task);
-    agentSession.writeSession(
-        name, task, Objects.requireNonNullElse(branchName, ""), nextSpec.id(), agentType);
 
     var runId = DateTimeUtils.newId().toString();
     var runLogPath = AgentUnit.BUILD.runLogPath(runId);
+    agentSession.writeSession(
+        name, task, Objects.requireNonNullElse(branchName, ""), nextSpec.id(), agentType, runId);
 
     if (background) {
       var sshCmd =
@@ -309,7 +309,8 @@ public final class DispatchCommand implements Runnable {
               taskSpec.reasoningEffort(),
               nextSpec.id(),
               agentType,
-              runLogPath);
+              runLogPath,
+              runId);
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Launching agent in background...|@"));
         if (dryRun) {
@@ -318,15 +319,16 @@ public final class DispatchCommand implements Runnable {
         System.out.println();
       }
       if (!dryRun) {
+        createRun(name, runId, nextSpec.id(), agentType, branchName, task, runLogPath);
         var pb = new ProcessBuilder(sshCmd);
         pb.inheritIO();
         var process = pb.start();
         var exitCode = process.waitFor();
         if (exitCode != 0) {
+          completeRun(runId, "failed", exitCode);
           throw new IOException("Failed to launch background agent; see output above.");
         }
-        recordRun(
-            name, runId, nextSpec.id(), agentType, branchName, task, runLogPath, agentSession);
+        updateRunProcess(name, runId, agentSession);
       }
       Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
       if (!dryRun) {
@@ -343,7 +345,9 @@ public final class DispatchCommand implements Runnable {
               taskSpec.model(),
               taskSpec.reasoningEffort(),
               nextSpec.id(),
-              agentType);
+              agentType,
+              runLogPath,
+              runId);
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Launching agent with spec...|@"));
         if (dryRun) {
@@ -352,10 +356,12 @@ public final class DispatchCommand implements Runnable {
         System.out.println();
       }
       if (!dryRun) {
+        createRun(name, runId, nextSpec.id(), agentType, branchName, task, runLogPath);
         var pb = new ProcessBuilder(sshCmd);
         pb.inheritIO();
         var process = pb.start();
         var exitCode = process.waitFor();
+        completeRun(runId, exitCode == 0 ? "completed" : "failed", exitCode);
         if (exitCode != 0) {
           System.err.println(
               Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
@@ -518,29 +524,23 @@ public final class DispatchCommand implements Runnable {
   }
 
   /**
-   * Records the launched execution as a {@link RunStore} run — stamped with this box's FDE handle
-   * as its {@code node} so the provenance guard can tell a local run from a foreign one — and
-   * prunes the container's oldest run-log directories. Never fatal: a bookkeeping failure must not
-   * fail a launch that already succeeded, since the agent is running regardless.
+   * Records the execution as a {@link RunStore} run <em>before</em> the agent starts — stamped with
+   * this box's FDE handle as its {@code node} so the provenance guard can tell a local run from a
+   * foreign one — and prunes the container's oldest run-log directories. Creating the row up front
+   * gives every terminal event a target and makes both dispatch modes appear in run history: a
+   * foreground session's row is completed here once its blocking launch returns. Never fatal: a
+   * bookkeeping failure must not fail a launch, since the agent runs regardless.
    */
-  private void recordRun(
+  private void createRun(
       String project,
       String runId,
       String specId,
       String agentType,
       String branch,
       String task,
-      String logPath,
-      AgentSession agentSession) {
+      String logPath) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       var runStore = new RunStore(db);
-      Integer pid = null;
-      try {
-        var status = agentSession.queryStatus(project);
-        pid = status != null ? status.pid() : null;
-      } catch (Exception ignored) {
-        // pid is a best-effort convenience; the run row is authoritative without it
-      }
       runStore.create(
           runId,
           project,
@@ -550,13 +550,47 @@ public final class DispatchCommand implements Runnable {
           agentType,
           branch,
           task,
-          pid,
+          null,
           null,
           logPath);
       pruneRuns(project, runStore);
     } catch (Exception e) {
       System.err.println(
           Banner.errorLine("Could not record run " + runId + ": " + e.getMessage(), Ansi.AUTO));
+    }
+  }
+
+  /**
+   * Stamps the agent pid on a background run once launch has resolved it. The pid is a best-effort
+   * convenience; the run row is authoritative without it, so a lookup failure is non-fatal.
+   */
+  private void updateRunProcess(String project, String runId, AgentSession agentSession) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      Integer pid = null;
+      try {
+        var status = agentSession.queryStatus(project);
+        pid = status != null ? status.pid() : null;
+      } catch (Exception ignored) {
+        pid = null;
+      }
+      new RunStore(db).updateProcess(runId, pid, null);
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine("Could not update run " + runId + ": " + e.getMessage(), Ansi.AUTO));
+    }
+  }
+
+  /**
+   * Completes a run with its terminal status and exit code — used for a foreground session, whose
+   * launch command blocks until the agent exits, and for a background launch that failed to start.
+   * Best-effort: a bookkeeping failure must not mask the real outcome.
+   */
+  private void completeRun(String runId, String status, int exitCode) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new RunStore(db).complete(runId, status, exitCode);
+    } catch (Exception e) {
+      System.err.println(
+          Banner.errorLine("Could not complete run " + runId + ": " + e.getMessage(), Ansi.AUTO));
     }
   }
 
