@@ -48,20 +48,20 @@ public final class AgentSessionsCommand implements Runnable {
     project = CurrentProject.require(project);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-      var result = client.get("/v1/projects/" + project + "/agent/sessions");
+      var result = client.get("/v1/runs?project=" + project);
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
         return;
       }
 
-      var sessions = (List<Map<String, Object>>) result.get("sessions");
-      if (sessions == null || sessions.isEmpty()) {
-        System.out.println(Ansi.AUTO.string("  @|faint No sessions found for " + project + ".|@"));
+      var runs = (List<Map<String, Object>>) result.get("runs");
+      if (runs == null || runs.isEmpty()) {
+        System.out.println(Ansi.AUTO.string("  @|faint No runs found for " + project + ".|@"));
         return;
       }
 
-      Banner.printAgentSessionsTable(sessions, project, System.out, Ansi.AUTO);
+      Banner.printAgentSessionsTable(runs, project, System.out, Ansi.AUTO);
     }
   }
 }

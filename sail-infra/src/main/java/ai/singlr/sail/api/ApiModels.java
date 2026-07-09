@@ -196,30 +196,6 @@ record AgentStatusResponse(
   }
 }
 
-record AgentLogResponse(String name, List<String> lines, String error) implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("name", name);
-    m.put("lines", lines);
-    m.put("error", error);
-    return m;
-  }
-}
-
-record StopAgentResponse(String name, boolean stopped, String reason, Integer pid)
-    implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("name", name);
-    m.put("stopped", stopped);
-    m.put("reason", reason);
-    m.put("pid", pid);
-    return m;
-  }
-}
-
 record AgentReportResponse(
     String name,
     String sessionStatus,
@@ -708,7 +684,8 @@ record GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) implements
   }
 }
 
-record GlobalSpecDetailResponse(GlobalSpecView spec, String body, String plan, int openFindings)
+record GlobalSpecDetailResponse(
+    GlobalSpecView spec, String body, String plan, int openFindings, RunSummary latestRun)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -717,6 +694,7 @@ record GlobalSpecDetailResponse(GlobalSpecView spec, String body, String plan, i
     if (body != null) m.put("body", body);
     if (plan != null) m.put("plan", plan);
     if (openFindings > 0) m.put("open_findings", openFindings);
+    if (latestRun != null) m.put("latest_run", latestRun.toMap());
     return m;
   }
 }
@@ -901,32 +879,36 @@ record FindingDismissResponse(String findingId, boolean dismissed) implements Ma
   }
 }
 
-record SessionView(
+record RunView(
     String id,
     String project,
     String specId,
+    String node,
+    String role,
     String agent,
     String branch,
-    String task,
     Integer pid,
     String status,
     String startedAt,
     String completedAt,
-    Integer exitCode)
+    Integer exitCode,
+    String logPath)
     implements Mappable {
-  static SessionView from(RunStore.RunRow row) {
-    return new SessionView(
+  static RunView from(RunStore.RunRow row) {
+    return new RunView(
         row.id(),
         row.project(),
         row.specId(),
+        row.node(),
+        row.role(),
         row.agent(),
         row.branch(),
-        row.task(),
         row.pid(),
         row.status(),
         row.startedAt(),
         row.completedAt(),
-        row.exitCode());
+        row.exitCode(),
+        row.logPath());
   }
 
   @Override
@@ -935,24 +917,78 @@ record SessionView(
     m.put("id", id);
     m.put("project", project);
     if (specId != null) m.put("spec_id", specId);
+    m.put("node", node);
+    m.put("role", role);
     m.put("agent", agent);
     if (branch != null) m.put("branch", branch);
-    if (task != null) m.put("task", task);
     if (pid != null) m.put("pid", pid);
     m.put("status", status);
     m.put("started_at", startedAt);
     if (completedAt != null) m.put("completed_at", completedAt);
     if (exitCode != null) m.put("exit_code", exitCode);
+    if (logPath != null) m.put("log_path", logPath);
     return m;
   }
 }
 
-record SessionListResponse(String project, List<SessionView> sessions) implements Mappable {
+record RunListResponse(String project, String spec, List<RunView> runs) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("project", project);
-    m.put("sessions", sessions);
+    if (project != null) m.put("project", project);
+    if (spec != null) m.put("spec", spec);
+    m.put("runs", runs);
+    return m;
+  }
+}
+
+record RunDetailResponse(RunView run) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    return run.toMap();
+  }
+}
+
+record RunLogResponse(String runId, List<String> lines, String error) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("run_id", runId);
+    m.put("lines", lines);
+    if (error != null) m.put("error", error);
+    return m;
+  }
+}
+
+record StopRunResponse(String runId, boolean stopped, String reason, Integer pid)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("run_id", runId);
+    m.put("stopped", stopped);
+    if (reason != null) m.put("reason", reason);
+    if (pid != null) m.put("pid", pid);
+    return m;
+  }
+}
+
+/**
+ * The latest run of a spec, embedded in board and spec-detail responses so a client can gate its
+ * "open logs" button on provenance ({@code node}) without a second call.
+ */
+record RunSummary(String id, String node, String status, Integer exitCode) implements Mappable {
+  static RunSummary from(RunStore.RunRow row) {
+    return new RunSummary(row.id(), row.node(), row.status(), row.exitCode());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("node", node);
+    m.put("status", status);
+    if (exitCode != null) m.put("exit_code", exitCode);
     return m;
   }
 }

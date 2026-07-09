@@ -36,11 +36,23 @@ public interface ApiOperations {
 
   Result<AgentStatusResponse> agentStatus(String project);
 
-  Result<AgentLogResponse> agentLog(String project, int tail, String role);
-
-  Result<StopAgentResponse> stopAgent(String project);
-
   Result<AgentReportResponse> agentReport(String project);
+
+  /** Lists runs, org-wide (synced) and optionally scoped to a project and/or spec. */
+  Result<RunListResponse> runs(String project, String spec);
+
+  /** One run's metadata, including the {@code node} that executed it. */
+  Result<RunDetailResponse> run(String runId);
+
+  /**
+   * Tails a run's log, but only when the run executed on this box: {@code localHandle} is compared
+   * to the run's {@code node} and a mismatch returns a structured {@code run_on_other_node} refusal
+   * rather than a foreign box's local file. Never tails the wrong execution's bytes.
+   */
+  Result<RunLogResponse> runLog(String runId, int tail, String localHandle);
+
+  /** Stops a run, but only when it is executing on this box (same provenance guard as the log). */
+  Result<StopRunResponse> stopRun(String runId, String localHandle);
 
   /** Publishes an event onto the bus and returns the stamped copy. */
   Result<EventPublishResponse> publishEvent(Event event);
@@ -73,6 +85,4 @@ public interface ApiOperations {
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(String specId, SpecRestoreRequest request);
 
   Result<GlobalBoardResponse> globalBoard(String project);
-
-  Result<SessionListResponse> agentSessions(String project);
 }

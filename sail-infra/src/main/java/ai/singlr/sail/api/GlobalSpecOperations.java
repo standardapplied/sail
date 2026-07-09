@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Map;
 import java.util.Objects;
@@ -26,6 +27,7 @@ final class GlobalSpecOperations {
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final EventBus eventBus;
+  private final RunStore runStore;
 
   GlobalSpecOperations(SpecStore specStore) {
     this(specStore, null, null);
@@ -36,9 +38,15 @@ final class GlobalSpecOperations {
   }
 
   GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore, EventBus eventBus) {
+    this(specStore, reviewStore, eventBus, null);
+  }
+
+  GlobalSpecOperations(
+      SpecStore specStore, ReviewStore reviewStore, EventBus eventBus, RunStore runStore) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
+    this.runStore = runStore;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -59,7 +67,20 @@ final class GlobalSpecOperations {
         GlobalSpecView.from(row),
         content != null ? content.body() : null,
         content != null ? content.plan() : null,
-        openFindingCount(specId));
+        openFindingCount(specId),
+        latestRun(specId));
+  }
+
+  /**
+   * The spec's most recent run as a compact summary (id, node, status, exit code), or null when it
+   * has never been dispatched. Lets a client gate its "open logs" button on provenance up front —
+   * one call, no second round-trip to find where the run executed.
+   */
+  private RunSummary latestRun(String specId) {
+    if (runStore == null) {
+      return null;
+    }
+    return runStore.listForSpec(specId).stream().findFirst().map(RunSummary::from).orElse(null);
   }
 
   GlobalSpecCreatedResponse create(SpecCreateRequest request) {

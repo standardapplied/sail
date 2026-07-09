@@ -51,6 +51,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String BOARD = "board";
   private static final String CONTENT = "content";
   private static final String REVIEWS = "reviews";
+  private static final String RUNS = "runs";
   private static final String HISTORY = "history";
   private static final String RESTORE = "restore";
   private static final String SESSIONS = "sessions";
@@ -186,6 +187,10 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.hasReviewsPrefix()) {
       return routeReviews(exchange, request);
+    }
+
+    if (request.hasRunsPrefix()) {
+      return routeRuns(request, nodeHandle.get());
     }
 
     if (!request.hasProjectPrefix()) {
@@ -433,23 +438,43 @@ public final class ApiRouter implements HttpHandler {
     if (request.size() != 5) {
       throw methodNotAllowed();
     }
-    return switch (request.subResource()) {
+    if (REPORT.equals(request.subResource())) {
+      requireMethod(request, POST);
+      return ApiResponse.from(operations.agentReport(project));
+    }
+    throw notFound();
+  }
+
+  /**
+   * Routes the run-addressed surface — {@code /v1/runs}, {@code /v1/runs/{id}}, {@code
+   * /v1/runs/{id}/log}, {@code /v1/runs/{id}/stop}. The {@code /stream} SSE variant never reaches
+   * here; it is intercepted up front like the agent stream. The log and stop handlers pass this
+   * box's handle so the operation's provenance guard can refuse a run that executed elsewhere.
+   */
+  private ApiResponse routeRuns(RouteRequest request, String localHandle) {
+    if (request.size() == 2) {
+      requireMethod(request, GET);
+      var params = QueryParameters.from(request.uri());
+      return ApiResponse.from(
+          operations.runs(params.values().get("project"), params.values().get("spec")));
+    }
+    var runId = request.segments().get(2);
+    if (request.size() == 3) {
+      requireMethod(request, GET);
+      return ApiResponse.from(operations.run(runId));
+    }
+    if (request.size() != 4) {
+      throw notFound();
+    }
+    return switch (request.segments().get(3)) {
       case LOG -> {
         requireMethod(request, GET);
-        var params = QueryParameters.from(request.uri());
-        yield ApiResponse.from(operations.agentLog(project, params.tail(), params.role()));
+        yield ApiResponse.from(
+            operations.runLog(runId, QueryParameters.from(request.uri()).tail(), localHandle));
       }
       case STOP -> {
         requireMethod(request, POST);
-        yield ApiResponse.from(operations.stopAgent(project));
-      }
-      case REPORT -> {
-        requireMethod(request, POST);
-        yield ApiResponse.from(operations.agentReport(project));
-      }
-      case SESSIONS -> {
-        requireMethod(request, GET);
-        yield ApiResponse.from(operations.agentSessions(project));
+        yield ApiResponse.from(operations.stopRun(runId, localHandle));
       }
       default -> throw notFound();
     };
@@ -627,6 +652,10 @@ public final class ApiRouter implements HttpHandler {
 
     boolean hasReviewsPrefix() {
       return segments.size() >= 2 && V1.equals(segments.get(0)) && REVIEWS.equals(segments.get(1));
+    }
+
+    boolean hasRunsPrefix() {
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && RUNS.equals(segments.get(1));
     }
 
     boolean isProjectRoot() {

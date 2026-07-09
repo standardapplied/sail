@@ -48,10 +48,22 @@ public final class AgentStreamCommand implements Runnable {
     CliCommand.run(commandSpec, this::execute);
   }
 
+  @Option(
+      names = "--run",
+      description = "Stream a specific run id (default: the project's latest).")
+  private String runId;
+
   private void execute() throws Exception {
     project = CurrentProject.require(project);
     var config = connection.resolve();
-    var path = "/v1/projects/" + project + "/agent/stream" + (since > 0 ? "?since=" + since : "");
+    if (runId == null) {
+      runId = latestRunId(config);
+      if (runId == null) {
+        System.out.println(Ansi.AUTO.string("  @|faint No runs found for " + project + ".|@"));
+        return;
+      }
+    }
+    var path = "/v1/runs/" + runId + "/stream" + (since > 0 ? "?since=" + since : "");
     var uri = URI.create(config.serverUrl() + path);
 
     var request =
@@ -80,6 +92,19 @@ public final class AgentStreamCommand implements Runnable {
           }
         }
       }
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private String latestRunId(ai.singlr.sail.api.ServerConnectionConfig config) throws Exception {
+    try (var client = new ai.singlr.sail.api.SailApiClient(config.serverUrl(), config.token())) {
+      var runs =
+          (java.util.List<java.util.Map<String, Object>>)
+              client.get("/v1/runs?project=" + project).get("runs");
+      if (runs == null || runs.isEmpty()) {
+        return null;
+      }
+      return (String) runs.getFirst().get("id");
     }
   }
 }

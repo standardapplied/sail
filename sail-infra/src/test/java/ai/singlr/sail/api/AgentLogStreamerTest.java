@@ -21,18 +21,18 @@ import org.junit.jupiter.api.Test;
 class AgentLogStreamerTest {
 
   @Test
-  void extractProjectFromValidPath() {
-    assertEquals("backend", AgentLogStreamer.extractProject("/v1/projects/backend/agent/stream"));
+  void extractRunIdFromValidPath() {
+    assertEquals("run-1", AgentLogStreamer.extractRunId("/v1/runs/run-1/stream"));
   }
 
   @Test
-  void extractProjectFromShortPath() {
-    assertNull(AgentLogStreamer.extractProject("/v1/health"));
+  void extractRunIdFromShortPath() {
+    assertNull(AgentLogStreamer.extractRunId("/v1/health"));
   }
 
   @Test
-  void extractProjectFromInvalidPrefix() {
-    assertNull(AgentLogStreamer.extractProject("/v1/other/backend/agent/stream"));
+  void extractRunIdFromInvalidPrefix() {
+    assertNull(AgentLogStreamer.extractRunId("/v1/other/run-1/stream"));
   }
 
   @Test
@@ -61,72 +61,49 @@ class AgentLogStreamerTest {
   }
 
   @Test
-  void parseRoleDefaultsToBuildForNull() {
-    assertEquals("build", AgentLogStreamer.parseRole(null));
-  }
-
-  @Test
-  void parseRoleDefaultsToBuildWhenMissing() {
-    assertEquals("build", AgentLogStreamer.parseRole("since=10"));
-  }
-
-  @Test
-  void parseRoleReadsReviewFromQuery() {
-    assertEquals("review", AgentLogStreamer.parseRole("since=10&role=review"));
-  }
-
-  @Test
-  void buildTailCommandWithoutSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "build");
+  void buildTailCommandTailsTheRunScopedLog() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
     assertTrue(cmd[cmd.length - 1].contains("tail -f"));
-    assertTrue(cmd[cmd.length - 1].contains("agent.log"));
+    assertTrue(cmd[cmd.length - 1].contains("/home/dev/.sail/runs/r1/agent.log"));
   }
 
   @Test
-  void buildTailCommandReviewRoleTailsReviewLog() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
-    var script = cmd[cmd.length - 1];
-    assertTrue(script.contains("review.log"));
-    assertFalse(script.contains("agent.log"));
-  }
-
-  @Test
-  void buildTailCommandTouchesLogSoMissingReviewLogStartsClean() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 0, "review");
-    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/review.log"));
+  void buildTailCommandTouchesTheLogSoAnEmptyRunStreamsClean() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 0);
+    assertTrue(cmd[cmd.length - 1].contains("touch /home/dev/.sail/runs/r1/agent.log"));
   }
 
   @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", 50, "build");
+    var cmd = AgentLogStreamer.buildTailCommand("backend", "/home/dev/.sail/runs/r1/agent.log", 50);
     assertTrue(cmd[cmd.length - 1].contains("tail -n +50 -f"));
   }
 
   @Test
-  void buildTailCommandIncludesUserFlags() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", 0, "build");
+  void buildTailCommandRunsAsTheDevUser() {
+    var cmd = AgentLogStreamer.buildTailCommand("proj", "/home/dev/.sail/runs/r1/agent.log", 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
   }
 
   @Test
-  void isStreamPathMatchesCanonicalPath() {
-    assertTrue(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/stream"));
+  void isStreamPathMatchesCanonicalRunPath() {
+    assertTrue(AgentLogStreamer.isStreamPath("/v1/runs/run-1/stream"));
   }
 
   @Test
-  void isStreamPathRejectsOtherAgentSubResources() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent/log"));
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/projects/backend/agent"));
+  void isStreamPathRejectsOtherRunSubResources() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1/log"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1"));
   }
 
   @Test
   void isStreamPathRejectsWrongPrefix() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/backend/agent/stream"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/run-1/stream"));
     assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
   }
 

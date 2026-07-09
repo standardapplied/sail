@@ -247,7 +247,7 @@ class ApiRouterTest {
   @Test
   void invalidTailReturnsUnprocessableEntity() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=0", "token");
+      var response = get(server, "/v1/runs/r1/log?tail=0", "token");
 
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("invalid_tail"));
@@ -257,17 +257,17 @@ class ApiRouterTest {
   @Test
   void validTailIsPassedToOperations() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=42", "token");
+      var response = get(server, "/v1/runs/r1/log?tail=42", "token");
 
       assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("42"));
+      assertTrue(response.body().contains("tail=42"));
     }
   }
 
   @Test
   void invalidTailTextReturnsUnprocessableEntity() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=abc", "token");
+      var response = get(server, "/v1/runs/r1/log?tail=abc", "token");
 
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("invalid_tail"));
@@ -277,7 +277,7 @@ class ApiRouterTest {
   @Test
   void missingTailValueReturnsUnprocessableEntity() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail", "token");
+      var response = get(server, "/v1/runs/r1/log?tail", "token");
 
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("invalid_tail"));
@@ -287,50 +287,40 @@ class ApiRouterTest {
   @Test
   void urlDecodedTailIsPassedToOperations() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=4%32", "token");
+      var response = get(server, "/v1/runs/r1/log?tail=4%32", "token");
 
       assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("42"));
+      assertTrue(response.body().contains("tail=42"));
     }
   }
 
   @Test
   void missingTailQueryValueUsesDefault() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?foo=bar", "token");
+      var response = get(server, "/v1/runs/r1/log?foo=bar", "token");
 
       assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("200"));
+      assertTrue(response.body().contains("tail=200"));
     }
   }
 
   @Test
-  void missingRoleDefaultsToBuild() throws Exception {
+  void runListAndDetailAndStopAreRouted() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=5", "token");
-
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("5:build"));
+      assertEquals(200, get(server, "/v1/runs?project=acme", "token").statusCode());
+      var detail = get(server, "/v1/runs/r1", "token");
+      assertEquals(200, detail.statusCode());
+      assertTrue(detail.body().contains("\"node\""));
+      assertEquals(200, post(server, "/v1/runs/r1/stop", "token", "{}").statusCode());
     }
   }
 
   @Test
-  void reviewRoleIsPassedToOperations() throws Exception {
+  void unknownRunSubResourceReturnsNotFound() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?tail=5&role=review", "token");
-
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("5:review"));
-    }
-  }
-
-  @Test
-  void invalidRoleReturnsUnprocessableEntity() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/log?role=bogus", "token");
-
-      assertEquals(422, response.statusCode());
-      assertTrue(response.body().contains("invalid_role"));
+      assertEquals(404, get(server, "/v1/runs/r1/bogus", "token").statusCode());
+      assertEquals(405, post(server, "/v1/runs/r1/log", "token", "{}").statusCode());
+      assertEquals(405, get(server, "/v1/runs/r1/stop", "token").statusCode());
     }
   }
 
@@ -351,9 +341,8 @@ class ApiRouterTest {
       assertEquals(405, post(server, "/v1/projects/acme/specs", "token", "{}").statusCode());
       assertEquals(405, get(server, "/v1/projects/acme/dispatch", "token").statusCode());
       assertEquals(405, post(server, "/v1/projects/acme/agent", "token", "{}").statusCode());
-      assertEquals(405, post(server, "/v1/projects/acme/agent/log", "token", "{}").statusCode());
-      assertEquals(405, get(server, "/v1/projects/acme/agent/stop", "token").statusCode());
       assertEquals(405, get(server, "/v1/projects/acme/agent/report", "token").statusCode());
+      assertEquals(405, post(server, "/v1/runs/r1", "token", "{}").statusCode());
     }
   }
 
@@ -439,9 +428,9 @@ class ApiRouterTest {
       assertEquals(200, get(server, "/v1/projects/acme/specs", "token").statusCode());
       assertEquals(200, get(server, "/v1/projects/acme/specs/auth", "token").statusCode());
       assertEquals(200, get(server, "/v1/projects/acme/agent", "token").statusCode());
-      assertEquals(200, get(server, "/v1/projects/acme/agent/log", "token").statusCode());
-      assertEquals(200, post(server, "/v1/projects/acme/agent/stop", "token", "{}").statusCode());
       assertEquals(200, post(server, "/v1/projects/acme/agent/report", "token", "{}").statusCode());
+      assertEquals(200, get(server, "/v1/runs/r1/log", "token").statusCode());
+      assertEquals(200, post(server, "/v1/runs/r1/stop", "token", "{}").statusCode());
     }
   }
 
@@ -864,18 +853,7 @@ class ApiRouterTest {
   }
 
   @Test
-  void agentSessionsReturns200() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/projects/acme/agent/sessions", "token");
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"project\": \"acme\""));
-      assertTrue(response.body().contains("\"sessions\""));
-      assertTrue(response.body().contains("\"agent\": \"claude-code\""));
-    }
-  }
-
-  @Test
-  void sessionViewModelCoversConstruction() {
+  void runViewModelCoversConstruction() {
     var row =
         new ai.singlr.sail.store.RunStore.RunRow(
             "s1",
@@ -890,20 +868,24 @@ class ApiRouterTest {
             null,
             "completed",
             7,
-            null,
+            "/home/dev/.sail/runs/s1/agent.log",
             "t0",
             "t1");
-    var view = SessionView.from(row);
+    var view = RunView.from(row);
     assertEquals("s1", view.id());
-    assertEquals("proj", view.project());
+    assertEquals("node-a", view.node());
     assertEquals(42, view.pid());
     var map = view.toMap();
     assertEquals("claude-code", map.get("agent"));
+    assertEquals("node-a", map.get("node"));
     assertEquals(7, map.get("exit_code"));
     assertTrue(map.containsKey("completed_at"));
+    assertTrue(map.containsKey("log_path"));
 
-    var list = new SessionListResponse("proj", java.util.List.of(view));
+    var list = new RunListResponse("proj", "auth", java.util.List.of(view));
     assertEquals("proj", list.toMap().get("project"));
+    assertEquals("auth", list.toMap().get("spec"));
+    assertEquals(view.toMap(), new RunDetailResponse(view).toMap());
   }
 
   @Test
@@ -1156,14 +1138,38 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<AgentLogResponse> agentLog(String project, int tail, String role) {
-      return Result.success(
-          new AgentLogResponse(project, java.util.List.of(tail + ":" + role), null));
+    public Result<RunListResponse> runs(String project, String spec) {
+      return Result.success(new RunListResponse(project, spec, java.util.List.of()));
     }
 
     @Override
-    public Result<StopAgentResponse> stopAgent(String project) {
-      return Result.success(new StopAgentResponse(project, false, null, null));
+    public Result<RunDetailResponse> run(String runId) {
+      return Result.success(
+          new RunDetailResponse(
+              new RunView(
+                  runId,
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  null,
+                  null,
+                  "running",
+                  "t0",
+                  null,
+                  null,
+                  null)));
+    }
+
+    @Override
+    public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
+      return Result.success(new RunLogResponse(runId, java.util.List.of("tail=" + tail), null));
+    }
+
+    @Override
+    public Result<StopRunResponse> stopRun(String runId, String localHandle) {
+      return Result.success(new StopRunResponse(runId, false, null, null));
     }
 
     @Override
@@ -1230,7 +1236,8 @@ class ApiRouterTest {
                   null),
               null,
               null,
-              0));
+              0,
+              new RunSummary("run-1", "node-a", "running", null)));
     }
 
     @Override
@@ -1403,24 +1410,6 @@ class ApiRouterTest {
     @Override
     public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
       return Result.success(new FindingDismissResponse(findingId, true));
-    }
-
-    @Override
-    public Result<SessionListResponse> agentSessions(String project) {
-      var session =
-          new SessionView(
-              "s1",
-              project,
-              "auth",
-              "claude-code",
-              "feat/auth",
-              "task",
-              1234,
-              "running",
-              "t0",
-              null,
-              null);
-      return Result.success(new SessionListResponse(project, java.util.List.of(session)));
     }
   }
 
