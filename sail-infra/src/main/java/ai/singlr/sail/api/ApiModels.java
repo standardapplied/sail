@@ -645,6 +645,7 @@ record GlobalSpecView(
     String assignee,
     String agent,
     String model,
+    String reasoningEffort,
     String branch,
     int priority,
     List<String> dependsOn,
@@ -663,6 +664,7 @@ record GlobalSpecView(
         row.assignee(),
         row.agent(),
         row.model(),
+        row.reasoningEffort(),
         row.branch(),
         row.priority(),
         row.dependsOn(),
@@ -683,6 +685,7 @@ record GlobalSpecView(
     if (assignee != null) m.put("assignee", assignee);
     if (agent != null) m.put("agent", agent);
     if (model != null) m.put("model", model);
+    if (reasoningEffort != null) m.put("reasoning_effort", reasoningEffort);
     if (branch != null) m.put("branch", branch);
     m.put("priority", priority);
     if (!dependsOn.isEmpty()) m.put("depends_on", dependsOn);

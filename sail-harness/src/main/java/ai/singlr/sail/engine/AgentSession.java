@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
@@ -280,6 +281,7 @@ public final class AgentSession {
       String specId,
       String agentType) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
+    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
         cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath, true);
@@ -374,6 +376,7 @@ public final class AgentSession {
       String specId,
       String agentType) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
+    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
         cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
@@ -384,6 +387,20 @@ public final class AgentSession {
         containerName,
         List.of(
             "bash", "-l", "-c", script, "bash", workDir, agentCmd, effectiveSpec, effectiveAgent));
+  }
+
+  private static void warnIfReasoningEffortDropped(
+      AgentCli cli, String specId, String reasoningEffort) {
+    if (cli != AgentCli.CLAUDE_CODE || Strings.isBlank(reasoningEffort)) {
+      return;
+    }
+    var spec = Strings.isBlank(specId) ? "this launch" : "spec " + specId;
+    System.err.println(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='"
+            + reasoningEffort
+            + "' for "
+            + spec
+            + ". Only Codex honors reasoning_effort.");
   }
 
   /** Returns the path to the agent log file inside the container. */

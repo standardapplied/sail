@@ -153,6 +153,26 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void updateClearsModelWhenBlank() {
+    ops.create(createReq(Map.of("model", "claude-opus-4", "reasoning_effort", "high")));
+
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("model", "")));
+
+    assertNull(updated.spec().model(), "an empty model clears the column back to null");
+    assertEquals("high", updated.spec().reasoningEffort(), "reasoning_effort is untouched");
+  }
+
+  @Test
+  void updateClearsReasoningEffortWhenBlank() {
+    ops.create(createReq(Map.of("model", "claude-opus-4", "reasoning_effort", "high")));
+
+    var updated = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("reasoning_effort", "")));
+
+    assertNull(updated.spec().reasoningEffort(), "an empty reasoning_effort clears it to null");
+    assertEquals("claude-opus-4", updated.spec().model(), "model is untouched");
+  }
+
+  @Test
   void listRejectsInvalidStatusFilter() {
     var ex =
         assertThrows(
