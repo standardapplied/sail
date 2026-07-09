@@ -168,6 +168,8 @@ public final class ServerStartCommand implements Runnable {
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
     var reviewStore = new ReviewStore(db);
+    var syncScheduler = NodeSync.scheduler(false);
+    shutdown.register(syncScheduler);
     var operations =
         new SailApiOperations(
             new ShellExecutor(false),
@@ -176,7 +178,8 @@ public final class ServerStartCommand implements Runnable {
             persister,
             specStore,
             reviewStore,
-            new ProjectStore(db));
+            new ProjectStore(db),
+            syncScheduler);
     var orphaned = reviewStore.failOrphanedRunning();
     if (orphaned > 0) {
       System.out.println(

@@ -25,52 +25,59 @@ public final class SailApiClient implements AutoCloseable {
 
   private final String baseUrl;
   private final String token;
+  private final boolean noSync;
   private final HttpClient client;
 
   public SailApiClient(String baseUrl, String token) {
+    this(baseUrl, token, false);
+  }
+
+  /**
+   * As {@link #SailApiClient(String, String)}, with {@code noSync} carrying the CLI's {@code
+   * --no-sync} flag: every request then asks the server to act on its local replica without the
+   * automatic reconcile with main.
+   */
+  public SailApiClient(String baseUrl, String token, boolean noSync) {
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     this.token = token;
+    this.noSync = noSync;
     this.client = HttpClient.newHttpClient();
   }
 
   public Map<String, Object> get(String path) throws IOException {
-    var request =
-        HttpRequest.newBuilder(URI.create(baseUrl + path))
-            .header("Authorization", "Bearer " + token)
-            .GET()
-            .build();
-    return send(request);
+    return send(request(path).GET().build());
   }
 
   public Map<String, Object> post(String path, Map<String, Object> body) throws IOException {
     var json = YamlUtil.dumpJson(new LinkedHashMap<>(body));
-    var request =
-        HttpRequest.newBuilder(URI.create(baseUrl + path))
-            .header("Authorization", "Bearer " + token)
+    return send(
+        request(path)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(json))
-            .build();
-    return send(request);
+            .build());
   }
 
   public Map<String, Object> put(String path, Map<String, Object> body) throws IOException {
     var json = YamlUtil.dumpJson(new LinkedHashMap<>(body));
-    var request =
-        HttpRequest.newBuilder(URI.create(baseUrl + path))
-            .header("Authorization", "Bearer " + token)
+    return send(
+        request(path)
             .header("Content-Type", "application/json")
             .PUT(HttpRequest.BodyPublishers.ofString(json))
-            .build();
-    return send(request);
+            .build());
   }
 
   public Map<String, Object> delete(String path) throws IOException {
-    var request =
+    return send(request(path).method("DELETE", HttpRequest.BodyPublishers.noBody()).build());
+  }
+
+  private HttpRequest.Builder request(String path) {
+    var builder =
         HttpRequest.newBuilder(URI.create(baseUrl + path))
-            .header("Authorization", "Bearer " + token)
-            .method("DELETE", HttpRequest.BodyPublishers.noBody())
-            .build();
-    return send(request);
+            .header("Authorization", "Bearer " + token);
+    if (noSync) {
+      builder.header(SyncControl.NO_SYNC_HEADER, "true");
+    }
+    return builder;
   }
 
   @SuppressWarnings("unchecked")

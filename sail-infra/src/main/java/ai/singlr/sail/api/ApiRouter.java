@@ -99,7 +99,9 @@ public final class ApiRouter implements HttpHandler {
       return;
     }
     try {
-      var response = route(exchange);
+      var response =
+          ScopedValue.where(SyncControl.NO_SYNC, noSyncRequested(exchange))
+              .call(() -> route(exchange));
       write(exchange, response);
     } catch (ApiException e) {
       write(exchange, ApiResponse.error(e.failure()));
@@ -405,6 +407,12 @@ public final class ApiRouter implements HttpHandler {
     if (!request.is(method)) {
       throw methodNotAllowed();
     }
+  }
+
+  /** Whether the caller sent the {@code --no-sync} opt-out header for this request. */
+  private static boolean noSyncRequested(HttpExchange exchange) {
+    return "true"
+        .equalsIgnoreCase(exchange.getRequestHeaders().getFirst(SyncControl.NO_SYNC_HEADER));
   }
 
   /**

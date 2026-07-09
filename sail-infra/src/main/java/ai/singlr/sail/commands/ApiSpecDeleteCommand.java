@@ -41,7 +41,6 @@ public final class ApiSpecDeleteCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
 
     if (!force && !json) {
@@ -54,7 +53,7 @@ public final class ApiSpecDeleteCommand implements Runnable {
     }
 
     var config = connection.resolve();
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.delete("/v1/specs/" + specId);
 
       if (json) {

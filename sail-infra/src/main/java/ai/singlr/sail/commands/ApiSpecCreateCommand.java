@@ -95,7 +95,6 @@ public final class ApiSpecCreateCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     if (fromReview != null) {
       executeFromReview();
       return;
@@ -124,7 +123,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     if (bodyFile != null) body.put("body", Files.readString(bodyFile));
     if (planFile != null) body.put("plan", Files.readString(planFile));
 
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.post("/v1/specs", body);
 
       if (json) {
@@ -147,7 +146,7 @@ public final class ApiSpecCreateCommand implements Runnable {
       NameValidator.requireValidSpecId(id);
       body.put("id", id);
     }
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.post("/v1/specs/" + fromReview + "/followup", body);
 
       if (json) {

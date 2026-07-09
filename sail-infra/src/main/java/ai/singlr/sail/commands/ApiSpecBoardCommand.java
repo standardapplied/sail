@@ -43,12 +43,11 @@ public final class ApiSpecBoardCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
     var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var path =
         resolvedProject != null ? "/v1/specs/board?project=" + resolvedProject : "/v1/specs/board";
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.get(path);
 
       if (json) {
