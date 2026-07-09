@@ -74,11 +74,10 @@ public final class ApiSpecListCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     var config = connection.resolve();
     var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var resolvedStatus = statusFilter(status, allStatuses);
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var params = new StringBuilder("/v1/specs?");
       if (resolvedProject != null) params.append("project=").append(resolvedProject).append("&");
       if (resolvedStatus != null) params.append("status=").append(resolvedStatus).append("&");

@@ -77,6 +77,42 @@ class SailApiClientTest {
   }
 
   @Test
+  void aNoSyncClientCarriesTheOptOutToTheOperationsSeam() throws Exception {
+    var probe = new NoSyncProbe();
+    var home = Files.createDirectories(tempDir.resolve("nosync"));
+    try (var noSyncFixture = ApiTestServer.start(home, probe);
+        var noSyncClient =
+            new SailApiClient(
+                "http://127.0.0.1:" + noSyncFixture.port(), noSyncFixture.token(), true)) {
+      noSyncClient.get("/v1/specs");
+      assertTrue(probe.sawNoSync);
+    }
+  }
+
+  @Test
+  void aDefaultClientDoesNotOptOutOfSync() throws Exception {
+    var probe = new NoSyncProbe();
+    var home = Files.createDirectories(tempDir.resolve("default-sync"));
+    try (var probeFixture = ApiTestServer.start(home, probe);
+        var defaultClient =
+            new SailApiClient("http://127.0.0.1:" + probeFixture.port(), probeFixture.token())) {
+      defaultClient.get("/v1/specs");
+      assertEquals(false, probe.sawNoSync);
+    }
+  }
+
+  private static final class NoSyncProbe extends TestOperations {
+    private volatile boolean sawNoSync;
+
+    @Override
+    public Result<GlobalSpecsListResponse> globalSpecs(
+        ai.singlr.sail.store.SpecStore.SpecFilter filter) {
+      sawNoSync = SyncControl.noSync();
+      return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+    }
+  }
+
+  @Test
   void invalidTokenThrowsIOException() {
     try (var badClient = new SailApiClient("http://127.0.0.1:" + fixture.port(), "wrong-token")) {
       assertThrows(IOException.class, () -> badClient.get("/v1/specs/board"));

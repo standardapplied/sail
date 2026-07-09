@@ -45,10 +45,9 @@ public final class ApiSpecRestoreCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.post("/v1/specs/" + specId + "/restore", Map.of("rev", rev));
 
       if (json) {

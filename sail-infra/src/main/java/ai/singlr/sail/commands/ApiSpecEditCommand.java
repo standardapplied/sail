@@ -88,7 +88,6 @@ public final class ApiSpecEditCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
 
@@ -112,7 +111,7 @@ public final class ApiSpecEditCommand implements Runnable {
     }
     if (force) body.put("force", true);
 
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.put("/v1/specs/" + specId, body);
 
       if (json) {

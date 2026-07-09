@@ -44,10 +44,9 @@ public final class ApiSpecHistoryCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.get("/v1/specs/" + specId + "/history");
 
       if (json) {

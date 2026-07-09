@@ -967,6 +967,46 @@ class ApiRouterTest {
     }
   }
 
+  @Test
+  void noSyncHeaderScopesTheOptOutToTheRequest() throws Exception {
+    var ops = new SyncScopeProbe();
+    try (var server = serverWith(ops, true)) {
+      var request =
+          HttpRequest.newBuilder(uri(server, "/v1/specs"))
+              .header("Authorization", "Bearer token")
+              .header(SyncControl.NO_SYNC_HEADER, "true")
+              .GET()
+              .build();
+
+      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(200, response.statusCode());
+      assertTrue(ops.sawNoSync);
+    }
+  }
+
+  @Test
+  void requestsWithoutTheNoSyncHeaderSyncAsUsual() throws Exception {
+    var ops = new SyncScopeProbe();
+    try (var server = serverWith(ops, true)) {
+      var response = get(server, "/v1/specs", "token");
+
+      assertEquals(200, response.statusCode());
+      assertFalse(ops.sawNoSync);
+    }
+  }
+
+  private static final class SyncScopeProbe extends FakeOperations {
+    private volatile boolean sawNoSync;
+
+    @Override
+    public Result<GlobalSpecsListResponse> globalSpecs(
+        ai.singlr.sail.store.SpecStore.SpecFilter filter) {
+      sawNoSync = SyncControl.noSync();
+      return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+    }
+  }
+
   private static SailApiServer server() throws IOException {
     return serverWith(new FakeOperations(), true);
   }

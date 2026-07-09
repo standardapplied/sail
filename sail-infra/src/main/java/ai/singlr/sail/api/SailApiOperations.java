@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 
@@ -61,6 +62,7 @@ public final class SailApiOperations implements ApiOperations {
   private final SessionStore sessionStore;
   private final ProjectStore projectStore;
   private final Supplier<ConnectEnvironment> connectEnvironment;
+  private final SyncScheduler syncScheduler;
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
 
@@ -122,6 +124,32 @@ public final class SailApiOperations implements ApiOperations {
     this(
         shell,
         file,
+        eventBus,
+        auditSubscriber,
+        specStore,
+        reviewStore,
+        projectStore,
+        SyncScheduler.disabled());
+  }
+
+  /**
+   * As {@link #SailApiOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore,
+   * ReviewStore, ProjectStore)} with the node's sync-on-write scheduler; used by {@code sail server
+   * start} so spec mutations propagate to main and stale reads freshen without a manual {@code sail
+   * sync}.
+   */
+  public SailApiOperations(
+      ShellExec shell,
+      String file,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      ProjectStore projectStore,
+      SyncScheduler syncScheduler) {
+    this(
+        shell,
+        file,
         WatcherSpawner::spawnProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
@@ -129,7 +157,8 @@ public final class SailApiOperations implements ApiOperations {
         reviewStore,
         null,
         projectStore,
-        ConnectEnvironment::detect);
+        ConnectEnvironment::detect,
+        syncScheduler);
   }
 
   SailApiOperations(
@@ -171,7 +200,8 @@ public final class SailApiOperations implements ApiOperations {
         reviewStore,
         sessionStore,
         null,
-        ConnectEnvironment::detect);
+        ConnectEnvironment::detect,
+        SyncScheduler.disabled());
   }
 
   SailApiOperations(
@@ -185,6 +215,32 @@ public final class SailApiOperations implements ApiOperations {
       SessionStore sessionStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment) {
+    this(
+        shell,
+        file,
+        watcherFallback,
+        eventBus,
+        auditPersister,
+        specStore,
+        reviewStore,
+        sessionStore,
+        projectStore,
+        connectEnvironment,
+        SyncScheduler.disabled());
+  }
+
+  SailApiOperations(
+      ShellExec shell,
+      String file,
+      WatcherSpawner.ProcessSpawner watcherFallback,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      SessionStore sessionStore,
+      ProjectStore projectStore,
+      Supplier<ConnectEnvironment> connectEnvironment,
+      SyncScheduler syncScheduler) {
     this.shell = shell;
     this.file = file;
     this.watcherSpawner = new WatcherSpawner(shell, watcherFallback);
@@ -195,6 +251,7 @@ public final class SailApiOperations implements ApiOperations {
     this.sessionStore = sessionStore;
     this.projectStore = projectStore;
     this.connectEnvironment = connectEnvironment;
+    this.syncScheduler = syncScheduler;
     this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
   }
@@ -221,17 +278,23 @@ public final class SailApiOperations implements ApiOperations {
 
   @Override
   public Result<SpecsResponse> specs(String project) {
-    return safe(() -> specsValue(project));
+    return safeRead(() -> specsValue(project));
   }
 
   @Override
   public Result<SpecResponse> spec(String project, String specId) {
-    return safe(() -> specValue(project, specId));
+    return safeRead(() -> specValue(project, specId));
   }
 
   @Override
   public Result<DispatchResponse> dispatch(String project, DispatchRequest request) {
-    return safe(() -> dispatchValue(project, request));
+    freshenForRead();
+    var result = safe(() -> dispatchValue(project, request));
+    if (result instanceof Result.Success<DispatchResponse> success
+        && success.value().dispatched()) {
+      triggerSyncAfterWrite();
+    }
+    return result;
   }
 
   @Override
@@ -868,6 +931,20 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
+  /**
+   * Event types whose arrival implies a spec mutation on this box that main has not seen: a CLI
+   * dispatch's claim, a status flip, and an agent stop (which the lifecycle/review reactors turn
+   * into a status transition moments later — well inside the sync debounce window). Publishing one
+   * on a node schedules the same debounced propagation as a direct API mutation, so the CLI lane
+   * needs no sync wrapper of its own.
+   */
+  private static final Set<String> SYNC_TRIGGER_EVENTS =
+      Set.of(
+          Event.WellKnownTypes.SPEC_DISPATCHED,
+          Event.WellKnownTypes.SPEC_RESTARTED,
+          Event.WellKnownTypes.SPEC_STATUS_CHANGED,
+          Event.WellKnownTypes.AGENT_SESSION_STOPPED);
+
   @Override
   public Result<EventPublishResponse> publishEvent(Event event) {
     if (eventBus == null) {
@@ -876,11 +953,17 @@ public final class SailApiOperations implements ApiOperations {
           "Event bus is not wired into this SailApiOperations instance.",
           "Use the SailApiOperations constructor that accepts an EventBus.");
     }
-    return safe(
-        () -> {
-          var stamped = eventBus.publish(event);
-          return new EventPublishResponse(stamped.id(), stamped.toMap());
-        });
+    var result =
+        safe(
+            () -> {
+              var stamped = eventBus.publish(event);
+              return new EventPublishResponse(stamped.id(), stamped.toMap());
+            });
+    if (result instanceof Result.Success<EventPublishResponse>
+        && SYNC_TRIGGER_EVENTS.contains(event.type())) {
+      triggerSyncAfterWrite();
+    }
+    return result;
   }
 
   @Override
@@ -926,83 +1009,110 @@ public final class SailApiOperations implements ApiOperations {
     }
   }
 
+  /** Serves a spec read after the TTL-gated freshen, unless the request opted out of sync. */
+  private <T> Result<T> safeRead(Supplier<T> supplier) {
+    freshenForRead();
+    return safe(supplier);
+  }
+
+  /** Runs a spec mutation and, when it succeeds, schedules the debounced propagation to main. */
+  private <T> Result<T> safeWrite(Supplier<T> supplier) {
+    var result = safe(supplier);
+    if (result instanceof Result.Success<T>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
+  private void freshenForRead() {
+    if (!SyncControl.noSync()) {
+      syncScheduler.freshenRead();
+    }
+  }
+
+  private void triggerSyncAfterWrite() {
+    if (!SyncControl.noSync()) {
+      syncScheduler.afterWrite();
+    }
+  }
+
   @Override
   public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
-    return safe(() -> globalSpecOps.list(filter));
+    return safeRead(() -> globalSpecOps.list(filter));
   }
 
   @Override
   public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
-    return safe(() -> globalSpecOps.get(specId));
+    return safeRead(() -> globalSpecOps.get(specId));
   }
 
   @Override
   public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
-    return safe(() -> globalSpecOps.create(request));
+    return safeWrite(() -> globalSpecOps.create(request));
   }
 
   @Override
   public Result<FollowupSpecResponse> createFollowupSpec(
       String specId, FollowupCreateRequest request) {
-    return safe(() -> reviewOps.createFollowup(specId, request));
+    return safeWrite(() -> reviewOps.createFollowup(specId, request));
   }
 
   @Override
   public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
       String specId, SpecUpdateRequest request) {
-    return safe(() -> globalSpecOps.update(specId, request));
+    return safeWrite(() -> globalSpecOps.update(specId, request));
   }
 
   @Override
   public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
-    return safe(() -> globalSpecOps.delete(specId));
+    return safeWrite(() -> globalSpecOps.delete(specId));
   }
 
   @Override
   public Result<GlobalSpecContentResponse> globalSpecContent(String specId) {
-    return safe(() -> globalSpecOps.content(specId));
+    return safeRead(() -> globalSpecOps.content(specId));
   }
 
   @Override
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request) {
-    return safe(() -> globalSpecOps.setContent(specId, request));
+    return safeWrite(() -> globalSpecOps.setContent(specId, request));
   }
 
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
-    return safe(() -> globalSpecOps.history(specId));
+    return safeRead(() -> globalSpecOps.history(specId));
   }
 
   @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request) {
-    return safe(() -> globalSpecOps.restore(specId, request));
+    return safeWrite(() -> globalSpecOps.restore(specId, request));
   }
 
   @Override
   public Result<GlobalBoardResponse> globalBoard(String project) {
-    return safe(() -> globalSpecOps.board(project));
+    return safeRead(() -> globalSpecOps.board(project));
   }
 
   @Override
   public Result<ReviewListResponse> reviewsForSpec(String specId) {
-    return safe(() -> reviewOps.listForSpec(specId));
+    return safeRead(() -> reviewOps.listForSpec(specId));
   }
 
   @Override
   public Result<ReviewDetailResponse> reviewDetail(String reviewId) {
-    return safe(() -> reviewOps.detail(reviewId));
+    return safeRead(() -> reviewOps.detail(reviewId));
   }
 
   @Override
   public Result<ReviewApproveResponse> approveReview(String reviewId, String actor) {
-    return safe(() -> reviewOps.approve(reviewId, actor));
+    return safeWrite(() -> reviewOps.approve(reviewId, actor));
   }
 
   @Override
   public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
-    return safe(() -> reviewOps.dismissFinding(reviewId, findingId));
+    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId));
   }
 
   @Override

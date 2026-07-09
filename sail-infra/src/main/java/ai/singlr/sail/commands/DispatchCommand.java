@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
@@ -121,7 +122,13 @@ public final class DispatchCommand implements Runnable {
   private void execute() throws Exception {
     name = CurrentProject.require(project);
     NameValidator.requireValidProjectName(name);
-    SpecSync.freshenIfNode(syncOptions.noSync());
+    try (var sync = NodeSync.scheduler(syncOptions.noSync())) {
+      execute(sync);
+    }
+  }
+
+  private void execute(SyncScheduler sync) throws Exception {
+    sync.freshenRead();
     if (restart && specId == null) {
       throw new IllegalArgumentException(
           "--restart requires --spec to identify which spec to restart.");
@@ -167,7 +174,7 @@ public final class DispatchCommand implements Runnable {
       printNoSpecs();
       return;
     }
-    SpecSync.freshenIfNode(syncOptions.noSync());
+    sync.syncNow();
     var resolution = prepared.resolution();
     var nextSpec = resolution.spec();
     var specBody = prepared.body();

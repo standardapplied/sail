@@ -53,11 +53,10 @@ public final class ApiSpecContentCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    SpecSync.freshenIfNode(syncOptions.noSync());
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
 
-    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+    try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       if (set) {
         var body = new LinkedHashMap<String, Object>();
         if (bodyFile != null) body.put("body", Files.readString(bodyFile));
