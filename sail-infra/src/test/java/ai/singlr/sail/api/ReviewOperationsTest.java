@@ -32,6 +32,8 @@ class ReviewOperationsTest {
   private SpecStore specStore;
   private ReviewOperations ops;
 
+  private static final Actor UDAY_ADMIN = new Actor("uday", Role.ADMIN, Actor.Lane.API);
+
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
@@ -111,7 +113,7 @@ class ReviewOperationsTest {
     var stageId = reviewStore.createStage(reviewId, "human", "human");
     reviewStore.startStage(stageId, "uday");
 
-    var response = ops.approve(reviewId, "uday");
+    var response = ops.approve(reviewId, UDAY_ADMIN);
 
     assertTrue(response.approved());
     var review = reviewStore.findReview(reviewId).orElseThrow();
@@ -128,13 +130,13 @@ class ReviewOperationsTest {
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.createStage(reviewId, "security", "agent");
 
-    var ex = assertThrows(ApiException.class, () -> ops.approve(reviewId, "uday"));
+    var ex = assertThrows(ApiException.class, () -> ops.approve(reviewId, UDAY_ADMIN));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
   @Test
   void approveMissingThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.approve("nope", "uday"));
+    assertThrows(ApiException.class, () -> ops.approve("nope", UDAY_ADMIN));
   }
 
   @Test
@@ -142,7 +144,7 @@ class ReviewOperationsTest {
     var reviewId = seedReviewWithFinding();
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
 
-    var response = ops.dismissFinding(reviewId, findingId);
+    var response = ops.dismissFinding(reviewId, findingId, UDAY_ADMIN);
 
     assertTrue(response.dismissed());
     assertEquals(
@@ -152,7 +154,7 @@ class ReviewOperationsTest {
 
   @Test
   void dismissFindingMissingReviewThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.dismissFinding("nope", "f1"));
+    assertThrows(ApiException.class, () -> ops.dismissFinding("nope", "f1", UDAY_ADMIN));
   }
 
   private String seedPassedReviewWithOpenFindings() {
@@ -305,7 +307,7 @@ class ReviewOperationsTest {
     reviewStore.startStage(humanStage, "uday");
     var sourceReview = reviewStore.reviewsForSpec("auth").getFirst().id();
 
-    ops.approve(followupReview, "uday");
+    ops.approve(followupReview, UDAY_ADMIN);
 
     var afterApprove =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();
@@ -314,7 +316,8 @@ class ReviewOperationsTest {
     new GlobalSpecOperations(specStore, reviewStore)
         .update(
             "auth-followup",
-            SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"));
+            SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"),
+            UDAY_ADMIN);
 
     var afterDone =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();

@@ -70,7 +70,9 @@ class SailApiOperationsSyncTest {
   void aFailedMutationTriggersNothing() throws Exception {
     var operations = operations(scheduler(), store -> {});
 
-    var result = operations.updateGlobalSpec("missing", update("pending"));
+    var result =
+        operations.updateGlobalSpec(
+            "missing", update("pending"), new Actor("uday", Role.ADMIN, Actor.Lane.API));
 
     assertInstanceOf(Result.Failure.class, result);
     assertEquals(0, rounds.get());

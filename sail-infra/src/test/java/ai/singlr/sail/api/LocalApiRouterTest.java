@@ -191,9 +191,9 @@ class LocalApiRouterTest {
 
     @Override
     public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-        String specId, SpecUpdateRequest request) {
+        String specId, SpecUpdateRequest request, Actor actor) {
       lastUpdate = request;
-      return super.updateGlobalSpec(specId, request);
+      return super.updateGlobalSpec(specId, request, actor);
     }
 
     @Override
@@ -209,9 +209,9 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
       lastDeletedId = specId;
-      return super.deleteGlobalSpec(specId);
+      return super.deleteGlobalSpec(specId, actor);
     }
 
     @Override
@@ -222,9 +222,9 @@ class LocalApiRouterTest {
 
     @Override
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-        String specId, SpecContentRequest request) {
+        String specId, SpecContentRequest request, Actor actor) {
       lastContent = request;
-      return super.setGlobalSpecContent(specId, request);
+      return super.setGlobalSpecContent(specId, request, actor);
     }
 
     @Override

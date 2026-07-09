@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -30,9 +31,12 @@ import java.util.function.Supplier;
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
  * it resolves the run, applies the same provenance guard as the buffered log/stop endpoints — a run
  * whose {@code node} is not this box is refused with a structured {@code run_on_other_node} error
- * rather than tailing a foreign box's local file — and then tails the run's own {@code
- * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
- * event. {@code ?since=N} replays from a line number for client reconnection.
+ * rather than tailing a foreign box's local file — then applies the same {@link RunPolicy} the
+ * buffered log endpoint does (the run's spec assignee or an admin, else {@code
+ * forbidden_not_assignee}), and finally tails the run's own {@code ~/.sail/runs/<id>/agent.log} via
+ * {@code incus exec}, sending each line as an SSE {@code data:} event. Because REST and SSE call
+ * the one pure policy, they return an identical verdict for an identical caller. {@code ?since=N}
+ * replays from a line number for client reconnection.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
  * long-lived connection never runs through the buffered request/response path. It is not registered
@@ -51,25 +55,40 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
+  private final Function<String, Optional<String>> specAssignee;
   private final Supplier<String> localHandle;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
-    this(auth, AgentLogStreamer::lookupFromDb, NodeIdentity::handle);
+    this(
+        auth,
+        AgentLogStreamer::lookupFromDb,
+        AgentLogStreamer::assigneeFromDb,
+        NodeIdentity::handle);
   }
 
   AgentLogStreamer(
       ApiAuth auth,
       Function<String, Optional<RunStore.RunRow>> runLookup,
+      Function<String, Optional<String>> specAssignee,
       Supplier<String> localHandle) {
     this.auth = auth;
     this.runLookup = runLookup;
+    this.specAssignee = specAssignee;
     this.localHandle = localHandle;
   }
 
   private static Optional<RunStore.RunRow> lookupFromDb(String runId) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       return new RunStore(db).findById(runId);
+    } catch (RuntimeException e) {
+      return Optional.empty();
+    }
+  }
+
+  private static Optional<String> assigneeFromDb(String specId) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::assignee);
     } catch (RuntimeException e) {
       return Optional.empty();
     }
@@ -101,6 +120,16 @@ public final class AgentLogStreamer implements HttpHandler {
       }
       if (SailApiOperations.isForeign(run, localHandle.get())) {
         sendForeign(exchange, run);
+        return;
+      }
+      if (RunPolicy.access(
+              ApiRouter.actorOf(exchange),
+              run.id(),
+              run.specId(),
+              specAssignee.apply(run.specId()).orElse(null))
+          instanceof AccessDecision.Refused refused) {
+        sendError(
+            exchange, refused.code().httpCode(), refused.code().code(), refused.message(), null);
         return;
       }
       if (Strings.isBlank(run.logPath())) {

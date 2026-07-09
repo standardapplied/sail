@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.Finding;
@@ -56,9 +57,10 @@ final class ReviewOperations {
     return new ReviewDetailResponse(ReviewView.from(review, stageViews), findings);
   }
 
-  ReviewApproveResponse approve(String reviewId, String actor) {
+  ReviewApproveResponse approve(String reviewId, Actor actor) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
+    ReviewPolicy.decide(actor, reviewId, review.specId(), specAssignee(review.specId())).enforce();
     var humanStage =
         reviewStore.stagesForReview(reviewId).stream()
             .filter(s -> "human".equals(s.stageType()) && "running".equals(s.status()))
@@ -68,7 +70,7 @@ final class ReviewOperations {
                     new ApiException(
                         ErrorCode.INVALID_REQUEST, "No human review stage awaiting approval."));
     reviewStore.completeStage(humanStage.id(), "passed");
-    reviewStore.approve(reviewId, actor);
+    reviewStore.approve(reviewId, decidedBy(actor));
     specStore.updateStatus(review.specId(), SpecStatus.AWAITING_MERGE);
     return new ReviewApproveResponse(reviewId, true);
   }
@@ -157,11 +159,22 @@ final class ReviewOperations {
     return followupId;
   }
 
-  FindingDismissResponse dismissFinding(String reviewId, String findingId) {
+  FindingDismissResponse dismissFinding(String reviewId, String findingId, Actor actor) {
     requireStore();
-    findReviewOrThrow(reviewId);
+    var review = findReviewOrThrow(reviewId);
+    ReviewPolicy.decide(actor, reviewId, review.specId(), specAssignee(review.specId())).enforce();
     reviewStore.resolveFinding(findingId, Finding.Resolution.DISMISSED);
     return new FindingDismissResponse(findingId, true);
+  }
+
+  /** The current assignee of the review's spec, or null when the spec is absent — fail closed. */
+  private String specAssignee(String specId) {
+    return specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(null);
+  }
+
+  /** Attribution for an approval: the acting FDE's handle, or {@code sail} for a machine token. */
+  private static String decidedBy(Actor actor) {
+    return Strings.isNotBlank(actor.handle()) ? actor.handle() : Event.SAIL_AGENT;
   }
 
   private ReviewStore.ReviewRow findReviewOrThrow(String reviewId) {

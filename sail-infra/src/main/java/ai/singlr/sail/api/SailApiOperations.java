@@ -330,24 +330,27 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
-    return onLocalRun(runId, localHandle, run -> safe(() -> runLogValue(run, tail)));
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
+    return onLocalRun(runId, localHandle, actor, run -> safe(() -> runLogValue(run, tail)));
   }
 
   @Override
-  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
-    return onLocalRun(runId, localHandle, run -> safe(() -> stopRunValue(run)));
+  public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
+    return onLocalRun(runId, localHandle, actor, run -> safe(() -> stopRunValue(run)));
   }
 
   /**
-   * Resolves a run and applies the provenance guard before handing it to {@code served}: an absent
-   * store is an internal error, an unknown run a 404, and a run that executed elsewhere a
-   * structured {@code run_on_other_node} refusal. The served branch only ever sees a run that ran
-   * on this box.
+   * Resolves a run, applies the provenance guard, then the resource-scoped {@link RunPolicy} before
+   * handing it to {@code served}: an absent store is an internal error, an unknown run a 404, a run
+   * that executed elsewhere a structured {@code run_on_other_node} refusal, and a caller who is
+   * neither the run's spec assignee nor an admin a {@code forbidden_not_assignee}. The served
+   * branch only ever sees a local run the caller may access — one guard for both the log tail and
+   * stop.
    */
   private <T> Result<T> onLocalRun(
       String runId,
       String localHandle,
+      Actor actor,
       java.util.function.Function<RunStore.RunRow, Result<T>> served) {
     if (runStore == null) {
       return Result.failure(
@@ -361,7 +364,22 @@ public final class SailApiOperations implements ApiOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
+    if (RunPolicy.access(actor, run.id(), run.specId(), specAssignee(run.specId()))
+        instanceof AccessDecision.Refused refused) {
+      return Result.failure(refused.code(), refused.message(), refused.fix());
+    }
     return served.apply(run);
+  }
+
+  /**
+   * The current assignee of {@code specId}, or null when the spec is absent or the store is not
+   * wired.
+   */
+  private String specAssignee(String specId) {
+    if (specStore == null || Strings.isBlank(specId)) {
+      return null;
+    }
+    return specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(null);
   }
 
   private RunStore requireRunStore() {
@@ -1247,13 +1265,13 @@ public final class SailApiOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request) {
-    return safeWrite(() -> globalSpecOps.update(specId, request));
+      String specId, SpecUpdateRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.update(specId, request, actor));
   }
 
   @Override
-  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
-    return safeWrite(() -> globalSpecOps.delete(specId));
+  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
+    return safeWrite(() -> globalSpecOps.delete(specId, actor));
   }
 
   @Override
@@ -1263,8 +1281,8 @@ public final class SailApiOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request) {
-    return safeWrite(() -> globalSpecOps.setContent(specId, request));
+      String specId, SpecContentRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.setContent(specId, request, actor));
   }
 
   @Override
@@ -1274,8 +1292,8 @@ public final class SailApiOperations implements ApiOperations {
 
   @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-      String specId, SpecRestoreRequest request) {
-    return safeWrite(() -> globalSpecOps.restore(specId, request));
+      String specId, SpecRestoreRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.restore(specId, request, actor));
   }
 
   @Override
@@ -1294,13 +1312,14 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   @Override
-  public Result<ReviewApproveResponse> approveReview(String reviewId, String actor) {
+  public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
     return safeWrite(() -> reviewOps.approve(reviewId, actor));
   }
 
   @Override
-  public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
-    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId));
+  public Result<FindingDismissResponse> dismissFinding(
+      String reviewId, String findingId, Actor actor) {
+    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId, actor));
   }
 
   private record LoadedProject(SailYaml config, ContainerState state) {}

@@ -32,6 +32,10 @@ import org.junit.jupiter.api.Test;
 class AgentLogStreamerTest {
 
   private static RunStore.RunRow runOn(String node) {
+    return run(node, "/home/dev/.sail/runs/r1/agent.log");
+  }
+
+  private static RunStore.RunRow run(String node, String logPath) {
     return new RunStore.RunRow(
         "r1",
         "acme",
@@ -45,14 +49,52 @@ class AgentLogStreamerTest {
         null,
         "running",
         null,
-        "/home/dev/.sail/runs/r1/agent.log",
+        logPath,
         "t0",
         null);
   }
 
   private static AgentLogStreamer streamer(
       java.util.function.Function<String, Optional<RunStore.RunRow>> lookup, String localHandle) {
-    return new AgentLogStreamer(exchange -> {}, lookup, () -> localHandle);
+    return streamer(lookup, id -> Optional.empty(), localHandle);
+  }
+
+  private static AgentLogStreamer streamer(
+      java.util.function.Function<String, Optional<RunStore.RunRow>> lookup,
+      java.util.function.Function<String, Optional<String>> assignee,
+      String localHandle) {
+    return new AgentLogStreamer(exchange -> {}, lookup, assignee, () -> localHandle);
+  }
+
+  @Test
+  void streamRefusesAMemberWhoIsNotTheRunSpecAssignee() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
+
+    streamer(id -> Optional.of(runOn("node-a")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(403, out.status);
+    assertTrue(out.body().contains("forbidden_not_assignee"), out.body());
+    assertTrue(out.body().contains("uday"), out.body());
+  }
+
+  @Test
+  void streamLetsTheRunSpecAssigneePastThePolicyGate() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("uday", "member");
+
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(404, out.status);
+    assertTrue(out.body().contains("This run has no log file."), out.body());
+  }
+
+  @Test
+  void streamLetsAnAdminPastThePolicyGate() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
+
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+
+    assertEquals(404, out.status);
+    assertTrue(out.body().contains("This run has no log file."), out.body());
   }
 
   @Test
@@ -214,10 +256,18 @@ class AgentLogStreamerTest {
     private final URI uri;
     private final Headers responseHeaders = new Headers();
     private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+    private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
     private int status = -1;
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
+    }
+
+    private CapturingExchange as(String fde, String role) {
+      attributes.put("token.fde", fde);
+      attributes.put("token.role", role);
+      attributes.put("token.name", fde);
+      return this;
     }
 
     private String body() {
@@ -264,11 +314,13 @@ class AgentLogStreamerTest {
 
     @Override
     public Object getAttribute(String name) {
-      return null;
+      return attributes.get(name);
     }
 
     @Override
-    public void setAttribute(String name, Object value) {}
+    public void setAttribute(String name, Object value) {
+      attributes.put(name, value);
+    }
 
     @Override
     public HttpContext getHttpContext() {
