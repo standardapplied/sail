@@ -9,11 +9,11 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.ReviewWiring;
+import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionAwareAuth;
-import ai.singlr.sail.api.SessionTracker;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.TokenAuth;
@@ -42,7 +42,7 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -195,8 +195,8 @@ public final class ServerStartCommand implements Runnable {
             bus,
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false));
-    var sessionStore = new SessionStore(db);
-    bus.subscribe(new SessionTracker(sessionStore));
+    var runStore = new RunStore(db);
+    bus.subscribe(new RunTracker(runStore, syncScheduler));
     bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 
     var webauthn = resolveWebauthn();
@@ -233,12 +233,12 @@ public final class ServerStartCommand implements Runnable {
     var unitProbe = MissedStopReconciler.systemdUnitProbe(reconcileShell);
     var missedStops =
         new MissedStopReconciler(
-            specStore, sessionStore, eventStore, bus, unitProbe, DateTimeUtils::now);
+            specStore, runStore, eventStore, bus, unitProbe, DateTimeUtils::now);
     var watcherSpawner = new WatcherSpawner(reconcileShell, null);
     var rearmer =
         new WatcherRearmer(
             specStore,
-            sessionStore,
+            runStore,
             unitProbe,
             watcherSpawner::watcherProcessRunning,
             WatcherRearmer.livingProcess(),

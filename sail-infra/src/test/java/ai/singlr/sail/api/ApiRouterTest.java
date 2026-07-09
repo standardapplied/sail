@@ -877,19 +877,22 @@ class ApiRouterTest {
   @Test
   void sessionViewModelCoversConstruction() {
     var row =
-        new ai.singlr.sail.store.SessionStore.SessionRow(
+        new ai.singlr.sail.store.RunStore.RunRow(
             "s1",
             "proj",
             "auth",
+            "node-a",
+            "build",
             "claude-code",
             "feat/auth",
             "task",
             42,
+            null,
             "completed",
-            "t0",
-            "t1",
             7,
-            null);
+            null,
+            "t0",
+            "t1");
     var view = SessionView.from(row);
     assertEquals("s1", view.id());
     assertEquals("proj", view.project());

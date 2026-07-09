@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -914,7 +914,7 @@ record SessionView(
     String completedAt,
     Integer exitCode)
     implements Mappable {
-  static SessionView from(SessionStore.SessionRow row) {
+  static SessionView from(RunStore.RunRow row) {
     return new SessionView(
         row.id(),
         row.project(),

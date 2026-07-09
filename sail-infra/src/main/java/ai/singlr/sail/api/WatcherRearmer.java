@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.util.Optional;
@@ -46,7 +46,7 @@ public final class WatcherRearmer implements AutoCloseable {
   }
 
   private final SpecStore specStore;
-  private final SessionStore sessionStore;
+  private final RunStore sessionStore;
   private final MissedStopReconciler.UnitProbe agentUnitProbe;
   private final Predicate<String> watcherRunning;
   private final LongPredicate watcherAlive;
@@ -55,7 +55,7 @@ public final class WatcherRearmer implements AutoCloseable {
 
   public WatcherRearmer(
       SpecStore specStore,
-      SessionStore sessionStore,
+      RunStore sessionStore,
       MissedStopReconciler.UnitProbe agentUnitProbe,
       Predicate<String> watcherRunning,
       LongPredicate watcherAlive,

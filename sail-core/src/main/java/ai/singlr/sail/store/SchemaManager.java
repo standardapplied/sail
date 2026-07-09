@@ -356,7 +356,15 @@ public final class SchemaManager {
           "DROP TABLE specs",
           "ALTER TABLE specs_v2 RENAME TO specs",
           "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
-          "ALTER TABLE agent_sessions ADD COLUMN watcher_pid INTEGER");
+          "ALTER TABLE agent_sessions ADD COLUMN watcher_pid INTEGER",
+          "ALTER TABLE agent_sessions ADD COLUMN node TEXT",
+          "ALTER TABLE agent_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'build'",
+          "ALTER TABLE agent_sessions ADD COLUMN log_path TEXT",
+          "ALTER TABLE agent_sessions ADD COLUMN rev TEXT",
+          "ALTER TABLE agent_sessions ADD COLUMN base_rev TEXT",
+          "ALTER TABLE agent_sessions RENAME TO runs",
+          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

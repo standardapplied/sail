@@ -8,7 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -120,7 +120,7 @@ public final class AgentReporter {
    * @param config the project's SailYaml config
    */
   public Report generate(
-      String containerName, SailYaml config, List<Spec> specs, SessionStore.SessionRow session)
+      String containerName, SailYaml config, List<Spec> specs, RunStore.RunRow session)
       throws IOException, InterruptedException, TimeoutException {
     return generate(containerName, config, specs, session, SailPaths.projectDir(containerName));
   }
@@ -135,7 +135,7 @@ public final class AgentReporter {
       String containerName,
       SailYaml config,
       List<Spec> specs,
-      SessionStore.SessionRow session,
+      RunStore.RunRow session,
       Path stateDir)
       throws IOException, InterruptedException, TimeoutException {
 

@@ -17,8 +17,8 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SessionStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -1500,7 +1500,19 @@ class SailApiOperationsTest {
             shell(),
             null,
             s -> {},
-            sessions -> sessions.create("acme", "auth", "claude-code", "feat/auth", "do it", 123));
+            sessions ->
+                sessions.create(
+                    ai.singlr.sail.common.DateTimeUtils.newId().toString(),
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    "feat/auth",
+                    "do it",
+                    123,
+                    null,
+                    "/home/dev/.sail/runs/r/agent.log"));
 
     var result = operations.agentSessions("acme");
 
@@ -1637,7 +1649,7 @@ class SailApiOperationsTest {
       FakeShell shell,
       EventBus bus,
       java.util.function.Consumer<SpecStore> seedSpecs,
-      java.util.function.Consumer<SessionStore> seedSessions)
+      java.util.function.Consumer<RunStore> seedSessions)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
@@ -1645,7 +1657,7 @@ class SailApiOperationsTest {
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
     var reviewStore = new ReviewStore(db);
-    var sessionStore = new SessionStore(db);
+    var sessionStore = new RunStore(db);
     seedSpecs.accept(specStore);
     seedSessions.accept(sessionStore);
     return new SailApiOperations(

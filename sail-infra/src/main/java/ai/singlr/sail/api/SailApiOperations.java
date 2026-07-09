@@ -32,7 +32,7 @@ import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -59,7 +59,7 @@ public final class SailApiOperations implements ApiOperations {
   private final AuditPersister auditPersister;
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
-  private final SessionStore sessionStore;
+  private final RunStore sessionStore;
   private final ProjectStore projectStore;
   private final Supplier<ConnectEnvironment> connectEnvironment;
   private final SyncScheduler syncScheduler;
@@ -189,7 +189,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore) {
+      RunStore sessionStore) {
     this(
         shell,
         file,
@@ -212,7 +212,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore,
+      RunStore sessionStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment) {
     this(
@@ -237,7 +237,7 @@ public final class SailApiOperations implements ApiOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      SessionStore sessionStore,
+      RunStore sessionStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler) {

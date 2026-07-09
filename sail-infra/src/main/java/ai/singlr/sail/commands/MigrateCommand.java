@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -22,6 +23,7 @@ import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
@@ -114,7 +116,29 @@ public final class MigrateCommand implements Runnable {
     backfillProjectRevisions(db, jsonOutput);
     scrubProjectIdentity(db, jsonOutput);
     importFiles(db, jsonOutput);
+    backfillRuns(db, jsonOutput);
     seedDemo(db, jsonOutput);
+  }
+
+  /**
+   * Carries pre-Run rows forward: stamps each with this box's FDE handle as its {@code node} (every
+   * legacy run executed here) so it stops reading as foreign under the provenance guard, and
+   * journals a baseline revision so it replicates. Quiet when nothing needed it; a box with no
+   * handle yet stamps nothing and retries on the next migrate/start.
+   */
+  private static void backfillRuns(Sqlite db, boolean jsonOutput) {
+    var runs = new RunStore(db);
+    var stamped = runs.backfillNode(NodeIdentity.handle());
+    var journaled = runs.backfillRevisions();
+    if (!jsonOutput && stamped + journaled > 0) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ runs: "
+                  + stamped
+                  + " stamped with this node, "
+                  + journaled
+                  + " made syncable"));
+    }
   }
 
   /**

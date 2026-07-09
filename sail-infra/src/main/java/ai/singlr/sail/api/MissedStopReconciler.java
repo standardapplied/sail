@@ -11,7 +11,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
-import ai.singlr.sail.store.SessionStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
@@ -62,7 +62,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   private final SpecStore specStore;
-  private final SessionStore sessionStore;
+  private final RunStore sessionStore;
   private final EventStore eventStore;
   private final EventBus bus;
   private final UnitProbe unitProbe;
@@ -71,7 +71,7 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   public MissedStopReconciler(
       SpecStore specStore,
-      SessionStore sessionStore,
+      RunStore sessionStore,
       EventStore eventStore,
       EventBus bus,
       UnitProbe unitProbe,
@@ -190,7 +190,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   private void publishStop(
-      SpecStore.SpecRow spec, SessionStore.SessionRow session, Integer exitCode, String why) {
+      SpecStore.SpecRow spec, RunStore.RunRow session, Integer exitCode, String why) {
     System.err.println(
         "  [reconcile] replaying missed stop for "
             + spec.project()
