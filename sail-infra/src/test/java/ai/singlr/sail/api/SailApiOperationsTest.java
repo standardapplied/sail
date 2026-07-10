@@ -1176,6 +1176,25 @@ class SailApiOperationsTest {
   }
 
   @Test
+  void dispatchStampsTheComputedBranchOnTheSpec() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStore(
+            branchYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            store -> {
+              stores[0] = store;
+              seedAuthBillingSetup(store);
+            });
+
+    dispatch(operations, "acme", request("auth", "background", true));
+
+    assertEquals("sail/auth", stores[0].findById("auth").orElseThrow().branch());
+  }
+
+  @Test
   void dispatchCreatesBranchWhenConfigured() throws Exception {
     var operations =
         operations(

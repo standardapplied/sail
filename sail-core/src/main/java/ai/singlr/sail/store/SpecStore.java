@@ -245,17 +245,21 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /**
-   * Status transition that also persists the spec's resolved target repos in the same transaction.
-   * Dispatch resolves repo overrides at launch time; recording them here keeps later store reads
-   * (the review pipeline builds its prompt from the stored repos) aligned with the checkouts the
-   * agent actually worked in.
+   * Status transition that also persists the spec's resolved target repos and its dispatch branch
+   * in the same transaction. Dispatch resolves repo overrides and computes the branch name at
+   * launch time; recording them here keeps later store reads (the review pipeline builds its prompt
+   * from the stored repos and branch) aligned with the checkouts the agent actually worked in —
+   * without this the review prompt fell back to "branch main" and reviewed the wrong scope. A blank
+   * {@code branch} (auto-branching disabled) leaves any previously stored value untouched.
    */
-  public void updateReposAndStatus(String id, List<String> repos, SpecStatus status) {
+  public void updateReposAndStatus(
+      String id, List<String> repos, SpecStatus status, String branch) {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, updated_at = ? WHERE id = ?",
+              "UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = ? WHERE id = ?",
               status.wire(),
+              Strings.isBlank(branch) ? null : branch,
               DateTimeUtils.now().toString(),
               id);
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
