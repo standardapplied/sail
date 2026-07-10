@@ -46,7 +46,7 @@ public final class GuardrailWatcher {
     }
   }
 
-  static String describe(WatcherSpawner.Spawned spawned, Path watchLog) {
+  public static String describe(WatcherSpawner.Spawned spawned, Path watchLog) {
     return switch (spawned) {
       case WatcherSpawner.Unit unit when unit.adopted() ->
           "Guardrail watcher already active (unit " + unit.name() + ", log: " + watchLog + ")";

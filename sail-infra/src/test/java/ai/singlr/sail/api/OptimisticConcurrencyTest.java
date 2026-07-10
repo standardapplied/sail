@@ -46,7 +46,7 @@ class OptimisticConcurrencyTest {
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
     var operations =
-        new SailApiOperations(new ShellExecutor(false), "sail.yaml", bus, persister, specStore);
+        new SailOperations(new ShellExecutor(false), "sail.yaml", bus, persister, specStore);
     server =
         new SailApiServer(
             "127.0.0.1", 0, operations, tokenStore, bus, persister, tempDir.resolve("api.sock"));

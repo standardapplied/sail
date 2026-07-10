@@ -13,9 +13,9 @@ import java.util.Map;
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
  * publishing (the in-container event helper) and global spec CRUD (the in-container {@code spec}
- * CLI an agent uses). Spec calls go through the very same {@link ApiOperations} the TCP API uses,
- * so a spec an agent creates over the socket is indistinguishable from one the engineer creates
- * with {@code sail spec} — one database, one source of truth.
+ * CLI an agent uses). Spec calls go through the very same {@link Operations} the TCP API uses, so a
+ * spec an agent creates over the socket is indistinguishable from one the engineer creates with
+ * {@code sail spec} — one database, one source of truth.
  *
  * <p>Trust here is the socket itself: an Incus container that can write the bind-mounted socket is
  * trusted, so requests carry no bearer token (the same model the event listener has always used).
@@ -29,9 +29,9 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String DEFAULT_ACTOR = "agent";
 
   private final EventBus bus;
-  private final ApiOperations operations;
+  private final Operations operations;
 
-  LocalApiRouter(EventBus bus, ApiOperations operations) {
+  LocalApiRouter(EventBus bus, Operations operations) {
     this.bus = bus;
     this.operations = operations;
   }

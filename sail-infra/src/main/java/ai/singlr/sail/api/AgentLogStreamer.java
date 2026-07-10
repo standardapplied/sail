@@ -120,7 +120,7 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 404, "run_not_found", "No run '" + runId + "'.", null);
         return;
       }
-      if (SailApiOperations.isForeign(run, localHandle.get())) {
+      if (SailOperations.isForeign(run, localHandle.get())) {
         sendForeign(exchange, run);
         return;
       }

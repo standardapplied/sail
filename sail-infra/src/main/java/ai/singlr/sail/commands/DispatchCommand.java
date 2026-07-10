@@ -6,46 +6,27 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Actor;
-import ai.singlr.sail.api.DispatchDecision;
-import ai.singlr.sail.api.DispatchEvents;
-import ai.singlr.sail.api.DispatchPolicy;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.BranchPolicy;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecDirectory;
-import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
-import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.AgentTaskPrompt;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.ContainerStateGuard;
-import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.GuardrailWatcher;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -53,10 +34,11 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 
 /**
- * Dispatches the next ready spec to an agent for autonomous execution. Reads the project's specs
- * from the control-plane database (the source of truth, replicated by sync), picks the next ready
- * one, marks it {@code in_progress}, and launches the configured agent with its body — so a stopped
- * or file-drifted container never blocks dispatch.
+ * Dispatches the next ready spec to an agent for autonomous execution. Pure presentation: parses
+ * flags, invokes the shared {@link DispatchOperations} executor in-process against the
+ * control-plane database (the same executor the HTTP API delegates to), and renders the outcome —
+ * banners, progress lines, {@code --json}. The procedure itself — resolve, policy, claim, branch,
+ * launch, run record, watcher, events — lives in one place for every lane.
  */
 @Command(
     name = "dispatch",
@@ -145,346 +127,195 @@ public final class DispatchCommand implements Runnable {
     }
 
     var shell = new ShellExecutor(dryRun);
-    var mgr = new ContainerManager(shell);
-
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
-
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: " + singYamlPath.toAbsolutePath());
+    var handle = Objects.toString(HostSync.handle(), "");
+    var request =
+        new DispatchOperations.Request(
+            specId, background ? "background" : "foreground", dryRun, repoOverrides, restart);
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      var operations =
+          operations(
+              db,
+              shell,
+              file,
+              this::publishLifecycle,
+              new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+              snapshotter(shell),
+              DispatchOperations.terminalLauncher(),
+              renderer(sync));
+      render(dispatch(operations, request, handle));
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+  }
 
-    if (config.agent() == null) {
-      throw new IllegalStateException("No agent configured in sail.yaml's agent block.");
+  /**
+   * The CLI lane's wiring of the shared dispatch executor: every store comes from the one
+   * control-plane database — spec claims, run rows, and the FDE roster guard included — so an
+   * in-process dispatch records exactly what a server-lane dispatch would.
+   */
+  static DispatchOperations operations(
+      Sqlite db,
+      ShellExec shell,
+      String file,
+      DispatchOperations.EventSink events,
+      WatcherSpawner watcherSpawner,
+      DispatchOperations.Snapshotter snapshotter,
+      DispatchOperations.AgentLauncher launcher,
+      DispatchOperations.Listener listener) {
+    return new DispatchOperations(
+        shell,
+        file,
+        new SpecStore(db),
+        new ReviewStore(db),
+        new RunStore(db),
+        new FdeStore(db),
+        events,
+        watcherSpawner,
+        snapshotter,
+        launcher,
+        listener);
+  }
+
+  private DispatchOperations.Outcome dispatch(
+      DispatchOperations operations, DispatchOperations.Request request, String handle) {
+    try {
+      return operations.dispatch(name, request, Actor.cliOperator(handle), handle);
+    } catch (ApiException e) {
+      throw new IllegalStateException(errorText(e), e);
     }
+  }
 
-    var sshUser = config.sshUser();
+  /** A structured refusal rendered for the terminal: the reason and, when known, the fix. */
+  private static String errorText(ApiException e) {
+    var action = e.failure().action();
+    return Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action;
+  }
 
-    var agentSession = new AgentSession(shell);
-    var existingSession = agentSession.queryStatus(name);
-    if (existingSession != null && existingSession.running()) {
-      throw new IllegalStateException(
-          "Agent is already running on '"
-              + name
-              + "' (PID "
-              + existingSession.pid()
-              + "). Stop it first with: sail agent stop "
-              + name);
-    }
-
-    var prepared = prepareDispatch(name, specId, restart, config);
-    if (prepared == null) {
-      printNoSpecs();
-      return;
-    }
-    sync.syncNow();
-    var resolution = prepared.resolution();
-    var nextSpec = resolution.spec();
-    var specBody = prepared.body();
-
-    var agentType = nextSpec.agent() != null ? nextSpec.agent() : config.agent().type();
-    var targetRepos = prepared.targetRepos();
-    var taskSpec = prepared.taskSpec();
-    var branchName = BranchPolicy.branchName(config, nextSpec);
-
-    if (resolution.restarted()) {
-      publishLifecycle(
-          Event.WellKnownTypes.SPEC_RESTARTED,
-          nextSpec.id(),
-          Map.of("note", "restarted from " + resolution.previousStatus()));
-    }
-    publishLifecycle(
-        Event.WellKnownTypes.SPEC_DISPATCHED,
-        nextSpec.id(),
-        DispatchEvents.dispatchedData(branchName, background ? "background" : "foreground"));
-
-    var description = !specBody.isBlank() ? specBody : nextSpec.title();
-    var task = AgentTaskPrompt.build(taskSpec, description);
-
-    if (json) {
-      System.out.println(
-          CliJson.stringify(
-              new DispatchPreview(
-                  name,
-                  nextSpec.id(),
-                  nextSpec.title(),
-                  background ? "background" : "foreground",
-                  task)));
-      if (dryRun) {
-        return;
+  private void render(DispatchOperations.Outcome outcome) {
+    switch (outcome) {
+      case DispatchOperations.NoSpecs ignored -> printNoSpecs();
+      case DispatchOperations.Dispatched dispatched -> {
+        if (!background) {
+          if (dispatched.exitCode() != null && dispatched.exitCode() != 0) {
+            System.err.println(
+                Banner.errorLine(
+                    "Agent session exited with code " + dispatched.exitCode(), Ansi.AUTO));
+          }
+          return;
+        }
+        Banner.printAgentLaunched(
+            name, dispatched.task(), dispatched.branch(), System.out, Ansi.AUTO);
+        dispatched
+            .watcher()
+            .ifPresent(
+                spawned ->
+                    System.out.println(
+                        Ansi.AUTO.string(
+                            "  @|green ✓|@ "
+                                + GuardrailWatcher.describe(
+                                    spawned, SailPaths.projectDir(name).resolve("watch.log")))));
       }
     }
+  }
 
-    if (!json) {
-      System.out.println(Ansi.AUTO.string("  @|bold Dispatching spec:|@ " + nextSpec.id()));
-      System.out.println(Ansi.AUTO.string("  @|faint " + nextSpec.title() + "|@"));
-      System.out.println();
-    }
-
-    var agentCli = AgentCli.fromYamlName(agentType);
-    var workDir = AgentSession.launchWorkDir(sshUser, targetRepos);
-    var fullPermissions = true;
-
-    if (!dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json)) {
+  /**
+   * The CLI lane's snapshot decision: fully per-dispatch opt-in via {@code --snapshot} / {@code
+   * --no-snapshot}, prompting interactively when neither is passed, and never on a dry run.
+   */
+  private DispatchOperations.Snapshotter snapshotter(ShellExecutor shell) {
+    return (project, config) -> {
+      if (dryRun || !SnapshotDecision.shouldSnapshot(snapshot, config, json)) {
+        return "";
+      }
       var snapMgr = new SnapshotManager(shell);
       var label = SnapshotManager.defaultLabel();
-      SnapshotDecision.create(System.out, snapMgr, name, label, json);
-      publishLifecycle(Event.WellKnownTypes.SNAPSHOT_CREATED, null, Map.of("label", label));
-    }
-
-    if (branchName != null) {
-      var created = 0;
-      for (var repo : targetRepos) {
-        var repoDir = branchRepoDir(workDir, targetRepos, repo);
-        var repoExists =
-            shell.exec(ContainerExec.asDevUser(name, List.of("test", "-d", repoDir + "/.git")));
-        if (repoExists.ok()) {
-          var branchExists =
-              shell
-                  .exec(
-                      ContainerExec.asDevUser(
-                          name,
-                          List.of(
-                              "git",
-                              "-C",
-                              repoDir,
-                              "rev-parse",
-                              "--verify",
-                              "--quiet",
-                              "refs/heads/" + branchName)))
-                  .ok();
-          var args = branchCheckoutArgs(repoDir, branchName, branchExists, resolution.restarted());
-          if (!json) {
-            var verb = branchExists ? "Reusing branch:" : "Creating branch:";
-            System.out.println(
-                Ansi.AUTO.string("  @|bold " + verb + "|@ " + branchName + " in " + repo.path()));
-          }
-          var result = shell.exec(ContainerExec.asDevUser(name, args));
-          if (!result.ok()) {
-            throw new IOException(
-                "Failed to "
-                    + (branchExists ? "check out" : "create")
-                    + " branch '"
-                    + branchName
-                    + "': "
-                    + result.stderr());
-          }
-          if (!json) {
-            System.out.println(
-                Ansi.AUTO.string("  @|green \u2713|@ Branch " + branchName + " in " + repo.path()));
-            System.out.println();
-          }
-          created++;
-        }
+      try {
+        SnapshotDecision.create(System.out, snapMgr, name, label, json);
+      } catch (Exception e) {
+        throw new IllegalStateException("Failed to create snapshot: " + e.getMessage(), e);
       }
-      if (created == 0 && !json) {
+      return label;
+    };
+  }
+
+  /**
+   * Renders the executor's progress for the terminal, and — the claim being the moment the spec
+   * flips {@code in_progress} — pushes the claim to main synchronously so a short-lived CLI process
+   * never exits before its most important write propagates.
+   */
+  private DispatchOperations.Listener renderer(SyncScheduler sync) {
+    return new DispatchOperations.Listener() {
+      @Override
+      public void claimed(Spec taskSpec, String task) {
+        sync.syncNow();
+        if (json) {
+          System.out.println(
+              CliJson.stringify(
+                  new DispatchPreview(
+                      name,
+                      taskSpec.id(),
+                      taskSpec.title(),
+                      background ? "background" : "foreground",
+                      task)));
+          return;
+        }
+        System.out.println(Ansi.AUTO.string("  @|bold Dispatching spec:|@ " + taskSpec.id()));
+        System.out.println(Ansi.AUTO.string("  @|faint " + taskSpec.title() + "|@"));
+        System.out.println();
+      }
+
+      @Override
+      public void branchReady(String branch, String repoPath, boolean reused) {
+        if (json) {
+          return;
+        }
+        var verb = reused ? "Reusing branch:" : "Creating branch:";
         System.out.println(
-            Ansi.AUTO.string("  @|faint Branch:|@ " + branchName + " (create manually in repo)"));
+            Ansi.AUTO.string("  @|bold " + verb + "|@ " + branch + " in " + repoPath));
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ Branch " + branch + " in " + repoPath));
         System.out.println();
       }
-    }
 
-    ensureSailSetup(shell, name);
-    agentSession.ensureDirectory(name);
-    agentSession.resetLog(name, AgentUnit.REVIEW);
-    agentSession.writeTaskFile(name, task);
-
-    var runId = DateTimeUtils.newId().toString();
-    var runLogPath = AgentUnit.BUILD.runLogPath(runId);
-    agentSession.writeSession(
-        name, task, Objects.requireNonNullElse(branchName, ""), nextSpec.id(), agentType, runId);
-
-    if (background) {
-      var sshCmd =
-          AgentSession.buildBackgroundLaunchCommand(
-              name,
-              sshUser,
-              workDir,
-              fullPermissions,
-              agentCli,
-              taskSpec.model(),
-              taskSpec.reasoningEffort(),
-              nextSpec.id(),
-              agentType,
-              runLogPath,
-              runId);
-      if (!json) {
-        System.out.println(Ansi.AUTO.string("  @|bold Launching agent in background...|@"));
-        if (dryRun) {
-          System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
+      @Override
+      public void branchUnavailable(String branch) {
+        if (json) {
+          return;
         }
+        System.out.println(
+            Ansi.AUTO.string("  @|faint Branch:|@ " + branch + " (create manually in repo)"));
         System.out.println();
       }
-      if (!dryRun) {
-        createRun(name, runId, nextSpec.id(), agentType, branchName, task, runLogPath);
-        var pb = new ProcessBuilder(sshCmd);
-        pb.inheritIO();
-        var process = pb.start();
-        var exitCode = process.waitFor();
-        if (exitCode != 0) {
-          completeRun(runId, "failed", exitCode);
-          throw new IOException("Failed to launch background agent; see output above.");
+
+      @Override
+      public void launching(boolean bg, List<String> command) {
+        if (json) {
+          return;
         }
-        updateRunProcess(name, runId, agentSession);
-      }
-      Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
-      if (!dryRun) {
-        GuardrailWatcher.launch(name, file, config, shell);
-      }
-    } else {
-      var sshCmd =
-          AgentSession.buildForegroundTaskCommand(
-              name,
-              sshUser,
-              workDir,
-              fullPermissions,
-              agentCli,
-              taskSpec.model(),
-              taskSpec.reasoningEffort(),
-              nextSpec.id(),
-              agentType,
-              runLogPath,
-              runId);
-      if (!json) {
-        System.out.println(Ansi.AUTO.string("  @|bold Launching agent with spec...|@"));
-        if (dryRun) {
-          System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
-        }
+        System.out.println(
+            Ansi.AUTO.string(
+                bg
+                    ? "  @|bold Launching agent in background...|@"
+                    : "  @|bold Launching agent with spec...|@"));
         System.out.println();
       }
-      if (!dryRun) {
-        createRun(name, runId, nextSpec.id(), agentType, branchName, task, runLogPath);
-        var pb = new ProcessBuilder(sshCmd);
-        pb.inheritIO();
-        var process = pb.start();
-        var exitCode = process.waitFor();
-        completeRun(runId, exitCode == 0 ? "completed" : "failed", exitCode);
-        if (exitCode != 0) {
-          System.err.println(
-              Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
+
+      @Override
+      public void runsPruned(int count) {
+        if (count > 0 && !json) {
+          System.out.println(
+              Ansi.AUTO.string("  @|faint Pruned " + count + " old run log(s) in " + name + ".|@"));
         }
       }
-    }
-  }
 
-  /**
-   * Outcome of {@link #resolveSpec}: the chosen spec, whether {@code --restart} actually reset a
-   * non-pending status (so the caller can publish a {@code spec_restarted} event), and the status
-   * the spec held just before the reset.
-   *
-   * @param spec the resolved spec, or {@code null} when there is no ready spec to dispatch
-   * @param restarted {@code true} iff {@code --restart} actually reset a non-pending status
-   * @param previousStatus the status the spec held before the reset; {@code null} when {@code
-   *     restarted} is {@code false}
-   */
-  record SpecResolution(Spec spec, boolean restarted, String previousStatus) {
-    static SpecResolution none() {
-      return new SpecResolution(null, false, null);
-    }
-
-    static SpecResolution of(Spec spec) {
-      return new SpecResolution(spec, false, null);
-    }
-
-    static SpecResolution restarted(Spec spec, String previousStatus) {
-      return new SpecResolution(spec, true, previousStatus);
-    }
-  }
-
-  /**
-   * What {@link #prepareDispatch} produces: the resolved spec with its target repos (persisted to
-   * the DB alongside the {@code in_progress} transition) and its body.
-   */
-  record Prepared(
-      SpecResolution resolution, Spec taskSpec, List<SailYaml.Repo> targetRepos, String body) {}
-
-  /**
-   * Reads the project's specs from the control-plane database — the source of truth — picks the one
-   * to dispatch, resolves its target repos (honoring {@code --repo} overrides), marks it {@code
-   * in_progress} with those repos persisted, and returns it with its body. Persisting the resolved
-   * repos keeps later store reads (the review pipeline's prompt) aligned with the checkouts the
-   * agent actually works in, and resolving before the status transition means an invalid override
-   * fails before the spec is marked {@code in_progress}. Returns {@code null} when the project has
-   * no specs or none are ready. The container is never read: a stopped or file-drifted project is
-   * irrelevant because the spec lives in the DB, replicated by sync.
-   */
-  private Prepared prepareDispatch(
-      String project, String specId, boolean restart, SailYaml config) {
-    var fde = HostSync.handle();
-    if (fde == null) {
-      throw new IllegalStateException(
-          "This box has no FDE handle, so it cannot pick its assigned specs.\n"
-              + "  Set it once: sudo sail host config set sync-handle <your-handle>"
-              + "  (a node gets it from 'sail join').");
-    }
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      if (new FdeStore(db).byHandle(fde).isEmpty()) {
-        throw new IllegalStateException(
-            "FDE '"
-                + fde
-                + "' is not in this box's roster, so its assigned specs cannot be trusted.\n"
-                + "  Run 'sail sync' to pull the roster from main, or get authorized there first.");
+      @Override
+      public void sailSetupBackfilled(boolean backfilled) {
+        if (backfilled && !json) {
+          System.out.println(
+              Ansi.AUTO.string(
+                  "  @|faint Backfilled sail event helpers in "
+                      + name
+                      + " (container predates current sail; reinstalled).|@"));
+        }
       }
-      var store = new SpecStore(db);
-      var specs = store.projectSpecs(project);
-      if (specs.isEmpty()) {
-        return null;
-      }
-      var resolution = resolveSpec(specId, restart, specs, store, fde);
-      if (resolution.spec() == null) {
-        return null;
-      }
-      var targetRepos = DispatchRepos.resolve(config, resolution.spec(), repoOverrides);
-      var taskSpec = DispatchRepos.withTargetRepos(resolution.spec(), targetRepos);
-      store.updateReposAndStatus(
-          taskSpec.id(),
-          taskSpec.repos(),
-          SpecStatus.IN_PROGRESS,
-          BranchPolicy.branchName(config, taskSpec));
-      new ReviewStore(db).supersedeForSpec(taskSpec.id());
-      var body = store.getContent(taskSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-      return new Prepared(resolution, taskSpec, targetRepos, body);
-    }
-  }
-
-  /**
-   * Picks the spec to dispatch. Enforces that {@code --spec} only targets pending specs unless
-   * {@code --restart} is set, in which case the spec's status is reset to {@code pending} in the
-   * DB. Returns a {@link SpecResolution} so the caller can distinguish "picked next pending" from
-   * "reset a non-pending spec" and publish the matching lifecycle event (which is the durable audit
-   * trail).
-   */
-  static SpecResolution resolveSpec(
-      String specId, boolean restart, List<Spec> specs, SpecStore store, String fde) {
-    if (specId == null) {
-      var next = SpecDirectory.nextReadyAssignedTo(specs, fde);
-      return next == null ? SpecResolution.none() : SpecResolution.of(next);
-    }
-    var found = SpecDirectory.findById(specs, specId);
-    if (found == null) {
-      throw new IllegalArgumentException("Spec '" + specId + "' not found");
-    }
-    if (DispatchPolicy.check(Actor.cliOperator(fde), found, fde)
-        instanceof DispatchDecision.Refused refused) {
-      throw new IllegalStateException(refused.message() + " " + refused.fix());
-    }
-    if (found.status() == SpecStatus.PENDING) {
-      return SpecResolution.of(found);
-    }
-    if (!restart) {
-      throw new IllegalStateException(
-          "Spec '"
-              + specId
-              + "' is not pending (current status: "
-              + found.status().wire()
-              + "). A spec is dispatched only when pending. To dispatch it again, pass --restart"
-              + " (this resets status to pending and records the restart as a lifecycle event).");
-    }
-    store.updateStatus(specId, SpecStatus.PENDING);
-    return SpecResolution.restarted(found, found.status().wire());
+    };
   }
 
   /**
@@ -494,7 +325,7 @@ public final class DispatchCommand implements Runnable {
    * itself, since the control-plane database (the spec's status is already persisted there) is the
    * source of truth. Dry-run skips publishing entirely because no real state change happened.
    */
-  private void publishLifecycle(String type, String specId, Map<String, Object> data) {
+  private void publishLifecycle(Event event) {
     if (dryRun) {
       return;
     }
@@ -502,13 +333,12 @@ public final class DispatchCommand implements Runnable {
       if (eventPublisher == null) {
         eventPublisher = SailEventPublisher.localDefault();
       }
-      eventPublisher.publish(
-          Event.of(name, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
+      eventPublisher.publish(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      warnLifecyclePublishFailed(type, e);
+      warnLifecyclePublishFailed(event.type(), e);
     } catch (Exception e) {
-      warnLifecyclePublishFailed(type, e);
+      warnLifecyclePublishFailed(event.type(), e);
     }
   }
 
@@ -527,149 +357,12 @@ public final class DispatchCommand implements Runnable {
             Ansi.AUTO));
   }
 
-  /**
-   * Records the execution as a {@link RunStore} run <em>before</em> the agent starts — stamped with
-   * this box's FDE handle as its {@code node} so the provenance guard can tell a local run from a
-   * foreign one — and prunes the container's oldest run-log directories. Creating the row up front
-   * gives every terminal event a target and makes both dispatch modes appear in run history: a
-   * foreground session's row is completed here once its blocking launch returns. Never fatal: a
-   * bookkeeping failure must not fail a launch, since the agent runs regardless.
-   */
-  private void createRun(
-      String project,
-      String runId,
-      String specId,
-      String agentType,
-      String branch,
-      String task,
-      String logPath) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var runStore = new RunStore(db);
-      runStore.create(
-          runId,
-          project,
-          specId,
-          NodeIdentity.handle(),
-          "build",
-          agentType,
-          branch,
-          task,
-          null,
-          null,
-          logPath);
-      pruneRuns(project, runStore);
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine("Could not record run " + runId + ": " + e.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  /**
-   * Stamps the agent pid on a background run once launch has resolved it. The pid is a best-effort
-   * convenience; the run row is authoritative without it, so a lookup failure is non-fatal.
-   */
-  private void updateRunProcess(String project, String runId, AgentSession agentSession) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      Integer pid = null;
-      try {
-        var status = agentSession.queryStatus(project);
-        pid = status != null ? status.pid() : null;
-      } catch (Exception ignored) {
-        pid = null;
-      }
-      new RunStore(db).updateProcess(runId, pid, null);
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine("Could not update run " + runId + ": " + e.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  /**
-   * Completes a run with its terminal status and exit code — used for a foreground session, whose
-   * launch command blocks until the agent exits, and for a background launch that failed to start.
-   * Best-effort: a bookkeeping failure must not mask the real outcome.
-   */
-  private void completeRun(String runId, String status, int exitCode) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      new RunStore(db).complete(runId, status, exitCode);
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine("Could not complete run " + runId + ": " + e.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  private void pruneRuns(String project, RunStore runStore) {
-    try {
-      var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
-      var pruned =
-          RunRetention.prune(new ShellExecutor(false), project, ids, RunRetention.DEFAULT_KEEP);
-      if (!pruned.isEmpty() && !json) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|faint Pruned " + pruned.size() + " old run log(s) in " + project + ".|@"));
-      }
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Run-log pruning skipped for " + project + ": " + e.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  private void ensureSailSetup(ShellExecutor shell, String container) {
-    try {
-      var result = ContainerSailSetup.ensureInstalled(shell, container);
-      if (result == ContainerSailSetup.Result.BACKFILLED && !json) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|faint Backfilled sail event helpers in "
-                    + container
-                    + " (container predates current sail; reinstalled).|@"));
-      }
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Could not backfill sail event helpers in "
-                  + container
-                  + ": "
-                  + e.getMessage()
-                  + ". Lifecycle events may not reach the bus; run 'sail project sync "
-                  + container
-                  + "' to retry.",
-              Ansi.AUTO));
-    }
-  }
-
   private void printNoSpecs() {
     if (json) {
       System.out.println(CliJson.stringify(new NoDispatch(name, false, "no_pending_specs")));
     } else {
       System.out.println(Ansi.AUTO.string("  @|faint No pending specs found for " + name + ".|@"));
     }
-  }
-
-  static String branchRepoDir(String workDir, List<SailYaml.Repo> targetRepos, SailYaml.Repo repo) {
-    return targetRepos.size() == 1 ? workDir : workDir + "/" + repo.path();
-  }
-
-  /**
-   * The git checkout command for a dispatch's work branch. A fresh branch is created with {@code
-   * checkout -b}; on a restart an already-present branch is reused with a <em>forced</em> {@code
-   * checkout -f} so re-dispatch lands on the prior branch even when the previous run left a dirty
-   * working tree (untracked scaffold that a plain {@code checkout} would refuse to overwrite),
-   * rather than resuming onto it and aborting. A collision on a non-restart dispatch is unexpected
-   * and fails loud, pointing the operator at {@code --restart}.
-   */
-  static List<String> branchCheckoutArgs(
-      String repoDir, String branchName, boolean branchExists, boolean restart) {
-    if (branchExists && !restart) {
-      throw new IllegalStateException(
-          "Branch '"
-              + branchName
-              + "' already exists. Pass --restart to re-dispatch onto it, or delete it first.");
-    }
-    return branchExists
-        ? List.of("git", "-C", repoDir, "checkout", "-f", branchName)
-        : List.of("git", "-C", repoDir, "checkout", "-b", branchName);
   }
 
   record DispatchPreview(String name, String specId, String specTitle, String mode, String task) {}

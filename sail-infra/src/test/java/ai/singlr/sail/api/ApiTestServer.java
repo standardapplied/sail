@@ -41,13 +41,13 @@ public final class ApiTestServer implements AutoCloseable {
   }
 
   /** Opens an in-tempdir SQLite DB, creates an admin token, and starts the server on port 0. */
-  public static ApiTestServer start(Path tempDir, ApiOperations operations) throws IOException {
+  public static ApiTestServer start(Path tempDir, Operations operations) throws IOException {
     return start(tempDir, operations, null, null);
   }
 
   /** Starts an event-bus-aware server; pass {@code null} for {@code eventBus} to disable events. */
   public static ApiTestServer start(
-      Path tempDir, ApiOperations operations, EventBus eventBus, EventSubscriber auditSubscriber)
+      Path tempDir, Operations operations, EventBus eventBus, EventSubscriber auditSubscriber)
       throws IOException {
     var db = Sqlite.open(tempDir.resolve("sail-test.db"));
     new SchemaManager(db).migrate();

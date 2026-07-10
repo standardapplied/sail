@@ -120,7 +120,7 @@ public final class WatcherRearmer implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
-            .filter(run -> SailApiOperations.ownsRun(run.node(), node))
+            .filter(run -> SailOperations.ownsRun(run.node(), node))
             .findFirst();
     if (latest.isEmpty() || !"running".equals(latest.get().status())) {
       return false;

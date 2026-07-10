@@ -101,7 +101,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -124,7 +124,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               null,
@@ -148,7 +148,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               null,
@@ -167,7 +167,7 @@ class ApiCoverageEdgesTest {
         new SailApiServer(
             "127.0.0.1",
             0,
-            new SailApiOperations(),
+            new SailOperations(),
             new FixedTokenTestAuth("tok"),
             null,
             null,
@@ -186,7 +186,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               null,

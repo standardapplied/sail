@@ -5,43 +5,29 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
-import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.DispatchRepos;
-import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -50,9 +36,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 
-public final class SailApiOperations implements ApiOperations {
-
-  private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
+public final class SailOperations implements Operations {
 
   private final ShellExec shell;
   private final String file;
@@ -65,29 +49,31 @@ public final class SailApiOperations implements ApiOperations {
   private final ProjectStore projectStore;
   private final Supplier<ConnectEnvironment> connectEnvironment;
   private final SyncScheduler syncScheduler;
+  private final ProjectLoader projects;
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
+  private final DispatchOperations dispatchOps;
 
-  public SailApiOperations() {
+  public SailOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
   }
 
-  public SailApiOperations(ShellExec shell, String file) {
+  public SailOperations(ShellExec shell, String file) {
     this(shell, file, WatcherSpawner::spawnProcess);
   }
 
-  SailApiOperations(ShellExec shell, String file, WatcherSpawner.ProcessSpawner watcherFallback) {
+  SailOperations(ShellExec shell, String file, WatcherSpawner.ProcessSpawner watcherFallback) {
     this(shell, file, watcherFallback, null, null);
   }
 
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
-  public SailApiOperations(
+  public SailOperations(
       ShellExec shell, String file, EventBus eventBus, AuditPersister auditPersister) {
     this(shell, file, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
   }
 
   /** Construct with database-backed stores; used by the control plane server. */
-  public SailApiOperations(
+  public SailOperations(
       ShellExec shell,
       String file,
       EventBus eventBus,
@@ -105,7 +91,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   /** Construct with database-backed spec store (no review store). */
-  public SailApiOperations(
+  public SailOperations(
       ShellExec shell,
       String file,
       EventBus eventBus,
@@ -115,7 +101,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   /** Construct with the project catalog included but no sync or run aggregate. */
-  public SailApiOperations(
+  public SailOperations(
       ShellExec shell,
       String file,
       EventBus eventBus,
@@ -132,17 +118,19 @@ public final class SailApiOperations implements ApiOperations {
         reviewStore,
         null,
         projectStore,
-        SyncScheduler.disabled());
+        SyncScheduler.disabled(),
+        null);
   }
 
   /**
-   * As {@link #SailApiOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore,
-   * ReviewStore, ProjectStore)} with the node's sync-on-write scheduler and the run aggregate; used
-   * by {@code sail server start} so spec mutations propagate to main, stale reads freshen without a
-   * manual {@code sail sync}, and dispatches record their runs — without the run store every {@code
-   * /v1/runs} route refuses and API-lane dispatches silently record no run at all.
+   * As {@link #SailOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore, ReviewStore,
+   * ProjectStore)} with the node's sync-on-write scheduler, the run aggregate, and the FDE roster;
+   * used by {@code sail server start} so spec mutations propagate to main, stale reads freshen
+   * without a manual {@code sail sync}, dispatches record their runs — without the run store every
+   * {@code /v1/runs} route refuses and API-lane dispatches silently record no run at all — and
+   * dispatch trusts only handles present in the synced roster.
    */
-  public SailApiOperations(
+  public SailOperations(
       ShellExec shell,
       String file,
       EventBus eventBus,
@@ -151,7 +139,8 @@ public final class SailApiOperations implements ApiOperations {
       ReviewStore reviewStore,
       RunStore runStore,
       ProjectStore projectStore,
-      SyncScheduler syncScheduler) {
+      SyncScheduler syncScheduler,
+      FdeStore fdeStore) {
     this(
         shell,
         file,
@@ -163,10 +152,11 @@ public final class SailApiOperations implements ApiOperations {
         runStore,
         projectStore,
         ConnectEnvironment::detect,
-        syncScheduler);
+        syncScheduler,
+        fdeStore);
   }
 
-  SailApiOperations(
+  SailOperations(
       ShellExec shell,
       String file,
       WatcherSpawner.ProcessSpawner watcherFallback,
@@ -175,7 +165,7 @@ public final class SailApiOperations implements ApiOperations {
     this(shell, file, watcherFallback, eventBus, auditPersister, null, null);
   }
 
-  SailApiOperations(
+  SailOperations(
       ShellExec shell,
       String file,
       WatcherSpawner.ProcessSpawner watcherFallback,
@@ -186,7 +176,7 @@ public final class SailApiOperations implements ApiOperations {
     this(shell, file, watcherFallback, eventBus, auditPersister, specStore, reviewStore, null);
   }
 
-  SailApiOperations(
+  SailOperations(
       ShellExec shell,
       String file,
       WatcherSpawner.ProcessSpawner watcherFallback,
@@ -206,10 +196,11 @@ public final class SailApiOperations implements ApiOperations {
         runStore,
         null,
         ConnectEnvironment::detect,
-        SyncScheduler.disabled());
+        SyncScheduler.disabled(),
+        null);
   }
 
-  SailApiOperations(
+  SailOperations(
       ShellExec shell,
       String file,
       WatcherSpawner.ProcessSpawner watcherFallback,
@@ -231,10 +222,11 @@ public final class SailApiOperations implements ApiOperations {
         runStore,
         projectStore,
         connectEnvironment,
-        SyncScheduler.disabled());
+        SyncScheduler.disabled(),
+        null);
   }
 
-  SailApiOperations(
+  SailOperations(
       ShellExec shell,
       String file,
       WatcherSpawner.ProcessSpawner watcherFallback,
@@ -246,6 +238,34 @@ public final class SailApiOperations implements ApiOperations {
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler) {
+    this(
+        shell,
+        file,
+        watcherFallback,
+        eventBus,
+        auditPersister,
+        specStore,
+        reviewStore,
+        runStore,
+        projectStore,
+        connectEnvironment,
+        syncScheduler,
+        null);
+  }
+
+  SailOperations(
+      ShellExec shell,
+      String file,
+      WatcherSpawner.ProcessSpawner watcherFallback,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      RunStore runStore,
+      ProjectStore projectStore,
+      Supplier<ConnectEnvironment> connectEnvironment,
+      SyncScheduler syncScheduler,
+      FdeStore fdeStore) {
     this.shell = shell;
     this.file = file;
     this.watcherSpawner = new WatcherSpawner(shell, watcherFallback);
@@ -257,8 +277,28 @@ public final class SailApiOperations implements ApiOperations {
     this.projectStore = projectStore;
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
+    this.projects = new ProjectLoader(shell, file);
     this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
+    this.dispatchOps =
+        new DispatchOperations(
+            shell,
+            file,
+            specStore,
+            reviewStore,
+            runStore,
+            fdeStore,
+            this::publishOnBus,
+            this.watcherSpawner,
+            DispatchOperations.autoSnapshotter(shell),
+            DispatchOperations.shellLauncher(shell),
+            DispatchOperations.Listener.NONE);
+  }
+
+  private void publishOnBus(Event event) {
+    if (eventBus != null) {
+      eventBus.publish(event);
+    }
   }
 
   @Override
@@ -438,7 +478,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private ProjectResponse projectValue(String project) {
-    var loaded = loadProject(project);
+    var loaded = projects.load(project);
     var agent = loaded.config().agent() != null ? agentConfigView(loaded.config()) : null;
     return new ProjectResponse(project, statusName(loaded.state()), agent);
   }
@@ -473,7 +513,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private ConnectResponse connectValue(String project) {
-    var loaded = loadRunningProject(project);
+    var loaded = projects.loadRunning(project);
     var containerIp = ((ContainerState.Running) loaded.state()).ipv4();
     if (containerIp == null) {
       throw new ApiException(
@@ -498,7 +538,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private SpecsResponse specsValue(String project) {
-    requireProjectExists(project);
+    projects.requireExists(project);
     var specs = specStore.projectSpecs(project);
     var summary = SpecDirectory.summarize(specs);
     return new SpecsResponse(
@@ -509,7 +549,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private SpecResponse specValue(String project, String specId) {
-    requireProjectExists(project);
+    projects.requireExists(project);
     var specs = specStore.projectSpecs(project);
     var spec = SpecDirectory.findById(specs, specId);
     if (spec == null) {
@@ -526,239 +566,30 @@ public final class SailApiOperations implements ApiOperations {
 
   private DispatchResponse dispatchValue(
       String project, DispatchRequest request, Actor actor, String localHandle) {
-    var loaded = loadRunningProject(project);
-    if (!request.mode().equals("background") && !request.mode().equals("foreground")) {
-      throw new ApiException(
-          ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
-    }
-    if (Strings.isBlank(localHandle)) {
-      throw refusal(DispatchPolicy.nodeHandleUnset());
-    }
-
-    var agentSession = new AgentSession(shell);
-    var existing = querySession(agentSession, project);
-    if (existing != null && existing.running()) {
-      throw new ApiException(
-          ErrorCode.AGENT_ALREADY_RUNNING,
-          "Agent is already running for project '" + project + "'.",
-          "Stop the active agent before dispatching another spec.");
-    }
-
-    var specs = specStore.projectSpecs(project);
-    var nextSpec = resolveSpec(specs, request.specId(), localHandle);
-    if (nextSpec == null) {
-      return new DispatchResponse(project, false, "no_pending_specs", null, null, "", false);
-    }
-    if (DispatchPolicy.check(actor, nextSpec, localHandle)
-        instanceof DispatchDecision.Refused refused) {
-      throw refusal(refused);
-    }
-
-    var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
-    var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    var branch = branchName(loaded.config(), nextSpec);
-    specStore.updateReposAndStatus(nextSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
-    if (reviewStore != null) {
-      reviewStore.supersedeForSpec(nextSpec.id());
-    }
-    var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-    var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
-    var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
-    publishDispatched(project, nextSpec.id(), agentType, branch, request.mode());
-    var snapshot = createSnapshotIfNeeded(project, loaded.config());
-    if (!snapshot.isEmpty()) {
-      publishSnapshotCreated(project, snapshot);
-    }
-    var branchCreated = createBranchIfNeeded(project, loaded.config(), targetRepos, branch);
-
-    if (!request.dryRun()) {
-      var runId = DateTimeUtils.newId().toString();
-      var runLogPath = AgentUnit.BUILD.runLogPath(runId);
-      recordRun(runId, project, nextSpec.id(), localHandle, agentType, branch, task, runLogPath);
-      AgentSession.SessionInfo status = null;
-      try {
-        var outcome =
-            launchAgent(
-                project,
-                loaded.config(),
-                targetRepos,
-                task,
-                branch,
-                request.mode(),
-                taskSpec,
-                agentType,
-                runLogPath,
-                runId);
-        status = querySession(agentSession, project);
-        if (request.mode().equals("foreground")) {
-          completeForegroundRun(runId, outcome.exitCode());
-        } else {
-          updateRunProcess(runId, status, outcome.watcher());
-        }
-        if (status != null && status.running()) {
-          publishAgentSessionStarted(
-              project, nextSpec.id(), agentType, status.pid(), runId, outcome.watcher());
-        }
-      } catch (RuntimeException e) {
-        failRun(runId);
-        throw e;
-      }
-      return new DispatchResponse(
-          project,
-          true,
-          null,
-          dispatchedSpecView(taskSpec, branch),
-          agentStatusView(agentType, request.mode(), status),
-          snapshot,
-          branchCreated);
-    }
-
-    return new DispatchResponse(
-        project,
-        true,
-        null,
-        dispatchedSpecView(taskSpec, branch),
-        agentStatusView(agentType, request.mode(), null),
-        snapshot,
-        branchCreated);
-  }
-
-  private void publishDispatched(
-      String project, String specId, String agentType, String branch, String mode) {
-    if (eventBus == null) {
-      return;
-    }
-    eventBus.publish(
-        Event.of(
+    var outcome =
+        dispatchOps.dispatch(
             project,
-            specId,
-            Event.WellKnownTypes.SPEC_DISPATCHED,
-            Event.SAIL_AGENT,
-            HostInfo.hostname(),
-            DispatchEvents.dispatchedData(branch, mode)));
-  }
-
-  private void publishSnapshotCreated(String project, String label) {
-    if (eventBus == null) {
-      return;
-    }
-    eventBus.publish(
-        Event.of(
-            project,
-            null,
-            Event.WellKnownTypes.SNAPSHOT_CREATED,
-            Event.SAIL_AGENT,
-            HostInfo.hostname(),
-            Map.of("label", label)));
-  }
-
-  /**
-   * Records the launched execution as a run stamped with this box's handle as its {@code node}, so
-   * the provenance guard can serve local runs and refuse foreign ones, and prunes the container's
-   * oldest run-log directories. Never fatal: the agent is already running, so a bookkeeping failure
-   * only forfeits the run's metadata, never the launch. A run store is absent only in tests that do
-   * not exercise dispatch.
-   */
-  private void recordRun(
-      String runId,
-      String project,
-      String specId,
-      String node,
-      String agentType,
-      String branch,
-      String task,
-      String logPath) {
-    if (runStore == null) {
-      return;
-    }
-    try {
-      runStore.create(
-          runId, project, specId, node, "build", agentType, branch, task, null, null, logPath);
-      var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
-      RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
-    } catch (Exception e) {
-      System.err.println("  [api] Warning: could not record run " + runId + ": " + e.getMessage());
-    }
-  }
-
-  /** Stamps the agent + watcher pids on a background run once launch has resolved them. */
-  private void updateRunProcess(
-      String runId, AgentSession.SessionInfo status, Optional<WatcherSpawner.Spawned> watcher) {
-    Integer watcherPid =
-        watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
-            ? (int) fallback.pid()
-            : null;
-    runBookkeeping(
-        "update run process " + runId,
-        () -> runStore.updateProcess(runId, status != null ? status.pid() : null, watcherPid));
-  }
-
-  /**
-   * Completes a foreground run explicitly: its launch command blocks until the agent exits, so the
-   * exit code is known here and the run must not be left {@code running} waiting for a terminal
-   * hook event that may never arrive.
-   */
-  private void completeForegroundRun(String runId, int exitCode) {
-    runBookkeeping(
-        "complete run " + runId,
-        () -> runStore.complete(runId, exitCode == 0 ? "completed" : "failed", exitCode));
-  }
-
-  /**
-   * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
-   */
-  private void failRun(String runId) {
-    runBookkeeping("mark run failed " + runId, () -> runStore.complete(runId, "failed", null));
-  }
-
-  /**
-   * Runs a best-effort run-store bookkeeping update. A missing store (a box that keeps no run
-   * aggregate) is a silent no-op, and a store error is logged but never propagated: bookkeeping
-   * must never fail a launch or mask the agent's real outcome.
-   */
-  private void runBookkeeping(String action, Runnable op) {
-    if (runStore == null) {
-      return;
-    }
-    try {
-      op.run();
-    } catch (RuntimeException e) {
-      System.err.println("  [api] Warning: could not " + action + ": " + e.getMessage());
-    }
-  }
-
-  private void publishAgentSessionStarted(
-      String project,
-      String specId,
-      String agentType,
-      Integer pid,
-      String runId,
-      Optional<WatcherSpawner.Spawned> watcher) {
-    if (eventBus == null) {
-      return;
-    }
-    var data = new LinkedHashMap<String, Object>();
-    if (pid != null) {
-      data.put("pid", pid);
-    }
-    if (Strings.isNotBlank(runId)) {
-      data.put(Event.WellKnownData.RUN_ID, runId);
-    }
-    if (watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback) {
-      data.put(Event.WellKnownData.WATCHER_PID, fallback.pid());
-    }
-    eventBus.publish(
-        Event.of(
-            project,
-            specId,
-            Event.WellKnownTypes.AGENT_SESSION_STARTED,
-            agentType,
-            HostInfo.hostname(),
-            data));
+            new DispatchOperations.Request(
+                request.specId(), request.mode(), request.dryRun(), request.repos(), false),
+            actor,
+            localHandle);
+    return switch (outcome) {
+      case DispatchOperations.NoSpecs ignored ->
+          new DispatchResponse(project, false, "no_pending_specs", null, null, "", false);
+      case DispatchOperations.Dispatched dispatched ->
+          new DispatchResponse(
+              project,
+              true,
+              null,
+              dispatchedSpecView(dispatched.taskSpec(), dispatched.branch()),
+              agentStatusView(dispatched.agentType(), request.mode(), dispatched.session()),
+              dispatched.snapshotLabel(),
+              dispatched.branchCreated());
+    };
   }
 
   private AgentStatusResponse agentStatusValue(String project) {
-    requireProjectExists(project);
+    projects.requireExists(project);
     var info = querySession(new AgentSession(shell), project);
     return new AgentStatusResponse(
         project,
@@ -779,7 +610,7 @@ public final class SailApiOperations implements ApiOperations {
    * run is local.
    */
   private RunLogResponse runLogValue(RunStore.RunRow run, int tail) {
-    requireProjectExists(run.project());
+    projects.requireExists(run.project());
     if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
@@ -807,7 +638,7 @@ public final class SailApiOperations implements ApiOperations {
    * provenance guard has already established the run is local.
    */
   private StopRunResponse stopRunValue(RunStore.RunRow run) {
-    requireProjectExists(run.project());
+    projects.requireExists(run.project());
     if (!"running".equals(run.status())) {
       return new StopRunResponse(run.id(), false, "run_not_running", null);
     }
@@ -828,7 +659,7 @@ public final class SailApiOperations implements ApiOperations {
   }
 
   private AgentReportResponse agentReportValue(String project, String localHandle) {
-    var loaded = loadProject(project);
+    var loaded = projects.load(project);
     try {
       var specs = specStore != null ? specStore.projectSpecs(project) : List.<Spec>of();
       var session =
@@ -849,73 +680,6 @@ public final class SailApiOperations implements ApiOperations {
       case ContainerState.NotCreated ignored -> "not_created";
       case ContainerState.Error ignored -> "error";
     };
-  }
-
-  private LoadedProject loadRunningProject(String project) {
-    var loaded = loadProject(project);
-    switch (loaded.state()) {
-      case ContainerState.Running ignored -> {
-        return loaded;
-      }
-      case ContainerState.Stopped ignored ->
-          throw new ApiException(
-              ErrorCode.PROJECT_STOPPED,
-              "Project '" + project + "' is stopped.",
-              "Start it with sail project start " + project + ".");
-      case ContainerState.NotCreated ignored ->
-          throw new ApiException(
-              ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
-      case ContainerState.Error error ->
-          throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
-    }
-  }
-
-  private LoadedProject loadProject(String project) {
-    var singYamlPath = SailPaths.resolveSailYaml(project, file);
-    if (!Files.exists(singYamlPath)) {
-      throw new ApiException(
-          ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
-          "Project descriptor was not found: " + singYamlPath.toAbsolutePath());
-    }
-    try {
-      var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
-      var state = new ContainerManager(shell).queryState(project);
-      return new LoadedProject(config, state);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, "Failed to load project.", e);
-    }
-  }
-
-  private void requireProjectExists(String project) {
-    var state = loadProject(project).state();
-    if (state instanceof ContainerState.NotCreated) {
-      throw new ApiException(
-          ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
-    }
-    if (state instanceof ContainerState.Error error) {
-      throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
-    }
-  }
-
-  private static ApiException refusal(DispatchDecision.Refused refused) {
-    return new ApiException(refused.code(), refused.message(), refused.fix());
-  }
-
-  private static Spec resolveSpec(List<Spec> specs, String specId, String localHandle) {
-    if (Strings.isBlank(specId)) {
-      return SpecDirectory.nextReadyAssignedTo(specs, localHandle);
-    }
-    var spec = SpecDirectory.findById(specs, specId);
-    if (spec == null) {
-      throw new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
-    }
-    if (!SpecDirectory.isReady(specs, spec)) {
-      throw new ApiException(
-          ErrorCode.SPEC_NOT_READY,
-          "Spec '" + specId + "' is not ready for dispatch.",
-          "Resolve dependencies or choose a ready spec.");
-    }
-    return spec;
   }
 
   private static SpecView specView(List<Spec> specs, Spec spec) {
@@ -947,135 +711,6 @@ public final class SailApiOperations implements ApiOperations {
         Strings.isNotBlank(branch) ? branch : null);
   }
 
-  private static String branchName(SailYaml config, Spec spec) {
-    return BranchPolicy.branchName(config, spec);
-  }
-
-  private String createSnapshotIfNeeded(String project, SailYaml config) {
-    if (config.agent() == null || !config.agent().autoSnapshot()) {
-      return "";
-    }
-    var snapMgr = new SnapshotManager(shell);
-    if (!shouldSnapshot(snapMgr, project)) {
-      return "";
-    }
-    var label = SnapshotManager.defaultLabel();
-    try {
-      snapMgr.create(project, label);
-      return label;
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.SNAPSHOT_FAILED, "Failed to create dispatch snapshot.", e);
-    }
-  }
-
-  private boolean createBranchIfNeeded(
-      String project, SailYaml config, List<SailYaml.Repo> targetRepos, String branch) {
-    if (Strings.isBlank(branch) || targetRepos.isEmpty()) {
-      return false;
-    }
-    var created = false;
-    for (var repo : targetRepos) {
-      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
-      var repoExists =
-          exec(ContainerExec.asDevUser(project, List.of("test", "-d", repoDir + "/.git")));
-      if (!repoExists.ok()) {
-        continue;
-      }
-      var result =
-          exec(
-              ContainerExec.asDevUser(
-                  project, List.of("git", "-C", repoDir, "checkout", "-b", branch)));
-      if (!result.ok()) {
-        throw new ApiException(
-            ErrorCode.BRANCH_CREATE_FAILED,
-            "Failed to create branch '" + branch + "' in repo '" + repo.path() + "'.");
-      }
-      created = true;
-    }
-    return created;
-  }
-
-  /**
-   * The outcome of a launch attempt: the launch command's exit code (for foreground, the agent's
-   * own exit code, since its launch command blocks until the agent exits) and the guardrail
-   * watcher, if one was spawned (background only).
-   */
-  private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
-
-  private LaunchOutcome launchAgent(
-      String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
-      String task,
-      String branch,
-      String mode,
-      Spec spec,
-      String agentType,
-      String logPath,
-      String runId) {
-    var background = mode.equals("background");
-    try {
-      ensureSailSetup(project);
-      var session = new AgentSession(shell);
-      session.ensureDirectory(project);
-      session.writeTaskFile(project, task);
-      session.writeSession(
-          project, task, Objects.requireNonNullElse(branch, ""), spec.id(), agentType, runId);
-      var agentCli = AgentCli.fromYamlName(agentType);
-      var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
-      var command =
-          background
-              ? AgentSession.buildBackgroundLaunchCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  logPath,
-                  runId)
-              : AgentSession.buildForegroundTaskCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  logPath,
-                  runId);
-      var result = exec(command);
-      if (background) {
-        if (!result.ok()) {
-          throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
-        }
-        return new LaunchOutcome(result.exitCode(), launchWatcherIfAgent(project, config));
-      }
-      return new LaunchOutcome(result.exitCode(), Optional.empty());
-    } catch (ApiException e) {
-      throw e;
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
-    }
-  }
-
-  private void ensureSailSetup(String project) {
-    try {
-      ContainerSailSetup.ensureInstalled(shell, project);
-    } catch (Exception e) {
-      System.err.println(
-          "  [api] Warning: failed to backfill sail event helpers in "
-              + project
-              + ": "
-              + e.getMessage());
-    }
-  }
-
   /**
    * Relaunches the guardrail watcher for a project whose original watcher died (e.g. with a daemon
    * restart mid-run). Unit-or-nothing: the relaunch never falls back to a plain process, so a
@@ -1085,7 +720,7 @@ public final class SailApiOperations implements ApiOperations {
    * re-armed agent keeps its remaining budget rather than getting a fresh one.
    */
   public Optional<WatcherSpawner.Unit> relaunchWatcher(String project) throws IOException {
-    var loaded = loadProject(project);
+    var loaded = projects.load(project);
     if (loaded.config().agent() == null) {
       return Optional.empty();
     }
@@ -1093,41 +728,6 @@ public final class SailApiOperations implements ApiOperations {
         project,
         SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
         SailPaths.projectDir(project).resolve("watch.log"));
-  }
-
-  /**
-   * Spawns the detached watcher whenever the project declares an agent block — supervision is on by
-   * default, with {@code Guardrails.defaults()} applying when none are declared, and the watcher is
-   * also the authoritative stop observer the review pipeline depends on.
-   */
-  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(String project, SailYaml config)
-      throws IOException {
-    if (config.agent() == null) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        watcherSpawner.spawn(
-            project,
-            SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-            SailPaths.projectDir(project).resolve("watch.log")));
-  }
-
-  private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {
-    try {
-      var snapshots = snapMgr.list(project);
-      if (snapshots.isEmpty()) {
-        return true;
-      }
-      var latestTime = OffsetDateTime.parse(snapshots.getLast().createdAt()).toInstant();
-      return DateTimeUtils.now().isAfter(latestTime.plus(SNAPSHOT_INTERVAL));
-    } catch (Exception e) {
-      System.err.println(
-          "  [snapshot] Could not determine snapshot age for '"
-              + project
-              + "', taking one to be safe: "
-              + e.getMessage());
-      return true;
-    }
   }
 
   private AgentSession.SessionInfo querySession(AgentSession session, String project) {
@@ -1219,8 +819,8 @@ public final class SailApiOperations implements ApiOperations {
     if (eventBus == null) {
       return Result.failure(
           ErrorCode.INTERNAL,
-          "Event bus is not wired into this SailApiOperations instance.",
-          "Use the SailApiOperations constructor that accepts an EventBus.");
+          "Event bus is not wired into this SailOperations instance.",
+          "Use the SailOperations constructor that accepts an EventBus.");
     }
     var result =
         safe(
@@ -1396,6 +996,4 @@ public final class SailApiOperations implements ApiOperations {
       String reviewId, String findingId, Actor actor) {
     return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId, actor));
   }
-
-  private record LoadedProject(SailYaml config, ContainerState state) {}
 }

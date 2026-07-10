@@ -183,7 +183,9 @@
                                         <exclude>ai.singlr.sail.api.SseHandler</exclude>
                                         <exclude>ai.singlr.sail.api.SseHandler.StreamSubscriber</exclude>
                                         <exclude>ai.singlr.sail.api.LocalApiSocket</exclude>
-                                        <exclude>ai.singlr.sail.api.SailApiOperations</exclude>
+                                        <exclude>ai.singlr.sail.api.SailOperations</exclude>
+                                        <exclude>ai.singlr.sail.api.DispatchOperations</exclude>
+                                        <exclude>ai.singlr.sail.api.DispatchOperations.*</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiClient</exclude>
                                         <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
                                         <exclude>ai.singlr.sail.api.AgentLogStreamer</exclude>
@@ -255,7 +257,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>ai.singlr.sail.api.SailApiOperations</include>
+                                        <include>ai.singlr.sail.api.SailOperations</include>
                                     </includes>
                                     <!--
                                         The central request handler: every method is exercised
@@ -276,6 +278,33 @@
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>1.0</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.DispatchOperations</include>
+                                    </includes>
+                                    <!--
+                                        The single dispatch executor shared by the CLI and API
+                                        lanes. The uncovered lines are best-effort bookkeeping
+                                        catches (run-store warnings, sail-setup backfill failure)
+                                        and the terminal launcher's process spawn, none reachable
+                                        without fault injection. Floored just under the actual so
+                                        the bar is locked in; raise toward 1.0 as those paths gain
+                                        coverage.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.95</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
@@ -338,10 +367,10 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>ai.singlr.sail.api.SailApiOperations</include>
+                                        <include>ai.singlr.sail.api.SailOperations</include>
                                     </includes>
                                     <!--
-                                        SailApiOperations dispatch path includes lifecycle event
+                                        SailOperations dispatch path includes lifecycle event
                                         publishers and review operations that depend on container
                                         state or database stores injected at server startup.
                                         Tested via router integration tests with FakeOperations;

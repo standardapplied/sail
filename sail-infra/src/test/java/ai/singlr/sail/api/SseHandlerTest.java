@@ -107,7 +107,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -179,7 +179,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -207,7 +207,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

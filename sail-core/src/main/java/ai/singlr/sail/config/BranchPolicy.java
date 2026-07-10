@@ -9,7 +9,7 @@ import ai.singlr.sail.common.Strings;
 
 /**
  * Pure resolver for the git branch name a dispatched spec should run on. Replaces the inline
- * duplicates that lived in {@code SailApiOperations.branchName} (HTTP dispatch path) and {@code
+ * duplicates that lived in {@code SailOperations.branchName} (HTTP dispatch path) and {@code
  * DispatchCommand} (CLI dispatch path); both surfaces now consume the same answer so events
  * announcing the dispatch carry the same {@code branch} value regardless of where the dispatch was
  * kicked off.

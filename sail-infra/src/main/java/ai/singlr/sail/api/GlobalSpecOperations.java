@@ -19,7 +19,7 @@ import java.util.Objects;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
- * out of {@code SailApiOperations} so the spec-store domain lives in one focused, fully-testable
+ * out of {@code SailOperations} so the spec-store domain lives in one focused, fully-testable
  * class. Methods return their response value and throw {@link ApiException} on failure; the caller
  * wraps them in a {@code Result}.
  */

@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.SpecStore;
 
-public interface ApiOperations {
+public interface Operations {
 
   Result<ReviewListResponse> reviewsForSpec(String specId);
 

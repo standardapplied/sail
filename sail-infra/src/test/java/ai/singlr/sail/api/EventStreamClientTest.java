@@ -52,7 +52,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -91,7 +91,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -119,7 +119,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -212,7 +212,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 
-class TestOperations implements ApiOperations {
+class TestOperations implements Operations {
 
   @Override
   public Result<HealthResponse> health() {

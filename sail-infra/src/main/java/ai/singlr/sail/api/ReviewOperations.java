@@ -14,11 +14,11 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 
 /**
- * Review-workflow operations against the {@link ReviewStore}. Split out of {@code
- * SailApiOperations} so the review domain is one focused, fully-testable class. Methods return
- * their response value and throw {@link ApiException} on failure; the caller wraps them in a {@code
- * Result}. {@code specStore} is needed only to park a spec in {@code awaiting_merge} when its human
- * review is approved — merging the PR and marking the spec {@code done} stays a human act.
+ * Review-workflow operations against the {@link ReviewStore}. Split out of {@code SailOperations}
+ * so the review domain is one focused, fully-testable class. Methods return their response value
+ * and throw {@link ApiException} on failure; the caller wraps them in a {@code Result}. {@code
+ * specStore} is needed only to park a spec in {@code awaiting_merge} when its human review is
+ * approved — merging the PR and marking the spec {@code done} stays a human act.
  */
 final class ReviewOperations {
 

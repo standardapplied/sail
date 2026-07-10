@@ -86,7 +86,7 @@ public final class RunTracker implements EventSubscriber {
     var node = localHandle.get();
     runStore
         .findById(runId)
-        .filter(run -> SailApiOperations.ownsRun(run.node(), node))
+        .filter(run -> SailOperations.ownsRun(run.node(), node))
         .ifPresent(run -> completeOrRecord(run, status, exitCode));
   }
 
