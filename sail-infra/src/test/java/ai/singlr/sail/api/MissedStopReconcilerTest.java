@@ -86,7 +86,13 @@ class MissedStopReconcilerTest {
 
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<Instant> clock) {
-    return new MissedStopReconciler(specStore, sessionStore, eventStore, bus, probe, clock);
+    return reconciler(probe, () -> "node-a", clock);
+  }
+
+  private MissedStopReconciler reconciler(
+      MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
+    return new MissedStopReconciler(
+        specStore, sessionStore, eventStore, bus, probe, localHandle, clock);
   }
 
   private void createInProgressSpec(String id) {
@@ -129,6 +135,19 @@ class MissedStopReconcilerTest {
         1,
         null,
         "/home/dev/.sail/runs/r/agent.log");
+  }
+
+  private void adoptedForeignRunningSession(String specId, Instant startedAt) {
+    sessionStore.applyRevision(
+        DateTimeUtils.newId().toString(),
+        Map.of(
+            "project", "test-project",
+            "spec_id", specId,
+            "node", "node-b",
+            "agent", "claude-code",
+            "status", "running",
+            "started_at", startedAt.toString()),
+        "1-foreign");
   }
 
   private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
@@ -261,6 +280,43 @@ class MissedStopReconcilerTest {
 
     assertEquals(1, replayed);
     assertEquals(0, probe.calls.get());
+  }
+
+  @Test
+  void aForeignNodesRunIsNeverProbedOrReplayedHere() {
+    createInProgressSpec("auth");
+    runningSession("auth");
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, () -> "node-b", PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aForeignTerminalRunIsNotReplayedHereEither() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+
+    var replayed = reconciler(new CountingProbe(true), () -> "node-b", Instant::now).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void aSupersededLocalRunNeverReplaysOverANewerForeignRun() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    adoptedForeignRunningSession("auth", Instant.now().plus(Duration.ofHours(1)));
+    var probe = new CountingProbe(true);
+
+    var replayed = reconciler(probe, Instant::now).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test

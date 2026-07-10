@@ -20,6 +20,8 @@ import ai.singlr.sail.webauthn.RelyingParty;
 import ai.singlr.sail.webauthn.TestAuthenticator;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
@@ -49,14 +51,18 @@ class PasskeyServiceTest {
     credentials = new WebauthnCredentialStore(db);
     sessions = new AuthSessionStore(db);
     fdes.add("uday", null, null);
-    service =
-        new PasskeyService(
-            new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
-            fdes,
-            credentials,
-            sessions,
-            new PendingChallengeStore(db));
+    service = serviceWithTtl(Duration.ofDays(30));
     authenticator = new TestAuthenticator(RP_ID);
+  }
+
+  private PasskeyService serviceWithTtl(Duration sessionTtl) {
+    return new PasskeyService(
+        new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+        fdes,
+        credentials,
+        sessions,
+        new PendingChallengeStore(db),
+        sessionTtl);
   }
 
   @AfterEach
@@ -95,6 +101,35 @@ class PasskeyServiceTest {
     assertEquals("uday", result.fdeHandle());
     assertTrue(result.sessionToken().startsWith("sess_"));
     assertTrue(sessions.validate(result.sessionToken()).isPresent());
+    var remaining = Duration.between(Instant.now(), Instant.parse(result.expiresAt()));
+    assertTrue(
+        remaining.toHours() >= 29 * 24 && remaining.toHours() <= 30 * 24, remaining::toString);
+  }
+
+  @Test
+  void mintedSessionLastsConfiguredTtl() {
+    enroll("uday");
+    service = serviceWithTtl(Duration.ofHours(2));
+
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+    var result =
+        service.finishLogin(
+            login.challengeId(),
+            assertion.credentialId(),
+            assertion.clientDataJson(),
+            assertion.authenticatorData(),
+            assertion.signature(),
+            null);
+
+    var remaining = Duration.between(Instant.now(), Instant.parse(result.expiresAt()));
+    assertTrue(remaining.toMinutes() >= 118 && remaining.toMinutes() <= 120, remaining::toString);
+  }
+
+  @Test
+  void rejectsNonPositiveSessionTtl() {
+    assertThrows(IllegalArgumentException.class, () -> serviceWithTtl(Duration.ZERO));
+    assertThrows(IllegalArgumentException.class, () -> serviceWithTtl(Duration.ofHours(-1)));
   }
 
   @Test

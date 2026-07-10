@@ -101,7 +101,35 @@ class WatcherRearmerTest {
       LongPredicate watcherAlive,
       WatcherRearmer.WatcherRelauncher relauncher) {
     return new WatcherRearmer(
-        specStore, sessionStore, agentUnitProbe, watcherUnitActive, watcherAlive, relauncher);
+        specStore,
+        sessionStore,
+        agentUnitProbe,
+        watcherUnitActive,
+        watcherAlive,
+        () -> "node-a",
+        relauncher);
+  }
+
+  @Test
+  void aForeignNodesRunIsNeverRearmedHere() {
+    createInProgressSpec("auth");
+    runningSession("auth", 5678);
+    var relaunches = new AtomicInteger();
+    var rearmer =
+        new WatcherRearmer(
+            specStore,
+            sessionStore,
+            project -> true,
+            NO_UNIT,
+            DEAD,
+            () -> "node-b",
+            project -> {
+              relaunches.incrementAndGet();
+              return Optional.of(LAUNCHED);
+            });
+
+    assertEquals(0, rearmer.rearm());
+    assertEquals(0, relaunches.get());
   }
 
   @Test

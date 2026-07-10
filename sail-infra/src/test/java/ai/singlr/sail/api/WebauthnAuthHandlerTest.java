@@ -32,6 +32,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -375,7 +376,8 @@ class WebauthnAuthHandlerTest {
             new FdeStore(db),
             new WebauthnCredentialStore(db),
             new AuthSessionStore(db),
-            new PendingChallengeStore(db));
+            new PendingChallengeStore(db),
+            Duration.ofDays(30));
     startWith(service);
     var authenticator = new TestAuthenticator(RP_ID);
 
@@ -429,7 +431,8 @@ class WebauthnAuthHandlerTest {
             new FdeStore(db),
             new WebauthnCredentialStore(db),
             new AuthSessionStore(db),
-            new PendingChallengeStore(db));
+            new PendingChallengeStore(db),
+            Duration.ofDays(30));
     startWith(
         service,
         new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),

@@ -172,6 +172,38 @@ class HostConfigSetCommandTest {
   }
 
   @Test
+  void sessionTtlIsSetAndPreservedByOtherWebauthnKeys() {
+    var withTtl = HostConfigSetCommand.applyChange(BASE, "webauthn-session-ttl-hours", "48");
+    assertEquals(48, withTtl.webauthn().sessionTtlHours());
+
+    var withRpId = HostConfigSetCommand.applyChange(withTtl, "webauthn-rp-id", "localhost");
+    var withName = HostConfigSetCommand.applyChange(withRpId, "webauthn-rp-name", "Sail");
+    var withOrigin =
+        HostConfigSetCommand.applyChange(withName, "webauthn-origin", "http://localhost:7070");
+
+    assertEquals(48, withOrigin.webauthn().sessionTtlHours());
+    assertEquals("localhost", withOrigin.webauthn().rpId());
+  }
+
+  @Test
+  void sessionTtlValidationBoundsAndParseErrors() {
+    HostConfigSetCommand.validate("webauthn-session-ttl-hours", "1");
+    HostConfigSetCommand.validate("webauthn-session-ttl-hours", "720");
+    HostConfigSetCommand.validate("webauthn-session-ttl-hours", "2160");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("webauthn-session-ttl-hours", "0"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HostConfigSetCommand.validate("webauthn-session-ttl-hours", "2161"));
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostConfigSetCommand.validate("webauthn-session-ttl-hours", "a-fortnight"));
+    assertTrue(thrown.getMessage().contains("whole number of hours"));
+  }
+
+  @Test
   void serverIpChangePreservesTheWebauthnBlock() {
     var withWebauthn = HostConfigSetCommand.applyChange(BASE, "webauthn-rp-id", "localhost");
 

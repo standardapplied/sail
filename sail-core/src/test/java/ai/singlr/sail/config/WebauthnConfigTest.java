@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -79,5 +80,48 @@ class WebauthnConfigTest {
   void toMapRoundTrips() {
     var config = new WebauthnConfig("a.dev", "Sail", List.of("https://a.dev"));
     assertEquals(config, WebauthnConfig.fromMap(config.toMap()));
+  }
+
+  @Test
+  void sessionTtlDefaultsToThirtyDays() {
+    assertEquals(Duration.ofDays(30), WebauthnConfig.disabled().sessionTtl());
+    assertEquals(Duration.ofDays(30), new WebauthnConfig("a.dev", "Sail", List.of()).sessionTtl());
+  }
+
+  @Test
+  void configuredSessionTtlOverridesDefault() {
+    var config = new WebauthnConfig("a.dev", "Sail", List.of("https://a.dev"), 12);
+    assertEquals(Duration.ofHours(12), config.sessionTtl());
+  }
+
+  @Test
+  void outOfRangeSessionTtlIsRejected() {
+    assertThrows(
+        IllegalArgumentException.class, () -> new WebauthnConfig("a.dev", "Sail", List.of(), 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new WebauthnConfig("a.dev", "Sail", List.of(), 90 * 24 + 1));
+    assertEquals(Duration.ofHours(1), new WebauthnConfig(null, null, null, 1).sessionTtl());
+    assertEquals(Duration.ofDays(90), new WebauthnConfig(null, null, null, 90 * 24).sessionTtl());
+  }
+
+  @Test
+  void fromMapReadsSessionTtlHours() {
+    assertEquals(720, WebauthnConfig.fromMap(Map.of("session_ttl_hours", 720)).sessionTtlHours());
+    assertEquals(720, WebauthnConfig.fromMap(Map.of("session_ttl_hours", "720")).sessionTtlHours());
+    assertNull(WebauthnConfig.fromMap(Map.of("rp_id", "a.dev")).sessionTtlHours());
+    assertThrows(
+        NumberFormatException.class,
+        () -> WebauthnConfig.fromMap(Map.of("session_ttl_hours", "soon")));
+  }
+
+  @Test
+  void toMapRoundTripsSessionTtlAndOmitsItWhenUnset() {
+    var config = new WebauthnConfig("a.dev", "Sail", List.of("https://a.dev"), 48);
+    assertEquals(config, WebauthnConfig.fromMap(config.toMap()));
+    assertFalse(
+        new WebauthnConfig("a.dev", "Sail", List.of("https://a.dev"))
+            .toMap()
+            .containsKey("session_ttl_hours"));
   }
 }

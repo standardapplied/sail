@@ -16,27 +16,32 @@ import java.util.Objects;
  * Main's side of one sync session: a stateless request loop over the SSH channel's stdio. It routes
  * each {@link SyncWire.Fetch}/{@link SyncWire.Commit} to the authoritative {@link MainReplica} for
  * its entity type (specs, files), serves the node's roster pull, and returns at {@link
- * SyncWire.Bye} or end of stream. The {@code writable} gate is the push half of Door-2
+ * SyncWire.Bye} or end of stream. The {@link SyncPrincipal} carries the push half of Door-2
  * authorization: a {@code viewer} opens a session and pulls every type, but its commits are refused
- * so only {@code member}+ work propagates.
+ * so only {@code member}+ work propagates. The principal's handle additionally binds run commits to
+ * execution provenance — a session may create, update, or delete only runs stamped with its own
+ * node, so no member can forge run metadata another box would treat as its own execution.
  */
 public final class SyncRpcServer {
 
+  private static final String RUN_ENTITY = "run";
+
   private final Map<String, MainReplica> replicas;
-  private final boolean writable;
+  private final SyncPrincipal principal;
   private final FdeRoster fdeRoster;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
-    this(Map.of("spec", main), writable, FdeRoster.EMPTY);
+    this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
   }
 
   public SyncRpcServer(MainReplica main, boolean writable, FdeRoster fdeRoster) {
-    this(Map.of("spec", main), writable, fdeRoster);
+    this(Map.of("spec", main), new SyncPrincipal(null, writable), fdeRoster);
   }
 
-  public SyncRpcServer(Map<String, MainReplica> replicas, boolean writable, FdeRoster fdeRoster) {
+  public SyncRpcServer(
+      Map<String, MainReplica> replicas, SyncPrincipal principal, FdeRoster fdeRoster) {
     this.replicas = Map.copyOf(replicas);
-    this.writable = writable;
+    this.principal = Objects.requireNonNull(principal, "principal");
     this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
   }
 
@@ -99,7 +104,7 @@ public final class SyncRpcServer {
   }
 
   private SyncWire.Response onCommit(SyncWire.Commit commit) {
-    if (!writable) {
+    if (!principal.canWrite()) {
       return new SyncWire.Failed(
           "Your role is read-only: it can pull the shared board but not push changes.");
     }
@@ -107,10 +112,43 @@ public final class SyncRpcServer {
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + commit.entityType());
     }
+    if (RUN_ENTITY.equals(commit.entityType()) && !ownsRunCommit(commit, main)) {
+      return new SyncWire.Failed(
+          "A sync session may push only runs executed on its own node; run "
+              + commit.entityId()
+              + " is not "
+              + principal.handle()
+              + "'s.");
+    }
     return switch (main.commit(commit.entityId(), commit.snapshot(), commit.expectedRev())) {
       case CommitOutcome.Accepted accepted -> new SyncWire.Committed(accepted.rev(), main.maxSeq());
       case CommitOutcome.Rejected rejected ->
           new SyncWire.Rejected(rejected.currentRev(), rejected.currentSnapshot());
     };
+  }
+
+  /**
+   * Whether this session may commit the run: both the incoming snapshot's {@code node} and the run
+   * main already holds must be the principal's own handle. Checking both sides refuses a forged
+   * foreign stamp and the clobbering of another node's run with a re-stamped one; a missing or
+   * blank stamp fails closed. A null current snapshot alongside a non-null revision is a tombstone,
+   * not a fresh ID — resurrecting it is refused outright, since the deleted run's owner is no
+   * longer readable and fetch hands every session the tombstone's revision to replay against.
+   */
+  private boolean ownsRunCommit(SyncWire.Commit commit, MainReplica main) {
+    var incoming = commit.snapshot();
+    var current = main.current(commit.entityId());
+    if (incoming != null && current == null && main.currentRev(commit.entityId()) != null) {
+      return false;
+    }
+    return ownedByPrincipal(incoming) && ownedByPrincipal(current);
+  }
+
+  private boolean ownedByPrincipal(Map<String, Object> run) {
+    if (run == null) {
+      return true;
+    }
+    var owner = Objects.toString(run.get("node"), "");
+    return !owner.isBlank() && owner.equals(principal.handle());
   }
 }
