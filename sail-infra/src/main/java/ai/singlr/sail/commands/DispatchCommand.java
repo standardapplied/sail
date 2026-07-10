@@ -439,7 +439,11 @@ public final class DispatchCommand implements Runnable {
       }
       var targetRepos = DispatchRepos.resolve(config, resolution.spec(), repoOverrides);
       var taskSpec = DispatchRepos.withTargetRepos(resolution.spec(), targetRepos);
-      store.updateReposAndStatus(taskSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS);
+      store.updateReposAndStatus(
+          taskSpec.id(),
+          taskSpec.repos(),
+          SpecStatus.IN_PROGRESS,
+          BranchPolicy.branchName(config, taskSpec));
       new ReviewStore(db).supersedeForSpec(taskSpec.id());
       var body = store.getContent(taskSpec.id()).map(SpecStore.SpecContent::body).orElse("");
       return new Prepared(resolution, taskSpec, targetRepos, body);

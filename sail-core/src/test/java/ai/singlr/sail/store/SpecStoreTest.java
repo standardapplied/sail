@@ -237,12 +237,23 @@ class SpecStoreTest {
   @Test
   void updateReposAndStatusReplacesReposWithTheStatusTransition() {
     store.create(spec("a", "Test", "pending"));
-    store.updateReposAndStatus("a", List.of("api", "web"), SpecStatus.IN_PROGRESS);
+    store.updateReposAndStatus("a", List.of("api", "web"), SpecStatus.IN_PROGRESS, "agent/a");
 
     var found = store.findById("a").orElseThrow();
     assertEquals(SpecStatus.IN_PROGRESS, found.status());
     assertEquals(List.of("api", "web"), found.repos());
+    assertEquals("agent/a", found.branch());
     assertEquals(2, store.history("a").size());
+  }
+
+  @Test
+  void updateReposAndStatusWithBlankBranchKeepsTheStoredOne() {
+    store.create(spec("a", "Test", "pending"));
+    store.updateReposAndStatus("a", List.of("api"), SpecStatus.IN_PROGRESS, "agent/a");
+    store.updateReposAndStatus("a", List.of("api"), SpecStatus.IN_PROGRESS, null);
+    store.updateReposAndStatus("a", List.of("api"), SpecStatus.IN_PROGRESS, "");
+
+    assertEquals("agent/a", store.findById("a").orElseThrow().branch());
   }
 
   @Test
