@@ -1006,6 +1006,29 @@ class SailApiOperationsTest {
   }
 
   @Test
+  void serverStartConstructorWiresTheRunLane() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var operations =
+        new SailApiOperations(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            yaml.toString(),
+            new EventBus(),
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            SyncScheduler.disabled());
+
+    var result = operations.runs("acme", null);
+
+    assertTrue(result.isSuccess());
+  }
+
+  @Test
   void dispatchOnAnUnconfiguredRepoIsACallerErrorNamingTheRepo() throws Exception {
     var operations =
         operationsWithStore(

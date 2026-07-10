@@ -114,7 +114,7 @@ public final class SailApiOperations implements ApiOperations {
     this(shell, file, eventBus, auditSubscriber, specStore, null);
   }
 
-  /** Construct with the project catalog included; used by {@code sail server start}. */
+  /** Construct with the project catalog included but no sync or run aggregate. */
   public SailApiOperations(
       ShellExec shell,
       String file,
@@ -130,15 +130,17 @@ public final class SailApiOperations implements ApiOperations {
         auditSubscriber,
         specStore,
         reviewStore,
+        null,
         projectStore,
         SyncScheduler.disabled());
   }
 
   /**
    * As {@link #SailApiOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore,
-   * ReviewStore, ProjectStore)} with the node's sync-on-write scheduler; used by {@code sail server
-   * start} so spec mutations propagate to main and stale reads freshen without a manual {@code sail
-   * sync}.
+   * ReviewStore, ProjectStore)} with the node's sync-on-write scheduler and the run aggregate; used
+   * by {@code sail server start} so spec mutations propagate to main, stale reads freshen without a
+   * manual {@code sail sync}, and dispatches record their runs — without the run store every {@code
+   * /v1/runs} route refuses and API-lane dispatches silently record no run at all.
    */
   public SailApiOperations(
       ShellExec shell,
@@ -147,6 +149,7 @@ public final class SailApiOperations implements ApiOperations {
       EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore,
+      RunStore runStore,
       ProjectStore projectStore,
       SyncScheduler syncScheduler) {
     this(
@@ -157,7 +160,7 @@ public final class SailApiOperations implements ApiOperations {
         auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
         reviewStore,
-        null,
+        runStore,
         projectStore,
         ConnectEnvironment::detect,
         syncScheduler);
