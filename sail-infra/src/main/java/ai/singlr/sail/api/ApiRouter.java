@@ -121,6 +121,7 @@ public final class ApiRouter implements HttpHandler {
           ApiResponse.error(
               new Result.Failure<>(ErrorCode.INVALID_REQUEST, e.getMessage(), null, null, e)));
     } catch (Exception e) {
+      ApiLog.unexpected(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath(), e);
       write(
           exchange,
           ApiResponse.error(

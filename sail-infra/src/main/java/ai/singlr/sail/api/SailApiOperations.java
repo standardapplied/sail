@@ -1271,6 +1271,7 @@ public final class SailApiOperations implements ApiOperations {
     } catch (ApiException e) {
       return e.failure().asFailure();
     } catch (Exception e) {
+      ApiLog.unexpected("an API operation", e);
       return Result.failure(ErrorCode.INTERNAL, "sail API operation failed.", e);
     }
   }
