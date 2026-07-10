@@ -1006,6 +1006,24 @@ class SailApiOperationsTest {
   }
 
   @Test
+  void dispatchOnAnUnconfiguredRepoIsACallerErrorNamingTheRepo() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            SailApiOperationsTest::seedAuthBillingSetup);
+
+    var error =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("auth", "background", true, List.of("scim-sql")));
+
+    assertError(ErrorCode.INVALID_REQUEST, error);
+    assertTrue(fullError(error).contains("scim-sql"));
+  }
+
+  @Test
   void dispatchMapsLaunchFailure() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var operations =
