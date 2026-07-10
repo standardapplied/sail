@@ -1265,11 +1265,22 @@ public final class SailApiOperations implements ApiOperations {
         });
   }
 
+  /**
+   * Maps an operation's outcome onto the wire contract the routers already speak: an {@link
+   * ApiException} is a structured refusal, an {@link IllegalArgumentException} is a caller error —
+   * a validation precondition like "repo not configured in sail.yaml" — surfaced as {@code
+   * invalid_request} (400) with its message, the same convention {@code ApiRouter} and {@code
+   * LocalApiRouter} apply to exceptions escaping their own routing. Only a truly unexpected
+   * exception becomes a generic {@code internal} 500, and its stack trace goes to the journal
+   * first.
+   */
   private static <T> Result<T> safe(Supplier<T> supplier) {
     try {
       return Result.success(supplier.get());
     } catch (ApiException e) {
       return e.failure().asFailure();
+    } catch (IllegalArgumentException e) {
+      return Result.failure(ErrorCode.INVALID_REQUEST, e.getMessage(), e);
     } catch (Exception e) {
       ApiLog.unexpected("an API operation", e);
       return Result.failure(ErrorCode.INTERNAL, "sail API operation failed.", e);
