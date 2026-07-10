@@ -39,7 +39,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       TokenStore tokenStore,
       EventBus eventBus,
       EventSubscriber auditSubscriber)
@@ -62,7 +62,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       TokenStore tokenStore,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
@@ -83,7 +83,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       TokenStore tokenStore,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
@@ -103,7 +103,7 @@ public final class SailApiServer implements AutoCloseable {
   SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
@@ -120,7 +120,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
@@ -134,7 +134,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
@@ -165,7 +165,7 @@ public final class SailApiServer implements AutoCloseable {
   public SailApiServer(
       String host,
       int port,
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       EventBus eventBus,
       EventSubscriber auditSubscriber,

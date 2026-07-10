@@ -14,6 +14,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -36,7 +37,7 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class SailApiOperationsTest {
+class SailOperationsTest {
 
   private static final String RUNNING_JSON =
       """
@@ -93,14 +94,14 @@ class SailApiOperationsTest {
 
   @Test
   void healthReturnsOk() {
-    var operations = new SailApiOperations(new FakeShell(), "sail.yaml");
+    var operations = new SailOperations(new FakeShell(), "sail.yaml");
 
     assertEquals("ok", get(operations.health(), "status"));
   }
 
   @Test
   void defaultConstructorSupportsHealthChecks() {
-    assertEquals("ok", get(new SailApiOperations().health(), "status"));
+    assertEquals("ok", get(new SailOperations().health(), "status"));
   }
 
   @Test
@@ -192,7 +193,7 @@ class SailApiOperationsTest {
     var projectStore = new ProjectStore(db);
     projectStore.upsert("beta", "name: beta", "me");
     var operations =
-        new SailApiOperations(
+        new SailOperations(
             shell().on("incus list --format json", EMPTY_JSON),
             yaml.toString(),
             null,
@@ -266,7 +267,7 @@ class SailApiOperationsTest {
         operationsWithStore(
             baseYaml(),
             shell().on("incus list ^acme$", RUNNING_JSON),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var result = operations.specs("acme");
 
@@ -281,7 +282,7 @@ class SailApiOperationsTest {
         operationsWithStore(
             baseYaml(),
             shell().on("incus list ^acme$", STOPPED_JSON),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var result = operations.specs("acme");
 
@@ -309,7 +310,7 @@ class SailApiOperationsTest {
         operationsWithStore(
             baseYaml(),
             shell().on("incus list ^acme$", RUNNING_JSON),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var error = operations.spec("acme", "missing");
 
@@ -352,7 +353,7 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var result = dispatch(operations, "acme", request("auth", "background", true));
 
@@ -393,7 +394,7 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var error = dispatch(operations, "acme", request("billing"));
 
@@ -417,7 +418,7 @@ class SailApiOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var error = dispatch(operations, "acme", request("missing"));
 
@@ -612,7 +613,7 @@ class SailApiOperationsTest {
   private static final String RUN_LOG = "/home/dev/.sail/runs/" + R1 + "/agent.log";
   private static final String R2_LOG = "/home/dev/.sail/runs/" + R2 + "/agent.log";
 
-  private SailApiOperations opsWithRun(FakeShell shell) throws Exception {
+  private SailOperations opsWithRun(FakeShell shell) throws Exception {
     return operationsWithStores(
         baseYaml(),
         shell,
@@ -633,7 +634,7 @@ class SailApiOperationsTest {
                 RUN_LOG));
   }
 
-  private SailApiOperations opsWithLocalRunAndSpec(FakeShell shell) throws Exception {
+  private SailOperations opsWithLocalRunAndSpec(FakeShell shell) throws Exception {
     return operationsWithStores(
         baseYaml(),
         shell,
@@ -917,7 +918,7 @@ class SailApiOperationsTest {
                 .on("mkdir -p /home/dev/.sail", "")
                 .on("claude", ""),
             null,
-            SailApiOperationsTest::seedAuthBillingSetup,
+            SailOperationsTest::seedAuthBillingSetup,
             runs::set);
 
     var result = dispatch(operations, "acme", request("auth"));
@@ -1012,7 +1013,7 @@ class SailApiOperationsTest {
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var operations =
-        new SailApiOperations(
+        new SailOperations(
             shell().on("incus list ^acme$", RUNNING_JSON),
             yaml.toString(),
             new EventBus(),
@@ -1021,7 +1022,8 @@ class SailApiOperationsTest {
             new ReviewStore(db),
             new RunStore(db),
             new ProjectStore(db),
-            SyncScheduler.disabled());
+            SyncScheduler.disabled(),
+            new FdeStore(db));
 
     var result = operations.runs("acme", null);
 
@@ -1034,7 +1036,7 @@ class SailApiOperationsTest {
         operationsWithStore(
             baseYaml(),
             shell().on("incus list ^acme$", RUNNING_JSON),
-            SailApiOperationsTest::seedAuthBillingSetup);
+            SailOperationsTest::seedAuthBillingSetup);
 
     var error =
         dispatch(
@@ -1060,7 +1062,7 @@ class SailApiOperationsTest {
                 .on("-- mkdir -p /home/dev/.sail", "")
                 .on("claude", new ShellExec.Result(1, "", "missing cli")),
             null,
-            SailApiOperationsTest::seedAuthBillingSetup,
+            SailOperationsTest::seedAuthBillingSetup,
             runs::set);
 
     var error = dispatch(operations, "acme", request("auth"));
@@ -1159,8 +1161,7 @@ class SailApiOperationsTest {
               },
               latch));
       var operations =
-          new SailApiOperations(
-              shell, yaml.toString(), (cmd, log) -> 4242L, bus, null, store, null);
+          new SailOperations(shell, yaml.toString(), (cmd, log) -> 4242L, bus, null, store, null);
 
       dispatch(operations, "acme", request("auth"));
 
@@ -1489,7 +1490,7 @@ class SailApiOperationsTest {
 
   @Test
   void missingDescriptorMapsToNotFound() {
-    var operations = new SailApiOperations(shell(), tempDir.resolve("missail.yaml").toString());
+    var operations = new SailOperations(shell(), tempDir.resolve("missail.yaml").toString());
 
     var error = operations.project("acme");
 
@@ -1517,7 +1518,7 @@ class SailApiOperationsTest {
   void publishEventReturnsStampedIdWhenBusWired(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
       var result =
           operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "host-01"));
       assertTrue(result.isSuccess());
@@ -1549,7 +1550,7 @@ class SailApiOperationsTest {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
       var latch = new java.util.concurrent.CountDownLatch(2);
       bus.subscribe(BusTesting.latching(persister, latch));
-      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
 
       operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
       operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
@@ -1586,7 +1587,7 @@ class SailApiOperationsTest {
             @Override
             public void onEvent(Event event) {}
           });
-      var operations = new SailApiOperations(shell(), baseYamlPath(tempDir).toString(), bus, null);
+      var operations = new SailOperations(shell(), baseYamlPath(tempDir).toString(), bus, null);
 
       var result = operations.eventBusStats();
 
@@ -1623,7 +1624,7 @@ class SailApiOperationsTest {
   void reviewsForSpecIsEmptyWithoutReviews() throws Exception {
     var operations =
         operationsWithStores(
-            baseYaml(), shell(), null, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
+            baseYaml(), shell(), null, SailOperationsTest::seedAuthBillingSetup, s -> {});
 
     var result = operations.reviewsForSpec("auth");
 
@@ -1669,7 +1670,7 @@ class SailApiOperationsTest {
             0.8));
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
     var operations =
-        new SailApiOperations(
+        new SailOperations(
             shell(), yaml.toString(), null, null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
@@ -1694,7 +1695,7 @@ class SailApiOperationsTest {
             .on("bash -l -c", "");
     var operations =
         operationsWithStores(
-            baseYaml(), shell, null, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
+            baseYaml(), shell, null, SailOperationsTest::seedAuthBillingSetup, s -> {});
 
     var result = dispatch(operations, "acme", request("auth", "foreground", false));
 
@@ -1714,7 +1715,7 @@ class SailApiOperationsTest {
               .on("incus snapshot create acme", "");
       var operations =
           operationsWithStores(
-              snapshotYaml(), shell, bus, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
+              snapshotYaml(), shell, bus, SailOperationsTest::seedAuthBillingSetup, s -> {});
 
       var result = dispatch(operations, "acme", request("auth", "background", true));
 
@@ -1730,7 +1731,7 @@ class SailApiOperationsTest {
             baseYaml(),
             shell().on("incus list ^acme$", STOPPED_JSON),
             null,
-            SailApiOperationsTest::seedAuthBillingSetup,
+            SailOperationsTest::seedAuthBillingSetup,
             s -> {});
 
     assertError(
@@ -1745,7 +1746,7 @@ class SailApiOperationsTest {
             baseYaml(),
             shell().on("incus list ^acme$", "[]"),
             null,
-            SailApiOperationsTest::seedAuthBillingSetup,
+            SailOperationsTest::seedAuthBillingSetup,
             s -> {});
 
     assertError(
@@ -1760,7 +1761,7 @@ class SailApiOperationsTest {
             baseYaml(),
             shell().on("incus list ^acme$", new ShellExec.Result(1, "", "boom")),
             null,
-            SailApiOperationsTest::seedAuthBillingSetup,
+            SailOperationsTest::seedAuthBillingSetup,
             s -> {});
 
     assertError(
@@ -1883,7 +1884,7 @@ class SailApiOperationsTest {
               .on("bash -l -c", "");
       var operations =
           operationsWithStores(
-              baseYaml(), shell, bus, SailApiOperationsTest::seedAuthBillingSetup, s -> {});
+              baseYaml(), shell, bus, SailOperationsTest::seedAuthBillingSetup, s -> {});
 
       var result = dispatch(operations, "acme", request("auth", "foreground", false));
 
@@ -1896,7 +1897,7 @@ class SailApiOperationsTest {
   void eventBusStatsReflectsBusState(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = new SailApiOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
       operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
       var result = operations.eventBusStats();
       assertTrue(result.isSuccess());
@@ -1959,7 +1960,7 @@ class SailApiOperationsTest {
   private static final Actor ADMIN = new Actor(LOCAL_HANDLE, Role.ADMIN, Actor.Lane.API);
 
   private static Result<DispatchResponse> dispatch(
-      SailApiOperations operations, String project, DispatchRequest request) {
+      SailOperations operations, String project, DispatchRequest request) {
     return operations.dispatch(project, request, ADMIN, LOCAL_HANDLE);
   }
 
@@ -1975,19 +1976,19 @@ class SailApiOperationsTest {
     return new DispatchRequest(specId, mode, dryRun);
   }
 
-  private SailApiOperations operations(String yamlContent, FakeShell shell) throws Exception {
-    return operationsWithStore(yamlContent, shell, SailApiOperationsTest::seedAuthBillingSetup);
+  private SailOperations operations(String yamlContent, FakeShell shell) throws Exception {
+    return operationsWithStore(yamlContent, shell, SailOperationsTest::seedAuthBillingSetup);
   }
 
   /** Builds operations backed by a migrated spec database seeded with {@code seed}. */
-  private SailApiOperations operationsWithStore(
+  private SailOperations operationsWithStore(
       String yamlContent, FakeShell shell, java.util.function.Consumer<SpecStore> seed)
       throws Exception {
     return operationsWithStore(yamlContent, shell, seed, null);
   }
 
   /** Builds operations backed by a full set of migrated stores (spec, review, session). */
-  private SailApiOperations operationsWithStores(
+  private SailOperations operationsWithStores(
       String yamlContent,
       FakeShell shell,
       EventBus bus,
@@ -2003,7 +2004,7 @@ class SailApiOperationsTest {
     var sessionStore = new RunStore(db);
     seedSpecs.accept(specStore);
     seedSessions.accept(sessionStore);
-    return new SailApiOperations(
+    return new SailOperations(
         shell,
         yaml.toString(),
         (command, logPath) -> 4242L,
@@ -2015,7 +2016,7 @@ class SailApiOperationsTest {
   }
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
-  private SailApiOperations operationsWith(
+  private SailOperations operationsWith(
       FakeShell shell,
       java.util.function.Consumer<ProjectStore> seedProjects,
       ConnectEnvironment environment)
@@ -2028,7 +2029,7 @@ class SailApiOperationsTest {
     seedAuthBillingSetup(specStore);
     var projectStore = new ProjectStore(db);
     seedProjects.accept(projectStore);
-    return new SailApiOperations(
+    return new SailOperations(
         shell,
         yaml.toString(),
         null,
@@ -2045,7 +2046,7 @@ class SailApiOperationsTest {
     return new ConnectEnvironment("203.0.113.7", "uday", true);
   }
 
-  private SailApiOperations operationsWithStore(
+  private SailOperations operationsWithStore(
       String yamlContent,
       FakeShell shell,
       java.util.function.Consumer<SpecStore> seed,
@@ -2059,7 +2060,7 @@ class SailApiOperationsTest {
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =
         watcher != null ? watcher : (command, logPath) -> 4242L;
-    return new SailApiOperations(shell, yaml.toString(), fallback, null, null, store, null);
+    return new SailOperations(shell, yaml.toString(), fallback, null, null, store, null);
   }
 
   /**
@@ -2112,11 +2113,11 @@ class SailApiOperationsTest {
     }
   }
 
-  private SailApiOperations operations(
+  private SailOperations operations(
       String yamlContent, FakeShell shell, WatcherSpawner.ProcessSpawner watcherLauncher)
       throws Exception {
     return operationsWithStore(
-        yamlContent, shell, SailApiOperationsTest::seedAuthBillingSetup, watcherLauncher);
+        yamlContent, shell, SailOperationsTest::seedAuthBillingSetup, watcherLauncher);
   }
 
   private static String baseYaml() {
@@ -2196,7 +2197,7 @@ class SailApiOperationsTest {
         """;
   }
 
-  private SailApiOperations operations(FakeShell shell) throws Exception {
+  private SailOperations operations(FakeShell shell) throws Exception {
     return operations(baseYaml(), shell);
   }
 

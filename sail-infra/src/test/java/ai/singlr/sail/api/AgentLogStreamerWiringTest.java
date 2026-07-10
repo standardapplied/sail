@@ -44,7 +44,7 @@ class AgentLogStreamerWiringTest {
     return new SailApiServer(
         "127.0.0.1",
         0,
-        new SailApiOperations(),
+        new SailOperations(),
         new FixedTokenTestAuth("tok"),
         new EventBus(),
         new AuditPersister(tmp.resolve("events.jsonl"), 8),

@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
-import ai.singlr.sail.api.SailApiOperations;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -49,7 +49,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
 
       var bus = new EventBus();
       var operations =
-          new SailApiOperations(new ShellExecutor(false), "sail.yaml", bus, null, specStore);
+          new SailOperations(new ShellExecutor(false), "sail.yaml", bus, null, specStore);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 

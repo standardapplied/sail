@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.api.EventBus;
-import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.EventStore;
@@ -52,7 +52,7 @@ class ApiSpecCommandsTest {
     var persister = new SpecStoreAuditPersister(eventStore);
     reviewStore = new ReviewStore(db);
     var operations =
-        new SailApiOperations(
+        new SailOperations(
             new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore);
     server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
     server.start();

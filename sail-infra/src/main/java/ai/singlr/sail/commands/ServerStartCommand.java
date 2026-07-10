@@ -10,8 +10,8 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RunTracker;
-import ai.singlr.sail.api.SailApiOperations;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SlackReactor;
@@ -173,7 +173,7 @@ public final class ServerStartCommand implements Runnable {
     var syncScheduler = NodeSync.scheduler(false);
     shutdown.register(syncScheduler);
     var operations =
-        new SailApiOperations(
+        new SailOperations(
             new ShellExecutor(false),
             SailPaths.PROJECT_DESCRIPTOR,
             bus,
@@ -182,7 +182,8 @@ public final class ServerStartCommand implements Runnable {
             reviewStore,
             runStore,
             new ProjectStore(db),
-            syncScheduler);
+            syncScheduler,
+            new FdeStore(db));
     var orphaned = reviewStore.failOrphanedRunning();
     if (orphaned > 0) {
       System.out.println(

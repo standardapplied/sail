@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Route-level authorization matrix against a real {@link SailApiOperations} and real stores, so the
+ * Route-level authorization matrix against a real {@link SailOperations} and real stores, so the
  * aggregate {@code AccessPolicy} classes are exercised end to end for every scoped route — spec
  * edit/delete/content/restore, reassignment, and review approve/dismiss — over both the API-token
  * lane and the passkey/session (gateway) lane, plus the host-admin (no-fde) regression.
@@ -59,7 +59,7 @@ class ResourceAuthzTest {
     tokenStore = new TokenStore(db);
     var yaml = tempDir.resolve("sail.yaml").toString();
     var ops =
-        new SailApiOperations(
+        new SailOperations(
             new ShellExecutor(false), yaml, new EventBus(), null, specStore, reviewStore);
     var auth = new SessionAwareAuth(sessions, fdes, new TokenAuth(tokenStore));
     server = new SailApiServer("127.0.0.1", 0, ops, auth, new EventBus(), null, null, null);

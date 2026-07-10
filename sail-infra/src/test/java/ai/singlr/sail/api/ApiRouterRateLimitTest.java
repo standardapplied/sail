@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 
 class ApiRouterRateLimitTest {
 
-  private final ApiOperations ops = new TestOperations();
+  private final Operations ops = new TestOperations();
 
   @Test
   void aRequestWithinBudgetIsServed() throws Exception {

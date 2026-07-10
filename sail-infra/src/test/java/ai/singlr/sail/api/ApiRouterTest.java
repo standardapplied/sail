@@ -1004,11 +1004,11 @@ class ApiRouterTest {
     return serverWith(new FakeOperations(), true);
   }
 
-  private static SailApiServer serverWith(ApiOperations ops) throws IOException {
+  private static SailApiServer serverWith(Operations ops) throws IOException {
     return serverWith(ops, false);
   }
 
-  private static SailApiServer serverWith(ApiOperations ops, boolean autoStart) throws IOException {
+  private static SailApiServer serverWith(Operations ops, boolean autoStart) throws IOException {
     var server =
         new SailApiServer("127.0.0.1", 0, ops, new FixedTokenTestAuth("token"), null, null, null);
     if (autoStart) {
@@ -1065,7 +1065,7 @@ class ApiRouterTest {
     return URI.create("http://127.0.0.1:" + server.port() + path);
   }
 
-  private static class FakeOperations implements ApiOperations {
+  private static class FakeOperations implements Operations {
     @Override
     public Result<HealthResponse> health() {
       return Result.success(new HealthResponse("ok"));

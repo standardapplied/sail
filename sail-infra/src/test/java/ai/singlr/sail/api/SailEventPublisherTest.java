@@ -48,7 +48,7 @@ class SailEventPublisherTest {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
       var operations =
-          new SailApiOperations(
+          new SailOperations(
               new ShellExecutor(true), tmp.resolve("sail.yaml").toString(), bus, persister);
       try (var server =
           new SailApiServer(
@@ -90,7 +90,7 @@ class SailEventPublisherTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailApiOperations(),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

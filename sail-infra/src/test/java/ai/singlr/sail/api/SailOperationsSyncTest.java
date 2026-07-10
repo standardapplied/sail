@@ -30,7 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
  * request. Reconciles run on a same-thread executor with an injected clock, so every assertion is
  * deterministic.
  */
-class SailApiOperationsSyncTest {
+class SailOperationsSyncTest {
 
   private static final String RUNNING_JSON =
       """
@@ -140,7 +140,7 @@ class SailApiOperationsSyncTest {
   @Test
   void aDispatchClaimPropagatesBeyondItsReadFreshen() throws Exception {
     var operations =
-        operations(scheduler(), null, dispatchShell(), SailApiOperationsSyncTest::seedReady);
+        operations(scheduler(), null, dispatchShell(), SailOperationsSyncTest::seedReady);
 
     var result =
         operations.dispatch(
@@ -182,12 +182,12 @@ class SailApiOperationsSyncTest {
         duration -> nanos.addAndGet(duration.toNanos()));
   }
 
-  private SailApiOperations operations(SyncScheduler scheduler, Consumer<SpecStore> seed)
+  private SailOperations operations(SyncScheduler scheduler, Consumer<SpecStore> seed)
       throws Exception {
     return operations(scheduler, null, plainShell(), seed);
   }
 
-  private SailApiOperations operations(
+  private SailOperations operations(
       SyncScheduler scheduler, EventBus bus, ShellExec shell, Consumer<SpecStore> seed)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
@@ -205,7 +205,7 @@ class SailApiOperationsSyncTest {
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
     seed.accept(specStore);
-    return new SailApiOperations(
+    return new SailOperations(
         shell,
         yaml.toString(),
         (command, logPath) -> 4242L,

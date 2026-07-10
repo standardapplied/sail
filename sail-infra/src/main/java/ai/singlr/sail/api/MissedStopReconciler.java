@@ -153,7 +153,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
             .findFirst()
-            .filter(run -> SailApiOperations.ownsRun(run.node(), node));
+            .filter(run -> SailOperations.ownsRun(run.node(), node));
     if (latest.isEmpty()) {
       return false;
     }

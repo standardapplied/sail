@@ -62,17 +62,17 @@ public final class ApiRouter implements HttpHandler {
   private static final int DEFAULT_PERMITS_PER_MINUTE = 600;
   private static final int DEFAULT_BURST = 600;
 
-  private final ApiOperations operations;
+  private final Operations operations;
   private final ApiAuth auth;
   private final RateLimiter rateLimiter;
   private final AgentLogStreamer agentStreamer;
   private final Supplier<String> nodeHandle;
 
-  public ApiRouter(ApiOperations operations, ApiAuth auth, RateLimiter rateLimiter) {
+  public ApiRouter(Operations operations, ApiAuth auth, RateLimiter rateLimiter) {
     this(operations, auth, rateLimiter, null);
   }
 
-  public ApiRouter(ApiOperations operations, ApiAuth auth, AgentLogStreamer agentStreamer) {
+  public ApiRouter(Operations operations, ApiAuth auth, AgentLogStreamer agentStreamer) {
     this(
         operations,
         auth,
@@ -81,7 +81,7 @@ public final class ApiRouter implements HttpHandler {
   }
 
   public ApiRouter(
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       RateLimiter rateLimiter,
       AgentLogStreamer agentStreamer) {
@@ -89,7 +89,7 @@ public final class ApiRouter implements HttpHandler {
   }
 
   ApiRouter(
-      ApiOperations operations,
+      Operations operations,
       ApiAuth auth,
       RateLimiter rateLimiter,
       AgentLogStreamer agentStreamer,
