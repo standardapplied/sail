@@ -286,11 +286,7 @@ final class GlobalSpecOperations {
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
       SpecPolicy.reassign(actor, existing.id(), existing.assignee(), targetAssignee).enforce();
     }
-    try {
-      specStore.restore(specId, request.rev());
-    } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
-    }
+    specStore.restore(specId, request.rev());
     var row = specStore.findById(specId).orElseThrow();
     publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecRestoredResponse(GlobalSpecView.from(row), request.rev());
