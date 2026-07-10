@@ -169,6 +169,7 @@ public final class ServerStartCommand implements Runnable {
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
     var reviewStore = new ReviewStore(db);
+    var runStore = new RunStore(db);
     var syncScheduler = NodeSync.scheduler(false);
     shutdown.register(syncScheduler);
     var operations =
@@ -179,6 +180,7 @@ public final class ServerStartCommand implements Runnable {
             persister,
             specStore,
             reviewStore,
+            runStore,
             new ProjectStore(db),
             syncScheduler);
     var orphaned = reviewStore.failOrphanedRunning();
@@ -196,7 +198,6 @@ public final class ServerStartCommand implements Runnable {
             bus,
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false));
-    var runStore = new RunStore(db);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
     bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 
