@@ -43,6 +43,7 @@ final class LocalApiRouter implements LocalApiHandler {
     } catch (IllegalArgumentException bad) {
       return problem(400, bad.getMessage());
     } catch (RuntimeException unexpected) {
+      ApiLog.unexpected(request.method() + " " + request.path(), unexpected);
       return problem(500, unexpected.getMessage());
     }
   }
