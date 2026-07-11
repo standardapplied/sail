@@ -1031,6 +1031,125 @@ class SailOperationsTest {
   }
 
   @Test
+  void dispatchRestartWithoutASpecIdIsACallerError() throws Exception {
+    var operations =
+        operationsWithStore(baseYaml(), idleShell(), SailOperationsTest::seedAuthBillingSetup);
+
+    var error =
+        dispatch(operations, "acme", new DispatchRequest(null, "background", false, null, true));
+
+    assertError(ErrorCode.INVALID_REQUEST, error);
+    assertTrue(fullError(error).contains("spec id"), fullError(error));
+  }
+
+  @Test
+  void dispatchWithoutRestartOnANonPendingSpecKeepsTheStructuredRefusal() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            idleShell(),
+            store -> {
+              stores[0] = store;
+              seedSpec(store, "auth", "Add auth", "review", List.of(), "Do auth");
+            });
+
+    var error = dispatch(operations, "acme", request("auth"));
+
+    assertError(ErrorCode.SPEC_NOT_READY, error);
+    assertTrue(error.action().contains("restart"), error.action());
+    assertFalse(error.action().contains("--restart"), "API callers must see a lane-neutral fix");
+    assertEquals(SpecStatus.REVIEW, stores[0].findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void serverStartConstructorRestartsADoneSpecOntoItsPriorBranch() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, branchYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var store = new SpecStore(db);
+    seedSpec(
+        store, "auth", "Add auth", "done", List.of(), "Do auth", null, null, null, "sail/auth");
+    var fdeStore = new FdeStore(db);
+    fdeStore.add(LOCAL_HANDLE, null, null, "admin");
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
+            .on("mkdir -p /home/dev/workspace/specs", "")
+            .on("printf '%s'", "")
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("test -d /home/dev/workspace/app/.git", "")
+            .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
+            .on("git -C /home/dev/workspace/app checkout -f sail/auth", "")
+            .on("systemd-run --user", "")
+            .on("claude", "");
+    var operations =
+        new SailOperations(
+            shell,
+            yaml.toString(),
+            null,
+            null,
+            store,
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            SyncScheduler.disabled(),
+            fdeStore);
+
+    var result =
+        dispatch(operations, "acme", new DispatchRequest("auth", "background", false, null, true));
+
+    assertEquals(true, get(result, "dispatched"));
+    assertEquals(true, get(result, "restarted"));
+    assertTrue(get(result, "spec").toString().contains("sail/auth"));
+    assertEquals(SpecStatus.IN_PROGRESS, store.findById("auth").orElseThrow().status());
+    assertTrue(
+        shell.invocations().stream().anyMatch(command -> command.contains("checkout -f sail/auth")),
+        "a restart force-checks out the prior branch instead of failing on the collision");
+    assertFalse(
+        shell.invocations().stream().anyMatch(command -> command.contains("checkout -b")),
+        "a restart never creates a fresh branch when the prior one exists");
+  }
+
+  @Test
+  void dispatchDryRunWithRestartClaimsTheSpecLikeAnyDispatchDryRun() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStore(
+            branchYaml(),
+            idleShell()
+                .on("test -d /home/dev/workspace/app/.git", "")
+                .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
+                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+            store -> {
+              stores[0] = store;
+              seedSpec(
+                  store,
+                  "auth",
+                  "Add auth",
+                  "review",
+                  List.of(),
+                  "Do auth",
+                  null,
+                  null,
+                  null,
+                  "sail/auth");
+            });
+
+    var result =
+        dispatch(operations, "acme", new DispatchRequest("auth", "background", true, null, true));
+
+    assertEquals(true, get(result, "dispatched"));
+    assertEquals(true, get(result, "restarted"));
+    assertEquals(
+        SpecStatus.IN_PROGRESS,
+        stores[0].findById("auth").orElseThrow().status(),
+        "a dry run claims the spec — dispatch's existing dry-run semantics, unchanged by restart");
+  }
+
+  @Test
   void dispatchOnAnUnconfiguredRepoIsACallerErrorNamingTheRepo() throws Exception {
     var operations =
         operationsWithStore(

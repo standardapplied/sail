@@ -97,6 +97,31 @@ class ApiRouterTest {
   }
 
   @Test
+  void dispatchParsesRestartFlag() throws Exception {
+    try (var server = server()) {
+      var response =
+          post(
+              server,
+              "/v1/projects/acme/dispatch",
+              "token",
+              "{\"spec_id\": \"auth\", \"restart\": true}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"restarted\": true"));
+    }
+  }
+
+  @Test
+  void dispatchDefaultsRestartToFalse() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/projects/acme/dispatch", "token", "{\"spec_id\": \"auth\"}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"restarted\": false"));
+    }
+  }
+
+  @Test
   void dispatchParsesSingleRepoTarget() throws Exception {
     try (var server = server()) {
       var response =
@@ -1137,7 +1162,8 @@ class ApiRouterTest {
                   request.specId(), "Spec", "in_progress", request.repos(), null, null, null, null),
               null,
               "",
-              false));
+              false,
+              request.restart()));
     }
 
     @Override

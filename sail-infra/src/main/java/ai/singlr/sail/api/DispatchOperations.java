@@ -53,7 +53,7 @@ public final class DispatchOperations {
 
   private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
 
-  /** One dispatch invocation, lane-agnostic. {@code restart} is CLI-only until the API grows it. */
+  /** One dispatch invocation, lane-agnostic. */
   public record Request(
       String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {}
 
@@ -64,8 +64,10 @@ public final class DispatchOperations {
   public record NoSpecs() implements Outcome {}
 
   /**
-   * A completed dispatch. {@code session}, {@code exitCode} (foreground only), {@code runId} and
-   * {@code watcher} are absent on a dry run, which stops after the claim/branch phase.
+   * A completed dispatch. {@code restarted} reports whether this dispatch was a re-dispatch that
+   * reset a non-pending spec, so callers can message it as an iteration. {@code session}, {@code
+   * exitCode} (foreground only), {@code runId} and {@code watcher} are absent on a dry run, which
+   * stops after the claim/branch phase.
    */
   public record Dispatched(
       Spec taskSpec,
@@ -75,6 +77,7 @@ public final class DispatchOperations {
       String runId,
       String snapshotLabel,
       boolean branchCreated,
+      boolean restarted,
       AgentSession.SessionInfo session,
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher)
@@ -273,6 +276,7 @@ public final class DispatchOperations {
           null,
           snapshot,
           branchCreated,
+          resolution.restarted(),
           null,
           null,
           Optional.empty());
@@ -313,6 +317,7 @@ public final class DispatchOperations {
           runId,
           snapshot,
           branchCreated,
+          resolution.restarted(),
           status,
           background ? null : launch.exitCode(),
           launch.watcher());
@@ -363,10 +368,12 @@ public final class DispatchOperations {
 
   /**
    * Picks the spec to dispatch. Without {@code specId}, the next ready spec assigned to this box's
-   * FDE (or none). With {@code specId}, the spec must exist, pass {@link DispatchPolicy} (checked
-   * before any mutation, so a refused caller can never reset a status), and be pending with its
-   * dependencies met — unless {@code restart} is set, in which case a non-pending status is reset
-   * to pending in the store and reported so the caller publishes {@code spec_restarted}.
+   * FDE (or none) — unless {@code restart} is set, which {@link RestartResolution} refuses because
+   * a restart must name its target. With {@code specId}, the spec must exist and pass {@link
+   * DispatchPolicy} (checked before any mutation, so a refused caller can never reset a status);
+   * {@link RestartResolution} then decides how its status is treated: pending dispatches normally
+   * with its dependencies met, and a non-pending status is either refused or — on {@code restart} —
+   * reset to pending in the store and reported so the caller publishes {@code spec_restarted}.
    */
   static SpecResolution resolveSpec(
       List<Spec> specs,
@@ -375,7 +382,12 @@ public final class DispatchOperations {
       Actor actor,
       String localHandle,
       SpecStore store) {
-    if (Strings.isBlank(specId)) {
+    var spec = Strings.isBlank(specId) ? null : SpecDirectory.findById(specs, specId);
+    if (spec == null) {
+      if (RestartResolution.decide(specId, null, restart)
+          instanceof RestartResolution.Refused refused) {
+        throw refusal(refused);
+      }
       var next = SpecDirectory.nextReadyAssignedTo(specs, localHandle);
       if (next == null) {
         return SpecResolution.none();
@@ -383,33 +395,23 @@ public final class DispatchOperations {
       requireAllowed(actor, next, localHandle);
       return SpecResolution.of(next);
     }
-    var spec = SpecDirectory.findById(specs, specId);
-    if (spec == null) {
-      throw new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
-    }
     requireAllowed(actor, spec, localHandle);
-    if (spec.status() == SpecStatus.PENDING) {
-      if (!SpecDirectory.isReady(specs, spec)) {
-        throw new ApiException(
-            ErrorCode.SPEC_NOT_READY,
-            "Spec '" + specId + "' is not ready for dispatch.",
-            "Resolve dependencies or choose a ready spec.");
+    return switch (RestartResolution.decide(specId, spec, restart)) {
+      case RestartResolution.Refused refused -> throw refusal(refused);
+      case RestartResolution.NotRestarted ignored -> {
+        if (!SpecDirectory.isReady(specs, spec)) {
+          throw new ApiException(
+              ErrorCode.SPEC_NOT_READY,
+              "Spec '" + specId + "' is not ready for dispatch.",
+              "Resolve dependencies or choose a ready spec.");
+        }
+        yield SpecResolution.of(spec);
       }
-      return SpecResolution.of(spec);
-    }
-    if (!restart) {
-      throw new ApiException(
-          ErrorCode.SPEC_NOT_READY,
-          "Spec '"
-              + specId
-              + "' is not pending (current status: "
-              + spec.status().wire()
-              + "). A spec is dispatched only when pending.",
-          "To dispatch it again, pass --restart (this resets status to pending and records the"
-              + " restart as a lifecycle event).");
-    }
-    store.updateStatus(specId, SpecStatus.PENDING);
-    return SpecResolution.restarted(spec, spec.status().wire());
+      case RestartResolution.Restarted restarted -> {
+        store.updateStatus(specId, SpecStatus.PENDING);
+        yield SpecResolution.restarted(spec, restarted.previousStatus());
+      }
+    };
   }
 
   private static void requireAllowed(Actor actor, Spec spec, String localHandle) {
@@ -474,7 +476,8 @@ public final class DispatchOperations {
       var result =
           exec(
               ContainerExec.asDevUser(
-                  project, branchCheckoutArgs(repoDir, branch, branchExists, restarted)));
+                  project,
+                  RestartResolution.branchCheckoutArgs(repoDir, branch, branchExists, restarted)));
       if (!result.ok()) {
         throw new ApiException(
             ErrorCode.BRANCH_CREATE_FAILED,
@@ -493,25 +496,6 @@ public final class DispatchOperations {
       listener.branchUnavailable(branch);
     }
     return created;
-  }
-
-  /**
-   * The git checkout command for a dispatch's work branch. A fresh branch is created with {@code
-   * checkout -b}; on a restart an already-present branch is reused with a <em>forced</em> {@code
-   * checkout -f} so re-dispatch lands on the prior branch even when the previous run left a dirty
-   * working tree, rather than resuming onto it and aborting.
-   */
-  static List<String> branchCheckoutArgs(
-      String repoDir, String branchName, boolean branchExists, boolean restart) {
-    if (branchExists && !restart) {
-      throw new ApiException(
-          ErrorCode.BRANCH_CREATE_FAILED,
-          "Branch '" + branchName + "' already exists.",
-          "Pass --restart to re-dispatch onto it, or delete it first.");
-    }
-    return branchExists
-        ? List.of("git", "-C", repoDir, "checkout", "-f", branchName)
-        : List.of("git", "-C", repoDir, "checkout", "-b", branchName);
   }
 
   /**
@@ -747,6 +731,10 @@ public final class DispatchOperations {
   }
 
   private static ApiException refusal(DispatchDecision.Refused refused) {
+    return new ApiException(refused.code(), refused.message(), refused.fix());
+  }
+
+  private static ApiException refusal(RestartResolution.Refused refused) {
     return new ApiException(refused.code(), refused.message(), refused.fix());
   }
 

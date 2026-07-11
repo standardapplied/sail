@@ -25,7 +25,8 @@ public final class JsonBody {
         optionalString(map, "spec_id"),
         optionalString(map, "mode"),
         Boolean.TRUE.equals(map.get("dry_run")),
-        optionalStringList(map, "repo", "repos"));
+        optionalStringList(map, "repo", "repos"),
+        Boolean.TRUE.equals(map.get("restart")));
   }
 
   public static Map<String, Object> readMap(HttpExchange exchange) throws IOException {

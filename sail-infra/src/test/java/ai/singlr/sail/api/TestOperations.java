@@ -67,7 +67,8 @@ class TestOperations implements Operations {
                 request.specId(), "Spec", "in_progress", request.repos(), null, null, null, null),
             null,
             "",
-            false));
+            false,
+            request.restart()));
   }
 
   @Override

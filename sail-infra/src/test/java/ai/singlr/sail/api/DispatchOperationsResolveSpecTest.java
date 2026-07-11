@@ -201,7 +201,22 @@ class DispatchOperationsResolveSpecTest {
     assertEquals(ErrorCode.SPEC_NOT_READY, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("oauth-flow"));
     assertTrue(ex.getMessage().contains("in_progress"));
-    assertTrue(ex.failure().action().contains("--restart"));
+    assertTrue(ex.failure().action().contains("restart"));
+  }
+
+  @Test
+  void restartWithoutASpecIdIsRefusedBeforeAutoSelection() {
+    var store = store();
+    store.create(row("oauth-flow", "in_progress"));
+
+    var ex = assertThrows(ApiException.class, () -> resolve(null, true, specsOf(store), store));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("spec id"));
+    assertEquals(
+        SpecStatus.IN_PROGRESS,
+        store.findById("oauth-flow").orElseThrow().status(),
+        "a refused restart must never reset any spec's status");
   }
 
   @Test
@@ -255,38 +270,5 @@ class DispatchOperationsResolveSpecTest {
         SpecStatus.IN_PROGRESS,
         store.findById("theirs").orElseThrow().status(),
         "a refused caller must never reset a spec's status");
-  }
-
-  @Test
-  void branchCheckoutCreatesAFreshBranchWhenItDoesNotExist() {
-    var args = DispatchOperations.branchCheckoutArgs("/w/mast", "agent/x", false, false);
-    assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
-  }
-
-  @Test
-  void branchCheckoutForceReusesAnExistingBranchOnRestart() {
-    var args = DispatchOperations.branchCheckoutArgs("/w/mast", "agent/x", true, true);
-    assertEquals(
-        List.of("git", "-C", "/w/mast", "checkout", "-f", "agent/x"),
-        args,
-        "a restart must land on the existing branch even over a dirty tree from the prior run "
-            + "(untracked scaffold that would otherwise abort a plain checkout)");
-  }
-
-  @Test
-  void branchCheckoutStillCreatesWhenRestartingWithNoPriorBranch() {
-    var args = DispatchOperations.branchCheckoutArgs("/w/mast", "agent/x", false, true);
-    assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
-  }
-
-  @Test
-  void branchCheckoutFailsLoudOnACollisionForAFreshDispatch() {
-    var ex =
-        assertThrows(
-            ApiException.class,
-            () -> DispatchOperations.branchCheckoutArgs("/w/mast", "agent/x", true, false));
-    assertEquals(ErrorCode.BRANCH_CREATE_FAILED, ex.failure().errorCode());
-    assertTrue(ex.failure().action().contains("--restart"), "must point the operator at --restart");
-    assertTrue(ex.getMessage().contains("agent/x"));
   }
 }

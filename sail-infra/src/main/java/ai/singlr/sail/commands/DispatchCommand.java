@@ -117,11 +117,6 @@ public final class DispatchCommand implements Runnable {
 
   private void execute(SyncScheduler sync) throws Exception {
     sync.freshenRead();
-    if (restart && specId == null) {
-      throw new IllegalArgumentException(
-          "--restart requires --spec to identify which spec to restart.");
-    }
-
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
     }

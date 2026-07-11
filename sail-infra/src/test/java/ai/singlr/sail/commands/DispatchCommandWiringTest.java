@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SyncScheduler;
@@ -176,6 +177,47 @@ class DispatchCommandWiringTest {
     var served = server.runs("acme", null);
     assertTrue(
         served.isSuccess(), "/v1/runs answers from the rows a CLI-lane dispatch just recorded");
+  }
+
+  @Test
+  void cliRestartWithoutASpecIsRefusedByTheSharedExecutor() throws Exception {
+    var operations = cliOperations(shell(), new ArrayList<>());
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    var request = new DispatchOperations.Request(null, "background", false, null, true);
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> operations.dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("spec id"));
+  }
+
+  @Test
+  void cliRestartRedispatchesAReviewSpecOntoItsPriorBranch() throws Exception {
+    var events = new ArrayList<Event>();
+    var operations =
+        cliOperations(
+            shell()
+                .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/x", "")
+                .on("git -C /home/dev/workspace/app checkout -f x", ""),
+            events);
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    var specStore = new SpecStore(db);
+    specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x");
+    var request = new DispatchOperations.Request("auth", "background", false, null, true);
+
+    var outcome = operations.dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE);
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
+    assertTrue(dispatched.restarted());
+    assertEquals("x", dispatched.branch(), "a restart lands on the recorded prior branch");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        List.of(Event.WellKnownTypes.SPEC_RESTARTED, Event.WellKnownTypes.SPEC_DISPATCHED),
+        events.stream().map(Event::type).toList());
+    assertEquals(Map.of("note", "restarted from review"), events.getFirst().data());
   }
 
   @Test

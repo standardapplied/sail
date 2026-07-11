@@ -139,9 +139,14 @@ record SpecResponse(
   }
 }
 
-record DispatchRequest(String specId, String mode, boolean dryRun, List<String> repos) {
+record DispatchRequest(
+    String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {
   DispatchRequest(String specId, String mode, boolean dryRun) {
     this(specId, mode, dryRun, List.of());
+  }
+
+  DispatchRequest(String specId, String mode, boolean dryRun, List<String> repos) {
+    this(specId, mode, dryRun, repos, false);
   }
 
   DispatchRequest {
@@ -157,7 +162,8 @@ record DispatchResponse(
     DispatchedSpecView spec,
     AgentStatusView agent,
     String snapshot,
-    boolean branchCreated)
+    boolean branchCreated,
+    boolean restarted)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -169,6 +175,7 @@ record DispatchResponse(
     m.put("agent", agent);
     m.put("snapshot", snapshot);
     m.put("branch_created", branchCreated);
+    m.put("restarted", restarted);
     return m;
   }
 }
