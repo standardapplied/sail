@@ -122,7 +122,7 @@ class DispatchLaneParityTest {
   }
 
   @Test
-  void bothLanesProduceTheSameSpecRowRunRowAndEventSequence() throws Exception {
+  void bothLanesProduceTheSameSpecRowRunRowsAndEventSequence() throws Exception {
     var cli = lane("cli");
     var cliOps =
         new DispatchOperations(
@@ -144,10 +144,20 @@ class DispatchLaneParityTest {
             ADMIN,
             HANDLE);
     assertInstanceOf(DispatchOperations.Dispatched.class, cliOutcome);
+    cli.specStore().updateStatus("auth", SpecStatus.REVIEW);
+    var cliRestart =
+        cliOps.dispatch(
+            "acme",
+            new DispatchOperations.Request("auth", "background", false, null, true),
+            ADMIN,
+            HANDLE);
+    assertTrue(
+        assertInstanceOf(DispatchOperations.Dispatched.class, cliRestart).restarted(),
+        "the CLI lane reports the re-dispatch as a restart");
 
     var api = lane("api");
     try (var bus = new EventBus()) {
-      var delivered = new CountDownLatch(1);
+      var delivered = new CountDownLatch(2);
       bus.subscribe(
           new EventSubscriber() {
             @Override
@@ -186,14 +196,29 @@ class DispatchLaneParityTest {
       var result =
           apiOps.dispatch(
               "acme", new DispatchRequest("auth", "background", false, null), ADMIN, HANDLE);
-
       assertTrue(result.isSuccess(), () -> String.valueOf(result.fullError()));
-      assertTrue(delivered.await(10, TimeUnit.SECONDS), "spec_dispatched must reach the bus");
+
+      api.specStore().updateStatus("auth", SpecStatus.REVIEW);
+      var restartResult =
+          apiOps.dispatch(
+              "acme", new DispatchRequest("auth", "background", false, null, true), ADMIN, HANDLE);
+      assertTrue(restartResult.isSuccess(), () -> String.valueOf(restartResult.fullError()));
+      assertTrue(
+          restartResult.orThrow().restarted(), "the API lane reports the re-dispatch as a restart");
+      assertTrue(
+          delivered.await(10, TimeUnit.SECONDS), "both spec_dispatched events must reach the bus");
     }
 
     assertEquals(specRow(cli), specRow(api), "one claim, one branch stamp, on either lane");
-    assertEquals(runRow(cli), runRow(api), "one run recorder, on either lane");
+    assertEquals(runRows(cli), runRows(api), "one run recorder, on either lane");
     assertEquals(eventShapes(cli), eventShapes(api), "one event sequence, on either lane");
+    assertTrue(
+        eventShapes(cli).stream()
+            .anyMatch(
+                shape ->
+                    Event.WellKnownTypes.SPEC_RESTARTED.equals(shape.get("type"))
+                        && Map.of("note", "restarted from review").equals(shape.get("data"))),
+        "the restart round records its lifecycle event with the note payload");
   }
 
   private static Map<String, Object> specRow(Lane lane) {
@@ -205,10 +230,13 @@ class DispatchLaneParityTest {
     return shape;
   }
 
-  private static Map<String, Object> runRow(Lane lane) {
+  private static List<Map<String, Object>> runRows(Lane lane) {
     var runs = lane.runStore().listForProject("acme");
-    assertEquals(1, runs.size(), "each lane records exactly one run");
-    var run = runs.getFirst();
+    assertEquals(2, runs.size(), "each lane records one run per dispatch");
+    return runs.stream().map(DispatchLaneParityTest::runShape).toList();
+  }
+
+  private static Map<String, Object> runShape(RunStore.RunRow run) {
     var shape = new LinkedHashMap<String, Object>();
     shape.put("project", run.project());
     shape.put("spec", run.specId());

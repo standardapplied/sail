@@ -570,12 +570,16 @@ public final class SailOperations implements Operations {
         dispatchOps.dispatch(
             project,
             new DispatchOperations.Request(
-                request.specId(), request.mode(), request.dryRun(), request.repos(), false),
+                request.specId(),
+                request.mode(),
+                request.dryRun(),
+                request.repos(),
+                request.restart()),
             actor,
             localHandle);
     return switch (outcome) {
       case DispatchOperations.NoSpecs ignored ->
-          new DispatchResponse(project, false, "no_pending_specs", null, null, "", false);
+          new DispatchResponse(project, false, "no_pending_specs", null, null, "", false, false);
       case DispatchOperations.Dispatched dispatched ->
           new DispatchResponse(
               project,
@@ -584,7 +588,8 @@ public final class SailOperations implements Operations {
               dispatchedSpecView(dispatched.taskSpec(), dispatched.branch()),
               agentStatusView(dispatched.agentType(), request.mode(), dispatched.session()),
               dispatched.snapshotLabel(),
-              dispatched.branchCreated());
+              dispatched.branchCreated(),
+              dispatched.restarted());
     };
   }
 
