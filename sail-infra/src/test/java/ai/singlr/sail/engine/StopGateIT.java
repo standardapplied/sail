@@ -27,10 +27,14 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 /**
- * Exercises the installed stop gate end-to-end in a real container against a live sail-api socket:
- * a dispatched-looking session with a dirty worktree is blocked exactly once (block JSON on
- * stdout), the second stop passes, and the event log shows {@code agent_stop_nudged} followed by
- * {@code agent_session_stopped} — never a stop that did not happen.
+ * Exercises the installed stop gate end-to-end in a real container against a live sail-api socket,
+ * on both hook lanes: a dispatched-looking session with a dirty worktree is blocked exactly once
+ * (block JSON on stdout), the second stop passes, and the event log shows {@code agent_stop_nudged}
+ * followed by {@code agent_session_stopped} — never a stop that did not happen. The Claude lane
+ * retries with the marker-file loop guard; the Codex lane feeds the payload shape captured from a
+ * live headless {@code codex exec} run (codex-cli 0.144.0), where the retry carries {@code
+ * stop_hook_active: true}. One gate script serves both, and the sail-owned codex {@code hooks.json}
+ * must wire it.
  */
 class StopGateIT extends AbstractIncusIT {
 
@@ -73,6 +77,19 @@ class StopGateIT extends AbstractIncusIT {
         Files.createDirectories(SailPaths.apiSocketHostDir());
         ContainerSailSetup.ensureInstalled(shell, CONTAINER);
         new IncusDeviceManager(shell).ensureEventSocket(CONTAINER, socketDir, CONTAINER_DIR);
+
+        var codexHooks =
+            exec(
+                CONTAINER,
+                List.of(
+                    "su",
+                    "-",
+                    "dev",
+                    "-c",
+                    "grep -F " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH));
+        assertTrue(
+            codexHooks.ok(),
+            "the installed codex hooks.json must wire the stop gate: " + codexHooks.stderr());
 
         var prepare =
             exec(
@@ -123,6 +140,37 @@ class StopGateIT extends AbstractIncusIT {
         var reason = Objects.toString(received.get(0).data().get("reason"), "");
         assertTrue(reason.contains("proj"), "the nudge event must carry the reason: " + reason);
         assertEquals("run-1", received.get(0).data().get(Event.WellKnownData.RUN_ID));
+
+        var codexFirst = codexStopAttempt(false);
+        assertTrue(codexFirst.ok(), "the first codex stop must exit 0: " + codexFirst.stderr());
+        assertTrue(
+            codexFirst.stdout().contains("\"decision\": \"block\""),
+            "a dirty worktree must block the first codex stop: " + codexFirst.stdout());
+        assertTrue(
+            codexFirst.stdout().contains("proj"),
+            "the codex block reason must name the dirty repo: " + codexFirst.stdout());
+
+        var codexSecond = codexStopAttempt(true);
+        assertTrue(codexSecond.ok(), "the codex retry must exit 0: " + codexSecond.stderr());
+        assertTrue(
+            codexSecond.stdout().isBlank(),
+            "the retry carries stop_hook_active=true and must pass: " + codexSecond.stdout());
+
+        awaitEvents(received, 4);
+        assertEquals(
+            List.of(
+                Event.WellKnownTypes.AGENT_STOP_NUDGED,
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                Event.WellKnownTypes.AGENT_STOP_NUDGED,
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED),
+            received.stream().map(Event::type).toList(),
+            "the codex lane must show the same nudged-then-stopped sequence");
+        assertEquals("codex", received.get(2).agent(), "the nudge must be attributed to codex");
+        assertEquals("run-2", received.get(2).data().get(Event.WellKnownData.RUN_ID));
+        var codexReason = Objects.toString(received.get(2).data().get("reason"), "");
+        assertTrue(
+            codexReason.contains("proj"),
+            "the codex nudge must carry the same reason text: " + codexReason);
       }
     } finally {
       deleteContainerQuietly(CONTAINER);
@@ -142,6 +190,29 @@ class StopGateIT extends AbstractIncusIT {
             "printf '{}' | SAIL_SPEC_ID="
                 + SPEC_ID
                 + " SAIL_RUN_ID=run-1 SAIL_AGENT=claude-code "
+                + SailStopGate.SCRIPT_PATH));
+  }
+
+  private ShellExec.Result codexStopAttempt(boolean stopHookActive) throws Exception {
+    var payload =
+        "{\"session_id\":\"s\",\"turn_id\":\"t\",\"transcript_path\":null,"
+            + "\"cwd\":\"/home/dev/workspace\",\"hook_event_name\":\"Stop\","
+            + "\"model\":\"gpt-5.6-sol\",\"permission_mode\":\"bypassPermissions\","
+            + "\"stop_hook_active\":"
+            + stopHookActive
+            + ",\"last_assistant_message\":\"done\"}";
+    return exec(
+        CONTAINER,
+        List.of(
+            "su",
+            "-",
+            "dev",
+            "-c",
+            "printf '%s' '"
+                + payload
+                + "' | SAIL_SPEC_ID="
+                + SPEC_ID
+                + " SAIL_RUN_ID=run-2 SAIL_AGENT=codex "
                 + SailStopGate.SCRIPT_PATH));
   }
 

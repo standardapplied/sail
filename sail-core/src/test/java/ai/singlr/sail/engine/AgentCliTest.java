@@ -160,6 +160,10 @@ class AgentCliTest {
 
     assertTrue(cmd.contains("codex exec"));
     assertTrue(cmd.contains("--dangerously-bypass-approvals-and-sandbox"));
+    assertTrue(
+        cmd.contains("--dangerously-bypass-hook-trust"),
+        "Codex silently skips untrusted hooks in headless exec, so without this flag the"
+            + " sail-owned hooks layer (and its stop gate) would never fire");
     assertTrue(cmd.contains("\"$(cat " + TASK + ")\""));
     assertFalse(cmd.contains("--print"));
   }
@@ -170,6 +174,9 @@ class AgentCliTest {
 
     assertTrue(cmd.contains("codex exec"));
     assertFalse(cmd.contains("--full-auto"));
+    assertFalse(
+        cmd.contains("--dangerously-bypass-hook-trust"),
+        "hooks run outside the Codex sandbox, so a sandboxed session must not auto-trust them");
   }
 
   @Test
