@@ -220,4 +220,44 @@ class SqliteTest {
     assertTrue(result.isPresent());
     assertEquals("persistent", result.get());
   }
+
+  @Test
+  void concurrentTransactionsOnOneConnectionNeverInterleave() throws Exception {
+    db.execute("CREATE TABLE counter (id INTEGER PRIMARY KEY, n INTEGER NOT NULL)");
+    db.execute("INSERT INTO counter VALUES (1, 0)");
+    var threads = 8;
+    var iterations = 25;
+    var start = new java.util.concurrent.CountDownLatch(1);
+
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+      for (var t = 0; t < threads; t++) {
+        futures.add(
+            executor.submit(
+                () -> {
+                  start.await();
+                  for (var i = 0; i < iterations; i++) {
+                    db.immediateTransaction(
+                        () -> {
+                          var n =
+                              db.queryOne(
+                                      "SELECT n FROM counter WHERE id = 1", row -> row.integer(0))
+                                  .orElseThrow();
+                          db.execute("UPDATE counter SET n = ? WHERE id = 1", n + 1);
+                          return null;
+                        });
+                    db.query("SELECT n FROM counter", row -> row.integer(0));
+                  }
+                  return null;
+                }));
+      }
+      start.countDown();
+      for (var future : futures) {
+        future.get(2, java.util.concurrent.TimeUnit.MINUTES);
+      }
+    }
+
+    var total = db.queryOne("SELECT n FROM counter WHERE id = 1", row -> row.integer(0));
+    assertEquals((long) threads * iterations, (long) total.orElseThrow());
+  }
 }

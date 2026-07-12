@@ -770,6 +770,44 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aHandlerFailurePublishesALoudPipelineErrorEvent() throws Exception {
+    createSpec("auth", "in_progress");
+    try (var bus = new EventBus()) {
+      var events = new java.util.concurrent.CopyOnWriteArrayList<Event>();
+      var latch = new CountDownLatch(1);
+      bus.subscribe(
+          BusTesting.latching(
+              new EventSubscriber() {
+                @Override
+                public String name() {
+                  return "capture";
+                }
+
+                @Override
+                public java.util.function.Predicate<Event> filter() {
+                  return e -> "review_pipeline_error".equals(e.type());
+                }
+
+                @Override
+                public void onEvent(Event event) {
+                  events.add(event);
+                }
+              },
+              latch));
+      var ctrl =
+          controller(p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr) -> "[]", bus);
+      db.close();
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(latch);
+
+      assertEquals(1, events.size());
+      assertEquals("auth", events.getFirst().spec());
+      assertTrue(events.getFirst().data().get("detail").toString().contains("closed"));
+    }
+  }
+
+  @Test
   void aRunningReviewIsNotRestartedByADuplicateEvent() {
     createSpec("auth", "in_progress");
     var reviewId = reviewStore.createReview("auth", 1);

@@ -46,6 +46,7 @@ public final class SlackReactor implements EventSubscriber {
           "review_stage_failed",
           "review_completed",
           "review_errored",
+          "review_pipeline_error",
           "review_iteration_started",
           "review_escalated");
 
