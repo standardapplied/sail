@@ -940,7 +940,9 @@ class SailOperationsTest {
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("mkdir -p /home/dev/.sail", "")
-            .on("codex exec --dangerously-bypass-approvals-and-sandbox --model gpt-5.5", "");
+            .on(
+                "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust --model gpt-5.5",
+                "");
     var operations =
         operationsWithStore(
             baseYaml(),
@@ -970,7 +972,7 @@ class SailOperationsTest {
             .anyMatch(
                 command ->
                     command.contains(
-                            "codex exec --dangerously-bypass-approvals-and-sandbox --model gpt-5.5")
+                            "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust --model gpt-5.5")
                         && command.contains("model_reasoning_effort='\"high\"'")));
     assertFalse(
         shell.invocations().stream().anyMatch(command -> command.contains("claude --print")));

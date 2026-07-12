@@ -393,7 +393,9 @@ class AgentSessionTest {
 
     var joined = String.join(" ", cmd);
     assertTrue(
-        joined.contains("codex exec --dangerously-bypass-approvals-and-sandbox --model gpt-5.5"));
+        joined.contains(
+            "codex exec --dangerously-bypass-approvals-and-sandbox"
+                + " --dangerously-bypass-hook-trust --model gpt-5.5"));
     assertTrue(joined.contains("model_reasoning_effort='\"high\"'"));
     assertFalse(joined.contains("exec codex exec"));
   }

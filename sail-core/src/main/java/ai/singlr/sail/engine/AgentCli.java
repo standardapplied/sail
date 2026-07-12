@@ -116,6 +116,14 @@ public enum AgentCli {
    * during a long-running dispatch. This must be scoped to the background dispatch path only: the
    * review/foreground paths parse the agent's final {@code json} block and would break under
    * streaming output. Codex already streams a readable transcript, so the flag is a no-op for it.
+   *
+   * <p>Full-permission Codex sessions additionally pass {@code --dangerously-bypass-hook-trust}:
+   * Codex silently skips untrusted hooks even in headless {@code exec}, and sail cannot pre-seed
+   * trust hashes for the hooks file it owns and rewrites, so without the flag the sail hooks layer
+   * would never fire (see {@code CodexHookConfig}). It is tied to {@code fullPermissions} because
+   * hooks run outside the Codex sandbox — in a sandboxed session auto-trusting hooks would grant an
+   * escape hatch, while an unsandboxed session gains nothing it did not already have. Every sail
+   * dispatch path runs with full permissions, and interactive engineer sessions never get the flag.
    */
   public String headlessCommand(
       String taskFile,
@@ -141,7 +149,10 @@ public enum AgentCli {
             + task;
       }
       case CODEX -> {
-        var perm = fullPermissions ? " --dangerously-bypass-approvals-and-sandbox" : "";
+        var perm =
+            fullPermissions
+                ? " --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
+                : "";
         yield binaryName + " exec" + perm + codexModelOptions(model, reasoningEffort) + " " + task;
       }
     };

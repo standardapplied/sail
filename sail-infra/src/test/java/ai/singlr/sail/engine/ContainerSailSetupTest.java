@@ -94,6 +94,33 @@ class ContainerSailSetupTest {
   }
 
   @Test
+  void aCodexHooksFileMissingTheStopGateForcesAReinstall() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail(
+                "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH, "");
+
+    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    assertEquals(
+        ContainerSailSetup.Result.BACKFILLED,
+        result,
+        "a codex hooks.json still wiring the bare Stop publisher is stale and must be rewritten,"
+            + " or premature Codex turn-ends keep stranding dispatched work uncommitted");
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(
+                c ->
+                    c.contains(
+                        "grep -qsF "
+                            + SailStopGate.SCRIPT_PATH
+                            + " "
+                            + CodexHookConfig.SETTINGS_PATH)),
+        "the probe must verify the codex hooks file wires the stop gate, not just exists");
+  }
+
+  @Test
   void anEventHelperMissingTheReasonArgForcesAReinstall() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -165,6 +192,17 @@ class ContainerSailSetupTest {
         probe.contains(
             "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + ClaudeCodeHookConfig.SETTINGS_PATH),
         "the probe must detect a settings file that still wires the bare Stop publisher");
+    assertTrue(
+        probe.contains(
+            "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH),
+        "the probe must detect a codex hooks file that still wires the bare Stop publisher");
+    assertTrue(
+        probe.contains(
+            "grep -qsF "
+                + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
+                + " "
+                + CodexHookConfig.SETTINGS_PATH),
+        "the probe must detect a codex hooks file predating the tool-progress heartbeats");
     assertTrue(
         probe.contains(
             "grep -qsF " + SailEventHelper.REASON_MARKER + " " + SailEventHelper.SCRIPT_PATH),

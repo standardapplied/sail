@@ -33,6 +33,15 @@ class SailStopGateTest {
 
   private static final String STOP_INPUT =
       "{\"session_id\":\"s\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}";
+
+  private static final String CODEX_STOP_INPUT =
+      """
+      {"session_id":"019f5813-4a30-7c73-ae8d-77a...","turn_id":"019f5813-4ab1-7292-8f37-97f...",\
+      "transcript_path":"/home/dev/.codex/sessions/2026/07/12/rollout.jsonl",\
+      "cwd":"/home/dev/workspace","hook_event_name":"Stop","model":"gpt-5.6-sol",\
+      "permission_mode":"bypassPermissions","stop_hook_active":false,\
+      "last_assistant_message":"done"}""";
+
   private static final String RUN_ID = "run-1";
 
   @TempDir Path home;
@@ -128,6 +137,30 @@ class SailStopGateTest {
     assertEquals(2, events.size(), events.toString());
     assertTrue(events.get(0).startsWith("agent_stop_nudged "), events.get(0));
     assertEquals("agent_session_stopped", events.get(1));
+  }
+
+  @Test
+  void theVerbatimCodexStopPayloadBlocksADirtyRepo() throws Exception {
+    var repo = repo("sail");
+    Files.writeString(repo.resolve("wip.txt"), "uncommitted");
+
+    var result = runGate(CODEX_STOP_INPUT, RUN_ID);
+
+    assertEquals(0, result.exitCode(), result.stderr());
+    var reason = blockReason(result);
+    assertTrue(reason.contains("commit your work in sail"), reason);
+  }
+
+  @Test
+  void theVerbatimCodexRetryPayloadHonorsStopHookActive() throws Exception {
+    var repo = repo("sail");
+    Files.writeString(repo.resolve("wip.txt"), "uncommitted");
+    var retry = CODEX_STOP_INPUT.replace("\"stop_hook_active\":false", "\"stop_hook_active\":true");
+
+    var result = runGate(retry, RUN_ID);
+
+    assertEquals("", result.stdout(), "Codex re-stops with stop_hook_active=true after a block");
+    assertEquals(List.of("agent_session_stopped"), events());
   }
 
   @Test
