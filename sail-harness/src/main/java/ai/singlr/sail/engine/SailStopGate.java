@@ -121,7 +121,9 @@ public final class SailStopGate {
           "${default#origin/}"|main|master) continue ;;
         esac
         command -v gh >/dev/null 2>&1 || continue
-        pr_err="$( (cd "$repo_dir" && timeout 5 gh pr view "$branch" --json state >/dev/null) 2>&1 || true)"
+        GH_TIMEOUT=""
+        command -v timeout >/dev/null 2>&1 && GH_TIMEOUT="timeout 5"
+        pr_err="$( (cd "$repo_dir" && $GH_TIMEOUT gh pr view "$branch" --json state >/dev/null) 2>&1 || true)"
         case "$pr_err" in
           *"no pull requests found"*) note "open a pull request for $branch in $repo" ;;
         esac
