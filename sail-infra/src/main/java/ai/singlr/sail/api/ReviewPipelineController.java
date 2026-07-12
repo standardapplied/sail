@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -155,6 +156,26 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
               + event.spec()
               + ": "
               + e.getMessage());
+      publishPipelineError(event, e);
+    }
+  }
+
+  /**
+   * A failure in this handler used to be one journal line and a silently stranded spec — the review
+   * never started and nothing downstream noticed (the field incident: a raced SQLite statement
+   * killed the kickoff twice in one week). Publish it loudly so Slack shows the failure, and rely
+   * on {@link MissedStopReconciler}'s rescue replay to retry the kickoff on the next sweep.
+   * Publishing must never mask the original failure.
+   */
+  private void publishPipelineError(Event event, Exception failure) {
+    try {
+      publishEvent(
+          event.project(),
+          event.spec(),
+          "review_pipeline_error",
+          Objects.toString(failure.getMessage(), failure.getClass().getSimpleName()));
+    } catch (RuntimeException e) {
+      System.err.println("review-pipeline: could not publish pipeline error: " + e.getMessage());
     }
   }
 

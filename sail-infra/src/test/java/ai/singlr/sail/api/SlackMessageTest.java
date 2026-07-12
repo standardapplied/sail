@@ -268,6 +268,18 @@ class SlackMessageTest {
   }
 
   @Test
+  void reviewPipelineErrorIsLoudAndCarriesTheCause() {
+    var text =
+        SlackMessage.forEvent(
+            event("review_pipeline_error", Map.of("detail", "another row available")), null);
+
+    assertEquals(
+        "Review pipeline hit an internal error (another row available) — the reconciler retries"
+            + " on its next sweep; if this recurs, check the server journal.",
+        text);
+  }
+
+  @Test
   void fixIterationStarted() {
     var text = SlackMessage.forEvent(event("review_iteration_started"), null);
 

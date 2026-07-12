@@ -16,6 +16,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -158,8 +159,8 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     var session = latest.get();
-    var observed = authoritativeStopObserved(spec.id(), session.startedAt());
-    var outcome = MissedStops.assess(session, observed, clock.get(), LAUNCH_GRACE);
+    var coverage = stopCoverage(spec.id(), session.startedAt());
+    var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {
       case MissedStops.Outcome.ReplayStop replay -> {
         publishStop(spec, session, replay.exitCode(), replay.why());
@@ -177,15 +178,42 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Whether an authoritative ({@code source}-carrying) stop for this spec has been recorded since
-   * the session started. Such a stop means the watcher (or an earlier pass) already covered this
-   * session; replaying over it would duplicate its outcome. Unreadable rows count as covering — the
-   * sweep must prefer doing nothing over acting on data it cannot interpret.
+   * The {@link MissedStops.StopCoverage} of this session: when an authoritative ({@code
+   * source}-carrying) stop was recorded since the session started, and whether the pipeline left
+   * evidence of acting on it — an {@code agent_failed} verdict or review stage activity since the
+   * same instant. Observed-but-unacted is the field failure this rescues: a raced statement killed
+   * the review kickoff after the watcher's stop landed, and the old observed-means-covered check
+   * made every later sweep skip the stranded spec. Unreadable stop rows count as covering and
+   * in-flight (timestamp {@code MAX}) — the sweep prefers doing nothing over acting on data it
+   * cannot interpret.
    */
-  private boolean authoritativeStopObserved(String specId, String startedAt) {
+  private MissedStops.StopCoverage stopCoverage(String specId, String startedAt) {
     var since = MissedStops.parseOr(startedAt, Instant.MIN);
-    return eventStore.forSpecAndType(specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
-        .anyMatch(row -> carriesSource(row) && !timestampOf(row).isBefore(since));
+    var observedAt =
+        eventStore.forSpecAndType(specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+            .filter(row -> carriesSource(row) && !timestampOf(row).isBefore(since))
+            .map(MissedStopReconciler::timestampOf)
+            .max(Instant::compareTo)
+            .orElse(null);
+    if (observedAt == null) {
+      return MissedStops.StopCoverage.none();
+    }
+    return new MissedStops.StopCoverage(observedAt, actedOnSince(specId, since));
+  }
+
+  private static final List<String> ACTED_ON_EVIDENCE =
+      List.of(
+          Event.WellKnownTypes.AGENT_FAILED,
+          "review_stage_started",
+          "review_stage_failed",
+          "review_escalated");
+
+  private boolean actedOnSince(String specId, Instant since) {
+    return ACTED_ON_EVIDENCE.stream()
+        .anyMatch(
+            type ->
+                eventStore.forSpecAndType(specId, type).stream()
+                    .anyMatch(row -> !timestampOf(row).isBefore(since)));
   }
 
   private static boolean carriesSource(EventStore.EventRow row) {

@@ -150,6 +150,12 @@ class MissedStopReconcilerTest {
         "1-foreign");
   }
 
+  private void recordEvent(String specId, String type, String timestamp) {
+    eventStore.insert(
+        new EventStore.EventRow(
+            0, timestamp, type, "test-project", specId, "claude-code", HostInfo.hostname(), "{}"));
+  }
+
   private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
     eventStore.insert(
         new EventStore.EventRow(
@@ -394,6 +400,74 @@ class MissedStopReconcilerTest {
     var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
     assertEquals(0, replayed);
+  }
+
+  @Test
+  void aDroppedAuthoritativeStopIsRescuedOnceItsGraceExpires() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.EXIT_CODE,
+            0,
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER));
+
+    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(1, replayed);
+  }
+
+  @Test
+  void aDroppedStopAlreadyActedOnIsNeverRescued() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+    recordEvent("auth", "review_stage_started", Instant.now().plusSeconds(2).toString());
+
+    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void aDroppedFailureStopWithItsVerdictPublishedIsNeverRescued() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 137);
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.EXIT_CODE,
+            137,
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER));
+    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2).toString());
+
+    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+  }
+
+  @Test
+  void evidenceFromBeforeTheSessionNeverCountsAsActedOn() {
+    createInProgressSpec("auth");
+    recordEvent(
+        "auth", "review_stage_started", Instant.now().minus(Duration.ofHours(2)).toString());
+    finishedSession("auth", "stopped", 0);
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+
+    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(1, replayed);
   }
 
   @Test

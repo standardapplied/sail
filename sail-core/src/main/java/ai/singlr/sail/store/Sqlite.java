@@ -16,12 +16,21 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
  * Thin Panama FFI wrapper over the system {@code libsqlite3.so.0}. Opens a database with WAL mode,
- * foreign keys enabled, and a 5-second busy timeout. Thread-safe via SQLite's serialized mode
- * (default).
+ * foreign keys enabled, and a 5-second busy timeout.
+ *
+ * <p>Thread-safe at the LOGICAL level, not just the C level: a connection-wide reentrant lock
+ * serializes every statement and every whole transaction scope. SQLite's serialized mode ({@code
+ * FULLMUTEX}) only protects individual C calls — it happily interleaves two threads' {@code BEGIN}s
+ * on one connection, so a server whose event-bus subscribers and request threads share this object
+ * would sporadically die with {@code cannot start a transaction within a transaction} (surfacing as
+ * a scrambled {@code sqlite3_errmsg} like "another row available"), which is exactly how the review
+ * pipeline silently lost agent stops in the field. The lock is reentrant so statements inside a
+ * {@link #transaction} body nest without deadlock.
  *
  * <p>Not a JDBC driver. Exposes exactly the surface Sail needs: execute, query, and transactions.
  */
@@ -40,6 +49,7 @@ public final class Sqlite implements AutoCloseable {
   private final Arena arena;
   private final MemorySegment db;
   private final SqliteLib lib;
+  private final ReentrantLock lock = new ReentrantLock();
   private volatile boolean closed;
 
   private Sqlite(Arena arena, MemorySegment db, SqliteLib lib) {
@@ -89,6 +99,7 @@ public final class Sqlite implements AutoCloseable {
 
   public void execute(String sql, Object... params) {
     requireOpen();
+    lock.lock();
     try (var stmtArena = Arena.ofConfined()) {
       var stmt = prepare(stmtArena, sql);
       try {
@@ -104,11 +115,14 @@ public final class Sqlite implements AutoCloseable {
       throw e;
     } catch (Throwable t) {
       throw new SqliteException("Execute failed: " + sql, t);
+    } finally {
+      lock.unlock();
     }
   }
 
   public <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
     requireOpen();
+    lock.lock();
     try (var stmtArena = Arena.ofConfined()) {
       var stmt = prepare(stmtArena, sql);
       try {
@@ -129,6 +143,8 @@ public final class Sqlite implements AutoCloseable {
       throw e;
     } catch (Throwable t) {
       throw new SqliteException("Query failed: " + sql, t);
+    } finally {
+      lock.unlock();
     }
   }
 
@@ -161,27 +177,40 @@ public final class Sqlite implements AutoCloseable {
   }
 
   private <T> T transaction(String begin, Supplier<T> work) {
-    execute(begin);
+    lock.lock();
     try {
-      var result = work.get();
-      execute("COMMIT");
-      return result;
-    } catch (Exception e) {
+      execute(begin);
       try {
-        execute("ROLLBACK");
-      } catch (Exception rollbackEx) {
-        e.addSuppressed(rollbackEx);
+        var result = work.get();
+        execute("COMMIT");
+        return result;
+      } catch (Exception e) {
+        try {
+          execute("ROLLBACK");
+        } catch (Exception rollbackEx) {
+          e.addSuppressed(rollbackEx);
+        }
+        throw e;
       }
-      throw e;
+    } finally {
+      lock.unlock();
     }
   }
 
+  /**
+   * The rows changed by the most recent statement on this connection. Only meaningful for the
+   * caller's own last statement when invoked inside a {@link #transaction} scope, which holds the
+   * connection lock across both calls; outside one, another thread's write may intervene.
+   */
   public int changes() {
     requireOpen();
+    lock.lock();
     try {
       return (int) lib.changes.invokeExact(db);
     } catch (Throwable t) {
       throw new SqliteException("Failed to get changes", t);
+    } finally {
+      lock.unlock();
     }
   }
 

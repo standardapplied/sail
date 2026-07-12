@@ -39,6 +39,11 @@ final class SlackMessage {
       case "review_stage_failed" ->
           "Review stage failed: " + detailOr(event, "review") + findingsSuffix(event) + ".";
       case "review_completed" -> "Review passed. Awaiting merge.";
+      case "review_pipeline_error" ->
+          "Review pipeline hit an internal error ("
+              + detailOr(event, "unknown error")
+              + ") — the reconciler retries on its next sweep; if this recurs, check the server"
+              + " journal.";
       case "review_errored" -> "Review errored: " + detailOr(event, "unknown error");
       case "review_iteration_started" -> "Fix iteration started.";
       case "review_escalated" ->

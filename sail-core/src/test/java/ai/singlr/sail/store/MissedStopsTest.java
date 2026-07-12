@@ -38,7 +38,16 @@ class MissedStopsTest {
   }
 
   private static MissedStops.Outcome assess(RunStore.RunRow session, boolean observed) {
-    return MissedStops.assess(session, observed, NOW, GRACE);
+    var coverage =
+        observed
+            ? new MissedStops.StopCoverage(NOW.minus(GRACE).minusSeconds(1), true)
+            : MissedStops.StopCoverage.none();
+    return MissedStops.assess(session, coverage, NOW, GRACE);
+  }
+
+  private static MissedStops.Outcome assessDropped(
+      RunStore.RunRow session, java.time.Instant observedAt) {
+    return MissedStops.assess(session, new MissedStops.StopCoverage(observedAt, false), NOW, GRACE);
   }
 
   @Test
@@ -73,6 +82,44 @@ class MissedStopsTest {
   @Test
   void anAuthoritativeStopAlreadyRecordedSkipsARunningSession() {
     var outcome = assess(session("running", null, "2026-07-06T11:00:00Z"), true);
+
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
+  }
+
+  @Test
+  void anObservedButUnactedStopOlderThanGraceIsReplayedWithItsExitCode() {
+    var outcome =
+        assessDropped(
+            session("stopped", 0, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
+
+    var replay = assertInstanceOf(MissedStops.Outcome.ReplayStop.class, outcome);
+    assertEquals(0, replay.exitCode());
+    assertEquals("authoritative stop was recorded but never acted on", replay.why());
+  }
+
+  @Test
+  void anObservedButUnactedFailureStopReplaysTheFailureExitCode() {
+    var outcome =
+        assessDropped(
+            session("stopped", 137, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
+
+    var replay = assertInstanceOf(MissedStops.Outcome.ReplayStop.class, outcome);
+    assertEquals(137, replay.exitCode());
+  }
+
+  @Test
+  void anObservedButUnactedStopStillInsideGraceStaysInFlight() {
+    var outcome =
+        assessDropped(session("stopped", 0, "2026-07-06T11:00:00Z"), NOW.minusSeconds(30));
+
+    assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
+  }
+
+  @Test
+  void anObservedUnactedStopOnANonTerminalSessionIsNeverReplayed() {
+    var outcome =
+        assessDropped(
+            session("running", null, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
 
     assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
