@@ -19,18 +19,19 @@ import java.util.concurrent.TimeoutException;
  *       containers provisioned before the directory-mount fix (file-level mounts that stranded on
  *       stale inodes when {@code sail-api} restarted) get auto-migrated to the directory mount on
  *       the next dispatch.
- *   <li><b>Helper files in the container.</b> {@code sail-event.sh}, {@code claude-settings.json},
- *       and {@code codex hooks.json} are probed with a single {@code test -f} chain; if any is
- *       missing — or the {@code spec} script still references a stale socket path after the socket
- *       moved off {@code /run}, or {@code claude-settings.json} predates the tool-progress hooks —
- *       the installers re-run and rewrite them. The hook-content check matters because the file is
- *       install-once: without it, a container provisioned before the hooks existed would keep a
+ *   <li><b>Helper files in the container.</b> {@code sail-event.sh}, {@code sail-stop-gate}, {@code
+ *       claude-settings.json}, and {@code codex hooks.json} are probed with a single {@code test
+ *       -f} chain; if any is missing — or the {@code spec} script still references a stale socket
+ *       path after the socket moved off {@code /run}, or {@code claude-settings.json} predates the
+ *       tool-progress hooks or the stop gate, or {@code sail-event.sh} predates the reason argument
+ *       — the installers re-run and rewrite them. The content checks matter because the files are
+ *       install-once: without them, a container provisioned before the hooks existed would keep a
  *       settings file the stall watcher gets no progress from, and its agents die at {@code
  *       max_idle}.
  * </ol>
  *
  * Designed for the dispatch hot path: ensureEventSocket is one idempotent shell call, the
- * file-existence probe is one more, and only a broken/missing setup costs the four installer
+ * file-existence probe is one more, and only a broken/missing setup costs the five installer
  * shells.
  */
 public final class ContainerSailSetup {
@@ -64,6 +65,7 @@ public final class ContainerSailSetup {
       return Result.ALREADY_PRESENT;
     }
     new SailEventHelper(shell).install(container);
+    new SailStopGate(shell).install(container);
     new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
@@ -81,12 +83,22 @@ public final class ContainerSailSetup {
                     "-c",
                     "test -f "
                         + SailEventHelper.SCRIPT_PATH
+                        + " && grep -qsF "
+                        + SailEventHelper.REASON_MARKER
+                        + " "
+                        + SailEventHelper.SCRIPT_PATH
+                        + " && test -f "
+                        + SailStopGate.SCRIPT_PATH
                         + " && test -f "
                         + SpecCliHelper.SCRIPT_PATH
                         + " && test -f "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && grep -qsF "
                         + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
+                        + " "
+                        + ClaudeCodeHookConfig.SETTINGS_PATH
+                        + " && grep -qsF "
+                        + SailStopGate.SCRIPT_PATH
                         + " "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && grep -qsF includeCoAuthoredBy "

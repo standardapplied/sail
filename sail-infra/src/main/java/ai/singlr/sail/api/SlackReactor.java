@@ -38,6 +38,7 @@ public final class SlackReactor implements EventSubscriber {
           Event.WellKnownTypes.SPEC_DISPATCHED,
           Event.WellKnownTypes.SPEC_RESTARTED,
           Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+          Event.WellKnownTypes.AGENT_STOP_NUDGED,
           Event.WellKnownTypes.AGENT_FAILED,
           Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
           "review_stage_started",
