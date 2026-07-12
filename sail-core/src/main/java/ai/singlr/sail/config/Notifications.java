@@ -46,6 +46,7 @@ public record Notifications(String url, List<String> events, SlackNotifications 
           "agent_session_started",
           "agent_session_stopped",
           "agent_session_completed",
+          "agent_stop_nudged",
           "snapshot_created");
 
   /**

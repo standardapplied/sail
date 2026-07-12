@@ -60,6 +60,15 @@ public record Event(
     public static final String AGENT_SESSION_STARTED = "agent_session_started";
     public static final String AGENT_SESSION_STOPPED = "agent_session_stopped";
     public static final String AGENT_SESSION_COMPLETED = "agent_session_completed";
+
+    /**
+     * The stop-hook readiness gate blocked a premature turn-end (uncommitted or unpushed work) and
+     * nudged the agent to finish the protocol. Carries the nudge text in {@code data.reason}. A
+     * blocked stop publishes this instead of {@link #AGENT_SESSION_STOPPED} — the stop never
+     * happened.
+     */
+    public static final String AGENT_STOP_NUDGED = "agent_stop_nudged";
+
     public static final String AGENT_TOOL_STARTED = "agent_tool_started";
     public static final String AGENT_TOOL_FINISHED = "agent_tool_finished";
     public static final String AGENT_LOG_CHUNK = "agent_log_chunk";

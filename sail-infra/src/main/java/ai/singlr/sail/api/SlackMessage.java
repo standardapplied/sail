@@ -29,6 +29,7 @@ final class SlackMessage {
       case Event.WellKnownTypes.SPEC_DISPATCHED -> root(event, spec, "dispatched");
       case Event.WellKnownTypes.SPEC_RESTARTED -> root(event, spec, "re-dispatched");
       case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> stopped(event);
+      case Event.WellKnownTypes.AGENT_STOP_NUDGED -> nudged(event);
       case Event.WellKnownTypes.AGENT_FAILED ->
           "Agent failed (" + detailOr(event, "no exit code") + ").";
       case Event.WellKnownTypes.GUARDRAIL_TRIGGERED -> guardrail(event);
@@ -72,6 +73,18 @@ final class SlackMessage {
     var note = stringFromData(event, "note");
     if (!note.isBlank()) {
       sb.append(": ").append(note);
+    }
+    return sb.append(".").toString();
+  }
+
+  private static String nudged(Event event) {
+    var sb =
+        new StringBuilder("Agent ")
+            .append(event.agent())
+            .append(" tried to stop before the protocol was complete and was nudged");
+    var reason = stringFromData(event, "reason");
+    if (!reason.isBlank()) {
+      sb.append(": ").append(reason);
     }
     return sb.append(".").toString();
   }

@@ -66,6 +66,7 @@ class SlackMessageTest {
         List.of(
             "spec_dispatched",
             "agent_session_stopped",
+            "agent_stop_nudged",
             "agent_failed",
             "guardrail_triggered",
             "review_stage_started",
@@ -129,6 +130,28 @@ class SlackMessageTest {
     var text = SlackMessage.forEvent(event("agent_session_stopped"), null);
 
     assertEquals("Agent sail stopped.", text);
+  }
+
+  @Test
+  void nudgedCarriesTheGateReason() {
+    var text =
+        SlackMessage.forEvent(
+            event(
+                "agent_stop_nudged",
+                Map.of("reason", "Not ready to stop: commit your work in sail")),
+            null);
+
+    assertEquals(
+        "Agent sail tried to stop before the protocol was complete and was nudged:"
+            + " Not ready to stop: commit your work in sail.",
+        text);
+  }
+
+  @Test
+  void nudgedWithoutReasonIsBare() {
+    var text = SlackMessage.forEvent(event("agent_stop_nudged"), null);
+
+    assertEquals("Agent sail tried to stop before the protocol was complete and was nudged.", text);
   }
 
   @Test

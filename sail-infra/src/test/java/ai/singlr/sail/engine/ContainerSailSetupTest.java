@@ -78,6 +78,38 @@ class ContainerSailSetupTest {
   }
 
   @Test
+  void aSettingsFileMissingTheStopGateForcesAReinstall() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail("grep -qsF " + SailStopGate.SCRIPT_PATH, "");
+
+    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    assertEquals(
+        ContainerSailSetup.Result.BACKFILLED,
+        result,
+        "a claude-settings.json still wiring the bare Stop publisher is stale and must be "
+            + "rewritten, or premature turn-ends keep stranding dispatched work uncommitted");
+  }
+
+  @Test
+  void anEventHelperMissingTheReasonArgForcesAReinstall() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail("grep -qsF " + SailEventHelper.REASON_MARKER, "");
+
+    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    assertEquals(
+        ContainerSailSetup.Result.BACKFILLED,
+        result,
+        "a sail-event.sh predating the reason argument would drop the nudge reason from "
+            + "agent_stop_nudged events and must be rewritten");
+  }
+
+  @Test
   void refreshHappensEvenWhenSourcePathUnchanged() throws Exception {
     // Same source path on host and container — the bug class 0.12.5/0.12.6 missed.
     // refreshEventSocket must still tear down + re-add so the kernel re-resolves the inode.
@@ -125,9 +157,18 @@ class ContainerSailSetupTest {
     var probe =
         shell.invocations().stream().filter(c -> c.contains("test -f")).findFirst().orElseThrow();
     assertTrue(probe.contains(SailEventHelper.SCRIPT_PATH));
+    assertTrue(probe.contains("test -f " + SailStopGate.SCRIPT_PATH));
     assertTrue(probe.contains(SpecCliHelper.SCRIPT_PATH));
     assertTrue(probe.contains(ClaudeCodeHookConfig.SETTINGS_PATH));
     assertTrue(probe.contains(CodexHookConfig.SETTINGS_PATH));
+    assertTrue(
+        probe.contains(
+            "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + ClaudeCodeHookConfig.SETTINGS_PATH),
+        "the probe must detect a settings file that still wires the bare Stop publisher");
+    assertTrue(
+        probe.contains(
+            "grep -qsF " + SailEventHelper.REASON_MARKER + " " + SailEventHelper.SCRIPT_PATH),
+        "the probe must detect an event helper predating the reason argument");
     assertTrue(
         probe.contains(SpecCliHelper.PROFILE_PATH),
         "the probe must detect a container missing the spec-CLI PATH entry so reconfigure retrofits it");
@@ -150,6 +191,10 @@ class ContainerSailSetupTest {
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail/bin")),
         "should re-install sail-event.sh helper");
+    assertTrue(
+        commands.stream()
+            .anyMatch(c -> c.contains(SailStopGate.SCRIPT_PATH) && c.contains("chmod 0755")),
+        "should re-install the sail-stop-gate script");
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("/home/dev/.sail/bin/spec")),
         "should re-install the spec CLI");

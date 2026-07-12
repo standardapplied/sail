@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +51,26 @@ class ClaudeCodeHookConfigTest {
     assertTrue(
         json.contains(SailEventHelper.SCRIPT_PATH + " agent_tool_finished"),
         "PostToolUse must emit agent_tool_finished");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void renderWiresTheStopGateAsTheOnlyStopHook() {
+    var json = ClaudeCodeHookConfig.render();
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
+    var stopGroups = (List<Map<String, Object>>) hooks.get("Stop");
+    assertEquals(1, stopGroups.size());
+    var stopHooks = (List<Map<String, Object>>) stopGroups.get(0).get("hooks");
+    assertEquals(
+        1,
+        stopHooks.size(),
+        "gating and publishing must live in ONE combined script: hooks in a matcher group run in"
+            + " parallel, so a bare publisher beside the gate would announce a cancelled stop");
+    assertEquals(SailStopGate.SCRIPT_PATH, stopHooks.get(0).get("command"));
+    assertEquals(SailStopGate.HOOK_TIMEOUT_SECONDS, stopHooks.get(0).get("timeout"));
+    assertFalse(
+        json.contains(SailEventHelper.SCRIPT_PATH + " agent_session_stopped"),
+        "the bare Stop publisher is replaced by the gate, which publishes the event itself");
   }
 
   @Test

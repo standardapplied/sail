@@ -51,6 +51,16 @@ class NotificationsTest {
   }
 
   @Test
+  void fromMapAcceptsTheStopNudgeEvent() {
+    var n =
+        Notifications.fromMap(
+            Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_stop_nudged")));
+
+    assertTrue(n.shouldNotify("agent_stop_nudged"));
+    assertFalse(n.shouldNotify("agent_session_stopped"));
+  }
+
+  @Test
   void fromMapRequiresUrl() {
     assertThrows(
         IllegalArgumentException.class, () -> Notifications.fromMap(Map.of("events", List.of())));

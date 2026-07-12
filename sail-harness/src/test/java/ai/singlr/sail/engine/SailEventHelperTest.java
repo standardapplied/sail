@@ -37,9 +37,26 @@ class SailEventHelperTest {
   }
 
   @Test
-  void scriptTakesEventTypeArgOnly() {
+  void scriptRequiresTheEventTypeArg() {
     var content = SailEventHelper.scriptContent();
     assertTrue(content.contains("EVENT_TYPE=\"${1:?event type required}\""));
+  }
+
+  @Test
+  void scriptTakesAnOptionalSanitizedReasonArg() {
+    var content = SailEventHelper.scriptContent();
+    assertTrue(
+        content.contains("REASON=\"$(printf '%s' \"${2:-}\" | tr -d '\\\\\"\\000-\\037')\""),
+        "the reason is interpolated into hand-built JSON, so quotes, backslashes, and control"
+            + " chars must be stripped first");
+    assertTrue(content.contains(SailEventHelper.REASON_MARKER));
+  }
+
+  @Test
+  void scriptEmbedsTheReasonFieldOnlyWhenPresent() {
+    var content = SailEventHelper.scriptContent();
+    assertTrue(content.contains("if [ -n \"$REASON\" ]; then"));
+    assertTrue(content.contains("\\\"reason\\\":\\\"$REASON\\\""));
   }
 
   @Test

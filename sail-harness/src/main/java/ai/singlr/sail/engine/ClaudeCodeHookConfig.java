@@ -25,7 +25,10 @@ import java.util.concurrent.TimeoutException;
  *   <li>{@code SessionStart} ({@code matcher: startup}) → {@code agent_session_started}
  *   <li>{@code PreToolUse} → {@code agent_tool_started}
  *   <li>{@code PostToolUse} → {@code agent_tool_finished}
- *   <li>{@code Stop} → {@code agent_session_stopped}
+ *   <li>{@code Stop} → {@link SailStopGate}, which publishes {@code agent_session_stopped} when it
+ *       allows the stop or {@code agent_stop_nudged} when it blocks a premature one. It must be the
+ *       only {@code Stop} hook: hooks in a matcher group run in parallel, so a bare publisher
+ *       beside the gate would announce a stop that the gate then cancels.
  *   <li>{@code SessionEnd} → {@code agent_session_completed}
  * </ul>
  *
@@ -70,7 +73,7 @@ public final class ClaudeCodeHookConfig {
     var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started");
     var toolStarted = hookCommand(SailEventHelper.SCRIPT_PATH, PROGRESS_HOOK_MARKER);
     var toolFinished = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_finished");
-    var stop = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_stopped");
+    var stop = stopGateCommand();
     var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed");
 
     var hooks = new LinkedHashMap<String, Object>();
@@ -126,6 +129,14 @@ public final class ClaudeCodeHookConfig {
     hook.put("type", "command");
     hook.put("command", script + " " + eventType);
     hook.put("timeout", 10);
+    return hook;
+  }
+
+  private static Map<String, Object> stopGateCommand() {
+    var hook = new LinkedHashMap<String, Object>();
+    hook.put("type", "command");
+    hook.put("command", SailStopGate.SCRIPT_PATH);
+    hook.put("timeout", SailStopGate.HOOK_TIMEOUT_SECONDS);
     return hook;
   }
 }
