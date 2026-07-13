@@ -24,7 +24,7 @@ import java.util.Set;
  * to set the checkpoint — reflects this node's own pushes, exactly as the in-process engine sees
  * it.
  */
-public final class RemoteMainReplica implements MainReplica {
+public final class RemoteMainReplica implements MainReplica, RenameReplica {
 
   private final Reader in;
   private final Writer out;
@@ -80,6 +80,46 @@ public final class RemoteMainReplica implements MainReplica {
           new CommitOutcome.Rejected(rejected.currentRev(), rejected.currentSnapshot());
       case SyncWire.Failed failed -> throw new SyncTransportException(failed.message());
       default -> throw new SyncTransportException("Unexpected response to commit: " + response);
+    };
+  }
+
+  @Override
+  public Set<Rename> renames() {
+    return fetched().renames();
+  }
+
+  @Override
+  public boolean hasApplied(Rename rename) {
+    return fetched().renames().stream()
+        .anyMatch(
+            applied ->
+                applied.oldRev().equals(rename.oldRev())
+                    && applied.newRev().equals(rename.newRev()));
+  }
+
+  @Override
+  public boolean pullRename(Rename rename) {
+    throw new UnsupportedOperationException("A remote main cannot pull a rename.");
+  }
+
+  @Override
+  public void acceptRename(Rename localRename, Rename committedRename) {
+    throw new UnsupportedOperationException("A remote main cannot adopt a rename.");
+  }
+
+  @Override
+  public RenameReplica.Commit commitRename(Rename rename) {
+    var response = Rpc.exchange(in, out, new SyncWire.CommitRename(entityType, rename));
+    return switch (response) {
+      case SyncWire.RenameCommitted committed -> {
+        maxSeq = committed.maxSeq();
+        yield new RenameReplica.Commit.Accepted(committed.rename());
+      }
+      case SyncWire.RenameRejected rejected ->
+          new RenameReplica.Commit.Rejected(rejected.oldSnapshot(), rejected.targetSnapshot());
+      case SyncWire.Failed failed -> throw new SyncTransportException(failed.message());
+      default ->
+          throw new SyncTransportException("Unexpected response to rename commit: " + response);
     };
   }
 

@@ -24,7 +24,7 @@ import java.util.Set;
  * (checkpoint) — no logic of its own beyond serialization. Project definitions reconcile through
  * the same engine, so a project created on main replicates to every box.
  */
-public final class ProjectReplica implements LocalReplica, MainReplica {
+public final class ProjectReplica implements LocalReplica, MainReplica, RenameReplica {
 
   private static final String ENTITY = "project";
 
@@ -86,6 +86,31 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
       case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
       case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
     };
+  }
+
+  @Override
+  public Set<Rename> renames() {
+    return projects.renames();
+  }
+
+  @Override
+  public boolean hasApplied(Rename rename) {
+    return projects.hasApplied(rename);
+  }
+
+  @Override
+  public boolean pullRename(Rename rename) {
+    return projects.pullRename(rename);
+  }
+
+  @Override
+  public void acceptRename(Rename localRename, Rename committedRename) {
+    projects.acceptRename(localRename, committedRename);
+  }
+
+  @Override
+  public Commit commitRename(Rename rename) {
+    return projects.commitRename(rename);
   }
 
   @Override

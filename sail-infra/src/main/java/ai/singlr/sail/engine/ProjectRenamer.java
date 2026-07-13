@@ -106,15 +106,18 @@ public final class ProjectRenamer {
         containers.rename(old, renamed);
         undo.push(() -> containers.rename(renamed, old));
       }
-      projects.rename(old, renamed, newDefinition);
-      undo.push(() -> projects.rename(renamed, old, existing.definition()));
       specs.reproject(old, renamed);
       undo.push(() -> specs.reproject(renamed, old));
       files.reproject(old, renamed);
       undo.push(() -> files.reproject(renamed, old));
       moveProjectDir(old, renamed);
-      undo.push(() -> moveProjectDir(renamed, old));
+      undo.push(
+          () -> {
+            moveProjectDir(renamed, old);
+            materialize(old, existing.definition());
+          });
       materialize(renamed, newDefinition);
+      projects.rename(old, renamed, newDefinition);
     } catch (Exception e) {
       rollback(undo);
       throw e;

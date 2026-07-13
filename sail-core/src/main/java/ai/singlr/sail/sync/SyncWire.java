@@ -11,6 +11,7 @@ import java.io.Reader;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The line protocol for one sync session over a Door-2 SSH channel: the node and main exchange one
@@ -35,9 +36,15 @@ public final class SyncWire {
   private static final String EXPECTED = "expectedRev";
   private static final String STALE = "stale";
   private static final String ENTITY_TYPE = "entityType";
+  private static final String RENAMES = "renames";
+  private static final String RENAME = "rename";
+  private static final String OLD_SNAPSHOT = "oldSnapshot";
+  private static final String TARGET_SNAPSHOT = "targetSnapshot";
+  private static final String RENAME_REJECTED = "renameRejected";
 
   private static final String OP_FETCH = "fetch";
   private static final String OP_COMMIT = "commit";
+  private static final String OP_COMMIT_RENAME = "commit-rename";
   private static final String OP_BYE = "bye";
   private static final String OP_FETCH_FDES = "fetch-fdes";
   private static final String FDES = "fdes";
@@ -74,7 +81,7 @@ public final class SyncWire {
     return message.isEmpty() ? null : message.toString();
   }
 
-  public sealed interface Request permits Fetch, Commit, Bye, FetchFdes {}
+  public sealed interface Request permits Fetch, Commit, CommitRename, Bye, FetchFdes {}
 
   /**
    * Ask main for its whole shared state of one entity type — specs, files — to reconcile against.
@@ -92,10 +99,13 @@ public final class SyncWire {
       String entityType, String entityId, Map<String, Object> snapshot, String expectedRev)
       implements Request {}
 
+  public record CommitRename(String entityType, RenameReplica.Rename rename) implements Request {}
+
   /** End the session; main returns nothing. */
   public record Bye() implements Request {}
 
-  public sealed interface Response permits Fetched, Committed, Rejected, Failed, Fdes {}
+  public sealed interface Response
+      permits Fetched, Committed, Rejected, RenameCommitted, RenameRejected, Failed, Fdes {}
 
   /** Main's FDE roster — one map of identity fields per FDE. */
   public record Fdes(List<Map<String, Object>> fdes) implements Response {}
@@ -104,14 +114,24 @@ public final class SyncWire {
   public record Snapshot(String rev, Map<String, Object> snapshot) {}
 
   /** Main's answer to {@link Fetch}: its identity, high-water sequence, and every shared entity. */
-  public record Fetched(String mainId, long maxSeq, Map<String, Snapshot> entities)
-      implements Response {}
+  public record Fetched(
+      String mainId, long maxSeq, Map<String, Snapshot> entities, Set<RenameReplica.Rename> renames)
+      implements Response {
+    public Fetched(String mainId, long maxSeq, Map<String, Snapshot> entities) {
+      this(mainId, maxSeq, entities, Set.of());
+    }
+  }
 
   /** Main accepted a {@link Commit}: the minted rev and main's new high-water sequence. */
   public record Committed(String rev, long maxSeq) implements Response {}
 
   /** Main rejected a stale {@link Commit}: its current rev and snapshot, left untouched. */
   public record Rejected(String currentRev, Map<String, Object> currentSnapshot)
+      implements Response {}
+
+  public record RenameCommitted(RenameReplica.Rename rename, long maxSeq) implements Response {}
+
+  public record RenameRejected(Map<String, Object> oldSnapshot, Map<String, Object> targetSnapshot)
       implements Response {}
 
   /** Main refused a request — e.g. a read-only FDE attempting to push. */
@@ -130,6 +150,11 @@ public final class SyncWire {
         map.put(ID, commit.entityId());
         map.put(SNAPSHOT, commit.snapshot());
         map.put(EXPECTED, commit.expectedRev());
+      }
+      case CommitRename commit -> {
+        map.put(OP, OP_COMMIT_RENAME);
+        map.put(ENTITY_TYPE, commit.entityType());
+        map.put(RENAME, renameMap(commit.rename()));
       }
       case Bye ignored -> map.put(OP, OP_BYE);
       case FetchFdes ignored -> map.put(OP, OP_FETCH_FDES);
@@ -154,6 +179,7 @@ public final class SyncWire {
                   entities.put(id, entry);
                 });
         map.put(ENTITIES, entities);
+        map.put(RENAMES, fetched.renames().stream().map(SyncWire::renameMap).toList());
       }
       case Committed committed -> {
         map.put(REV, committed.rev());
@@ -163,6 +189,15 @@ public final class SyncWire {
         map.put(STALE, true);
         map.put(REV, rejected.currentRev());
         map.put(SNAPSHOT, rejected.currentSnapshot());
+      }
+      case RenameCommitted committed -> {
+        map.put(RENAME, renameMap(committed.rename()));
+        map.put(MAX_SEQ, committed.maxSeq());
+      }
+      case RenameRejected rejected -> {
+        map.put(RENAME_REJECTED, true);
+        map.put(OLD_SNAPSHOT, rejected.oldSnapshot());
+        map.put(TARGET_SNAPSHOT, rejected.targetSnapshot());
       }
       case Failed failed -> map.put(ERROR, failed.message());
       case Fdes roster -> map.put(FDES, roster.fdes());
@@ -181,6 +216,8 @@ public final class SyncWire {
               string(map, ID),
               snapshot(map, SNAPSHOT),
               string(map, EXPECTED));
+      case OP_COMMIT_RENAME ->
+          new CommitRename(string(map, ENTITY_TYPE), rename(snapshot(map, RENAME)));
       case OP_BYE -> new Bye();
       case OP_FETCH_FDES -> new FetchFdes();
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
@@ -195,11 +232,18 @@ public final class SyncWire {
     if (map.containsKey(STALE)) {
       return new Rejected(string(map, REV), snapshot(map, SNAPSHOT));
     }
+    if (map.containsKey(RENAME_REJECTED)) {
+      return new RenameRejected(snapshot(map, OLD_SNAPSHOT), snapshot(map, TARGET_SNAPSHOT));
+    }
     if (map.containsKey(FDES)) {
       return new Fdes(fdeList(map));
     }
     if (map.containsKey(ENTITIES)) {
-      return new Fetched(string(map, ID), longValue(map, MAX_SEQ), entities(map));
+      return new Fetched(
+          string(map, ID), longValue(map, MAX_SEQ), entities(map), renames(map.get(RENAMES)));
+    }
+    if (map.containsKey(RENAME)) {
+      return new RenameCommitted(rename(snapshot(map, RENAME)), longValue(map, MAX_SEQ));
     }
     if (map.containsKey(REV)) {
       return new Committed(string(map, REV), longValue(map, MAX_SEQ));
@@ -214,6 +258,45 @@ public final class SyncWire {
       raw.forEach((id, value) -> entities.put(id, snapshot(value)));
     }
     return entities;
+  }
+
+  private static Map<String, Object> renameMap(RenameReplica.Rename rename) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("oldName", rename.oldName());
+    map.put("newName", rename.newName());
+    map.put("oldDefinition", rename.oldDefinition());
+    map.put("newDefinition", rename.newDefinition());
+    map.put("actor", rename.actor());
+    map.put("baseOldRev", rename.baseOldRev());
+    map.put("priorOldRev", rename.priorOldRev());
+    map.put("priorTargetRev", rename.priorTargetRev());
+    map.put("oldRev", rename.oldRev());
+    map.put("newRev", rename.newRev());
+    return map;
+  }
+
+  private static RenameReplica.Rename rename(Map<String, Object> map) {
+    return new RenameReplica.Rename(
+        string(map, "oldName"),
+        string(map, "newName"),
+        string(map, "oldDefinition"),
+        string(map, "newDefinition"),
+        string(map, "actor"),
+        string(map, "baseOldRev"),
+        string(map, "priorOldRev"),
+        string(map, "priorTargetRev"),
+        string(map, "oldRev"),
+        string(map, "newRev"));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Set<RenameReplica.Rename> renames(Object value) {
+    if (!(value instanceof List<?> list)) {
+      return Set.of();
+    }
+    return list.stream()
+        .map(item -> rename((Map<String, Object>) item))
+        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
   }
 
   @SuppressWarnings("unchecked")

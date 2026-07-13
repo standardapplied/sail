@@ -78,6 +78,7 @@ public final class SyncRpcServer {
         case SyncWire.Fetch fetch -> fetched(fetch.entityType());
         case SyncWire.FetchFdes ignored -> new SyncWire.Fdes(fdeRoster.entries());
         case SyncWire.Commit commit -> onCommit(commit);
+        case SyncWire.CommitRename commit -> onCommitRename(commit);
         case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session loop");
       };
     } catch (RuntimeException e) {
@@ -111,7 +112,28 @@ public final class SyncRpcServer {
     for (var id : main.entityIds()) {
       entities.put(id, new SyncWire.Snapshot(main.currentRev(id), main.current(id)));
     }
-    return new SyncWire.Fetched(main.id(), main.maxSeq(), entities);
+    java.util.Set<RenameReplica.Rename> renames =
+        main instanceof RenameReplica renameReplica ? renameReplica.renames() : java.util.Set.of();
+    return new SyncWire.Fetched(main.id(), main.maxSeq(), entities, renames);
+  }
+
+  private SyncWire.Response onCommitRename(SyncWire.CommitRename commit) {
+    if (!principal.canWrite()) {
+      return new SyncWire.Failed(
+          "Your role is read-only: it can pull the shared board but not push changes.");
+    }
+    var main = replicas.get(commit.entityType());
+    if (!(main instanceof RenameReplica renameReplica)) {
+      return new SyncWire.Failed("Entity type does not support rename: " + commit.entityType());
+    }
+    var outcome =
+        SyncPeer.with(principal.handle(), () -> renameReplica.commitRename(commit.rename()));
+    return switch (outcome) {
+      case RenameReplica.Commit.Accepted accepted ->
+          new SyncWire.RenameCommitted(accepted.rename(), main.maxSeq());
+      case RenameReplica.Commit.Rejected rejected ->
+          new SyncWire.RenameRejected(rejected.oldSnapshot(), rejected.targetSnapshot());
+    };
   }
 
   private SyncWire.Response onCommit(SyncWire.Commit commit) {
