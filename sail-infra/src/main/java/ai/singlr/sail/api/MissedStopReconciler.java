@@ -152,17 +152,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         }
       }
       for (var spec : specStore.list(REVIEW)) {
-        try {
-          replayed += rescueStrandedReview(spec) ? 1 : 0;
-        } catch (Exception e) {
-          System.err.println(
-              "  [reconcile] review-strand check failed for "
-                  + spec.project()
-                  + "/"
-                  + spec.id()
-                  + ": "
-                  + e.getMessage());
-        }
+        replayed += rescueStrandedReview(spec) ? 1 : 0;
       }
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
