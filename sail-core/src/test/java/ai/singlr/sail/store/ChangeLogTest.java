@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -31,6 +32,33 @@ class ChangeLogTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+  }
+
+  @Test
+  void aLocalMutationRecordsNoPeer() {
+    log.append("spec", "a", "1-x", "uday", "local", false, "{}");
+
+    assertNull(log.history("spec", "a").getFirst().peer());
+  }
+
+  @Test
+  void aRevisionAppendedUnderASyncPeerRecordsThatPeerAsItsProvenance() {
+    SyncPeer.with("sumesh", () -> log.append("spec", "a", "1-x", "uday", "sync", false, "{}"));
+
+    var entry = log.history("spec", "a").getFirst();
+    assertEquals("sumesh", entry.peer());
+    assertEquals("sync", entry.origin());
+    assertEquals(
+        "uday", entry.actor(), "actor stays the inherited author; peer names the box that pushed");
+  }
+
+  @Test
+  void thePeerBindingIsScopedAndDoesNotLeakToLaterAppends() {
+    SyncPeer.with("sumesh", () -> log.append("spec", "a", "1-x", "uday", "sync", false, "{}"));
+    log.append("spec", "b", "1-y", "uday", "local", false, "{}");
+
+    assertEquals("sumesh", log.history("spec", "a").getFirst().peer());
+    assertNull(log.history("spec", "b").getFirst().peer());
   }
 
   @Test

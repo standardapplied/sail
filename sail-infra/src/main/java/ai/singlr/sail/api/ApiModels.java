@@ -575,10 +575,12 @@ record SpecRestoreRequest(String rev) {
   }
 }
 
-record SpecRevisionView(String rev, String actor, String recordedAt, String origin, boolean deleted)
+record SpecRevisionView(
+    String rev, String actor, String recordedAt, String origin, boolean deleted, String peer)
     implements Mappable {
   static SpecRevisionView from(ChangeLog.Entry e) {
-    return new SpecRevisionView(e.rev(), e.actor(), e.recordedAt(), e.origin(), e.deleted());
+    return new SpecRevisionView(
+        e.rev(), e.actor(), e.recordedAt(), e.origin(), e.deleted(), e.peer());
   }
 
   @Override
@@ -589,6 +591,7 @@ record SpecRevisionView(String rev, String actor, String recordedAt, String orig
     m.put("recorded_at", recordedAt);
     m.put("origin", origin);
     m.put("deleted", deleted);
+    if (peer != null) m.put("peer", peer);
     return m;
   }
 }
