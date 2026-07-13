@@ -79,6 +79,28 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void theCommitBindsThePushingHandleAsSyncProvenance() throws Exception {
+    var seenPeer = new java.util.concurrent.atomic.AtomicReference<String>("unset");
+    MainReplica capturing =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
+            seenPeer.set(ai.singlr.sail.store.SyncPeer.current());
+            return new CommitOutcome.Accepted("1-x");
+          }
+        };
+    var out = new StringWriter();
+    new SyncRpcServer(Map.of("spec", capturing), new SyncPrincipal("sumesh", true), FdeRoster.EMPTY)
+        .serve(
+            new StringReader(
+                SyncWire.encode(new SyncWire.Commit("spec", "a", Map.of(), null)) + "\n"),
+            out);
+
+    assertEquals(
+        "sumesh", seenPeer.get(), "the change_log written during the commit must name the pusher");
+  }
+
+  @Test
   void aReadOnlyServerRefusesACommit() throws Exception {
     assertInstanceOf(
         SyncWire.Failed.class, serve(false, new SyncWire.Commit("spec", "a", Map.of(), null)));

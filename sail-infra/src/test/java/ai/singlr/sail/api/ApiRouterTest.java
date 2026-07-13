@@ -1370,7 +1370,8 @@ class ApiRouterTest {
           new GlobalSpecHistoryResponse(
               specId,
               java.util.List.of(
-                  new SpecRevisionView("1-abc", "uday", "2026-06-13T00:00:00Z", "local", false))));
+                  new SpecRevisionView(
+                      "1-abc", "uday", "2026-06-13T00:00:00Z", "local", false, null))));
     }
 
     @Override

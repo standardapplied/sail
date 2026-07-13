@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -131,7 +132,11 @@ public final class SyncRpcServer {
               + "'s.");
     }
     var before = main.current(commit.entityId());
-    return switch (main.commit(commit.entityId(), commit.snapshot(), commit.expectedRev())) {
+    var outcome =
+        SyncPeer.with(
+            principal.handle(),
+            () -> main.commit(commit.entityId(), commit.snapshot(), commit.expectedRev()));
+    return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
         emitTransitions(commit, before, main);
         yield new SyncWire.Committed(accepted.rev(), main.maxSeq());

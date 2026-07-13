@@ -26,6 +26,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.ProjectReplica;
@@ -211,6 +212,10 @@ public final class SyncCommand implements Callable<Integer> {
   }
 
   private SyncEngine.Report reconcile(Boxes boxes, String target) throws Exception {
+    return SyncPeer.withChecked("main", () -> reconcileSession(boxes, target));
+  }
+
+  private SyncEngine.Report reconcileSession(Boxes boxes, String target) throws Exception {
     try (var channel = SshSyncChannel.open(target);
         var session = new SyncSession(channel.reader(), channel.writer())) {
       var specReport = new SyncEngine().reconcile(boxes.spec(), session.replica("spec"));

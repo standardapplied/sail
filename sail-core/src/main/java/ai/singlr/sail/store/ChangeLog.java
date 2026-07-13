@@ -36,7 +36,8 @@ public final class ChangeLog {
       String recordedAt,
       String origin,
       boolean deleted,
-      String snapshot) {}
+      String snapshot,
+      String peer) {}
 
   /** Appends a revision. {@code snapshot} is the entity's full state as JSON at this revision. */
   public void append(
@@ -49,7 +50,7 @@ public final class ChangeLog {
       String snapshot) {
     db.execute(
         "INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin,"
-            + " deleted, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            + " deleted, snapshot, peer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         entityType,
         entityId,
         rev,
@@ -57,7 +58,8 @@ public final class ChangeLog {
         DateTimeUtils.now().toString(),
         origin,
         deleted ? 1 : 0,
-        snapshot);
+        snapshot,
+        SyncPeer.current());
   }
 
   /** Returns every revision of an entity in chronological order (oldest first). */
@@ -89,8 +91,8 @@ public final class ChangeLog {
   }
 
   private static final String SELECT =
-      "SELECT seq, entity_type, entity_id, rev, actor, recorded_at, origin, deleted, snapshot"
-          + " FROM change_log";
+      "SELECT seq, entity_type, entity_id, rev, actor, recorded_at, origin, deleted, snapshot,"
+          + " peer FROM change_log";
 
   private static Entry map(Sqlite.Row row) {
     return new Entry(
@@ -102,6 +104,7 @@ public final class ChangeLog {
         row.text(5),
         row.text(6),
         row.integer(7) != 0,
-        row.text(8));
+        row.text(8),
+        row.text(9));
   }
 }
