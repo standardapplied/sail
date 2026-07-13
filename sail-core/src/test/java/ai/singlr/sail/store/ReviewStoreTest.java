@@ -95,6 +95,42 @@ class ReviewStoreTest {
   }
 
   @Test
+  void theAggregateSnapshotRoundTripsOntoAFreshBoxAsCountsWithoutFindingRows() {
+    var reviewId = store.createReview("auth", 2);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    store.startStage(stageId, "codex");
+    addOpenFinding(stageId, Finding.Severity.HIGH, "One");
+    addOpenFinding(stageId, Finding.Severity.HIGH, "Two");
+    addOpenFinding(stageId, Finding.Severity.MEDIUM, "Three");
+    store.completeStage(stageId, "failed");
+    store.updateReviewStatus(reviewId, "failed");
+
+    var snapshot = store.comparableSnapshot(reviewId);
+    var rev = store.latestRev(reviewId);
+
+    var mainDb = Sqlite.open(tempDir.resolve("main.db"));
+    new SchemaManager(mainDb).migrate();
+    var main = new ReviewStore(mainDb);
+    main.applyRevision(reviewId, snapshot, rev);
+
+    var review = main.findReview(reviewId).orElseThrow();
+    assertEquals("failed", review.status());
+    assertEquals(2, review.iteration());
+    var stages = main.stagesForReview(reviewId);
+    assertEquals(1, stages.size());
+    assertEquals("failed", stages.getFirst().status());
+    assertEquals("codex", stages.getFirst().reviewer());
+    var counts = main.findingCountsForStage(stages.getFirst().id());
+    assertEquals(2, counts.get("HIGH"));
+    assertEquals(1, counts.get("MEDIUM"));
+    assertTrue(
+        main.findingsForStage(stages.getFirst().id()).isEmpty(),
+        "finding rows stay on the executing node; only counts replicate");
+    assertEquals(rev, main.latestRev(reviewId));
+    mainDb.close();
+  }
+
+  @Test
   void linkSourceFindingsRecordsAndReturnsIds() {
     var reviewId = store.createReview("auth", 1);
     var stageId = store.createStage(reviewId, "security", "agent");

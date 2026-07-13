@@ -366,7 +366,33 @@ public final class SchemaManager {
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
           "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
           "DROP INDEX IF EXISTS idx_agent_sessions_project",
-          "DROP INDEX IF EXISTS idx_agent_sessions_spec");
+          "DROP INDEX IF EXISTS idx_agent_sessions_spec",
+          "ALTER TABLE reviews ADD COLUMN rev TEXT",
+          "ALTER TABLE reviews ADD COLUMN base_rev TEXT",
+          "ALTER TABLE review_stages ADD COLUMN finding_counts TEXT",
+          """
+          CREATE TABLE reviews_v2 (
+              id TEXT PRIMARY KEY,
+              spec_id TEXT NOT NULL,
+              iteration INTEGER NOT NULL DEFAULT 1,
+              status TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'running', 'passed', 'failed', 'escalated')),
+              created_at TEXT NOT NULL,
+              completed_at TEXT,
+              decided_by TEXT,
+              superseded_at TEXT,
+              error TEXT,
+              rev TEXT,
+              base_rev TEXT
+          )""",
+          """
+          INSERT INTO reviews_v2 (id, spec_id, iteration, status, created_at, completed_at,
+              decided_by, superseded_at, error, rev, base_rev)
+          SELECT id, spec_id, iteration, status, created_at, completed_at,
+              decided_by, superseded_at, error, rev, base_rev FROM reviews""",
+          "DROP TABLE reviews",
+          "ALTER TABLE reviews_v2 RENAME TO reviews",
+          "CREATE INDEX IF NOT EXISTS idx_reviews_spec ON reviews(spec_id)");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The
