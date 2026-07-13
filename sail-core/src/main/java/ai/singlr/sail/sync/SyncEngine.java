@@ -6,12 +6,12 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.store.ConflictDetector;
+import ai.singlr.sail.store.ProjectStore;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Drives one sync round between a node ({@link LocalReplica}) and the authoritative {@link
@@ -51,13 +51,11 @@ public final class SyncEngine {
   }
 
   public Report reconcile(LocalReplica local, MainReplica main) {
-    var tally = new EnumMap<Outcome, Integer>(Outcome.class);
-    var claimed = reconcileRenames(local, main, tally);
     var ids = new LinkedHashSet<String>();
     ids.addAll(local.entityIds());
     ids.addAll(main.entityIds());
-    ids.removeAll(claimed);
 
+    var tally = new EnumMap<Outcome, Integer>(Outcome.class);
     for (var id : ids) {
       var outcome =
           reconcileEntity(local, main, id, main.current(id), main.currentRev(id), MAX_REDETECTS);
@@ -85,18 +83,17 @@ public final class SyncEngine {
       int redetectsLeft) {
     var base = local.base(id);
     var localSnap = local.current(id);
-    var remoteBlocksResurrection = blockingTombstone(remoteSnap);
-    if (remoteBlocksResurrection && base == null) {
-      var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
-      if (changed) {
-        local.adopt(id, null, remoteRev);
+    if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
+      if (base == null) {
+        var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
+        if (changed) {
+          local.adopt(id, null, remoteRev);
+        }
+        return changed ? Outcome.PULLED : Outcome.CONVERGED;
       }
-      return changed ? Outcome.PULLED : Outcome.CONVERGED;
-    }
-    if (remoteBlocksResurrection) {
       remoteSnap = null;
     }
-    if (blockingTombstone(localSnap) && base == null) {
+    if (ProjectStore.isBlocksResurrectionMarker(localSnap) && base == null) {
       if (remoteSnap != null) {
         local.recordConflict(
             id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
@@ -122,83 +119,6 @@ public final class SyncEngine {
         yield Outcome.CONFLICT;
       }
     };
-  }
-
-  private static boolean blockingTombstone(Map<String, Object> snapshot) {
-    return snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
-  }
-
-  private Set<String> reconcileRenames(
-      LocalReplica local, MainReplica main, EnumMap<Outcome, Integer> tally) {
-    if (!(local instanceof RenameReplica localRenames)
-        || !(main instanceof RenameReplica mainRenames)) {
-      return Set.of();
-    }
-    var claimed = new LinkedHashSet<String>();
-    var pending = new LinkedHashSet<>(localRenames.renames());
-    for (var rename : mainRenames.renames()) {
-      if (localRenames.hasApplied(rename)) {
-        continue;
-      }
-      var overlap = pending.stream().filter(candidate -> overlaps(candidate, rename)).findFirst();
-      if (overlap.isPresent()) {
-        claim(claimed, overlap.orElseThrow());
-        claim(claimed, rename);
-        recordRenameConflict(local, main, overlap.orElseThrow());
-        tally.merge(Outcome.CONFLICT, 1, Integer::sum);
-        continue;
-      }
-      claim(claimed, rename);
-      if (localRenames.pullRename(rename)) {
-        tally.merge(Outcome.PULLED, 1, Integer::sum);
-      } else {
-        recordRenameConflict(local, main, rename);
-        tally.merge(Outcome.CONFLICT, 1, Integer::sum);
-      }
-    }
-    for (var rename : pending) {
-      if (claimed.contains(rename.oldName()) || claimed.contains(rename.newName())) {
-        continue;
-      }
-      if (mainRenames.hasApplied(rename)) {
-        continue;
-      }
-      claim(claimed, rename);
-      switch (mainRenames.commitRename(rename)) {
-        case RenameReplica.Commit.Accepted accepted -> {
-          localRenames.acceptRename(rename, accepted.rename());
-          tally.merge(Outcome.PUSHED, 1, Integer::sum);
-        }
-        case RenameReplica.Commit.Rejected ignored -> {
-          recordRenameConflict(local, main, rename);
-          tally.merge(Outcome.CONFLICT, 1, Integer::sum);
-        }
-      }
-    }
-    return claimed;
-  }
-
-  private static boolean overlaps(RenameReplica.Rename left, RenameReplica.Rename right) {
-    return left.oldName().equals(right.oldName())
-        || left.oldName().equals(right.newName())
-        || left.newName().equals(right.oldName())
-        || left.newName().equals(right.newName());
-  }
-
-  private static void claim(Set<String> claimed, RenameReplica.Rename rename) {
-    claimed.add(rename.oldName());
-    claimed.add(rename.newName());
-  }
-
-  private static void recordRenameConflict(
-      LocalReplica local, MainReplica main, RenameReplica.Rename rename) {
-    var old = rename.oldName();
-    local.recordConflict(
-        old,
-        local.base(old),
-        local.current(old),
-        main.current(old),
-        List.of(ConflictDetector.DELETED_FIELD));
   }
 
   private Outcome push(

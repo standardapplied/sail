@@ -40,7 +40,7 @@ class ProjectRenameCommandTest {
     var help = sw.toString();
     assertTrue(help.contains("--dry-run"));
     assertTrue(help.contains("--json"));
-    assertTrue(help.toLowerCase().contains("propagate"));
+    assertTrue(help.toLowerCase().contains("local only"));
   }
 
   @Test

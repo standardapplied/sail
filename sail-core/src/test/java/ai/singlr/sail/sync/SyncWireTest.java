@@ -15,7 +15,6 @@ import java.io.StringReader;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** Every request and response survives a JSON round trip on a single line, deletions included. */
@@ -30,20 +29,6 @@ class SyncWireTest {
     map.put("assignee", null);
     map.put("body", "line one\nline two\twith a \"quote\"");
     return map;
-  }
-
-  private static RenameReplica.Rename rename() {
-    return new RenameReplica.Rename(
-        "old",
-        "renamed",
-        "name: old\n",
-        "name: renamed\n",
-        "ada",
-        "1-base",
-        "1-base",
-        null,
-        "2-old",
-        "1-new");
   }
 
   @Test
@@ -115,13 +100,6 @@ class SyncWireTest {
   }
 
   @Test
-  void renameCommitRequestRoundTripsAsOneOperation() {
-    var line = SyncWire.encode(new SyncWire.CommitRename("project", rename()));
-
-    assertEquals(new SyncWire.CommitRename("project", rename()), SyncWire.decodeRequest(line));
-  }
-
-  @Test
   void fetchedResponseRoundTripsEntitiesIncludingTombstone() {
     var entities = new LinkedHashMap<String, SyncWire.Snapshot>();
     entities.put("auth", new SyncWire.Snapshot("3-abc", snapshot()));
@@ -135,31 +113,6 @@ class SyncWireTest {
     assertEquals("Auth", decoded.entities().get("auth").snapshot().get("title"));
     assertEquals("4-def", decoded.entities().get("gone").rev());
     assertNull(decoded.entities().get("gone").snapshot());
-  }
-
-  @Test
-  void fetchedResponseCarriesAuthoritativeRenames() {
-    var line = SyncWire.encode(new SyncWire.Fetched("main", 2, Map.of(), Set.of(rename())));
-
-    var decoded = (SyncWire.Fetched) SyncWire.decodeResponse(line);
-    assertEquals(Set.of(rename()), decoded.renames());
-  }
-
-  @Test
-  void renameCommitResponsesRoundTrip() {
-    var committed =
-        (SyncWire.RenameCommitted)
-            SyncWire.decodeResponse(SyncWire.encode(new SyncWire.RenameCommitted(rename(), 3)));
-    var rejected =
-        (SyncWire.RenameRejected)
-            SyncWire.decodeResponse(
-                SyncWire.encode(
-                    new SyncWire.RenameRejected(
-                        Map.of("definition", "old"), Map.of("definition", "taken"))));
-
-    assertEquals(rename(), committed.rename());
-    assertEquals(3, committed.maxSeq());
-    assertEquals("taken", rejected.targetSnapshot().get("definition"));
   }
 
   @Test

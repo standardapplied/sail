@@ -26,12 +26,12 @@ import picocli.CommandLine.Spec;
 
 /**
  * Renames a project on this box. Re-keys the catalog, specs, shared files, on-disk state, the Incus
- * container, and the guest hostname (see {@link ProjectRenamer}). The catalog rename propagates
- * through {@code sail sync}; container and on-disk state remain local to each box.
+ * container, and the guest hostname (see {@link ProjectRenamer}). The rename is local: it does not
+ * propagate through {@code sail sync}, which the command states on success.
  */
 @Command(
     name = "rename",
-    description = "Rename a project and propagate its catalog identity through sync.",
+    description = "Rename a project on this box (local only — does not sync to other boxes).",
     mixinStandardHelpOptions = true)
 public final class ProjectRenameCommand implements Runnable {
 
@@ -114,7 +114,7 @@ public final class ProjectRenameCommand implements Runnable {
     System.out.println("[dry-run]   re-key catalog, specs, and shared files to " + newName);
     System.out.println(
         "[dry-run]   move " + SailPaths.projectDir(name) + " -> " + SailPaths.projectDir(newName));
-    System.out.println("[dry-run]   tombstone " + name + " and publish " + newName + " on sync");
+    System.out.println("[dry-run]   local only: not propagated to other boxes via sail sync");
   }
 
   private void emit(ProjectRenamer.Result result) {
@@ -124,7 +124,7 @@ public final class ProjectRenameCommand implements Runnable {
       map.put("from", result.from());
       map.put("to", result.to());
       map.put("container_renamed", result.containerRenamed());
-      map.put("syncs", true);
+      map.put("local_only", true);
       if (!result.warnings().isEmpty()) {
         map.put("warnings", result.warnings());
       }
@@ -152,6 +152,8 @@ public final class ProjectRenameCommand implements Runnable {
     System.out.println();
     System.out.println(
         Ansi.AUTO.string(
-            "  @|green ✓|@ The catalog rename will propagate to every box on the next sync."));
+            "  @|yellow ⚠ This rename is local to this box.|@ Other boxes won't see it through"
+                + " @|bold sail sync|@ — rename it there too (or re-sync) once your FDEs are on"
+                + " board."));
   }
 }

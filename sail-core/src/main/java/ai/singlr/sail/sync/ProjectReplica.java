@@ -24,7 +24,7 @@ import java.util.Set;
  * (checkpoint) — no logic of its own beyond serialization. Project definitions reconcile through
  * the same engine, so a project created on main replicates to every box.
  */
-public final class ProjectReplica implements LocalReplica, MainReplica, RenameReplica {
+public final class ProjectReplica implements LocalReplica, MainReplica {
 
   private static final String ENTITY = "project";
 
@@ -60,9 +60,9 @@ public final class ProjectReplica implements LocalReplica, MainReplica, RenameRe
   @Override
   public Map<String, Object> current(String entityId) {
     var current = projects.comparableSnapshot(entityId);
-    return current == null && projects.blocksResurrection(entityId)
-        ? Map.of("_blocks_resurrection", true)
-        : current;
+    return current != null || !projects.blocksResurrection(entityId)
+        ? current
+        : ProjectStore.blocksResurrectionMarker();
   }
 
   @Override
@@ -77,7 +77,8 @@ public final class ProjectReplica implements LocalReplica, MainReplica, RenameRe
 
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
-    projects.applyRevision(entityId, blockingTombstone(snapshot) ? null : snapshot, rev);
+    projects.applyRevision(
+        entityId, ProjectStore.isBlocksResurrectionMarker(snapshot) ? null : snapshot, rev);
   }
 
   @Override
@@ -86,31 +87,6 @@ public final class ProjectReplica implements LocalReplica, MainReplica, RenameRe
       case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
       case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
     };
-  }
-
-  @Override
-  public Set<Rename> renames() {
-    return projects.renames();
-  }
-
-  @Override
-  public boolean hasApplied(Rename rename) {
-    return projects.hasApplied(rename);
-  }
-
-  @Override
-  public boolean pullRename(Rename rename) {
-    return projects.pullRename(rename);
-  }
-
-  @Override
-  public void acceptRename(Rename localRename, Rename committedRename) {
-    projects.acceptRename(localRename, committedRename);
-  }
-
-  @Override
-  public Commit commitRename(Rename rename) {
-    return projects.commitRename(rename);
   }
 
   @Override
@@ -135,9 +111,5 @@ public final class ProjectReplica implements LocalReplica, MainReplica, RenameRe
 
   private static String json(Map<String, Object> snapshot) {
     return snapshot == null ? null : YamlUtil.dumpJson(snapshot);
-  }
-
-  private static boolean blockingTombstone(Map<String, Object> snapshot) {
-    return snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
   }
 }

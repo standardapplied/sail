@@ -191,25 +191,6 @@ class ProjectRenamerTest {
   }
 
   @Test
-  void aFilesystemFailureDoesNotPublishRenameRevisions() throws Exception {
-    Files.createDirectories(projectsDir.resolve("renamed"));
-    var projects = new ProjectStore(db);
-
-    assertThrows(
-        Exception.class,
-        () ->
-            renamer(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")))
-                .rename("old", "renamed"));
-
-    assertTrue(projects.findByName("old").isPresent());
-    assertTrue(projects.findByName("renamed").isEmpty());
-    assertFalse(projects.blocksResurrection("old"));
-    assertFalse(projects.blocksResurrection("renamed"));
-    assertEquals(1, new SpecStore(db).projectSpecs("old").size());
-    assertTrue(new FileStore(db).find("old", "start-dev.sh").isPresent());
-  }
-
-  @Test
   void rejectsRenamingToTheSameName() {
     assertThrows(
         IllegalArgumentException.class, () -> renamer(runningShell()).rename("old", "old"));

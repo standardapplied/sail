@@ -104,15 +104,6 @@ class ProjectStoreSyncTest {
   }
 
   @Test
-  void commitPreservesABlockingTombstoneWhenTheProjectIsAlreadyAbsent() {
-    var outcome = store.commitRevision("old", Map.of("_blocks_resurrection", true), null);
-
-    assertInstanceOf(PushOutcome.Accepted.class, outcome);
-    assertTrue(store.findByName("old").isEmpty());
-    assertTrue(store.blocksResurrection("old"));
-  }
-
-  @Test
   void deleteTombstonesAndBaseRevSurvivesForDeleteVsEditDetection() {
     store.applyRevision("acme", def("base"), "rev-base");
 
@@ -121,19 +112,6 @@ class ProjectStoreSyncTest {
     assertNull(store.comparableSnapshot("acme"));
     assertEquals("rev-base", store.baseRevOf("acme"), "base rev recovered from the tombstone");
     assertTrue(store.syncEntityIds().contains("acme"), "tombstone still a known entity");
-  }
-
-  @Test
-  void renameProducesADeletionAndCreationThatReplicasCanAdopt() {
-    store.applyRevision("old", def("name: old\n"), "rev-old");
-
-    store.rename("old", "renamed", "name: renamed\n");
-
-    assertNull(store.comparableSnapshot("old"));
-    assertEquals("rev-old", store.baseRevOf("old"));
-    assertEquals(def("name: renamed\n", "sync"), store.comparableSnapshot("renamed"));
-    assertTrue(store.syncEntityIds().contains("old"));
-    assertTrue(store.syncEntityIds().contains("renamed"));
   }
 
   @Test

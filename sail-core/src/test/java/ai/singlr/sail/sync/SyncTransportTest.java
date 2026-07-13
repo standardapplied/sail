@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -169,55 +168,6 @@ class SyncTransportTest {
     } finally {
       serverThread.join();
     }
-  }
-
-  private SyncEngine.Report syncProjectsOverWire(ProjectReplica node, ProjectReplica authority)
-      throws Exception {
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-    var serverThread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    new SyncRpcServer(
-                            Map.of("project", authority),
-                            new SyncPrincipal("A", true),
-                            FdeRoster.EMPTY)
-                        .serve(serverIn, toClient);
-                  } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                  }
-                });
-
-    try (var session = new SyncSession(clientIn, toServer)) {
-      return engine.reconcile(node, session.replica("project"));
-    } finally {
-      serverThread.join();
-    }
-  }
-
-  @Test
-  void projectRenamesCommitAtomicallyOverTheWire() throws Exception {
-    var mainProjects = new ProjectStore(main.db);
-    var nodeProjects = new ProjectStore(nodeA.db);
-    var mainReplica =
-        new ProjectReplica(
-            "main", mainProjects, new ChangeLog(main.db), main.conflicts, new SyncState(main.db));
-    var nodeReplica =
-        new ProjectReplica(
-            "A", nodeProjects, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
-    mainProjects.upsert("p", "name: p\n", "ada");
-    syncProjectsOverWire(nodeReplica, mainReplica);
-    nodeProjects.rename("p", "q", "name: q\n");
-
-    var report = syncProjectsOverWire(nodeReplica, mainReplica);
-
-    assertEquals(1, report.pushed());
-    assertTrue(mainProjects.findByName("p").isEmpty());
-    assertEquals("name: q\n", mainProjects.findByName("q").orElseThrow().definition());
   }
 
   @Test

@@ -18,7 +18,6 @@ import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,40 +75,6 @@ class ProjectSyncTest {
 
   private void sync(Box box) {
     engine.reconcile(box.replica, main.replica);
-  }
-
-  private MainReplica entityOnlyMain() {
-    return new MainReplica() {
-      @Override
-      public String id() {
-        return main.replica.id();
-      }
-
-      @Override
-      public Set<String> entityIds() {
-        return main.replica.entityIds();
-      }
-
-      @Override
-      public Map<String, Object> current(String id) {
-        return main.replica.current(id);
-      }
-
-      @Override
-      public String currentRev(String id) {
-        return main.replica.currentRev(id);
-      }
-
-      @Override
-      public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-        return main.replica.commit(id, snapshot, expectedRev);
-      }
-
-      @Override
-      public long maxSeq() {
-        return main.replica.maxSeq();
-      }
-    };
   }
 
   private String definitionOn(Box box, String name) {
@@ -192,154 +157,6 @@ class ProjectSyncTest {
   }
 
   @Test
-  void anAuthoritativeRenameConflictsWithAnUnbasedProjectOfTheSameName() {
-    main.projects.upsert("old", "name: old\n", "uday");
-    main.projects.rename("old", "renamed", "name: renamed\n");
-    node.projects.upsert("old", "name: old\n", "sumesh");
-
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.conflicts());
-    assertTrue(main.projects.findByName("old").isEmpty());
-    assertEquals("name: old\n", definitionOn(node, "old"));
-    assertTrue(node.projects.findByName("renamed").isEmpty());
-  }
-
-  @Test
-  void aRenameRacingAnUnbasedCreateSurvivesTheStaleCommitRetry() {
-    node.projects.upsert("old", "name: old\n", "sumesh");
-    MainReplica racingMain =
-        new MainReplica() {
-          private boolean raced;
-
-          @Override
-          public String id() {
-            return main.replica.id();
-          }
-
-          @Override
-          public Set<String> entityIds() {
-            return main.replica.entityIds();
-          }
-
-          @Override
-          public Map<String, Object> current(String id) {
-            return main.replica.current(id);
-          }
-
-          @Override
-          public String currentRev(String id) {
-            return main.replica.currentRev(id);
-          }
-
-          @Override
-          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-            if (!raced) {
-              raced = true;
-              main.projects.upsert("old", "name: old\n", "uday");
-              main.projects.rename("old", "renamed", "name: renamed\n");
-            }
-            return main.replica.commit(id, snapshot, expectedRev);
-          }
-
-          @Override
-          public long maxSeq() {
-            return main.replica.maxSeq();
-          }
-        };
-
-    engine.reconcile(node.replica, racingMain);
-
-    assertTrue(main.projects.findByName("old").isEmpty());
-    assertTrue(node.projects.findByName("old").isEmpty());
-    assertEquals("name: renamed\n", definitionOn(main, "renamed"));
-  }
-
-  @Test
-  void aProjectRenamedOnANodePropagatesToMain() {
-    main.projects.upsert("old", "name: old\n", "uday");
-    sync(node);
-
-    node.projects.rename("old", "renamed", "name: renamed\n");
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.pushed());
-    assertTrue(main.projects.findByName("old").isEmpty());
-    assertEquals("name: renamed\n", definitionOn(main, "renamed"));
-    assertTrue(main.projects.blocksResurrection("old"));
-  }
-
-  @Test
-  void anUnbasedRenameCannotDeleteAnIndependentAuthoritativeProject() {
-    main.projects.upsert("old", "owner: main\n", "uday");
-    node.projects.upsert("old", "owner: node\n", "sumesh");
-    node.projects.rename("old", "renamed", "owner: node\n");
-
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.conflicts());
-    assertEquals("owner: main\n", definitionOn(main, "old"));
-    assertTrue(node.projects.findByName("old").isEmpty());
-    assertTrue(main.projects.findByName("renamed").isEmpty());
-  }
-
-  @Test
-  void anUnbasedBlockingTombstoneConflictsWithAuthoritativeContent() {
-    main.projects.upsert("victim", "owner: main\n", "uday");
-    node.projects.upsert("victim", "owner: node\n", "sumesh");
-    node.projects.rename("victim", "unrelated", "owner: node\n");
-
-    var report = engine.reconcile(node.replica, entityOnlyMain());
-
-    assertEquals(1, report.conflicts());
-    assertEquals("owner: main\n", definitionOn(main, "victim"));
-  }
-
-  @Test
-  void aRenameConflictsWithABasedConcurrentEditAndPreservesTheEdit() {
-    main.projects.upsert("old", "value: base\n", "uday");
-    sync(node);
-    node.projects.upsert("old", "value: unsynced-node-edit\n", "sumesh");
-    main.projects.rename("old", "renamed", "value: base\n");
-
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.conflicts());
-    assertEquals("value: unsynced-node-edit\n", definitionOn(node, "old"));
-    assertTrue(node.projects.findByName("renamed").isEmpty());
-    assertEquals(
-        List.of("<deleted>"), node.conflicts.pendingFor("project", "old").orElseThrow().fields());
-  }
-
-  @Test
-  void aTargetCollisionRejectsTheWholeRenameBeforeDeletingTheSource() {
-    main.projects.upsert("p", "name: p\n", "uday");
-    sync(node);
-    main.projects.upsert("q", "owner: main\n", "uday");
-    node.projects.rename("p", "q", "owner: node\n");
-
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.conflicts());
-    assertEquals("name: p\n", definitionOn(main, "p"));
-    assertEquals("owner: main\n", definitionOn(main, "q"));
-  }
-
-  @Test
-  void concurrentRenamesDoNotReplicateDuplicateTargets() {
-    main.projects.upsert("p", "name: p\n", "uday");
-    sync(node);
-    main.projects.rename("p", "q", "name: q\n");
-    node.projects.rename("p", "r", "name: r\n");
-
-    var report = engine.reconcile(node.replica, main.replica);
-
-    assertEquals(1, report.conflicts());
-    assertEquals(List.of("q"), main.projects.list().stream().map(row -> row.name()).toList());
-    assertEquals(List.of("r"), node.projects.list().stream().map(row -> row.name()).toList());
-  }
-
-  @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
     node.projects.applyRevision("acme", Map.of("definition", "AAA"), "1-base");
 
@@ -347,5 +164,43 @@ class ProjectSyncTest {
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
     assertEquals("AAA", definitionOn(node, "acme"));
+  }
+
+  @Test
+  void aRenameOnMainDeletesAStaleUnbasedNodeCopyInsteadOfResurrectingIt() {
+    main.projects.upsert("p", "name: p\n", "uday");
+    node.projects.upsert("p", "name: p\n", "mady");
+
+    main.projects.rename("p", "q", "name: q\n");
+    sync(node);
+
+    assertTrue(
+        node.projects.findByName("p").isEmpty(), "the stale unbased copy adopts main's deletion");
+    assertEquals("name: q\n", definitionOn(node, "q"), "the new name propagates");
+    assertTrue(main.projects.findByName("p").isEmpty(), "the node never resurrected p on main");
+  }
+
+  @Test
+  void aRenameOnMainRemovesASyncedProjectFromNodesWithoutConflict() {
+    main.projects.upsert("p", "name: p\n", "uday");
+    sync(node);
+
+    main.projects.rename("p", "q", "name: q\n");
+    sync(node);
+
+    assertTrue(node.projects.findByName("p").isEmpty());
+    assertEquals("name: q\n", definitionOn(node, "q"));
+    assertTrue(node.conflicts.pending().isEmpty(), "a clean rename is a pull, not a conflict");
+  }
+
+  @Test
+  void aRenameOnANodePushesBothTheDeletionAndTheNewNameToMain() {
+    node.projects.upsert("p", "name: p\n", "mady");
+    node.projects.rename("p", "q", "name: q\n");
+
+    sync(node);
+
+    assertTrue(main.projects.findByName("p").isEmpty(), "main receives the deletion");
+    assertEquals("name: q\n", definitionOn(main, "q"), "main receives the new name");
   }
 }

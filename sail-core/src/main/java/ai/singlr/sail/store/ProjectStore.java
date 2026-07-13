@@ -9,7 +9,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.sync.RenameReplica;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,12 +33,7 @@ import java.util.Set;
 public final class ProjectStore implements ConflictResolver {
 
   private static final String ENTITY = "project";
-  private static final String RENAME_TO = "_rename_to";
-  private static final String RENAME_FROM = "_rename_from";
-  private static final String RENAME_BASE_OLD_REV = "_rename_base_old_rev";
-  private static final String RENAME_PRIOR_OLD_REV = "_rename_prior_old_rev";
-  private static final String RENAME_PRIOR_TARGET_REV = "_rename_prior_target_rev";
-  private static final String RENAME_NEW_REV = "_rename_new_rev";
+  private static final String BLOCKS_RESURRECTION = "_blocks_resurrection";
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -90,158 +84,29 @@ public final class ProjectStore implements ConflictResolver {
         });
   }
 
-  /** Renames a project and journals the linked source and target revisions atomically. */
+  /**
+   * Renames a project by tombstoning the old identity and creating the new one, each an ordinary
+   * revision that peers reconcile through the normal sync engine — so both halves propagate and the
+   * old name cannot be resurrected by a stale peer that still holds it. The old identity's
+   * tombstone carries a resurrection block: it defeats an unbased create of the same name rather
+   * than losing to it (a plain delete does not). Idempotent — a no-op once {@code old} is gone;
+   * rejects a rename onto a name that is still live here.
+   */
   public void rename(String old, String renamed, String newDefinition) {
     var canonical = PersonalFields.redact(newDefinition);
-    db.immediateTransaction(
+    db.transaction(
         () -> {
           var existing = findByName(old).orElse(null);
           if (existing == null) {
-            return null;
+            return;
           }
           if (findByName(renamed).isPresent()) {
             throw new IllegalStateException("A project named '" + renamed + "' already exists.");
           }
-          writeRename(
-              old,
-              renamed,
-              existing.definition(),
-              canonical,
-              existing.updatedBy(),
-              rawBaseRev(old),
-              latestRev(old),
-              latestRev(renamed),
-              null,
-              null,
-              "local",
-              false);
-          return null;
-        });
-  }
-
-  public Set<RenameReplica.Rename> renames() {
-    var renames = new LinkedHashSet<RenameReplica.Rename>();
-    for (var old : syncEntityIds()) {
-      var history = changeLog.history(ENTITY, old);
-      if (history.isEmpty()) {
-        continue;
-      }
-      var source = history.getLast();
-      var sourceSnapshot = YamlUtil.parseMap(source.snapshot());
-      var renamed = text(sourceSnapshot.get(RENAME_TO));
-      var newRev = text(sourceSnapshot.get(RENAME_NEW_REV));
-      if (!source.deleted() || renamed == null || newRev == null) {
-        continue;
-      }
-      var target = changeLog.at(ENTITY, renamed, newRev).orElse(null);
-      if (target == null
-          || !Objects.equals(old, text(YamlUtil.parseMap(target.snapshot()).get(RENAME_FROM)))) {
-        continue;
-      }
-      var targetSnapshot = YamlUtil.parseMap(target.snapshot());
-      var actor = findByName(renamed).map(ProjectRow::updatedBy).orElse("sync");
-      renames.add(
-          new RenameReplica.Rename(
-              old,
-              renamed,
-              text(sourceSnapshot.get("definition")),
-              text(targetSnapshot.get("definition")),
-              actor,
-              text(sourceSnapshot.get(RENAME_BASE_OLD_REV)),
-              text(sourceSnapshot.get(RENAME_PRIOR_OLD_REV)),
-              text(sourceSnapshot.get(RENAME_PRIOR_TARGET_REV)),
-              source.rev(),
-              target.rev()));
-    }
-    return renames;
-  }
-
-  public boolean hasApplied(RenameReplica.Rename rename) {
-    return changeLog.at(ENTITY, rename.oldName(), rename.oldRev()).isPresent()
-        && changeLog.at(ENTITY, rename.newName(), rename.newRev()).isPresent();
-  }
-
-  public boolean pullRename(RenameReplica.Rename rename) {
-    return db.immediateTransaction(
-        () -> {
-          var existing = findByName(rename.oldName()).orElse(null);
-          var sourceMatches =
-              existing == null
-                  ? latestRev(rename.oldName()) == null
-                  : Objects.equals(latestRev(rename.oldName()), rename.priorOldRev())
-                      && Objects.equals(rawBaseRev(rename.oldName()), rename.priorOldRev());
-          if (!sourceMatches
-              || !Objects.equals(latestRev(rename.newName()), rename.priorTargetRev())
-              || findByName(rename.newName()).isPresent()) {
-            return false;
-          }
-          writeRename(
-              rename.oldName(),
-              rename.newName(),
-              rename.oldDefinition(),
-              rename.newDefinition(),
-              rename.actor(),
-              rename.baseOldRev(),
-              rename.priorOldRev(),
-              rename.priorTargetRev(),
-              rename.oldRev(),
-              rename.newRev(),
-              "sync",
-              true);
-          return true;
-        });
-  }
-
-  public void acceptRename(RenameReplica.Rename localRename, RenameReplica.Rename committedRename) {
-    db.immediateTransaction(
-        () -> {
-          if (!hasApplied(localRename)) {
-            throw new IllegalStateException("Local project rename is no longer current.");
-          }
-          writeRename(
-              committedRename.oldName(),
-              committedRename.newName(),
-              committedRename.oldDefinition(),
-              committedRename.newDefinition(),
-              committedRename.actor(),
-              committedRename.baseOldRev(),
-              committedRename.priorOldRev(),
-              committedRename.priorTargetRev(),
-              committedRename.oldRev(),
-              committedRename.newRev(),
-              "sync",
-              true);
-          return null;
-        });
-  }
-
-  public RenameReplica.Commit commitRename(RenameReplica.Rename rename) {
-    return db.immediateTransaction(
-        () -> {
-          var old = rename.oldName();
-          var renamed = rename.newName();
-          var existing = findByName(old).orElse(null);
-          if (!Objects.equals(latestRev(old), rename.baseOldRev())
-              || !Objects.equals(latestRev(renamed), rename.priorTargetRev())
-              || findByName(renamed).isPresent()
-              || existing == null) {
-            return new RenameReplica.Commit.Rejected(
-                comparableSnapshot(old), comparableSnapshot(renamed));
-          }
-          return new RenameReplica.Commit.Accepted(
-              writeRename(
-                  old,
-                  renamed,
-                  existing.definition(),
-                  rename.newDefinition(),
-                  rename.actor(),
-                  rename.baseOldRev(),
-                  rename.baseOldRev(),
-                  rename.priorTargetRev(),
-                  null,
-                  null,
-                  "sync",
-                  true));
+          recordRevision(old, existing.definition(), null, "local", true, false, true);
+          db.execute("DELETE FROM projects WHERE name = ?", old);
+          writeRow(renamed, canonical, existing.updatedBy());
+          recordRevision(renamed, canonical, null, "local", false, false);
         });
   }
 
@@ -257,16 +122,6 @@ public final class ProjectStore implements ConflictResolver {
 
   public Map<String, Object> comparableSnapshot(String id) {
     return findByName(id).map(row -> comparable(row.definition(), row.updatedBy())).orElse(null);
-  }
-
-  /** Returns whether the latest revision is a rename tombstone that defeats stale creates. */
-  public boolean blocksResurrection(String id) {
-    var history = changeLog.history(ENTITY, id);
-    if (history.isEmpty() || !history.getLast().deleted()) {
-      return false;
-    }
-    return Boolean.TRUE.equals(
-        YamlUtil.parseMap(history.getLast().snapshot()).get("_blocks_resurrection"));
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -362,15 +217,14 @@ public final class ProjectStore implements ConflictResolver {
           if (!Objects.equals(latestRev(id), expectedRev)) {
             var current = comparableSnapshot(id);
             if (current == null && blocksResurrection(id)) {
-              current = Map.of("_blocks_resurrection", true);
+              current = blocksResurrectionMarker();
             }
             return new PushOutcome.Stale(latestRev(id), current);
           }
-          var blocksResurrection =
-              snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
-          if (snapshot == null || blocksResurrection) {
+          var blocks = isBlocksResurrectionMarker(snapshot);
+          if (snapshot == null || blocks) {
             var present = findByName(id).orElse(null);
-            if (present == null && !blocksResurrection) {
+            if (present == null && !blocks) {
               return new PushOutcome.Accepted(latestRev(id));
             }
             var rev =
@@ -381,7 +235,7 @@ public final class ProjectStore implements ConflictResolver {
                     "sync",
                     true,
                     false,
-                    blocksResurrection);
+                    blocks);
             if (present != null) {
               db.execute("DELETE FROM projects WHERE name = ?", id);
             }
@@ -459,70 +313,6 @@ public final class ProjectStore implements ConflictResolver {
     db.execute("DELETE FROM projects WHERE name = ?", id);
   }
 
-  private RenameReplica.Rename writeRename(
-      String old,
-      String renamed,
-      String oldDefinition,
-      String newDefinition,
-      String actor,
-      String baseOldRev,
-      String priorOldRev,
-      String priorTargetRev,
-      String explicitOldRev,
-      String explicitNewRev,
-      String origin,
-      boolean setBaseRev) {
-    writeRow(renamed, newDefinition, actor);
-    var targetSnapshot = new LinkedHashMap<String, Object>();
-    targetSnapshot.put("definition", newDefinition);
-    targetSnapshot.put(RENAME_FROM, old);
-    var newRev =
-        appendRenameRevision(renamed, targetSnapshot, explicitNewRev, origin, false, setBaseRev);
-
-    var sourceSnapshot = new LinkedHashMap<String, Object>();
-    sourceSnapshot.put("definition", oldDefinition);
-    sourceSnapshot.put("_base_rev", baseOldRev);
-    sourceSnapshot.put("_blocks_resurrection", true);
-    sourceSnapshot.put(RENAME_TO, renamed);
-    sourceSnapshot.put(RENAME_BASE_OLD_REV, baseOldRev);
-    sourceSnapshot.put(RENAME_PRIOR_OLD_REV, priorOldRev);
-    sourceSnapshot.put(RENAME_PRIOR_TARGET_REV, priorTargetRev);
-    sourceSnapshot.put(RENAME_NEW_REV, newRev);
-    var oldRev = appendRenameRevision(old, sourceSnapshot, explicitOldRev, origin, true, false);
-    db.execute("DELETE FROM projects WHERE name = ?", old);
-    return new RenameReplica.Rename(
-        old,
-        renamed,
-        oldDefinition,
-        newDefinition,
-        actor,
-        baseOldRev,
-        priorOldRev,
-        priorTargetRev,
-        oldRev,
-        newRev);
-  }
-
-  private String appendRenameRevision(
-      String id,
-      Map<String, Object> map,
-      String explicitRev,
-      String origin,
-      boolean deleted,
-      boolean setBaseRev) {
-    var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(latestRev(id), snapshot);
-    if (!deleted) {
-      if (setBaseRev) {
-        db.execute("UPDATE projects SET rev = ?, base_rev = ? WHERE name = ?", rev, rev, id);
-      } else {
-        db.execute("UPDATE projects SET rev = ? WHERE name = ?", rev, id);
-      }
-    }
-    changeLog.append(ENTITY, id, rev, null, origin, deleted, snapshot);
-    return rev;
-  }
-
   private String recordRevision(
       String id,
       String definition,
@@ -531,6 +321,28 @@ public final class ProjectStore implements ConflictResolver {
       boolean deleted,
       boolean setBaseRev) {
     return recordRevision(id, definition, explicitRev, origin, deleted, setBaseRev, false);
+  }
+
+  /**
+   * Whether this box holds a resurrection-blocking tombstone for {@code id}: a rename recorded its
+   * old identity's deletion so a stale peer still holding the name adopts the deletion rather than
+   * pushing its surviving copy back. Only a rename's tombstone blocks; a plain delete does not.
+   */
+  public boolean blocksResurrection(String id) {
+    var history = changeLog.history(ENTITY, id);
+    return !history.isEmpty()
+        && history.getLast().deleted()
+        && Boolean.TRUE.equals(
+            YamlUtil.parseMap(history.getLast().snapshot()).get(BLOCKS_RESURRECTION));
+  }
+
+  /** The snapshot the sync engine reads as "this identity is authoritatively, blockingly gone". */
+  public static Map<String, Object> blocksResurrectionMarker() {
+    return Map.of(BLOCKS_RESURRECTION, true);
+  }
+
+  public static boolean isBlocksResurrectionMarker(Map<String, Object> snapshot) {
+    return snapshot != null && Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION));
   }
 
   private String recordRevision(
@@ -545,9 +357,9 @@ public final class ProjectStore implements ConflictResolver {
     map.put("definition", definition);
     if (deleted) {
       map.put("_base_rev", rawBaseRev(id));
-    }
-    if (blocksResurrection) {
-      map.put("_blocks_resurrection", true);
+      if (blocksResurrection) {
+        map.put(BLOCKS_RESURRECTION, true);
+      }
     }
     var snapshot = YamlUtil.dumpJson(map);
     var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
@@ -593,10 +405,6 @@ public final class ProjectStore implements ConflictResolver {
   private static String actorOf(Map<String, Object> snapshot) {
     var actor = snapshot == null ? null : snapshot.get(ACTOR);
     return actor == null ? "sync" : actor.toString();
-  }
-
-  private static String text(Object value) {
-    return value == null ? null : value.toString();
   }
 
   private String rawBaseRev(String id) {
