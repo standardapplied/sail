@@ -29,6 +29,7 @@ public final class SyncRpcServer {
   private final Map<String, MainReplica> replicas;
   private final SyncPrincipal principal;
   private final FdeRoster fdeRoster;
+  private final SyncTransitionSink transitionSink;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
@@ -40,9 +41,18 @@ public final class SyncRpcServer {
 
   public SyncRpcServer(
       Map<String, MainReplica> replicas, SyncPrincipal principal, FdeRoster fdeRoster) {
+    this(replicas, principal, fdeRoster, SyncTransitionSink.NONE);
+  }
+
+  public SyncRpcServer(
+      Map<String, MainReplica> replicas,
+      SyncPrincipal principal,
+      FdeRoster fdeRoster,
+      SyncTransitionSink transitionSink) {
     this.replicas = Map.copyOf(replicas);
     this.principal = Objects.requireNonNull(principal, "principal");
     this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
+    this.transitionSink = Objects.requireNonNull(transitionSink, "transitionSink");
   }
 
   public void serve(Reader in, Writer out) throws IOException {
@@ -120,11 +130,33 @@ public final class SyncRpcServer {
               + principal.handle()
               + "'s.");
     }
+    var before = main.current(commit.entityId());
     return switch (main.commit(commit.entityId(), commit.snapshot(), commit.expectedRev())) {
-      case CommitOutcome.Accepted accepted -> new SyncWire.Committed(accepted.rev(), main.maxSeq());
+      case CommitOutcome.Accepted accepted -> {
+        emitTransitions(commit, before, main);
+        yield new SyncWire.Committed(accepted.rev(), main.maxSeq());
+      }
       case CommitOutcome.Rejected rejected ->
           new SyncWire.Rejected(rejected.currentRev(), rejected.currentSnapshot());
     };
+  }
+
+  /**
+   * Hands each real transition of an accepted commit to the sink. Shielded: the commit is already
+   * durable, so a sink failure must degrade to a logged warning — letting it propagate would return
+   * {@link SyncWire.Failed} for a change main actually applied and make the node retry it forever.
+   */
+  private void emitTransitions(
+      SyncWire.Commit commit, Map<String, Object> before, MainReplica main) {
+    try {
+      var after = main.current(commit.entityId());
+      for (var transition :
+          SyncTransitions.detect(commit.entityType(), commit.entityId(), before, after)) {
+        transitionSink.onTransition(transition);
+      }
+    } catch (RuntimeException e) {
+      System.err.println("  [sync] transition notification failed; the sync is unaffected: " + e);
+    }
   }
 
   /**

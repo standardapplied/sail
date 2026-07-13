@@ -26,6 +26,8 @@ import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import ai.singlr.sail.sync.SyncTransition;
+import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -114,6 +116,12 @@ class SyncServerCommandTest {
 
   private SyncEngine.Report syncWithToken(String token, String entityType, LocalReplica replica)
       throws Exception {
+    return syncWithToken(token, entityType, replica, SyncTransitionSink.NONE);
+  }
+
+  private SyncEngine.Report syncWithToken(
+      String token, String entityType, LocalReplica replica, SyncTransitionSink sink)
+      throws Exception {
     var toServer = new PipedWriter();
     var serverIn = new BufferedReader(new PipedReader(toServer));
     var toClient = new PipedWriter();
@@ -124,7 +132,7 @@ class SyncServerCommandTest {
             .start(
                 () -> {
                   try {
-                    SyncServerCommand.serve(mainReplicaDb, "main", token, serverIn, toClient);
+                    SyncServerCommand.serve(mainReplicaDb, "main", token, serverIn, toClient, sink);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
                   }
@@ -201,6 +209,32 @@ class SyncServerCommandTest {
 
     assertThrows(SyncTransportException.class, () -> syncWithToken(token, "run", nodeRunReplica()));
     assertTrue(new RunStore(mainDb).findById(runId).isEmpty());
+  }
+
+  @Test
+  void aCommittedPushHandsItsTransitionsToTheSink() throws Exception {
+    nodeSpecs.create(spec("auth", "Auth"));
+    nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
+    var seen = new java.util.ArrayList<SyncTransition>();
+
+    syncWithToken(tokenFor("member"), "spec", nodeReplica, seen::add);
+
+    assertEquals(1, seen.size());
+    assertEquals("spec", seen.getFirst().entityType());
+    assertEquals("auth", seen.getFirst().entityId());
+    assertEquals("in_progress", seen.getFirst().to());
+  }
+
+  @Test
+  void aReSyncedUnchangedSpecEmitsNoTransition() throws Exception {
+    nodeSpecs.create(spec("auth", "Auth"));
+    var token = tokenFor("member");
+    syncWithToken(token);
+    var seen = new java.util.ArrayList<SyncTransition>();
+
+    syncWithToken(token, "spec", nodeReplica, seen::add);
+
+    assertTrue(seen.isEmpty());
   }
 
   @Test

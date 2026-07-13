@@ -221,6 +221,24 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aSyncDerivedStopNeverStartsAPipelineTheWorkLivesOnAnotherBox() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(
+        Event.of(
+            "test-project",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_SYNC)));
+
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertTrue(reviewStore.latestReviewForSpec("auth").isEmpty());
+  }
+
+  @Test
   void skipsAnUnknownSpec() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
 

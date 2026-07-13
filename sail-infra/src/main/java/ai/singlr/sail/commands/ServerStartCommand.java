@@ -24,6 +24,7 @@ import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
@@ -201,7 +202,14 @@ public final class ServerStartCommand implements Runnable {
             new ShellExecutor(false),
             syncScheduler::afterWrite);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
-    bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
+    if (narratesSlack(HostSync.config())) {
+      bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
+    } else {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Slack narration is main's job — this node's work is announced there once"
+                  + " it syncs.|@"));
+    }
 
     var webauthn = resolveWebauthn();
     var configured = webauthn.isConfigured();
@@ -326,6 +334,15 @@ public final class ServerStartCommand implements Runnable {
         new AuthSessionStore(db),
         new PendingChallengeStore(db),
         webauthn.sessionTtl());
+  }
+
+  /**
+   * Whether this box is the single Slack notification authority. Main and a standalone box narrate
+   * their own state; a node never posts — its transitions sync to main, whose {@code _sync} process
+   * turns them into the lifecycle events main's reactor announces. Exactly one notifier per fleet.
+   */
+  static boolean narratesSlack(SyncConfig sync) {
+    return !HostSync.isNode(sync);
   }
 
   /**

@@ -111,6 +111,14 @@ public record Event(
      */
     public static final String SOURCE_RECONCILE = "reconcile";
 
+    /**
+     * {@link #SOURCE} value: an event main derived from a node's synced state transition. Carried
+     * on every sync-derived event so main-side narration (Slack) treats it as authoritative while
+     * the execution-side reactors — the review pipeline, webhooks the origin node already sent —
+     * leave it alone; the work it describes lives on another box.
+     */
+    public static final String SOURCE_SYNC = "sync";
+
     /** The agent process's exit code, carried on an authoritative stop. */
     public static final String EXIT_CODE = "exit_code";
 

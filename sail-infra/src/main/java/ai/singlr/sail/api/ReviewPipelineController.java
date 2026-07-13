@@ -475,10 +475,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * Whether this stop is the real termination, not a mid-run turn-end. The in-container agent hook
    * fires {@code Stop} when a turn ends — before the process exits and with no exit code — so the
    * controller waits for the watcher's poll-derived stop (which carries a {@code source}) rather
-   * than reviewing on a turn boundary, or on a crash the hook can't report an exit code for.
+   * than reviewing on a turn boundary, or on a crash the hook can't report an exit code for. A
+   * sync-derived stop is narration, not execution: it describes an agent that ran on another box,
+   * whose own controller drives the review there — kicking a pipeline here would review the wrong
+   * box's checkout.
    */
   private static boolean isAuthoritative(Event event) {
-    return event.data().get(Event.WellKnownData.SOURCE) != null;
+    var source = event.data().get(Event.WellKnownData.SOURCE);
+    return source != null && !Event.WellKnownData.SOURCE_SYNC.equals(source);
   }
 
   private static Integer exitCodeOf(Event event) {
