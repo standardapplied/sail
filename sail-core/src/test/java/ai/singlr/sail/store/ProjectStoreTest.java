@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,17 +38,20 @@ class ProjectStoreTest {
   }
 
   @Test
-  void renameRekeysTheRowAndMovesChangeLogHistory() {
+  void renameTombstonesTheOldIdentityAndCreatesTheNew() {
     store.upsert("old", "name: old\nimage: ubuntu/24.04\n", "uday");
-    var rev = store.latestRev("old");
+    var oldRev = store.latestRev("old");
 
     store.rename("old", "renamed", "name: renamed\nimage: ubuntu/24.04\n");
 
-    assertTrue(store.findByName("old").isEmpty(), "the old name is gone");
+    assertTrue(store.findByName("old").isEmpty(), "the old name is gone from the catalog");
+    assertTrue(
+        store.blocksResurrection("old"),
+        "the old identity keeps a resurrection-blocking tombstone so a stale peer cannot revive it");
     var row = store.findByName("renamed").orElseThrow();
     assertTrue(row.definition().contains("name: renamed"));
-    assertEquals(rev, store.latestRev("renamed"), "history moved to the new id");
-    assertNull(store.latestRev("old"), "no history left under the old id");
+    assertNotEquals(
+        oldRev, store.latestRev("renamed"), "the new identity is a fresh revision, not a re-key");
   }
 
   @Test
@@ -58,6 +62,29 @@ class ProjectStoreTest {
     store.rename("old", "renamed", "name: renamed\n");
 
     assertTrue(store.findByName("renamed").isPresent());
+  }
+
+  @Test
+  void renameOntoALiveNameIsRejectedAndLeavesBothIntact() {
+    store.upsert("old", "name: old\n", "uday");
+    store.upsert("taken", "name: taken\n", "uday");
+
+    assertThrows(IllegalStateException.class, () -> store.rename("old", "taken", "name: taken\n"));
+
+    assertTrue(store.findByName("old").isPresent(), "the failed rename left the old name intact");
+    assertFalse(store.blocksResurrection("old"), "a rejected rename records no tombstone");
+  }
+
+  @Test
+  void plainDeleteDoesNotBlockResurrection() {
+    store.upsert("p", "name: p\n", "uday");
+
+    store.delete("p");
+
+    assertTrue(store.findByName("p").isEmpty(), "the plain delete removed the catalog row");
+    assertFalse(
+        store.blocksResurrection("p"),
+        "only a rename tombstone is authoritative over a stale create; a plain delete is not");
   }
 
   @Test

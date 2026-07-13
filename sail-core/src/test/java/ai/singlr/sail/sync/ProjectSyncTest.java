@@ -165,4 +165,42 @@ class ProjectSyncTest {
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
     assertEquals("AAA", definitionOn(node, "acme"));
   }
+
+  @Test
+  void aRenameOnMainDeletesAStaleUnbasedNodeCopyInsteadOfResurrectingIt() {
+    main.projects.upsert("p", "name: p\n", "uday");
+    node.projects.upsert("p", "name: p\n", "mady");
+
+    main.projects.rename("p", "q", "name: q\n");
+    sync(node);
+
+    assertTrue(
+        node.projects.findByName("p").isEmpty(), "the stale unbased copy adopts main's deletion");
+    assertEquals("name: q\n", definitionOn(node, "q"), "the new name propagates");
+    assertTrue(main.projects.findByName("p").isEmpty(), "the node never resurrected p on main");
+  }
+
+  @Test
+  void aRenameOnMainRemovesASyncedProjectFromNodesWithoutConflict() {
+    main.projects.upsert("p", "name: p\n", "uday");
+    sync(node);
+
+    main.projects.rename("p", "q", "name: q\n");
+    sync(node);
+
+    assertTrue(node.projects.findByName("p").isEmpty());
+    assertEquals("name: q\n", definitionOn(node, "q"));
+    assertTrue(node.conflicts.pending().isEmpty(), "a clean rename is a pull, not a conflict");
+  }
+
+  @Test
+  void aRenameOnANodePushesBothTheDeletionAndTheNewNameToMain() {
+    node.projects.upsert("p", "name: p\n", "mady");
+    node.projects.rename("p", "q", "name: q\n");
+
+    sync(node);
+
+    assertTrue(main.projects.findByName("p").isEmpty(), "main receives the deletion");
+    assertEquals("name: q\n", definitionOn(main, "q"), "main receives the new name");
+  }
 }

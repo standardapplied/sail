@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.store.ConflictDetector;
+import ai.singlr.sail.store.ProjectStore;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -82,6 +83,24 @@ public final class SyncEngine {
       int redetectsLeft) {
     var base = local.base(id);
     var localSnap = local.current(id);
+    if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
+      if (base == null) {
+        var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
+        if (changed) {
+          local.adopt(id, null, remoteRev);
+        }
+        return changed ? Outcome.PULLED : Outcome.CONVERGED;
+      }
+      remoteSnap = null;
+    }
+    if (ProjectStore.isBlocksResurrectionMarker(localSnap) && base == null) {
+      if (remoteSnap != null) {
+        local.recordConflict(
+            id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
+        return Outcome.CONFLICT;
+      }
+      return push(local, main, id, localSnap, remoteRev, Outcome.PUSHED, redetectsLeft);
+    }
     return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
       case ConflictDetector.Converged ignored -> {
         linkSharedRevision(local, id, remoteSnap, remoteRev);

@@ -59,7 +59,10 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
 
   @Override
   public Map<String, Object> current(String entityId) {
-    return projects.comparableSnapshot(entityId);
+    var current = projects.comparableSnapshot(entityId);
+    return current != null || !projects.blocksResurrection(entityId)
+        ? current
+        : ProjectStore.blocksResurrectionMarker();
   }
 
   @Override
@@ -74,7 +77,8 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
 
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
-    projects.applyRevision(entityId, snapshot, rev);
+    projects.applyRevision(
+        entityId, ProjectStore.isBlocksResurrectionMarker(snapshot) ? null : snapshot, rev);
   }
 
   @Override
