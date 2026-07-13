@@ -124,6 +124,7 @@ class ReviewLoopIntegrationTest {
             p -> "codex",
             runner,
             bus,
+            () -> {},
             new DirectExecutorService());
     bus.subscribe(BusTesting.latching(controller, latch));
   }

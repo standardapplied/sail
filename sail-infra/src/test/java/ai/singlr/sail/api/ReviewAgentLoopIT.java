@@ -152,6 +152,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
               p -> "codex",
               new ContainerReviewAgentRunner(shell),
               null,
+              () -> {},
               new DirectExecutorService());
 
       controller.onEvent(

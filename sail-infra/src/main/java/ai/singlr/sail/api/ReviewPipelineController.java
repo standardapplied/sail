@@ -55,6 +55,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private final Function<String, String> reviewerResolver;
   private final ReviewAgentRunner agentRunner;
   private final EventBus eventBus;
+  private final Runnable syncTrigger;
   private final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight =
       new ConcurrentHashMap<>();
   private final ExecutorService pipelineExecutor;
@@ -70,7 +71,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       Function<String, ReviewPipelineConfig> configResolver,
       Function<String, String> reviewerResolver,
       ReviewAgentRunner agentRunner,
-      EventBus eventBus) {
+      EventBus eventBus,
+      Runnable syncTrigger) {
     this(
         specStore,
         reviewStore,
@@ -78,6 +80,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         reviewerResolver,
         agentRunner,
         eventBus,
+        syncTrigger,
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
@@ -86,6 +89,12 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * event-bus drain is never blocked; tests pass a same-thread executor so a pipeline runs to
    * completion synchronously within {@link #onEvent} — no latch, no completion race, deterministic
    * coverage.
+   *
+   * <p>{@code syncTrigger} is fired after every spec status transition the pipeline makes, so the
+   * loop's own state changes (review, awaiting_merge, fix-iteration in_progress) propagate to main
+   * immediately through the same sync-on-write seam manual edits use — main is the notification
+   * authority and must see the loop advance without waiting for a periodic sync. On main and
+   * standalone boxes it is a no-op.
    */
   ReviewPipelineController(
       SpecStore specStore,
@@ -94,6 +103,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       Function<String, String> reviewerResolver,
       ReviewAgentRunner agentRunner,
       EventBus eventBus,
+      Runnable syncTrigger,
       ExecutorService pipelineExecutor) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
@@ -101,7 +111,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     this.reviewerResolver = reviewerResolver;
     this.agentRunner = agentRunner;
     this.eventBus = eventBus;
+    this.syncTrigger = Objects.requireNonNull(syncTrigger, "syncTrigger");
     this.pipelineExecutor = pipelineExecutor;
+  }
+
+  /** Sets a spec's status and immediately signals sync so the transition reaches main. */
+  private void advanceSpec(String specId, SpecStatus status) {
+    specStore.updateStatus(specId, status);
+    syncTrigger.run();
   }
 
   /**
@@ -194,7 +211,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       return;
     }
 
-    specStore.updateStatus(specId, SpecStatus.REVIEW);
+    advanceSpec(specId, SpecStatus.REVIEW);
 
     var config = configResolver.apply(event.project());
     if (config == null || config.stages().isEmpty()) return;
@@ -268,7 +285,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       }
 
       reviewStore.updateReviewStatus(reviewId, "passed");
-      specStore.updateStatus(specId, SpecStatus.AWAITING_MERGE);
+      advanceSpec(specId, SpecStatus.AWAITING_MERGE);
       publishEvent(project, specId, "review_completed", null);
 
     } catch (Exception e) {
@@ -394,7 +411,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * maxIterations} is reached.
    */
   private void reReview(ReviewPipelineConfig config, String project, String specId, int iteration) {
-    specStore.updateStatus(specId, SpecStatus.REVIEW);
+    advanceSpec(specId, SpecStatus.REVIEW);
     var reviewId = createReviewWithStages(config, specId, iteration);
     executePipeline(reviewId, config, project, specId);
   }
@@ -404,7 +421,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (spec.isEmpty()) return;
 
     var fixTask = FixTaskBuilder.build(spec.get().title(), findings);
-    specStore.updateStatus(specId, SpecStatus.IN_PROGRESS);
+    advanceSpec(specId, SpecStatus.IN_PROGRESS);
     publishEvent(project, specId, "review_iteration_started", null);
 
     try {
@@ -418,7 +435,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   private void escalate(String project, String specId, String reviewId) {
     reviewStore.updateReviewStatus(reviewId, "escalated");
-    specStore.updateStatus(specId, SpecStatus.REVIEW);
+    advanceSpec(specId, SpecStatus.REVIEW);
     publishEvent(project, specId, "review_escalated", null);
   }
 

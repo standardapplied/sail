@@ -218,6 +218,7 @@ class MissedStopReconcilerTest {
             p -> "codex",
             (p, a, pr) -> "[]",
             bus,
+            () -> {},
             new DirectExecutorService());
     bus.subscribe(BusTesting.latching(controller, latch));
   }

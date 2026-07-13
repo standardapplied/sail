@@ -189,7 +189,35 @@ class ReviewPipelineControllerTest {
       ReviewAgentRunner runner,
       EventBus bus) {
     return new ReviewPipelineController(
-        specStore, reviewStore, config, reviewer, runner, bus, new DirectExecutorService());
+        specStore,
+        reviewStore,
+        config,
+        reviewer,
+        runner,
+        bus,
+        () -> {},
+        new DirectExecutorService());
+  }
+
+  @Test
+  void advancingASpecTriggersSyncSoTheTransitionReachesMain() {
+    createSpec("auth", "in_progress");
+    var syncs = new java.util.concurrent.atomic.AtomicInteger();
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr) -> "[]",
+            null,
+            syncs::incrementAndGet,
+            new DirectExecutorService());
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertTrue(syncs.get() > 0, "a spec status transition must trigger sync-on-write to main");
   }
 
   @Test
@@ -837,7 +865,8 @@ class ReviewPipelineControllerTest {
             p -> singleAgentStage("no_critical"),
             p -> "codex",
             gated,
-            null);
+            null,
+            () -> {});
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     assertTrue(started.await(5, TimeUnit.SECONDS), "pipeline should reach the agent runner");
@@ -897,6 +926,7 @@ class ReviewPipelineControllerTest {
             p -> "codex",
             (p, a, pr) -> "[]",
             null,
+            () -> {},
             new DirectExecutorService());
     errDb.close();
 

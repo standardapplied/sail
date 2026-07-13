@@ -114,6 +114,7 @@ class ReviewAgentLoopTest {
             p -> "codex",
             new ContainerReviewAgentRunner(agentShell),
             bus,
+            () -> {},
             new DirectExecutorService());
     bus.subscribe(BusTesting.latching(controller, latch));
   }
