@@ -252,6 +252,67 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aSpecStrandedInReviewWithNoReviewStartedGetsItsStopReplayed() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(1, replayed, "a spec stranded in review with no review must be rescued");
+  }
+
+  @Test
+  void aReviewSpecWhoseReviewActuallyStartedIsNotRescued() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, replayed, "a review that ran is not stranded");
+  }
+
+  @Test
+  void theReviewStrandRescueRunsAtMostOncePerSpec() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    var rec = reconciler(new CountingProbe(true), Instant::now);
+
+    assertEquals(1, rec.sweep());
+    assertEquals(0, rec.sweep(), "an empty-pipeline review must not be replayed forever");
+  }
+
+  @Test
+  void aReviewSpecWithNoOwnedRunIsNotRescued() {
+    createReviewSpec("auth");
+
+    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, replayed, "no run to replay a stop from");
+  }
+
+  private void createReviewSpec(String id) {
+    specStore.create(
+        new SpecStore.SpecRow(
+            id,
+            "test-project",
+            "Test spec",
+            SpecStatus.REVIEW,
+            null,
+            "claude-code",
+            null,
+            null,
+            "feat/test",
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of(),
+            List.of()));
+  }
+
+  @Test
   void replaysACrashedMissedStopAndLeavesTheSpecInProgress() throws Exception {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 137);

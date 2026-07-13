@@ -17,6 +17,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -60,6 +62,11 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
+  private static final SpecStore.SpecFilter REVIEW =
+      new SpecStore.SpecFilter(null, "review", null, null, null);
+
+  private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("completed", "stopped", "failed");
+
   /** Answers whether a project's agent systemd unit is still active. */
   @FunctionalInterface
   public interface UnitProbe {
@@ -74,6 +81,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final PeriodicPass pass;
+  private final Set<String> reviewRescueAttempted = ConcurrentHashMap.newKeySet();
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -143,10 +151,49 @@ public final class MissedStopReconciler implements AutoCloseable {
                   + e.getMessage());
         }
       }
+      for (var spec : specStore.list(REVIEW)) {
+        replayed += rescueStrandedReview(spec) ? 1 : 0;
+      }
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
     return replayed;
+  }
+
+  /**
+   * Rescues a spec stranded in {@code review} with no review ever started — the shape a dropped
+   * kickoff leaves: an out-of-band status write (a manual edit, or a sync revision from another
+   * box) moved the spec to {@code review} while its agent was still running here, so the
+   * authoritative stop hit the pipeline's guard against a non-{@code in_progress} spec and no
+   * review was created. Replaying the stop lets the review-resilient pipeline kick it off. A {@code
+   * review_stage_started} event means a review did run, so the spec is not stranded; and the rescue
+   * fires at most once per spec per server lifetime, so a project with no automated pipeline (its
+   * {@code review} is a human queue) is never replayed in a loop.
+   */
+  private boolean rescueStrandedReview(SpecStore.SpecRow spec) {
+    if (reviewRescueAttempted.contains(spec.id()) || reviewStarted(spec.id())) {
+      return false;
+    }
+    var node = localHandle.get();
+    var latest =
+        sessionStore.listForSpec(spec.id()).stream()
+            .findFirst()
+            .filter(run -> SailOperations.ownsRun(run.node(), node))
+            .filter(run -> TERMINAL_RUN_STATUSES.contains(run.status()));
+    if (latest.isEmpty()) {
+      return false;
+    }
+    reviewRescueAttempted.add(spec.id());
+    publishStop(
+        spec,
+        latest.get(),
+        latest.get().exitCode(),
+        "stranded in review with no review started; replaying the stop to kick it off");
+    return true;
+  }
+
+  private boolean reviewStarted(String specId) {
+    return !eventStore.forSpecAndType(specId, "review_stage_started").isEmpty();
   }
 
   private boolean reconcile(SpecStore.SpecRow spec) throws Exception {

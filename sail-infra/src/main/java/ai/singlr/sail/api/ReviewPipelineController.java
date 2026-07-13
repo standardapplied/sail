@@ -201,7 +201,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var spec = specStore.findById(specId);
     if (spec.isEmpty()) return;
 
-    if (spec.get().status() != SpecStatus.IN_PROGRESS) return;
+    if (!reviewable(spec.get().status())) return;
 
     if (!isAuthoritative(event)) return;
 
@@ -245,6 +245,19 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
             () -> executePipeline(reviewId, config, event.project(), specId), pipelineExecutor);
     inFlight.put(reviewId, future);
     future.whenComplete((v, ex) -> inFlight.remove(reviewId));
+  }
+
+  /**
+   * Whether an authoritative stop for a spec in this status should kick off a review. Both {@code
+   * in_progress} (the normal path) and {@code review} qualify: a spec can be moved to {@code
+   * review} out of band — a manual edit, or a sync revision from another box — while its agent is
+   * still running here, and the old {@code == IN_PROGRESS} guard then dropped the real stop and
+   * stranded the spec in {@code review} with no review ever created. Terminal and pre-dispatch
+   * states ({@code done}, {@code awaiting_merge}, {@code archived}, {@code draft}, {@code pending})
+   * are not reviewable, so their stops are ignored.
+   */
+  private static boolean reviewable(SpecStatus status) {
+    return status == SpecStatus.IN_PROGRESS || status == SpecStatus.REVIEW;
   }
 
   private String createReviewWithStages(ReviewPipelineConfig config, String specId, int iteration) {

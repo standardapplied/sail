@@ -239,6 +239,43 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void anAuthoritativeStopStillKicksOffReviewWhenStatusWasClobberedToReview() {
+    createSpec("auth", "review");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth");
+    assertTrue(
+        review.isPresent(), "a spec clobbered to review out of band must still get its review");
+    assertEquals("passed", review.get().status());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aReviewAlreadyRunningIsNotRestartedWhenStatusIsReview() {
+    createSpec("auth", "review");
+    var reviewId = reviewStore.createReview("auth", 1);
+    reviewStore.updateReviewStatus(reviewId, "running");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+  }
+
+  @Test
+  void aTerminalSpecStatusIgnoresTheStop() {
+    createSpec("auth", "awaiting_merge");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(reviewStore.latestReviewForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void skipsAnUnknownSpec() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr) -> "[]");
 
