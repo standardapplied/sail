@@ -35,14 +35,16 @@ public final class ReviewWiring {
       ReviewStore reviewStore,
       EventBus eventBus,
       Function<String, SailYaml> projectLoader,
-      ShellExec shell) {
+      ShellExec shell,
+      Runnable syncTrigger) {
     return new ReviewPipelineController(
         specStore,
         reviewStore,
         configResolver(projectLoader),
         reviewerResolver(projectLoader),
         new ContainerReviewAgentRunner(shell),
-        eventBus);
+        eventBus,
+        syncTrigger);
   }
 
   /** Resolves a project's review pipeline: its configured one, or the mandatory default. */

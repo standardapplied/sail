@@ -143,7 +143,8 @@ class ApiCoverageEdgesTest {
         var db = Sqlite.open(tmp.resolve("control.db"))) {
       new SchemaManager(db).migrate();
       var controller =
-          ReviewWiring.controller(new SpecStore(db), new ReviewStore(db), bus, p -> null, null);
+          ReviewWiring.controller(
+              new SpecStore(db), new ReviewStore(db), bus, p -> null, null, () -> {});
       try (var server =
           new SailApiServer(
               "127.0.0.1",

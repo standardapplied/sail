@@ -198,7 +198,8 @@ public final class ServerStartCommand implements Runnable {
             reviewStore,
             bus,
             ServerStartCommand::loadProjectYaml,
-            new ShellExecutor(false));
+            new ShellExecutor(false),
+            syncScheduler::afterWrite);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
     bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
 

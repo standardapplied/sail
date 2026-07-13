@@ -83,7 +83,7 @@ class ReviewWiringTest {
 
   @Test
   void controllerFactoryAssemblesAReviewPipelineController() {
-    try (var controller = ReviewWiring.controller(null, null, null, p -> null, null)) {
+    try (var controller = ReviewWiring.controller(null, null, null, p -> null, null, () -> {})) {
       assertNotNull(controller);
       assertEquals("review-pipeline", controller.name());
     }
