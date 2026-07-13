@@ -170,6 +170,36 @@ class ProjectSyncTest {
   }
 
   @Test
+  void aProjectRenamedOnANodePropagatesToMain() {
+    main.projects.upsert("old", "name: old\n", "uday");
+    sync(node);
+
+    node.projects.rename("old", "renamed", "name: renamed\n");
+    var report = engine.reconcile(node.replica, main.replica);
+
+    assertEquals(2, report.pushed());
+    assertTrue(main.projects.findByName("old").isEmpty());
+    assertEquals("name: renamed\n", definitionOn(main, "renamed"));
+    assertTrue(main.projects.blocksResurrection("old"));
+  }
+
+  @Test
+  void aRenameConflictsWithABasedConcurrentEditAndPreservesTheEdit() {
+    main.projects.upsert("old", "value: base\n", "uday");
+    sync(node);
+    node.projects.upsert("old", "value: unsynced-node-edit\n", "sumesh");
+    main.projects.rename("old", "renamed", "value: base\n");
+
+    var report = engine.reconcile(node.replica, main.replica);
+
+    assertEquals(1, report.conflicts());
+    assertEquals("value: unsynced-node-edit\n", definitionOn(node, "old"));
+    assertEquals("value: base\n", definitionOn(node, "renamed"));
+    assertEquals(
+        List.of("<deleted>"), node.conflicts.pendingFor("project", "old").orElseThrow().fields());
+  }
+
+  @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
     node.projects.applyRevision("acme", Map.of("definition", "AAA"), "1-base");
 

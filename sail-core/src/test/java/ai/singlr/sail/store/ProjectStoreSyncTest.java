@@ -104,6 +104,15 @@ class ProjectStoreSyncTest {
   }
 
   @Test
+  void commitPreservesABlockingTombstoneWhenTheProjectIsAlreadyAbsent() {
+    var outcome = store.commitRevision("old", Map.of("_blocks_resurrection", true), null);
+
+    assertInstanceOf(PushOutcome.Accepted.class, outcome);
+    assertTrue(store.findByName("old").isEmpty());
+    assertTrue(store.blocksResurrection("old"));
+  }
+
+  @Test
   void deleteTombstonesAndBaseRevSurvivesForDeleteVsEditDetection() {
     store.applyRevision("acme", def("base"), "rev-base");
 

@@ -82,11 +82,16 @@ public final class SyncEngine {
       int redetectsLeft) {
     var base = local.base(id);
     var localSnap = local.current(id);
-    if (blockingTombstone(remoteSnap)) {
-      if (localSnap != null || !Objects.equals(local.currentRev(id), remoteRev)) {
+    var blocksResurrection = blockingTombstone(remoteSnap);
+    if (blocksResurrection && base == null) {
+      var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
+      if (changed) {
         local.adopt(id, null, remoteRev);
       }
-      return localSnap == null ? Outcome.CONVERGED : Outcome.PULLED;
+      return changed ? Outcome.PULLED : Outcome.CONVERGED;
+    }
+    if (blocksResurrection) {
+      remoteSnap = null;
     }
     return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
       case ConflictDetector.Converged ignored -> {

@@ -222,13 +222,25 @@ public final class ProjectStore implements ConflictResolver {
           if (!Objects.equals(latestRev(id), expectedRev)) {
             return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
           }
-          if (snapshot == null) {
+          var blocksResurrection =
+              snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
+          if (snapshot == null || blocksResurrection) {
             var present = findByName(id).orElse(null);
-            if (present == null) {
+            if (present == null && !blocksResurrection) {
               return new PushOutcome.Accepted(latestRev(id));
             }
-            var rev = recordRevision(id, present.definition(), null, "sync", true, false);
-            db.execute("DELETE FROM projects WHERE name = ?", id);
+            var rev =
+                recordRevision(
+                    id,
+                    present == null ? null : present.definition(),
+                    null,
+                    "sync",
+                    true,
+                    false,
+                    blocksResurrection);
+            if (present != null) {
+              db.execute("DELETE FROM projects WHERE name = ?", id);
+            }
             return new PushOutcome.Accepted(rev);
           }
           var definition = definitionOf(snapshot);
