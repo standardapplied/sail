@@ -76,6 +76,20 @@ class ProjectImporterTest {
   }
 
   @Test
+  void leavesAStaleDescriptorTombstonedAfterARename() throws IOException {
+    writeProject("old", "name: old\n");
+    store.upsert("old", "name: old\n", null);
+    store.rename("old", "renamed", "name: renamed\n");
+
+    var report = new ProjectImporter(projectsDir, store).importAll();
+
+    assertEquals(0, report.imported());
+    assertEquals(1, report.skipped());
+    assertTrue(store.findByName("old").isEmpty());
+    assertTrue(store.blocksResurrection("old"));
+  }
+
+  @Test
   void skipsDirectoriesWithoutADescriptor() throws IOException {
     Files.createDirectories(projectsDir.resolve("empty"));
     writeProject("acme", "name: acme\n");

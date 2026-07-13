@@ -220,7 +220,11 @@ public final class ProjectStore implements ConflictResolver {
     return db.immediateTransaction(
         () -> {
           if (!Objects.equals(latestRev(id), expectedRev)) {
-            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
+            var current = comparableSnapshot(id);
+            if (current == null && blocksResurrection(id)) {
+              current = Map.of("_blocks_resurrection", true);
+            }
+            return new PushOutcome.Stale(latestRev(id), current);
           }
           var blocksResurrection =
               snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));

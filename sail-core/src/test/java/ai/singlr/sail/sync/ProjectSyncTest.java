@@ -18,6 +18,7 @@ import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -170,6 +171,56 @@ class ProjectSyncTest {
   }
 
   @Test
+  void aRenameRacingAnUnbasedCreateSurvivesTheStaleCommitRetry() {
+    node.projects.upsert("old", "name: old\n", "sumesh");
+    MainReplica racingMain =
+        new MainReplica() {
+          private boolean raced;
+
+          @Override
+          public String id() {
+            return main.replica.id();
+          }
+
+          @Override
+          public Set<String> entityIds() {
+            return main.replica.entityIds();
+          }
+
+          @Override
+          public Map<String, Object> current(String id) {
+            return main.replica.current(id);
+          }
+
+          @Override
+          public String currentRev(String id) {
+            return main.replica.currentRev(id);
+          }
+
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
+            if (!raced) {
+              raced = true;
+              main.projects.upsert("old", "name: old\n", "uday");
+              main.projects.rename("old", "renamed", "name: renamed\n");
+            }
+            return main.replica.commit(id, snapshot, expectedRev);
+          }
+
+          @Override
+          public long maxSeq() {
+            return main.replica.maxSeq();
+          }
+        };
+
+    engine.reconcile(node.replica, racingMain);
+
+    assertTrue(main.projects.findByName("old").isEmpty());
+    assertTrue(node.projects.findByName("old").isEmpty());
+    assertEquals("name: renamed\n", definitionOn(main, "renamed"));
+  }
+
+  @Test
   void aProjectRenamedOnANodePropagatesToMain() {
     main.projects.upsert("old", "name: old\n", "uday");
     sync(node);
@@ -179,6 +230,21 @@ class ProjectSyncTest {
 
     assertEquals(2, report.pushed());
     assertTrue(main.projects.findByName("old").isEmpty());
+    assertEquals("name: renamed\n", definitionOn(main, "renamed"));
+    assertTrue(main.projects.blocksResurrection("old"));
+  }
+
+  @Test
+  void aProjectRenamedOnANodeBeforeItsFirstSharedSyncPropagatesToMain() {
+    main.projects.upsert("old", "name: old\n", "uday");
+    node.projects.upsert("old", "name: old\n", "uday");
+    node.projects.rename("old", "renamed", "name: renamed\n");
+
+    var report = engine.reconcile(node.replica, main.replica);
+
+    assertEquals(2, report.pushed());
+    assertTrue(main.projects.findByName("old").isEmpty());
+    assertTrue(node.projects.findByName("old").isEmpty());
     assertEquals("name: renamed\n", definitionOn(main, "renamed"));
     assertTrue(main.projects.blocksResurrection("old"));
   }
