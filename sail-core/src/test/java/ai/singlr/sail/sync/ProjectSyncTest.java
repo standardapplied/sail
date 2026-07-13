@@ -157,6 +157,19 @@ class ProjectSyncTest {
   }
 
   @Test
+  void anAuthoritativeTombstonePreventsAnUnbasedStaleCreateFromResurrecting() {
+    main.projects.upsert("old", "name: old\n", "uday");
+    main.projects.rename("old", "renamed", "name: renamed\n");
+    node.projects.upsert("old", "name: old\n", "sumesh");
+
+    var report = engine.reconcile(node.replica, main.replica);
+
+    assertEquals(2, report.pulled());
+    assertTrue(main.projects.findByName("old").isEmpty());
+    assertTrue(node.projects.findByName("old").isEmpty());
+  }
+
+  @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
     node.projects.applyRevision("acme", Map.of("definition", "AAA"), "1-base");
 

@@ -115,6 +115,19 @@ class ProjectStoreSyncTest {
   }
 
   @Test
+  void renameProducesADeletionAndCreationThatReplicasCanAdopt() {
+    store.applyRevision("old", def("name: old\n"), "rev-old");
+
+    store.rename("old", "renamed", "name: renamed\n");
+
+    assertNull(store.comparableSnapshot("old"));
+    assertEquals("rev-old", store.baseRevOf("old"));
+    assertEquals(def("name: renamed\n", "sync"), store.comparableSnapshot("renamed"));
+    assertTrue(store.syncEntityIds().contains("old"));
+    assertTrue(store.syncEntityIds().contains("renamed"));
+  }
+
+  @Test
   void applyRevisionNullAdoptsADeletionFromMain() {
     store.upsert("acme", "local", "uday");
 

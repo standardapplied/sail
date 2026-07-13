@@ -23,9 +23,8 @@ import java.util.Objects;
 /**
  * Renames a project on this box — re-keying every place its name is the identity: the catalog, its
  * specs and shared files, the on-disk state directory, the Incus container, and the guest hostname
- * the in-container {@code spec} CLI reads. A purely local operation: it emits no sync rename event,
- * so other boxes do not learn of it through {@code sail sync} (the caller surfaces that to the
- * engineer).
+ * the in-container {@code spec} CLI reads. The catalog rename is represented as a tombstone for the
+ * old identity and a fresh entity at the new identity, so both halves propagate through sync.
  *
  * <p>The mutating steps run in an order whose every prior step has a compensation, recorded on a
  * stack as it succeeds; any failure unwinds them in reverse so a half-done rename never corrupts

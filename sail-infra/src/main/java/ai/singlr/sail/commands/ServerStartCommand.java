@@ -341,7 +341,7 @@ public final class ServerStartCommand implements Runnable {
    * their own state; a node never posts — its transitions sync to main, whose {@code _sync} process
    * turns them into the lifecycle events main's reactor announces. Exactly one notifier per fleet.
    */
-  static boolean narratesSlack(SyncConfig sync) {
+  public static boolean narratesSlack(SyncConfig sync) {
     return !HostSync.isNode(sync);
   }
 

@@ -82,6 +82,12 @@ public final class SyncEngine {
       int redetectsLeft) {
     var base = local.base(id);
     var localSnap = local.current(id);
+    if (blockingTombstone(remoteSnap)) {
+      if (localSnap != null || !Objects.equals(local.currentRev(id), remoteRev)) {
+        local.adopt(id, null, remoteRev);
+      }
+      return localSnap == null ? Outcome.CONVERGED : Outcome.PULLED;
+    }
     return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
       case ConflictDetector.Converged ignored -> {
         linkSharedRevision(local, id, remoteSnap, remoteRev);
@@ -100,6 +106,10 @@ public final class SyncEngine {
         yield Outcome.CONFLICT;
       }
     };
+  }
+
+  private static boolean blockingTombstone(Map<String, Object> snapshot) {
+    return snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
   }
 
   private Outcome push(

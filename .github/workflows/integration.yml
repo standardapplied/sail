@@ -11,6 +11,21 @@ permissions:
   contents: read
 
 jobs:
+  fleet-integration:
+    name: Multi-node control-plane integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5f # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run multi-node integration tests without incus
+        run: mvn -B -Pintegration -Dsail.it.requireIncus=false verify
+
   incus-integration:
     name: Incus-backed integration tests
     runs-on: ubuntu-latest

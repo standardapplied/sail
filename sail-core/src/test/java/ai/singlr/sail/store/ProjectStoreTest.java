@@ -37,7 +37,7 @@ class ProjectStoreTest {
   }
 
   @Test
-  void renameRekeysTheRowAndMovesChangeLogHistory() {
+  void renameTombstonesTheOldIdentityAndCreatesANewEntity() {
     store.upsert("old", "name: old\nimage: ubuntu/24.04\n", "uday");
     var rev = store.latestRev("old");
 
@@ -46,8 +46,13 @@ class ProjectStoreTest {
     assertTrue(store.findByName("old").isEmpty(), "the old name is gone");
     var row = store.findByName("renamed").orElseThrow();
     assertTrue(row.definition().contains("name: renamed"));
-    assertEquals(rev, store.latestRev("renamed"), "history moved to the new id");
-    assertNull(store.latestRev("old"), "no history left under the old id");
+    assertTrue(store.latestRev("old") != null, "the old identity keeps a tombstone");
+    assertTrue(store.latestRev("renamed") != null, "the new identity has its own revision");
+    assertTrue(store.blocksResurrection("old"));
+    assertFalse(store.blocksResurrection("renamed"));
+    assertFalse(rev.equals(store.latestRev("old")), "the tombstone advances old's revision");
+    assertFalse(rev.equals(store.latestRev("renamed")), "the new identity starts fresh history");
+    assertTrue(store.syncEntityIds().containsAll(List.of("old", "renamed")));
   }
 
   @Test
@@ -58,6 +63,17 @@ class ProjectStoreTest {
     store.rename("old", "renamed", "name: renamed\n");
 
     assertTrue(store.findByName("renamed").isPresent());
+  }
+
+  @Test
+  void renameRefusesToReplaceAnExistingProject() {
+    store.upsert("old", "name: old\n", "uday");
+    store.upsert("taken", "name: taken\n", "sumesh");
+
+    assertThrows(IllegalStateException.class, () -> store.rename("old", "taken", "name: taken\n"));
+
+    assertTrue(store.findByName("old").isPresent());
+    assertEquals("sumesh", store.findByName("taken").orElseThrow().updatedBy());
   }
 
   @Test

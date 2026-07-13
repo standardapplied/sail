@@ -59,7 +59,10 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
 
   @Override
   public Map<String, Object> current(String entityId) {
-    return projects.comparableSnapshot(entityId);
+    var current = projects.comparableSnapshot(entityId);
+    return current == null && projects.blocksResurrection(entityId)
+        ? Map.of("_blocks_resurrection", true)
+        : current;
   }
 
   @Override
@@ -74,7 +77,7 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
 
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
-    projects.applyRevision(entityId, snapshot, rev);
+    projects.applyRevision(entityId, blockingTombstone(snapshot) ? null : snapshot, rev);
   }
 
   @Override
@@ -107,5 +110,9 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
 
   private static String json(Map<String, Object> snapshot) {
     return snapshot == null ? null : YamlUtil.dumpJson(snapshot);
+  }
+
+  private static boolean blockingTombstone(Map<String, Object> snapshot) {
+    return snapshot != null && Boolean.TRUE.equals(snapshot.get("_blocks_resurrection"));
   }
 }

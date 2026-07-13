@@ -84,26 +84,24 @@ public final class ProjectStore implements ConflictResolver {
   }
 
   /**
-   * Re-keys a project from {@code old} to {@code renamed} within this box's catalog: the row (its
-   * name and the redacted {@code newDefinition}, whose {@code name:} field the caller has already
-   * updated) and the project's change-log history. Idempotent — a no-op once {@code old} is gone. A
-   * local re-key only: it emits no sync rename event, so other boxes do not learn of it through
-   * {@code sail sync}.
+   * Renames a project as two independently replicated mutations: a tombstone for {@code old} and a
+   * fresh entity at {@code renamed}. Idempotent — a no-op once {@code old} is gone.
    */
   public void rename(String old, String renamed, String newDefinition) {
     var canonical = PersonalFields.redact(newDefinition);
     db.transaction(
         () -> {
-          db.execute(
-              "UPDATE projects SET name = ?, definition = ? WHERE name = ?",
-              renamed,
-              canonical,
-              old);
-          db.execute(
-              "UPDATE change_log SET entity_id = ? WHERE entity_type = ? AND entity_id = ?",
-              renamed,
-              ENTITY,
-              old);
+          var existing = findByName(old).orElse(null);
+          if (existing == null) {
+            return;
+          }
+          if (findByName(renamed).isPresent()) {
+            throw new IllegalStateException("A project named '" + renamed + "' already exists.");
+          }
+          recordRevision(old, existing.definition(), null, "local", true, false, true);
+          db.execute("DELETE FROM projects WHERE name = ?", old);
+          writeRow(renamed, canonical, existing.updatedBy());
+          recordRevision(renamed, canonical, null, "local", false, false);
         });
   }
 
@@ -119,6 +117,16 @@ public final class ProjectStore implements ConflictResolver {
 
   public Map<String, Object> comparableSnapshot(String id) {
     return findByName(id).map(row -> comparable(row.definition(), row.updatedBy())).orElse(null);
+  }
+
+  /** Returns whether the latest revision is a rename tombstone that defeats stale creates. */
+  public boolean blocksResurrection(String id) {
+    var history = changeLog.history(ENTITY, id);
+    if (history.isEmpty() || !history.getLast().deleted()) {
+      return false;
+    }
+    return Boolean.TRUE.equals(
+        YamlUtil.parseMap(history.getLast().snapshot()).get("_blocks_resurrection"));
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -302,10 +310,24 @@ public final class ProjectStore implements ConflictResolver {
       String origin,
       boolean deleted,
       boolean setBaseRev) {
+    return recordRevision(id, definition, explicitRev, origin, deleted, setBaseRev, false);
+  }
+
+  private String recordRevision(
+      String id,
+      String definition,
+      String explicitRev,
+      String origin,
+      boolean deleted,
+      boolean setBaseRev,
+      boolean blocksResurrection) {
     var map = new LinkedHashMap<String, Object>();
     map.put("definition", definition);
     if (deleted) {
       map.put("_base_rev", rawBaseRev(id));
+    }
+    if (blocksResurrection) {
+      map.put("_blocks_resurrection", true);
     }
     var snapshot = YamlUtil.dumpJson(map);
     var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
