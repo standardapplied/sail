@@ -80,6 +80,25 @@ class WebhookReactorTest {
   }
 
   @Test
+  void onEventSkipsSyncDerivedEventsTheOriginNodeAlreadyNotified() {
+    var calls = new ArrayList<String>();
+    var notifications = new Notifications("https://example.com/wh", List.of("spec_dispatched"));
+    var reactor = new WebhookReactor(project -> notifications, url -> recorder(calls));
+
+    reactor.onEvent(
+        Event.of(
+                "light",
+                "oauth",
+                "spec_dispatched",
+                "sail",
+                "h",
+                Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_SYNC))
+            .withId(1L));
+
+    assertTrue(calls.isEmpty());
+  }
+
+  @Test
   void onEventFiresForSubscribedType() {
     var calls = new ArrayList<String>();
     var notifications = new Notifications("https://example.com/wh", List.of("spec_dispatched"));

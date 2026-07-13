@@ -70,6 +70,9 @@ public final class WebhookReactor implements EventSubscriber {
 
   @Override
   public void onEvent(Event event) {
+    if (isSyncDerived(event)) {
+      return;
+    }
     var notifications = resolver.resolve(event.project());
     if (notifications == null || notifications.url() == null) {
       return;
@@ -84,5 +87,14 @@ public final class WebhookReactor implements EventSubscriber {
 
   private WebhookSender senderFor(String url) {
     return senders.computeIfAbsent(url, senderFactory);
+  }
+
+  /**
+   * A sync-derived event replays a transition another box already executed — and, with this same
+   * webhook configuration in its synced project descriptor, already notified. Sending it again from
+   * main would double every webhook, so narration input stays Slack-only.
+   */
+  private static boolean isSyncDerived(Event event) {
+    return Event.WellKnownData.SOURCE_SYNC.equals(event.data().get(Event.WellKnownData.SOURCE));
   }
 }

@@ -165,6 +165,99 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void anAcceptedCommitHandsItsTransitionsToTheSink() throws Exception {
+    var main =
+        new FakeMain() {
+          private Map<String, Object> committed;
+
+          @Override
+          public Map<String, Object> current(String entityId) {
+            return committed;
+          }
+
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            committed = snapshot;
+            return new CommitOutcome.Accepted("1-x");
+          }
+        };
+    var seen = new java.util.ArrayList<SyncTransition>();
+    var out = new StringWriter();
+    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), null);
+
+    new SyncRpcServer(
+            Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
+        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+
+    assertInstanceOf(SyncWire.Committed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertEquals(1, seen.size());
+    assertEquals("in_progress", seen.getFirst().to());
+  }
+
+  @Test
+  void aRejectedCommitNeverReachesTheSink() throws Exception {
+    var main =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            return new CommitOutcome.Rejected("2-y", Map.of("status", "review"));
+          }
+        };
+    var seen = new java.util.ArrayList<SyncTransition>();
+    var out = new StringWriter();
+    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), "1-x");
+
+    new SyncRpcServer(
+            Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
+        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+
+    assertInstanceOf(SyncWire.Rejected.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertTrue(seen.isEmpty());
+  }
+
+  @Test
+  void aThrowingSinkNeverFailsTheCommittedReply() throws Exception {
+    var main =
+        new FakeMain() {
+          private Map<String, Object> committed;
+
+          @Override
+          public Map<String, Object> current(String entityId) {
+            return committed;
+          }
+
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            committed = snapshot;
+            return new CommitOutcome.Accepted("1-x");
+          }
+        };
+    var out = new StringWriter();
+    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), null);
+    var captured = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      new SyncRpcServer(
+              Map.of("spec", main),
+              new SyncPrincipal(null, true),
+              FdeRoster.EMPTY,
+              transition -> {
+                throw new IllegalStateException("slack is down");
+              })
+          .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertInstanceOf(SyncWire.Committed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertTrue(captured.toString(StandardCharsets.UTF_8).contains("slack is down"));
+  }
+
+  @Test
   void fetchFdesReturnsTheInjectedRoster() throws Exception {
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
     var out = new StringWriter();

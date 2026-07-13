@@ -6,7 +6,10 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Capability;
+import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.Role;
+import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
@@ -30,6 +33,7 @@ import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
+import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -72,12 +76,24 @@ public final class SyncServerCommand implements Callable<Integer> {
     try (mainDb) {
       var in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
       var out = new OutputStreamWriter(System.out, StandardCharsets.UTF_8);
-      return serve(mainDb, host, System.getenv("SAIL_TOKEN"), in, out);
+      return serve(
+          mainDb, host, System.getenv("SAIL_TOKEN"), in, out, transitionBridge(mainDb.db(), host));
     }
   }
 
   static int serve(
       SyncDatabase converged, String mainId, String token, BufferedReader in, Writer out)
+      throws IOException {
+    return serve(converged, mainId, token, in, out, SyncTransitionSink.NONE);
+  }
+
+  static int serve(
+      SyncDatabase converged,
+      String mainId,
+      String token,
+      BufferedReader in,
+      Writer out,
+      SyncTransitionSink transitionSink)
       throws IOException {
     var db = converged.db();
     var changeLog = new ChangeLog(db);
@@ -92,8 +108,54 @@ public final class SyncServerCommand implements Callable<Integer> {
             "run", new RunReplica(mainId, new RunStore(db), changeLog, conflicts, syncState),
             "review",
                 new ReviewReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState));
-    new SyncRpcServer(replicas, principal(db, token), () -> roster(db)).serve(in, out);
+    new SyncRpcServer(replicas, principal(db, token), () -> roster(db), transitionSink)
+        .serve(in, out);
     return 0;
+  }
+
+  /**
+   * The bridge from a committed transition to main's running server: maps it to today's lifecycle
+   * events and posts each to the local sail-api, where main's bus (and its Slack reactor) picks it
+   * up. This {@code _sync} subprocess shares main's database but not the server's in-process bus,
+   * so the local-socket publisher {@code notifyBoardUpdated} already uses is the one proven path.
+   * Best-effort by contract: a down sail-api costs the narration, never the sync.
+   */
+  static SyncTransitionSink transitionBridge(Sqlite db, String host) {
+    var specs = new SpecStore(db);
+    var reviews = new ReviewStore(db);
+    var publisher = new SailEventPublisher[1];
+    return transition -> {
+      var events =
+          SyncTransitionEvents.eventsFor(
+              transition,
+              specId -> specs.findById(specId).map(SpecStore.SpecRow::project).orElse(null),
+              specId ->
+                  reviews
+                      .latestReviewForSpec(specId)
+                      .map(ReviewStore.ReviewRow::status)
+                      .orElse(null),
+              host);
+      for (var event : events) {
+        publish(publisher, event);
+      }
+    };
+  }
+
+  private static void publish(SailEventPublisher[] publisher, Event event) {
+    try {
+      if (publisher[0] == null) {
+        publisher[0] = SailEventPublisher.localDefault();
+      }
+      publisher[0].publish(event);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    } catch (Exception e) {
+      System.err.println(
+          "  [sync] could not hand "
+              + event.type()
+              + " to the local sail-api; the sync is unaffected: "
+              + e.getMessage());
+    }
   }
 
   static List<Map<String, Object>> roster(Sqlite db) {
