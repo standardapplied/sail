@@ -15,6 +15,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -23,6 +24,7 @@ import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.ProjectReplica;
+import ai.singlr.sail.sync.ReviewReplica;
 import ai.singlr.sail.sync.RunReplica;
 import ai.singlr.sail.sync.SpecReplica;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -87,7 +89,9 @@ public final class SyncServerCommand implements Callable<Integer> {
             "file", new FileReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
             "project",
                 new ProjectReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
-            "run", new RunReplica(mainId, new RunStore(db), changeLog, conflicts, syncState));
+            "run", new RunReplica(mainId, new RunStore(db), changeLog, conflicts, syncState),
+            "review",
+                new ReviewReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState));
     new SyncRpcServer(replicas, principal(db, token), () -> roster(db)).serve(in, out);
     return 0;
   }

@@ -6,19 +6,38 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Review, stage, and finding CRUD on SQLite. Each review belongs to a spec and tracks one pass
  * through the review pipeline. Stages run sequentially; findings belong to stages.
+ *
+ * <p>The review is a <em>synced aggregate</em>: its snapshot carries the review row plus its stages
+ * and each stage's finding counts by severity, so main can narrate the review loop (started, stage
+ * passed/failed with counts, iteration, escalation) from replicated state — full findings stay on
+ * the executing node, which is the only writer. Every mutation to the review or its children
+ * journals a new revision of the whole aggregate within the same transaction, exactly as {@link
+ * RunStore} does for a flat run row. Single-writer, so reconciliation is conflict-free in practice.
  */
-public final class ReviewStore {
+public final class ReviewStore implements ConflictResolver {
+
+  private static final String ENTITY = "review";
+  private static final Set<String> SURROGATE_FIELDS = Set.of("id");
 
   private final Sqlite db;
+  private final ChangeLog changeLog;
 
   public ReviewStore(Sqlite db) {
     this.db = db;
+    this.changeLog = new ChangeLog(db);
   }
 
   /**
@@ -59,12 +78,16 @@ public final class ReviewStore {
 
   public String createReview(String specId, int iteration) {
     var id = DateTimeUtils.newId().toString();
-    db.execute(
-        "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
-        id,
-        specId,
-        iteration,
-        DateTimeUtils.now().toString());
+    db.transaction(
+        () -> {
+          db.execute(
+              "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+              id,
+              specId,
+              iteration,
+              DateTimeUtils.now().toString());
+          journal(id);
+        });
     return id;
   }
 
@@ -106,11 +129,15 @@ public final class ReviewStore {
 
   /** Marks a review passed and records the deciding principal (the human who approved it). */
   public void approve(String reviewId, String decidedBy) {
-    db.execute(
-        "UPDATE reviews SET status = 'passed', completed_at = ?, decided_by = ? WHERE id = ?",
-        DateTimeUtils.now().toString(),
-        decidedBy,
-        reviewId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE reviews SET status = 'passed', completed_at = ?, decided_by = ? WHERE id = ?",
+              DateTimeUtils.now().toString(),
+              decidedBy,
+              reviewId);
+          journal(reviewId);
+        });
   }
 
   /**
@@ -121,11 +148,20 @@ public final class ReviewStore {
    * {@code max_iterations} had ever been reached.
    */
   public int supersedeForSpec(String specId) {
-    db.execute(
-        "UPDATE reviews SET superseded_at = ? WHERE spec_id = ? AND superseded_at IS NULL",
-        DateTimeUtils.now().toString(),
-        specId);
-    return db.changes();
+    return db.transaction(
+        () -> {
+          var affected =
+              db.query(
+                  "SELECT id FROM reviews WHERE spec_id = ? AND superseded_at IS NULL",
+                  row -> row.text(0),
+                  specId);
+          db.execute(
+              "UPDATE reviews SET superseded_at = ? WHERE spec_id = ? AND superseded_at IS NULL",
+              DateTimeUtils.now().toString(),
+              specId);
+          affected.forEach(this::journal);
+          return affected.size();
+        });
   }
 
   /**
@@ -136,10 +172,16 @@ public final class ReviewStore {
    * start, before missed stops are replayed.
    */
   public int failOrphanedRunning() {
-    db.execute(
-        "UPDATE reviews SET status = 'failed', completed_at = ? WHERE status = 'running'",
-        DateTimeUtils.now().toString());
-    return db.changes();
+    return db.transaction(
+        () -> {
+          var affected =
+              db.query("SELECT id FROM reviews WHERE status = 'running'", row -> row.text(0));
+          db.execute(
+              "UPDATE reviews SET status = 'failed', completed_at = ? WHERE status = 'running'",
+              DateTimeUtils.now().toString());
+          affected.forEach(this::journal);
+          return affected.size();
+        });
   }
 
   /**
@@ -147,11 +189,15 @@ public final class ReviewStore {
    * iteration.
    */
   public void failReviewWithError(String reviewId, String error) {
-    db.execute(
-        "UPDATE reviews SET status = 'failed', error = ?, completed_at = ? WHERE id = ?",
-        error,
-        DateTimeUtils.now().toString(),
-        reviewId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE reviews SET status = 'failed', error = ?, completed_at = ? WHERE id = ?",
+              error,
+              DateTimeUtils.now().toString(),
+              reviewId);
+          journal(reviewId);
+        });
   }
 
   public void updateReviewStatus(String reviewId, String status) {
@@ -159,21 +205,29 @@ public final class ReviewStore {
         "passed".equals(status) || "failed".equals(status) || "escalated".equals(status)
             ? DateTimeUtils.now().toString()
             : null;
-    db.execute(
-        "UPDATE reviews SET status = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
-        status,
-        completedAt,
-        reviewId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE reviews SET status = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
+              status,
+              completedAt,
+              reviewId);
+          journal(reviewId);
+        });
   }
 
   public String createStage(String reviewId, String name, String stageType) {
     var id = DateTimeUtils.newId().toString();
-    db.execute(
-        "INSERT INTO review_stages (id, review_id, name, stage_type, status) VALUES (?, ?, ?, ?, 'pending')",
-        id,
-        reviewId,
-        name,
-        stageType);
+    db.transaction(
+        () -> {
+          db.execute(
+              "INSERT INTO review_stages (id, review_id, name, stage_type, status) VALUES (?, ?, ?, ?, 'pending')",
+              id,
+              reviewId,
+              name,
+              stageType);
+          journal(reviewId);
+        });
     return id;
   }
 
@@ -196,11 +250,15 @@ public final class ReviewStore {
   }
 
   public void startStage(String stageId, String reviewer) {
-    db.execute(
-        "UPDATE review_stages SET status = 'running', reviewer = ?, started_at = ? WHERE id = ?",
-        reviewer,
-        DateTimeUtils.now().toString(),
-        stageId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE review_stages SET status = 'running', reviewer = ?, started_at = ? WHERE id = ?",
+              reviewer,
+              DateTimeUtils.now().toString(),
+              stageId);
+          journalForStage(stageId);
+        });
   }
 
   public void completeStage(String stageId, String status) {
@@ -214,37 +272,45 @@ public final class ReviewStore {
    * for a genuine review verdict.
    */
   public void completeStage(String stageId, String status, String error) {
-    db.execute(
-        "UPDATE review_stages SET status = ?, completed_at = ?, error = ? WHERE id = ?",
-        status,
-        DateTimeUtils.now().toString(),
-        error,
-        stageId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE review_stages SET status = ?, completed_at = ?, error = ? WHERE id = ?",
+              status,
+              DateTimeUtils.now().toString(),
+              error,
+              stageId);
+          journalForStage(stageId);
+        });
   }
 
   public void addFinding(String stageId, Finding finding) {
-    db.execute(
-        """
-        INSERT INTO review_findings (id, stage_id, severity, category, file,
-            line_start, line_end, title, description, evidence,
-            suggestion_before, suggestion_after, suggestion_rationale,
-            confidence, resolution)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        finding.id(),
-        stageId,
-        finding.severity().name(),
-        finding.category().name(),
-        finding.file(),
-        finding.lineStart(),
-        finding.lineEnd(),
-        finding.title(),
-        finding.description(),
-        finding.evidence(),
-        finding.suggestion() != null ? finding.suggestion().before() : null,
-        finding.suggestion() != null ? finding.suggestion().after() : null,
-        finding.suggestion() != null ? finding.suggestion().rationale() : null,
-        finding.confidence(),
-        finding.resolution().name());
+    db.transaction(
+        () -> {
+          db.execute(
+              """
+              INSERT INTO review_findings (id, stage_id, severity, category, file,
+                  line_start, line_end, title, description, evidence,
+                  suggestion_before, suggestion_after, suggestion_rationale,
+                  confidence, resolution)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              finding.id(),
+              stageId,
+              finding.severity().name(),
+              finding.category().name(),
+              finding.file(),
+              finding.lineStart(),
+              finding.lineEnd(),
+              finding.title(),
+              finding.description(),
+              finding.evidence(),
+              finding.suggestion() != null ? finding.suggestion().before() : null,
+              finding.suggestion() != null ? finding.suggestion().after() : null,
+              finding.suggestion() != null ? finding.suggestion().rationale() : null,
+              finding.confidence(),
+              finding.resolution().name());
+          journalForStage(stageId);
+        });
   }
 
   public List<Finding> findingsForStage(String stageId) {
@@ -291,8 +357,21 @@ public final class ReviewStore {
   }
 
   public void resolveFinding(String findingId, Finding.Resolution resolution) {
-    db.execute(
-        "UPDATE review_findings SET resolution = ? WHERE id = ?", resolution.name(), findingId);
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE review_findings SET resolution = ? WHERE id = ?",
+              resolution.name(),
+              findingId);
+          var reviewId =
+              db.queryOne(
+                  """
+                  SELECT s.review_id FROM review_stages s
+                  JOIN review_findings f ON f.stage_id = s.id WHERE f.id = ?""",
+                  row -> row.text(0),
+                  findingId);
+          reviewId.ifPresent(this::journal);
+        });
   }
 
   /**
@@ -344,6 +423,351 @@ public final class ReviewStore {
         .filter(review -> "passed".equals(review.status()))
         .map(review -> openFindingsForReview(review.id()))
         .orElse(List.of());
+  }
+
+  // ---- Sync: the review as a replicated aggregate (review + stages + finding counts) ----
+
+  /**
+   * Journals a fresh revision of the whole aggregate for a local mutation, within its transaction.
+   */
+  private void journal(String reviewId) {
+    recordRevision(reviewId, null, "local", false, false);
+  }
+
+  /** Journals the aggregate a stage belongs to — a stage or finding change is a review revision. */
+  private void journalForStage(String stageId) {
+    db.queryOne("SELECT review_id FROM review_stages WHERE id = ?", row -> row.text(0), stageId)
+        .ifPresent(this::journal);
+  }
+
+  /** Back-fills a revision for any pre-sync review row that has none yet. */
+  public int backfillRevisions() {
+    var journaled = syncEntityIds();
+    var pending =
+        db.query("SELECT id FROM reviews", row -> row.text(0)).stream()
+            .filter(id -> !journaled.contains(id))
+            .toList();
+    for (var id : pending) {
+      db.transaction(() -> journal(id));
+    }
+    return pending.size();
+  }
+
+  public Set<String> syncEntityIds() {
+    return new LinkedHashSet<>(
+        db.query(
+            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
+            row -> row.text(0),
+            ENTITY));
+  }
+
+  public String latestRev(String id) {
+    var history = changeLog.history(ENTITY, id);
+    return history.isEmpty() ? null : history.getLast().rev();
+  }
+
+  public Map<String, Object> comparableSnapshot(String id) {
+    var aggregate = aggregateMap(id);
+    return aggregate == null ? null : comparable(aggregate);
+  }
+
+  public Map<String, Object> comparableAtRev(String id, String rev) {
+    if (Strings.isBlank(rev)) {
+      return null;
+    }
+    return changeLog
+        .at(ENTITY, id, rev)
+        .map(e -> comparable(YamlUtil.parseMap(e.snapshot())))
+        .orElse(null);
+  }
+
+  public String baseRevOf(String id) {
+    if (findReview(id).isPresent()) {
+      return rawBaseRev(id);
+    }
+    var tombstone = changeLog.history(ENTITY, id);
+    if (tombstone.isEmpty()) {
+      return null;
+    }
+    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
+    return baseRev == null ? null : baseRev.toString();
+  }
+
+  /** Adopts main's authoritative aggregate at its exact rev as the new synced ancestor. */
+  public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
+    db.transaction(
+        () -> {
+          if (snapshot == null) {
+            adoptDeletion(id, rev);
+          } else {
+            writeAggregate(id, snapshot);
+            recordRevision(id, rev, "sync", false, true);
+          }
+        });
+  }
+
+  /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
+  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
+    return db.immediateTransaction(
+        () -> {
+          if (!Objects.equals(latestRev(id), expectedRev)) {
+            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
+          }
+          if (snapshot == null) {
+            if (findReview(id).isEmpty()) {
+              return new PushOutcome.Accepted(latestRev(id));
+            }
+            var rev = recordRevision(id, null, "sync", true, false);
+            deleteAggregate(id);
+            return new PushOutcome.Accepted(rev);
+          }
+          writeAggregate(id, snapshot);
+          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
+        });
+  }
+
+  @Override
+  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
+    return db.transaction(
+        () -> {
+          var baseRev = adoptBase(id, remote);
+          if (sameContent(chosen, remote)) {
+            return baseRev;
+          }
+          return writeChosen(id, chosen);
+        });
+  }
+
+  private String adoptBase(String id, Map<String, Object> remote) {
+    if (remote == null) {
+      return adoptBaseDeletion(id);
+    }
+    writeAggregate(id, remote);
+    return recordRevision(id, null, "sync", false, true);
+  }
+
+  private String adoptBaseDeletion(String id) {
+    if (findReview(id).isEmpty()) {
+      var rev = Revisions.next(currentRev(id), "{}");
+      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+      return rev;
+    }
+    var rev = recordRevision(id, null, "sync", true, false);
+    deleteAggregate(id);
+    return rev;
+  }
+
+  private String writeChosen(String id, Map<String, Object> chosen) {
+    if (chosen == null) {
+      if (findReview(id).isEmpty()) {
+        return latestRev(id);
+      }
+      var rev = recordRevision(id, null, "resolve", true, false);
+      deleteAggregate(id);
+      return rev;
+    }
+    writeAggregate(id, chosen);
+    return recordRevision(id, null, "resolve", false, false);
+  }
+
+  private void adoptDeletion(String id, String rev) {
+    if (findReview(id).isEmpty()) {
+      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+      return;
+    }
+    recordRevision(id, rev, "sync", true, false);
+    deleteAggregate(id);
+  }
+
+  private String recordRevision(
+      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
+    var aggregate = aggregateMap(id);
+    if (aggregate == null) {
+      return null;
+    }
+    if (deleted) {
+      aggregate.put("_base_rev", rawBaseRev(id));
+    }
+    var snapshot = YamlUtil.dumpJson(aggregate);
+    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
+    if (!deleted) {
+      if (setBaseRev) {
+        db.execute("UPDATE reviews SET rev = ?, base_rev = ? WHERE id = ?", rev, rev, id);
+      } else {
+        db.execute("UPDATE reviews SET rev = ? WHERE id = ?", rev, id);
+      }
+    }
+    changeLog.append(ENTITY, id, rev, specIdOf(id), origin, deleted, snapshot);
+    return rev;
+  }
+
+  /**
+   * The full aggregate snapshot: the review row, its stages in order, and each stage's finding
+   * counts by severity. Null when the review is absent. Finding counts (not the finding rows) are
+   * what main narrates; the rows stay on the executing node.
+   */
+  private Map<String, Object> aggregateMap(String id) {
+    var review = findReview(id).orElse(null);
+    if (review == null) {
+      return null;
+    }
+    var map = new LinkedHashMap<String, Object>();
+    map.put("id", review.id());
+    map.put("spec_id", review.specId());
+    map.put("iteration", review.iteration());
+    map.put("status", review.status());
+    map.put("created_at", review.createdAt());
+    map.put("completed_at", review.completedAt());
+    map.put("decided_by", review.decidedBy());
+    map.put("superseded_at", review.supersededAt());
+    map.put("error", review.error());
+    var stages = new java.util.ArrayList<Map<String, Object>>();
+    for (var stage : stagesForReview(id)) {
+      var s = new LinkedHashMap<String, Object>();
+      s.put("id", stage.id());
+      s.put("name", stage.name());
+      s.put("stage_type", stage.stageType());
+      s.put("status", stage.status());
+      s.put("reviewer", stage.reviewer());
+      s.put("started_at", stage.startedAt());
+      s.put("completed_at", stage.completedAt());
+      s.put("error", stage.error());
+      s.put("finding_counts", new LinkedHashMap<String, Object>(findingCountsForStage(stage.id())));
+      stages.add(s);
+    }
+    map.put("stages", stages);
+    return map;
+  }
+
+  /**
+   * A stage's finding counts by severity for narration: read from the synced {@code finding_counts}
+   * column on a box that holds the review via sync (its finding rows never replicated), else
+   * counted live from {@code review_findings} on the executing node. Empty when the stage has no
+   * findings.
+   */
+  public Map<String, Integer> findingCountsForStage(String stageId) {
+    var stored =
+        db.queryOne(
+                "SELECT COALESCE(finding_counts, '') FROM review_stages WHERE id = ?",
+                row -> row.text(0),
+                stageId)
+            .orElse("");
+    var counts = new LinkedHashMap<String, Integer>();
+    if (!stored.isBlank()) {
+      YamlUtil.parseMap(stored).forEach((k, v) -> counts.put(k, ((Number) v).intValue()));
+      return counts;
+    }
+    findingCounts(stageId).forEach((k, v) -> counts.put(k, ((Number) v).intValue()));
+    return counts;
+  }
+
+  /** Counts of a stage's findings by severity name, e.g. {@code {"HIGH": 2, "MEDIUM": 1}}. */
+  private Map<String, Object> findingCounts(String stageId) {
+    var counts = new LinkedHashMap<String, Object>();
+    for (var row :
+        db.query(
+            "SELECT severity, COUNT(*) FROM review_findings WHERE stage_id = ? GROUP BY severity",
+            row -> Map.entry(row.text(0), (int) row.integer(1)),
+            stageId)) {
+      counts.put(row.getKey(), row.getValue());
+    }
+    return counts;
+  }
+
+  /**
+   * Writes an aggregate snapshot: the review row and its stages (with finding counts), replacing
+   * any existing children.
+   */
+  @SuppressWarnings("unchecked")
+  private void writeAggregate(String id, Map<String, Object> snapshot) {
+    deleteAggregate(id);
+    db.execute(
+        """
+        INSERT INTO reviews (id, spec_id, iteration, status, created_at, completed_at,
+            decided_by, superseded_at, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        id,
+        text(snapshot, "spec_id"),
+        integer(snapshot, "iteration"),
+        text(snapshot, "status"),
+        text(snapshot, "created_at"),
+        text(snapshot, "completed_at"),
+        text(snapshot, "decided_by"),
+        text(snapshot, "superseded_at"),
+        text(snapshot, "error"));
+    var stages = (List<Map<String, Object>>) snapshot.get("stages");
+    if (stages != null) {
+      for (var stage : stages) {
+        var counts = stage.get("finding_counts");
+        db.execute(
+            """
+            INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
+                started_at, completed_at, error, finding_counts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            text(stage, "id"),
+            id,
+            text(stage, "name"),
+            text(stage, "stage_type"),
+            text(stage, "status"),
+            text(stage, "reviewer"),
+            text(stage, "started_at"),
+            text(stage, "completed_at"),
+            text(stage, "error"),
+            counts == null ? null : YamlUtil.dumpJson((Map<String, Object>) counts));
+      }
+    }
+  }
+
+  private void deleteAggregate(String id) {
+    db.execute(
+        "DELETE FROM review_findings WHERE stage_id IN (SELECT id FROM review_stages WHERE review_id = ?)",
+        id);
+    db.execute("DELETE FROM review_stages WHERE review_id = ?", id);
+    db.execute("DELETE FROM reviews WHERE id = ?", id);
+  }
+
+  private static Map<String, Object> comparable(Map<String, Object> full) {
+    if (full == null) {
+      return null;
+    }
+    var m = new LinkedHashMap<String, Object>();
+    for (var field : full.keySet()) {
+      if (!SURROGATE_FIELDS.contains(field) && !field.startsWith("_")) {
+        m.put(field, full.get(field));
+      }
+    }
+    return m;
+  }
+
+  private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {
+    return Objects.equals(comparable(a), comparable(b));
+  }
+
+  private String specIdOf(String reviewId) {
+    return findReview(reviewId).map(ReviewRow::specId).orElse(null);
+  }
+
+  private String rawBaseRev(String id) {
+    var value =
+        db.queryOne(
+                "SELECT COALESCE(base_rev, '') FROM reviews WHERE id = ?", row -> row.text(0), id)
+            .orElse("");
+    return value.isBlank() ? null : value;
+  }
+
+  private String currentRev(String id) {
+    return db.queryOne("SELECT COALESCE(rev, '') FROM reviews WHERE id = ?", row -> row.text(0), id)
+        .orElse("");
+  }
+
+  private static String text(Map<String, Object> map, String key) {
+    var value = map.get(key);
+    return value == null ? null : value.toString();
+  }
+
+  private static Integer integer(Map<String, Object> map, String key) {
+    var value = map.get(key);
+    return value instanceof Number n ? n.intValue() : null;
   }
 
   private ReviewRow mapReview(Sqlite.Row row) {

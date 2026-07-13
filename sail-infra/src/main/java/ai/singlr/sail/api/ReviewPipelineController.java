@@ -254,6 +254,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       reviewStore.createStage(
           reviewId, stageConfig.name(), stageConfig.type().name().toLowerCase());
     }
+    syncTrigger.run();
     return reviewId;
   }
 
@@ -274,6 +275,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         }
 
         var outcome = executeAgentStage(stage, stageConfig, project, specId);
+        syncTrigger.run();
         if (outcome instanceof StageOutcome.Errored errored) {
           handleStageError(reviewId, project, specId, stage.name(), errored.message());
           return;
@@ -295,6 +297,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
               + ": "
               + e.getMessage());
       reviewStore.updateReviewStatus(reviewId, "failed");
+      syncTrigger.run();
     }
   }
 
