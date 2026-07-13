@@ -523,7 +523,13 @@ public final class DispatchOperations {
       session.resetLog(project, AgentUnit.REVIEW);
       session.writeTaskFile(project, task);
       session.writeSession(
-          project, task, Objects.requireNonNullElse(branch, ""), spec.id(), agentType, runId);
+          project,
+          task,
+          Objects.requireNonNullElse(branch, ""),
+          spec.id(),
+          agentType,
+          runId,
+          targetRepos.stream().map(SailYaml.Repo::path).toList());
       var agentCli = AgentCli.fromYamlName(agentType);
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var command =

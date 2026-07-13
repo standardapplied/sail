@@ -112,7 +112,7 @@ public final class AgentSession {
   public void writeSession(
       String containerName, String task, String branch, String specId, String agentType)
       throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, "", AgentUnit.BUILD);
+    writeSession(containerName, task, branch, specId, agentType, "", List.of(), AgentUnit.BUILD);
   }
 
   /**
@@ -128,7 +128,24 @@ public final class AgentSession {
       String agentType,
       String runId)
       throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, runId, AgentUnit.BUILD);
+    writeSession(containerName, task, branch, specId, agentType, runId, List.of(), AgentUnit.BUILD);
+  }
+
+  /**
+   * Writes session metadata carrying the run id and the spec's resolved repos, so the stop gate can
+   * scope its readiness checks to exactly the repos this dispatch works in rather than every repo
+   * in the shared container.
+   */
+  public void writeSession(
+      String containerName,
+      String task,
+      String branch,
+      String specId,
+      String agentType,
+      String runId,
+      List<String> repos)
+      throws IOException, InterruptedException, TimeoutException {
+    writeSession(containerName, task, branch, specId, agentType, runId, repos, AgentUnit.BUILD);
   }
 
   /** Writes session metadata for the given role's unit (its own session file and log path). */
@@ -139,6 +156,7 @@ public final class AgentSession {
       String specId,
       String agentType,
       String runId,
+      List<String> repos,
       AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var map = new LinkedHashMap<String, Object>();
@@ -147,6 +165,7 @@ public final class AgentSession {
     map.put("spec_id", Objects.requireNonNullElse(specId, ""));
     map.put("agent_type", Objects.requireNonNullElse(agentType, ""));
     map.put("run_id", Objects.requireNonNullElse(runId, ""));
+    map.put("repos", Objects.requireNonNullElse(repos, List.<String>of()));
     map.put("started_at", Instant.now().toString());
     map.put("log_path", unit.logPath());
     var json = YamlUtil.dumpJson(map);

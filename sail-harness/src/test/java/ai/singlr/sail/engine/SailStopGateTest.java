@@ -323,6 +323,42 @@ class SailStopGateTest {
     assertThrows(Exception.class, () -> gate.install("../bad"));
   }
 
+  @Test
+  void aDirtyRepoOutsideTheSpecReposIsNotNudged() throws Exception {
+    pushToFreshOrigin(repo("manatee-nexus"), "main");
+    var other = repo("manatee-assessments");
+    Files.writeString(other.resolve("wip.txt"), "leftover from another run");
+    writeSessionRepos(List.of("manatee-nexus"));
+
+    var result = runGate(STOP_INPUT, RUN_ID);
+
+    assertEquals("", result.stdout(), "a repo outside the spec's repos must not block the stop");
+    assertEquals(List.of("agent_session_stopped"), events());
+  }
+
+  @Test
+  void aDirtySpecRepoStillBlocksWhenScoped() throws Exception {
+    var target = repo("manatee-nexus");
+    Files.writeString(target.resolve("wip.txt"), "uncommitted");
+    repo("manatee-assessments");
+    writeSessionRepos(List.of("manatee-nexus"));
+
+    var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
+
+    assertTrue(reason.contains("commit your work in manatee-nexus"), reason);
+    assertFalse(reason.contains("manatee-assessments"), reason);
+  }
+
+  private void writeSessionRepos(List<String> repos) throws IOException {
+    var session = home.resolve(".sail/agent-session.json");
+    Files.createDirectories(session.getParent());
+    var quoted = repos.stream().map(r -> "\"" + r + "\"").toList();
+    Files.writeString(
+        session,
+        "{\"spec_id\": \"s\", \"repos\": [" + String.join(", ", quoted) + "]}",
+        StandardCharsets.UTF_8);
+  }
+
   private String blockReason(GateResult result) {
     var block = YamlUtil.parseMap(result.stdout());
     assertEquals("block", block.get("decision"), result.stdout());
