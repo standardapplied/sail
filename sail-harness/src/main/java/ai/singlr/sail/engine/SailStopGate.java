@@ -21,6 +21,12 @@ import java.util.concurrent.TimeoutException;
  * sessions load no settings file at all, and ad-hoc {@code sail agent start} or engineer sessions
  * carry no run id, so all of them keep the old publish-and-allow behavior.
  *
+ * <p>The dirty/unpushed/PR checks are scoped to the run's spec repos — read from {@code repos} in
+ * {@code ~/.sail/agent-session.json}, which dispatch stamps with the spec's resolved repos. A repo
+ * the spec does not target (left dirty by a previous dispatch in the shared container) never nudges
+ * this run. When the session lists no repos — an older session file or a non-dispatch launch —
+ * every workspace repo is checked, the prior behavior.
+ *
  * <p>The gate blocks at most once per run — the first block drops a marker file under {@code
  * ~/.sail/runs/&lt;runId&gt;/} — so the agent keeps its contractual right to stop-and-report
  * failure: the second stop always wins. It fails open on every unexpected condition (unparseable
@@ -60,6 +66,7 @@ public final class SailStopGate {
       EVENT_HELPER="$SAIL_HOME/.sail/bin/sail-event.sh"
       WORKSPACE="$SAIL_HOME/workspace"
       RUNS_DIR="$SAIL_HOME/.sail/runs"
+      SESSION="$SAIL_HOME/.sail/agent-session.json"
 
       publish() {
         if [ -x "$EVENT_HELPER" ]; then
@@ -93,6 +100,21 @@ public final class SailStopGate {
       MARKER="$RUNS_DIR/$RUN_ID/stop-nudged"
       [ ! -f "$MARKER" ] || allow
 
+      REPOS="$(python3 -c '
+      import json, sys
+      try:
+          repos = json.load(open(sys.argv[1])).get("repos") or []
+      except Exception:
+          sys.exit(0)
+      for r in repos:
+          print(r)
+      ' "$SESSION" 2>/dev/null || true)"
+
+      in_scope() {
+        [ -n "$REPOS" ] || return 0
+        printf '%s\n' "$REPOS" | grep -qxF "$1"
+      }
+
       REASONS=""
       note() {
         if [ -n "$REASONS" ]; then
@@ -105,6 +127,7 @@ public final class SailStopGate {
       for repo_dir in "$WORKSPACE"/*/; do
         [ -e "$repo_dir.git" ] || continue
         repo="$(basename "$repo_dir")"
+        in_scope "$repo" || continue
         dirty="$(git -C "$repo_dir" status --porcelain 2>/dev/null || true)"
         [ -z "$dirty" ] || note "commit your work in $repo (the worktree is dirty)"
         branch="$(git -C "$repo_dir" symbolic-ref --short -q HEAD 2>/dev/null || true)"

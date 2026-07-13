@@ -797,4 +797,17 @@ class AgentSessionTest {
     assertTrue(cmd.contains("v1-sync-commit-integrity"));
     assertTrue(cmd.contains("claude-code"));
   }
+
+  @Test
+  void writeSessionPersistsTheSpecReposForStopGateScoping() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var session = new AgentSession(shell);
+
+    session.writeSession(
+        "acme", "task", "branch", "spec-1", "claude-code", "run-1", List.of("manatee-nexus"));
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains("repos"), "session must persist repos for stop-gate scoping");
+    assertTrue(cmd.contains("manatee-nexus"), cmd);
+  }
 }
