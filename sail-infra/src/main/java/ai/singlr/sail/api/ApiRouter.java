@@ -32,6 +32,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String V1 = "v1";
   private static final String HEALTH = "health";
   private static final String WHOAMI = "whoami";
+  private static final String FDES = "fdes";
   private static final String PROJECTS = "projects";
   private static final String SPECS = "specs";
   private static final String DISPATCH = "dispatch";
@@ -172,6 +173,10 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.matches(GET, V1, WHOAMI)) {
       return whoami(exchange);
+    }
+
+    if (request.matches(GET, V1, FDES)) {
+      return ApiResponse.from(operations.fdes());
     }
 
     if (request.hasEventsPrefix()) {

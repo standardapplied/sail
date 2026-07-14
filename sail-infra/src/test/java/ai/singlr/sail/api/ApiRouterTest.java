@@ -33,6 +33,34 @@ class ApiRouterTest {
   }
 
   @Test
+  void fdesListsTheRosterToAnAuthenticatedCaller() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/fdes", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"handle\": \"ada\""));
+      assertTrue(response.body().contains("\"display_name\": \"Ada Lovelace\""));
+      assertTrue(response.body().contains("\"email\": \"ada@x.dev\""));
+      assertTrue(response.body().contains("\"role\": \"admin\""));
+      assertTrue(response.body().contains("\"handle\": \"bob\""));
+      assertTrue(response.body().contains("\"schema_version\": 1"));
+      assertTrue(
+          response.body().indexOf("\"ada\"") < response.body().indexOf("\"bob\""),
+          "the roster is served in the handle order the store returns");
+    }
+  }
+
+  @Test
+  void fdesRequiresABearerToken() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/fdes", null);
+
+      assertEquals(401, response.statusCode());
+      assertTrue(response.body().contains("missing_bearer_token"));
+    }
+  }
+
+  @Test
   void protectedRoutesRequireBearerToken() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/projects/acme/agent", null);
@@ -1105,6 +1133,15 @@ class ApiRouterTest {
               java.util.List.of(
                   new ProjectListItemView("acme", "running"),
                   new ProjectListItemView("beta", "not_created"))));
+    }
+
+    @Override
+    public Result<FdesResponse> fdes() {
+      return Result.success(
+          new FdesResponse(
+              java.util.List.of(
+                  new FdeSummaryView("ada", "Ada Lovelace", "ada@x.dev", "admin"),
+                  new FdeSummaryView("bob", "Bob", "bob@x.dev", "member"))));
     }
 
     @Override

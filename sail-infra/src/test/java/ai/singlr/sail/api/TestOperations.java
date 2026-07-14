@@ -22,6 +22,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<FdesResponse> fdes() {
+    return Result.success(new FdesResponse(List.of()));
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null));
   }
