@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -207,8 +208,10 @@ class SyncServerCommandTest {
     var runId = createNodeRun("grace");
     var token = tokenFor("member");
 
-    assertThrows(SyncTransportException.class, () -> syncWithToken(token, "run", nodeRunReplica()));
-    assertTrue(new RunStore(mainDb).findById(runId).isEmpty());
+    assertDoesNotThrow(() -> syncWithToken(token, "run", nodeRunReplica()));
+    assertTrue(
+        new RunStore(mainDb).findById(runId).isEmpty(),
+        "the forged run is refused (rejected, not applied) without aborting the whole sync session");
   }
 
   @Test

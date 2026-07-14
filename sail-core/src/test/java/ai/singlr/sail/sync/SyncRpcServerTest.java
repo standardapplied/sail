@@ -139,21 +139,32 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aRunStampedWithAnotherNodeIsRefused() throws Exception {
+  void aRunStampedWithAnotherNodeIsRejectedNotFailed() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", Map.of("node", "grace"), null);
-    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, commit));
+    assertInstanceOf(
+        SyncWire.Rejected.class,
+        serveRun("ada", null, commit),
+        "an un-owned run push is rejected, not failed, so one bad run cannot abort the whole sync");
   }
 
   @Test
-  void overwritingAnotherNodesRunWithOnesOwnStampIsRefused() throws Exception {
+  void overwritingAnotherNodesRunReturnsMainsVersionToAdopt() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "1-x");
-    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", Map.of("node", "grace"), commit));
+    var rejected =
+        assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", Map.of("node", "grace"), commit));
+    assertEquals("1-x", rejected.currentRev());
+    assertEquals(
+        "grace",
+        rejected.currentSnapshot().get("node"),
+        "the node is handed main's authoritative version to adopt, converging instead of clobbering");
   }
 
   @Test
-  void deletingAnotherNodesRunIsRefused() throws Exception {
+  void deletingAnotherNodesRunIsRejectedNotFailed() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", null, "1-x");
-    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", Map.of("node", "grace"), commit));
+    var rejected =
+        assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", Map.of("node", "grace"), commit));
+    assertEquals("grace", rejected.currentSnapshot().get("node"));
   }
 
   @Test
@@ -163,9 +174,9 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void recreatingATombstonedRunIdIsRefusedEvenWithOnesOwnStamp() throws Exception {
+  void recreatingATombstonedRunIdIsRejectedSoTheNodeAdoptsTheDeletion() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "2-x");
-    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, "2-x", commit));
+    assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", null, "2-x", commit));
   }
 
   @Test
@@ -175,9 +186,9 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aRunWithoutANodeStampFailsClosed() throws Exception {
+  void aRunWithoutANodeStampIsRejectedNotFailed() throws Exception {
     var commit = new SyncWire.Commit("run", "r1", Map.of("status", "running"), null);
-    assertInstanceOf(SyncWire.Failed.class, serveRun("ada", null, commit));
+    assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", null, commit));
   }
 
   @Test

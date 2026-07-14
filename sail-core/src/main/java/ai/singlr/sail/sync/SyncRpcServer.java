@@ -123,13 +123,16 @@ public final class SyncRpcServer {
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + commit.entityType());
     }
-    if (RUN_ENTITY.equals(commit.entityType()) && !ownsRunCommit(commit, main)) {
-      return new SyncWire.Failed(
-          "A sync session may push only runs executed on its own node; run "
-              + commit.entityId()
-              + " is not "
-              + principal.handle()
-              + "'s.");
+    if (RUN_ENTITY.equals(commit.entityType())) {
+      if (principal.handle() == null || principal.handle().isBlank()) {
+        return new SyncWire.Failed(
+            "This sync session has no node handle, so a run cannot be attributed to it; "
+                + "set the node's sync handle before pushing runs.");
+      }
+      if (!ownsRunCommit(commit, main)) {
+        return new SyncWire.Rejected(
+            main.currentRev(commit.entityId()), main.current(commit.entityId()));
+      }
     }
     var before = main.current(commit.entityId());
     var outcome =
