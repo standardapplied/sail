@@ -67,9 +67,6 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
-  private static final SpecStore.SpecFilter PENDING =
-      new SpecStore.SpecFilter(null, "pending", null, null, null);
-
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
 
@@ -186,25 +183,37 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var deadline = clock.get().minus(LAUNCH_GRACE);
     var released = 0;
-    for (var spec : specStore.list(PENDING)) {
-      for (var run : sessionStore.listForSpec(spec.id())) {
-        if ("running".equals(run.status())
-            && SailOperations.ownsRun(run.node(), node)
-            && MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)) {
-          System.err.println(
-              "  [reconcile] releasing stranded reservation for "
-                  + spec.project()
-                  + "/"
-                  + spec.id()
-                  + " (run "
-                  + run.id()
-                  + "): running with a still-pending spec past the launch grace");
-          sessionStore.complete(run.id(), "failed", null);
-          released++;
-        }
+    for (var run : sessionStore.running()) {
+      if (!SailOperations.ownsRun(run.node(), node)
+          || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
+          || specBeingWorked(run.specId())) {
+        continue;
       }
+      System.err.println(
+          "  [reconcile] releasing stranded reservation "
+              + run.id()
+              + " for spec "
+              + run.specId()
+              + " (running with no agent working it; spec is not in_progress or review)");
+      sessionStore.complete(run.id(), "stopped", null);
+      released++;
     }
     return released;
+  }
+
+  /**
+   * Whether the run's spec is actively being worked on this box, so a {@code running} run for it is
+   * legitimate and left to the in-progress and review sweeps. Any other spec state — pending (a
+   * crash between reserve and claim), or a terminal state the run outlived (a dropped completion,
+   * or a pre-run-scoped run carried across an upgrade) — means the reservation is dead and blocking
+   * the dispatch gate for no agent.
+   */
+  private boolean specBeingWorked(String specId) {
+    return specStore
+        .findById(specId)
+        .map(spec -> spec.status().wire())
+        .map(status -> "in_progress".equals(status) || "review".equals(status))
+        .orElse(false);
   }
 
   /**

@@ -117,12 +117,16 @@ class MissedStopReconcilerTest {
   }
 
   private void createPendingSpec(String id) {
+    createSpec(id, SpecStatus.PENDING);
+  }
+
+  private void createSpec(String id, SpecStatus status) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
             "test-project",
             "Test spec",
-            SpecStatus.PENDING,
+            status,
             null,
             "claude-code",
             null,
@@ -146,13 +150,41 @@ class MissedStopReconcilerTest {
 
     assertEquals(1, released);
     assertEquals(
-        "failed",
+        "stopped",
         sessionStore.listForSpec("auth").getFirst().status(),
         "a run left running by a crash between reserve and claim is freed");
     assertEquals(
         SpecStatus.PENDING,
         specStore.findById("auth").orElseThrow().status(),
         "the never-claimed spec stays dispatchable");
+  }
+
+  @Test
+  void releasesAStrandedReservationForADoneSpecPastGrace() {
+    createSpec("auth", SpecStatus.DONE);
+    runningSession("auth");
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(1, released);
+    assertEquals(
+        "stopped",
+        sessionStore.listForSpec("auth").getFirst().status(),
+        "a run left running for a finished spec is freed so it stops blocking the dispatch gate");
+  }
+
+  @Test
+  void keepsARunningReservationForAnInProgressSpec() {
+    createInProgressSpec("auth");
+    runningSession("auth");
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    assertEquals(
+        "running",
+        sessionStore.listForSpec("auth").getFirst().status(),
+        "a run whose spec is actively in progress is left to the in-progress sweep, not reaped");
   }
 
   @Test
