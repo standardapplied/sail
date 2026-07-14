@@ -27,7 +27,9 @@ import java.util.List;
  * <p>{@link #branchCheckoutArgs} is the branch half of the same decision: a restart force-checks
  * out the prior branch when it exists ({@code checkout -f}, so a dirty tree left by the previous
  * run cannot abort the re-dispatch) and creates it fresh otherwise, while a non-restart dispatch
- * fails loud on a collision, pointing the caller at the restart option.
+ * fails loud on a collision, pointing the caller at the restart option. {@link #freshBranchArgs}
+ * cuts a brand-new work branch off the latest fetched base so an agent never inherits a stale local
+ * checkout of {@code main}/{@code master}.
  */
 public sealed interface RestartResolution
     permits RestartResolution.Refused, RestartResolution.NotRestarted, RestartResolution.Restarted {
@@ -79,5 +81,19 @@ public sealed interface RestartResolution
     return branchExists
         ? List.of("git", "-C", repoDir, "checkout", "-f", branchName)
         : List.of("git", "-C", repoDir, "checkout", "-b", branchName);
+  }
+
+  /**
+   * The git command to cut a fresh work branch. When {@code originBaseAvailable}, it forks from
+   * {@code origin/<base>} — the just-fetched upstream tip — so an agent never inherits a stale
+   * local checkout of the base branch; otherwise (no remote, offline, or a detached base) it forks
+   * from the current {@code HEAD}, the prior behaviour, so a dispatch on a box that cannot reach
+   * origin still proceeds rather than failing.
+   */
+  static List<String> freshBranchArgs(
+      String repoDir, String branchName, String base, boolean originBaseAvailable) {
+    return originBaseAvailable
+        ? List.of("git", "-C", repoDir, "checkout", "-b", branchName, "origin/" + base)
+        : branchCheckoutArgs(repoDir, branchName, false, false);
   }
 }

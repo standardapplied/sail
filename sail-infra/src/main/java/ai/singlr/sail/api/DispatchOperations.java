@@ -516,11 +516,16 @@ public final class DispatchOperations {
                       "--quiet",
                       "refs/heads/" + branch)))
               .ok();
-      var result =
-          exec(
-              ContainerExec.asDevUser(
-                  project,
-                  RestartResolution.branchCheckoutArgs(repoDir, branch, branchExists, restarted)));
+      List<String> checkoutArgs;
+      if (branchExists) {
+        checkoutArgs = RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted);
+      } else {
+        var base = baseBranch(project, repoDir, repo);
+        checkoutArgs =
+            RestartResolution.freshBranchArgs(
+                repoDir, branch, base, fetchLatestBase(project, repoDir, base));
+      }
+      var result = exec(ContainerExec.asDevUser(project, checkoutArgs));
       if (!result.ok()) {
         throw new ApiException(
             ErrorCode.BRANCH_CREATE_FAILED,
@@ -539,6 +544,55 @@ public final class DispatchOperations {
       listener.branchUnavailable(branch);
     }
     return created;
+  }
+
+  /**
+   * The mainline a fresh work branch forks from: the repo's configured branch when {@code
+   * sail.yaml} pins one, else origin's default branch (the clone's {@code origin/HEAD}), else
+   * blank. Deriving it from the repo config or the remote default — never the current {@code HEAD}
+   * — keeps a new branch off the mainline even when a prior dispatch left the checkout on an
+   * earlier work branch.
+   */
+  private String baseBranch(String project, String repoDir, SailYaml.Repo repo) {
+    if (Strings.isNotBlank(repo.branch())) {
+      return repo.branch();
+    }
+    var result =
+        exec(
+            ContainerExec.asDevUser(
+                project,
+                List.of("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "origin/HEAD")));
+    if (!result.ok()) {
+      return "";
+    }
+    var ref = result.stdout().trim();
+    return ref.startsWith("origin/") ? ref.substring("origin/".length()) : ref;
+  }
+
+  /**
+   * Fetches {@code base} from origin so a fresh work branch forks from the current upstream tip
+   * rather than a stale local checkout. Best-effort: returns true only when {@code origin/<base>}
+   * is available to branch from afterwards, so an offline box, a repo with no {@code origin}, or a
+   * detached base falls back to the local {@code HEAD} instead of failing the dispatch.
+   */
+  private boolean fetchLatestBase(String project, String repoDir, String base) {
+    if (Strings.isBlank(base) || "HEAD".equals(base)) {
+      return false;
+    }
+    exec(
+        ContainerExec.asDevUser(
+            project, List.of("git", "-C", repoDir, "fetch", "--quiet", "origin", base)));
+    return exec(ContainerExec.asDevUser(
+            project,
+            List.of(
+                "git",
+                "-C",
+                repoDir,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "refs/remotes/origin/" + base)))
+        .ok();
   }
 
   /**
