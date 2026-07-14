@@ -239,6 +239,15 @@ public final class RunStore implements ConflictResolver {
         ownerKey(localHandle));
   }
 
+  /**
+   * Every run still in the {@code running} state, across all projects and nodes — the reaper's full
+   * input. Ownership is filtered by the caller so it matches exactly what the dispatch gate counts,
+   * including rows with a blank node.
+   */
+  public List<RunRow> running() {
+    return db.query("SELECT " + COLUMNS + " FROM runs WHERE status = 'running'", this::mapRow);
+  }
+
   private static String ownerKey(String localHandle) {
     return Strings.isBlank(localHandle) ? "" : localHandle;
   }
