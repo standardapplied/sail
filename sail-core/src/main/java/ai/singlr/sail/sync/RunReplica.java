@@ -34,14 +34,28 @@ public final class RunReplica implements LocalReplica, MainReplica {
   private static final String ENTITY = "run";
 
   private final String id;
+  private final String handle;
   private final RunStore runs;
   private final ChangeLog changeLog;
   private final SyncConflicts conflicts;
   private final SyncState syncState;
 
+  /**
+   * {@code id} is the box's sync-mesh identity (the checkpoint peer key); {@code handle} is the
+   * box's FDE handle, the value a run's {@code node} carries when this box executed it. The two
+   * differ in production — {@code id} is the machine hostname, {@code handle} the configured sync
+   * handle — so run ownership is checked against {@code handle}, never {@code id}. A blank handle
+   * (a box with no sync identity) defers ownership to main's guard.
+   */
   public RunReplica(
-      String id, RunStore runs, ChangeLog changeLog, SyncConflicts conflicts, SyncState syncState) {
+      String id,
+      String handle,
+      RunStore runs,
+      ChangeLog changeLog,
+      SyncConflicts conflicts,
+      SyncState syncState) {
     this.id = Objects.requireNonNull(id, "id");
+    this.handle = Objects.requireNonNull(handle, "handle");
     this.runs = Objects.requireNonNull(runs, "runs");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
@@ -56,6 +70,23 @@ public final class RunReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return runs.syncEntityIds();
+  }
+
+  /**
+   * A box may push only the runs it executed. A run stamped with another node is a foreign copy
+   * this box holds purely as a reader, so it is never pushed: the engine adopts main's version
+   * instead. A blank or absent stamp (a run from before node-stamping, or a tombstone whose owner
+   * is no longer readable), or a box with no handle of its own, is left to main's own ownership
+   * guard rather than denied here.
+   */
+  @Override
+  public boolean mayPush(String entityId) {
+    if (handle.isBlank()) {
+      return true;
+    }
+    return runs.findById(entityId)
+        .map(run -> run.node() == null || run.node().isBlank() || handle.equals(run.node()))
+        .orElse(true);
   }
 
   @Override

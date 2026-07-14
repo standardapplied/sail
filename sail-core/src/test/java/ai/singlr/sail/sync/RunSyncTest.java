@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -47,7 +48,7 @@ class RunSyncTest {
       new SchemaManager(db).migrate();
       this.runs = new RunStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica = new RunReplica(id, runs, new ChangeLog(db), conflicts, new SyncState(db));
+      this.replica = new RunReplica(id, id, runs, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override
@@ -115,6 +116,39 @@ class RunSyncTest {
     sync(other);
     assertEquals("completed", other.runs.findById(id).orElseThrow().status());
     assertEquals(0, other.runs.findById(id).orElseThrow().exitCode());
+  }
+
+  @Test
+  void aReplicaMayPushOnlyTheRunsItExecuted() {
+    var mine = startRun(node, "node");
+    var foreign = startRun(node, "other");
+    var stampless = startRun(node, "");
+
+    assertTrue(node.replica.mayPush(mine), "a node may push a run it executed");
+    assertFalse(node.replica.mayPush(foreign), "a node must not push a run another node executed");
+    assertTrue(
+        node.replica.mayPush(stampless),
+        "a stampless pre-upgrade run is left to main's ownership guard, not denied here");
+  }
+
+  @Test
+  void aReaderNeverPushesADivergedForeignRunAndAdoptsMainsVersion() {
+    var id = startRun(node, "node");
+    sync(node);
+    sync(other);
+
+    other.runs.complete(id, "stopped", 0);
+
+    sync(other);
+
+    assertEquals(
+        "running",
+        main.runs.findById(id).orElseThrow().status(),
+        "a reader box cannot clobber main's run with a change it did not author");
+    assertEquals(
+        "running",
+        other.runs.findById(id).orElseThrow().status(),
+        "the reader discards its illegitimate change and adopts main's authoritative version");
   }
 
   @Test

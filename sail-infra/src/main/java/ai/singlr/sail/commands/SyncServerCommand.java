@@ -105,7 +105,8 @@ public final class SyncServerCommand implements Callable<Integer> {
             "file", new FileReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
             "project",
                 new ProjectReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
-            "run", new RunReplica(mainId, new RunStore(db), changeLog, conflicts, syncState),
+            "run",
+                new RunReplica(mainId, mainId, new RunStore(db), changeLog, conflicts, syncState),
             "review",
                 new ReviewReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState));
     new SyncRpcServer(replicas, principal(db, token), () -> roster(db), transitionSink)

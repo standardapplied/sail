@@ -178,7 +178,8 @@ class SyncServerCommandTest {
 
   private RunReplica nodeRunReplica() {
     return new RunReplica(
-        "node",
+        "uday",
+        "uday",
         new RunStore(nodeDb),
         new ChangeLog(nodeDb),
         new SyncConflicts(nodeDb),
@@ -211,7 +212,8 @@ class SyncServerCommandTest {
     assertDoesNotThrow(() -> syncWithToken(token, "run", nodeRunReplica()));
     assertTrue(
         new RunStore(mainDb).findById(runId).isEmpty(),
-        "the forged run is refused (rejected, not applied) without aborting the whole sync session");
+        "a run the box did not author is never offered for push, so main never receives the forgery"
+            + " and the sync session still completes");
   }
 
   @Test
