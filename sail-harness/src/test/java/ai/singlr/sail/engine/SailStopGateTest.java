@@ -350,7 +350,7 @@ class SailStopGateTest {
   }
 
   private void writeSessionRepos(List<String> repos) throws IOException {
-    var session = home.resolve(".sail/agent-session.json");
+    var session = home.resolve(".sail/runs/" + RUN_ID + "/agent-session.json");
     Files.createDirectories(session.getParent());
     var quoted = repos.stream().map(r -> "\"" + r + "\"").toList();
     Files.writeString(

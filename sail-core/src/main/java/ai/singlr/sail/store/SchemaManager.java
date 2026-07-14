@@ -393,7 +393,9 @@ public final class SchemaManager {
           "DROP TABLE reviews",
           "ALTER TABLE reviews_v2 RENAME TO reviews",
           "CREATE INDEX IF NOT EXISTS idx_reviews_spec ON reviews(spec_id)",
-          "ALTER TABLE change_log ADD COLUMN peer TEXT");
+          "ALTER TABLE change_log ADD COLUMN peer TEXT",
+          "ALTER TABLE runs ADD COLUMN unit TEXT",
+          "ALTER TABLE runs ADD COLUMN repos TEXT");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

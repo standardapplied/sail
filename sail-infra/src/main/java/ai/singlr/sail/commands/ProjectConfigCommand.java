@@ -158,7 +158,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    return new AgentSession(shell).queryStatus(containerName);
+    return RunScopedSessions.resolve(shell, containerName).info();
   }
 
   private SpecSnapshot loadSpecSummary(ShellExecutor shell, SailYaml config, ContainerState state)

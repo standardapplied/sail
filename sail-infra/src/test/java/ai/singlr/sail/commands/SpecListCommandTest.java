@@ -220,7 +220,6 @@ class SpecListCommandTest {
   void agentCommandsAcceptAnOmittedProjectArgument() {
     for (var args :
         List.of(
-            new String[] {"agent", "launch"},
             new String[] {"agent", "run"},
             new String[] {"agent", "attach"},
             new String[] {"agent", "stream"},

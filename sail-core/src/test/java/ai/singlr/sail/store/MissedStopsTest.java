@@ -33,8 +33,10 @@ class MissedStopsTest {
         status,
         exitCode,
         null,
+        "sail-agent-run",
         startedAt,
-        null);
+        null,
+        java.util.List.of());
   }
 
   private static MissedStops.Outcome assess(RunStore.RunRow session, boolean observed) {

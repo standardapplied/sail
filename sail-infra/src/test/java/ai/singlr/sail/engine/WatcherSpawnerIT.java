@@ -45,18 +45,32 @@ class WatcherSpawnerIT {
     }
   }
 
+  private boolean unitActive(String unit) {
+    return execOk(List.of("systemctl", "--user", "--quiet", "is-active", unit))
+        || execOk(List.of("systemctl", "--quiet", "is-active", unit));
+  }
+
+  private boolean execOk(List<String> command) {
+    try {
+      return shell.exec(command).ok();
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
   @Test
   void theLadderLandsOnARealScopeAndNeverStacksASecondWatcher() throws Exception {
     var log = tempDir.resolve("watch.log");
     var argv = List.of("sleep", "30");
 
-    var spawned = spawner.spawnUnit(PROJECT, argv, log);
+    var unitName = WatcherSpawner.unitName(PROJECT);
+    var spawned = spawner.spawnUnit(unitName, argv, log);
 
     if (spawned.isPresent()) {
       assertFalse(spawned.get().adopted(), "first spawn must launch, not adopt");
-      assertTrue(spawner.unitActive(PROJECT), "unit must be active right after spawn");
+      assertTrue(unitActive(unitName), "unit must be active right after spawn");
 
-      var second = spawner.spawnUnit(PROJECT, argv, log).orElseThrow();
+      var second = spawner.spawnUnit(unitName, argv, log).orElseThrow();
       assertTrue(second.adopted(), "second spawn must adopt the active unit");
       assertEquals(WatcherSpawner.unitName(PROJECT), second.name());
     } else {
@@ -70,15 +84,16 @@ class WatcherSpawnerIT {
   @Test
   void aStoppedUnitIsCollectedSoTheNameIsReusable() throws Exception {
     var log = tempDir.resolve("watch.log");
-    var first = spawner.spawnUnit(PROJECT, List.of("sleep", "30"), log);
+    var unitName = WatcherSpawner.unitName(PROJECT);
+    var first = spawner.spawnUnit(unitName, List.of("sleep", "30"), log);
     if (first.isEmpty()) {
-      assertFalse(spawner.unitActive(PROJECT));
+      assertFalse(unitActive(unitName));
       return;
     }
     tearDown();
 
-    assertFalse(spawner.unitActive(PROJECT), "stopped unit must not read as active");
-    var respawned = spawner.spawnUnit(PROJECT, List.of("sleep", "30"), log).orElseThrow();
+    assertFalse(unitActive(unitName), "stopped unit must not read as active");
+    var respawned = spawner.spawnUnit(unitName, List.of("sleep", "30"), log).orElseThrow();
     assertFalse(respawned.adopted(), "collected name must be reusable for a fresh launch");
   }
 }

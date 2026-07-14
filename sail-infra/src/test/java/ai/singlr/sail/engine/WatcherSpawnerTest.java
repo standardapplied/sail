@@ -28,6 +28,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 class WatcherSpawnerTest {
 
+  private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String AGENT_UNIT = "sail-agent-" + RUN_ID;
+  private static final String WATCH_UNIT = "sail-watch-" + RUN_ID;
+
   @TempDir Path tempDir;
 
   private Path yaml() {
@@ -56,6 +60,66 @@ class WatcherSpawnerTest {
   @Test
   void unitNameIsDeterministicPerProject() {
     assertEquals("sail-watch-acme", WatcherSpawner.unitName("acme"));
+  }
+
+  @Test
+  void runScopedUnitNameRequiresACanonicalRunId() {
+    assertEquals(WATCH_UNIT, WatcherSpawner.unitNameForRun(RUN_ID));
+    assertThrows(IllegalArgumentException.class, () -> WatcherSpawner.unitNameForRun("../escape"));
+  }
+
+  @Test
+  void watchCommandForRunAddressesTheRunAndItsRecordedUnit() {
+    var command = WatcherSpawner.watchCommandForRun("acme", yaml(), RUN_ID, AGENT_UNIT);
+
+    assertEquals(
+        List.of(
+            SailPaths.binaryPath().toString(),
+            "agent",
+            "watch",
+            "acme",
+            "--run",
+            RUN_ID,
+            "--unit",
+            AGENT_UNIT,
+            "-f",
+            yaml().toAbsolutePath().toString()),
+        command);
+  }
+
+  @Test
+  void spawnForRunLaunchesTheRunScopedUnitWithItsOwnWatchLog() throws Exception {
+    var shell = new FakeShell().on("systemd-run --user", ok());
+    var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
+
+    var spawned = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT);
+
+    assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", false), spawned);
+    var invocation = shell.invocationsMatching("systemd-run").getFirst();
+    assertTrue(invocation.contains("--unit " + WATCH_UNIT));
+    assertTrue(invocation.contains("--run " + RUN_ID));
+    assertTrue(invocation.contains("--unit " + AGENT_UNIT));
+    assertTrue(
+        invocation.contains(
+            WatcherSpawner.watchLogForRun("acme", RUN_ID).toAbsolutePath().toString()));
+    assertTrue(shell.invocationsMatching("is-active").isEmpty(), "per-run units never collide");
+    assertTrue(shell.invocationsMatching("systemctl --user stop").isEmpty());
+  }
+
+  @Test
+  void twoConcurrentRunsGetDistinctWatcherUnitsAndLogs() throws Exception {
+    var other = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    var shell = new FakeShell().on("systemd-run --user", ok());
+    var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
+
+    var first = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT);
+    var second = spawner.spawnForRun("acme", yaml(), other, "sail-agent-" + other);
+
+    assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", false), first);
+    assertEquals(new WatcherSpawner.Unit("sail-watch-" + other, "user", false), second);
+    assertFalse(
+        WatcherSpawner.watchLogForRun("acme", RUN_ID)
+            .equals(WatcherSpawner.watchLogForRun("acme", other)));
   }
 
   @Test
@@ -153,12 +217,12 @@ class WatcherSpawnerTest {
 
   @Test
   void spawnUnitAdoptsAnAlreadyActiveUnitInsteadOfStackingASecondWatcher() throws Exception {
-    var shell = new FakeShell().on("--quiet is-active sail-watch-acme", ok());
+    var shell = new FakeShell().on("--quiet is-active " + WATCH_UNIT, ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var spawned = spawner.spawnUnit("acme", yaml(), log());
+    var spawned = spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT);
 
-    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", true), spawned.orElseThrow());
+    assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", true), spawned.orElseThrow());
     assertTrue(shell.invocationsMatching("systemd-run").isEmpty());
   }
 
@@ -174,11 +238,11 @@ class WatcherSpawnerTest {
   }
 
   @Test
-  void watcherProcessRunningProbesByProcessPattern() {
-    var shell = new FakeShell().on("pgrep -f -- agent watch acme -f ", ok());
+  void watcherProcessRunningForRunProbesByRunIdPattern() {
+    var shell = new FakeShell().on("pgrep -f -- --run " + RUN_ID, ok());
 
-    assertTrue(new WatcherSpawner(shell, null).watcherProcessRunning("acme"));
-    assertFalse(new WatcherSpawner(new FakeShell(), null).watcherProcessRunning("acme"));
+    assertTrue(new WatcherSpawner(shell, null).watcherProcessRunningForRun(RUN_ID));
+    assertFalse(new WatcherSpawner(new FakeShell(), null).watcherProcessRunningForRun(RUN_ID));
   }
 
   @Test
@@ -190,27 +254,16 @@ class WatcherSpawnerTest {
             .on("systemd-run", fail());
     var spawner = new WatcherSpawner(shell, null);
 
-    var unit = spawner.spawnUnit("acme", yaml(), log());
+    var unit = spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT);
 
-    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", true), unit.orElseThrow());
+    assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", true), unit.orElseThrow());
   }
 
   @Test
   void spawnUnitIsEmptyWhenNoSystemdScopeExists() throws Exception {
     var spawner = new WatcherSpawner(new FakeShell(), null);
 
-    assertTrue(spawner.spawnUnit("acme", yaml(), log()).isEmpty());
-  }
-
-  @Test
-  void unitActiveProbesUserThenSystemScope() {
-    assertTrue(
-        new WatcherSpawner(new FakeShell().on("systemctl --user --quiet is-active", ok()), null)
-            .unitActive("acme"));
-    assertTrue(
-        new WatcherSpawner(new FakeShell().on("systemctl --quiet is-active", ok()), null)
-            .unitActive("acme"));
-    assertFalse(new WatcherSpawner(new FakeShell(), null).unitActive("acme"));
+    assertTrue(spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT).isEmpty());
   }
 
   @Test

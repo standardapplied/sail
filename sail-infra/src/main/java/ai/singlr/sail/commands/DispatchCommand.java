@@ -206,7 +206,8 @@ public final class DispatchCommand implements Runnable {
                         Ansi.AUTO.string(
                             "  @|green ✓|@ "
                                 + GuardrailWatcher.describe(
-                                    spawned, SailPaths.projectDir(name).resolve("watch.log")))));
+                                    spawned,
+                                    WatcherSpawner.watchLogForRun(name, dispatched.runId())))));
       }
     }
   }

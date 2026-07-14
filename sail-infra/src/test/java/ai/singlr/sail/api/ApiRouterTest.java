@@ -895,8 +895,10 @@ class ApiRouterTest {
             "completed",
             7,
             "/home/dev/.sail/runs/s1/agent.log",
+            null,
             "t0",
-            "t1");
+            "t1",
+            java.util.List.of());
     var view = RunView.from(row);
     assertEquals("s1", view.id());
     assertEquals("node-a", view.node());
@@ -1167,8 +1169,10 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<AgentStatusResponse> agentStatus(String project) {
-      return Result.success(new AgentStatusResponse(project, false, null, null, null, null, null));
+    public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
+      return Result.success(
+          new AgentStatusResponse(
+              project, false, null, null, null, null, null, java.util.List.of()));
     }
 
     @Override
@@ -1451,14 +1455,14 @@ class ApiRouterTest {
 
   private static final class FailingOperations extends FakeOperations {
     @Override
-    public Result<AgentStatusResponse> agentStatus(String project) {
+    public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       return Result.failure(ErrorCode.CONFLICT, "Agent is busy.", "Wait.");
     }
   }
 
   private static final class ExplodingOperations extends FakeOperations {
     @Override
-    public Result<AgentStatusResponse> agentStatus(String project) {
+    public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       throw new IllegalStateException("boom");
     }
   }

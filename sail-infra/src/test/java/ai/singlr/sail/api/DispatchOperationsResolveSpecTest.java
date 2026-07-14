@@ -69,7 +69,7 @@ class DispatchOperationsResolveSpecTest {
 
   private static DispatchOperations.SpecResolution resolve(
       String specId, boolean restart, List<Spec> specs, SpecStore store) {
-    return DispatchOperations.resolveSpec(specs, specId, restart, OPERATOR, FDE, store);
+    return DispatchOperations.resolveSpec(specs, specId, restart, OPERATOR, FDE);
   }
 
   @Test
@@ -233,7 +233,7 @@ class DispatchOperationsResolveSpecTest {
   }
 
   @Test
-  void restartResetsTheStatusToPendingInTheDb() {
+  void restartReportsTheRestartWithoutTouchingTheStore() {
     var store = store();
     store.create(row("oauth-flow", "in_progress"));
 
@@ -245,11 +245,14 @@ class DispatchOperationsResolveSpecTest {
         "in_progress",
         resolution.previousStatus(),
         "previousStatus carries the pre-reset status so the executor publishes spec_restarted");
-    assertEquals(SpecStatus.PENDING, store.findById("oauth-flow").orElseThrow().status());
+    assertEquals(
+        SpecStatus.IN_PROGRESS,
+        store.findById("oauth-flow").orElseThrow().status(),
+        "resolution is pure — the executor resets the status only after every gate has passed");
   }
 
   @Test
-  void restartResetsAnAwaitingMergeSpecToo() {
+  void restartReportsAnAwaitingMergeSpecToo() {
     var store = store();
     store.create(row("parked", "awaiting_merge"));
 
@@ -257,7 +260,6 @@ class DispatchOperationsResolveSpecTest {
 
     assertTrue(resolution.restarted());
     assertEquals("awaiting_merge", resolution.previousStatus());
-    assertEquals(SpecStatus.PENDING, store.findById("parked").orElseThrow().status());
   }
 
   @Test

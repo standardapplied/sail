@@ -79,6 +79,16 @@ public final class YamlUtil {
     return result instanceof List<?> l ? (List<Map<String, Object>>) l : List.of();
   }
 
+  /** Parse a JSON array of strings. Returns empty list for null/blank or non-list input. */
+  public static List<String> parseStringList(String json) {
+    if (Strings.isBlank(json)) {
+      return List.of();
+    }
+    var load = new Load(LoadSettings.builder().build());
+    var result = load.loadFromString(json);
+    return result instanceof List<?> l ? l.stream().map(String::valueOf).toList() : List.of();
+  }
+
   /**
    * Dumps in block style: these files ({@code host.yaml}, {@code config.yaml}, {@code sail.yaml})
    * are declarative configuration the operator edits by hand, and the default flow style emits a

@@ -54,7 +54,8 @@ public final class AgentStopCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
 
     var agentSession = new AgentSession(shell);
-    var info = agentSession.queryStatus(name);
+    var resolved = RunScopedSessions.resolve(shell, name);
+    var info = resolved.info();
 
     if (info == null || !info.running()) {
       if (json) {
@@ -70,7 +71,7 @@ public final class AgentStopCommand implements Runnable {
       return;
     }
 
-    agentSession.killAgent(name);
+    agentSession.killAgent(name, resolved.unit());
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

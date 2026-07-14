@@ -92,7 +92,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   void theRealRunnerInvokesTheAgentInTheContainerAndParsesItsFindings() throws Exception {
     var prompt = ReviewPromptBuilder.build("feat/test", List.of("sail"), List.of("security"));
 
-    var output = new ContainerReviewAgentRunner(shell).run(CONTAINER, "codex", prompt);
+    var output =
+        new ContainerReviewAgentRunner(shell)
+            .run(
+                CONTAINER, "codex", prompt, ai.singlr.sail.common.DateTimeUtils.newId().toString());
 
     var parsed = FindingParser.parse(output);
     assertEquals(

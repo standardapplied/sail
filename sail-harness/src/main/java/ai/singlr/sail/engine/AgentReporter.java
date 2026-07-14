@@ -126,6 +126,17 @@ public final class AgentReporter {
   }
 
   /**
+   * The identity to probe for live session state: the run's recorded unit when it has one, or the
+   * fixed ad-hoc identity for a pre-run-scoped session or a report with no run at all.
+   */
+  private static AgentUnit unitOf(RunStore.RunRow session) {
+    if (session == null || session.unit() == null || session.unit().isBlank()) {
+      return AgentUnit.BUILD;
+    }
+    return AgentUnit.recorded(session.id(), session.unit());
+  }
+
+  /**
    * Generates a full report with an explicit state directory (enables testing without /etc/sail).
    * Specs come from the control-plane database. When {@code session} is present it is the source of
    * truth for the run's start and end times — so the duration is the agent's real run-time, not
@@ -140,7 +151,7 @@ public final class AgentReporter {
       throws IOException, InterruptedException, TimeoutException {
 
     var agentSession = new AgentSession(shell);
-    var info = agentSession.queryStatus(containerName);
+    var info = agentSession.queryStatus(containerName, unitOf(session));
     var running = info != null && info.running();
     var startedAt =
         session != null && session.startedAt() != null

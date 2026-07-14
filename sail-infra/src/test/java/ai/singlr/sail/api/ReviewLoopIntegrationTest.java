@@ -105,7 +105,7 @@ class ReviewLoopIntegrationTest {
    */
   private static ReviewAgentRunner cyclingRunner(java.util.List<String> reviewOutputs) {
     var reviewCall = new AtomicInteger();
-    return (project, agent, prompt) -> {
+    return (project, agent, prompt, reviewId) -> {
       if (prompt.contains("Output your findings")) {
         var i = reviewCall.getAndIncrement();
         return i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]";
@@ -162,7 +162,7 @@ class ReviewLoopIntegrationTest {
   void aCleanStopPublishedToTheBusAdvancesTheSpecToAwaitingMerge() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid) -> "[]", latch);
 
     bus.publish(stop("auth"));
 
@@ -175,7 +175,7 @@ class ReviewLoopIntegrationTest {
   void aHookTurnEndStopThroughTheBusDoesNotTriggerReview() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid) -> "[]", latch);
 
     bus.publish(hookTurnEndStop("auth"));
 
@@ -220,7 +220,7 @@ class ReviewLoopIntegrationTest {
   void aNonZeroExitPublishedToTheBusSkipsReview() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid) -> "[]", latch);
 
     bus.publish(stop("auth", 137));
 

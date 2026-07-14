@@ -72,8 +72,9 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<AgentStatusResponse> agentStatus(String project) {
-    return Result.success(new AgentStatusResponse(project, false, null, null, null, null, null));
+  public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
+    return Result.success(
+        new AgentStatusResponse(project, false, null, null, null, null, null, java.util.List.of()));
   }
 
   @Override

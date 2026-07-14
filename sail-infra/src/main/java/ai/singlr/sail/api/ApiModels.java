@@ -187,7 +187,8 @@ record AgentStatusResponse(
     String task,
     String startedAt,
     String branch,
-    String logPath)
+    String logPath,
+    List<AgentRunView> runs)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -198,6 +199,31 @@ record AgentStatusResponse(
     m.put("task", task);
     m.put("started_at", startedAt);
     m.put("branch", branch);
+    m.put("log_path", logPath);
+    m.put("runs", runs.stream().map(AgentRunView::toMap).toList());
+    return m;
+  }
+}
+
+/** One running run of the project, probed live on its own recorded unit. */
+record AgentRunView(
+    String runId,
+    String specId,
+    String branch,
+    boolean running,
+    Integer pid,
+    String startedAt,
+    String logPath)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("run_id", runId);
+    m.put("spec_id", specId);
+    m.put("branch", branch);
+    m.put("running", running);
+    m.put("pid", pid);
+    m.put("started_at", startedAt);
     m.put("log_path", logPath);
     return m;
   }

@@ -12,7 +12,6 @@ import picocli.CommandLine.Command;
     description = "Manage AI coding agent sessions.",
     mixinStandardHelpOptions = true,
     subcommands = {
-      AgentLaunchCommand.class,
       RunCommand.class,
       AgentAttachCommand.class,
       AgentStreamCommand.class,

@@ -359,13 +359,21 @@ On a trip it snapshots or kills the agent and fires notifications. Rollback uses
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
-The watcher runs detached, as the systemd transient unit `sail-watch-<project>` — the same
+The watcher runs detached, as the systemd transient unit `sail-watch-<runId>` — the same
 mechanism that runs the agent — so it survives Ctrl-C on the dispatch stream, the SSH
-session ending, and daemon restarts. The unit name is deterministic and one agent runs per
-project, so coverage is probed rather than bookkept, and the two spawn intents differ
-deliberately: dispatch stops and replaces any unit left over from the previous session (an
-adopted stale watcher would enforce the old session's nearly-spent deadline against the new
-agent), while the periodic re-armer — whose coverage probe is process-level, seeing units in
+session ending, and daemon restarts. Every dispatched run has its own identity end to end:
+the agent runs as `sail-agent-<runId>` with its pid, session, task, and log files under
+`~/.sail/runs/<runId>/`, the run records the unit it was launched with, and every later
+consumer (stop, probe, reconciler, watcher) addresses that recorded unit — which is what
+lets dispatches on disjoint repo sets share one container concurrently, refused only when
+their repo sets overlap. The overlap gate is an atomic reservation: one `BEGIN IMMEDIATE`
+SQLite transaction checks every running local run and inserts the new run with its reserved
+repos, so concurrent dispatches — even a CLI and the server in separate processes — can never
+both claim the same repo, and a reservation failure aborts the dispatch before any spec is
+claimed or branch checked out. An ad-hoc `sail agent start` session mints no run row, so
+dispatch probes the fixed `sail-agent` identity and refuses while one is live: a row-less
+agent may touch any repo, and whole-container is the only safe reading. Coverage is probed rather than bookkept, per run, and the periodic
+re-armer — whose coverage probe is process-level, seeing units in
 any user's systemd scope and plain fallback processes alike — relaunches unit-or-nothing for
 any running agent nothing covers, resuming the original deadline rather than granting a
 fresh budget. The missed-stop sweep still replays the stop of any agent that manages to
@@ -397,10 +405,12 @@ its process wrapper. Dispatch is fire-and-forget (it launches a detached `system
 unit and an external `sail agent watch` monitors it); a review blocks the pipeline until it
 has findings, so `ContainerReviewAgentRunner` runs it as a bounded foreground `shell.exec`
 (30-minute per-invocation timeout) that needs no systemd user manager or D-Bus session, so it
-works in any container. The output streams to `review.log` (appended, so an attempt's whole
-reviewer-and-fix negotiation lands in one live-followable log, reset per dispatch attempt),
-findings are parsed from the bytes that run appended (read by offset so a plain agent's
-re-review is never fed a prior iteration's findings) via `StreamJsonResult`. The reviewer runs
+works in any container. Each review owns its files under `~/.sail/runs/<reviewId>/`: the
+pipeline reviews concurrently completed specs on concurrent virtual threads, so a shared
+prompt or log would cross-contaminate them. The output streams to the review's own
+`review.log` (appended, so one attempt's reviewer-and-fix negotiation lands in one
+live-followable log), findings are parsed from the bytes that run appended (read by offset so
+a plain agent's re-review is never fed a prior iteration's findings) via `StreamJsonResult`. The reviewer runs
 clean (empty `SAIL_SPEC_ID`, no hooks) so its own completion never re-enters the pipeline.
 Follow it live with `sail agent log <project> --review`.
 

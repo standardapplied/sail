@@ -81,8 +81,9 @@ class WatcherRearmerTest {
   }
 
   private String runningSession(String specId, Integer watcherPid) {
+    var id = DateTimeUtils.newId().toString();
     return sessionStore.create(
-        DateTimeUtils.newId().toString(),
+        id,
         "test-project",
         specId,
         "node-a",
@@ -92,7 +93,8 @@ class WatcherRearmerTest {
         "task",
         1,
         watcherPid,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   private WatcherRearmer rearmer(
@@ -110,6 +112,78 @@ class WatcherRearmerTest {
         relauncher);
   }
 
+  private String preUpgradeRunningSession(String specId) {
+    return sessionStore.create(
+        DateTimeUtils.newId().toString(),
+        "test-project",
+        specId,
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/test",
+        "task",
+        1,
+        null,
+        "/home/dev/.sail/agent.log");
+  }
+
+  @Test
+  void aPreUpgradeRunWithNoRecordedUnitIsLeftToItsOwnDetachedWatcher() {
+    createInProgressSpec("auth");
+    preUpgradeRunningSession("auth");
+    var probed = new AtomicInteger();
+    var relaunches = new AtomicInteger();
+
+    var rearmed =
+        rearmer(
+                (project, runId, unit) -> {
+                  probed.incrementAndGet();
+                  return true;
+                },
+                NO_UNIT,
+                DEAD,
+                run -> {
+                  relaunches.incrementAndGet();
+                  return Optional.of(LAUNCHED);
+                })
+            .rearm();
+
+    assertEquals(0, rearmed);
+    assertEquals(0, probed.get(), "this pass cannot know that unit's liveness");
+    assertEquals(0, relaunches.get());
+  }
+
+  @Test
+  void theProbeCoverageCheckAndRelaunchAllAddressTheRunItself() {
+    createInProgressSpec("auth");
+    var runId = runningSession("auth", null);
+    var probes = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+    var covered = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+    var relaunched = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+
+    var rearmed =
+        rearmer(
+                (project, id, unit) -> {
+                  probes.add(id + "|" + unit);
+                  return true;
+                },
+                id -> {
+                  covered.add(id);
+                  return false;
+                },
+                DEAD,
+                run -> {
+                  relaunched.add(run.id() + "|" + run.unit());
+                  return Optional.of(LAUNCHED);
+                })
+            .rearm();
+
+    assertEquals(1, rearmed);
+    assertEquals(List.of(runId + "|sail-agent-" + runId), List.copyOf(probes));
+    assertEquals(List.of(runId), List.copyOf(covered));
+    assertEquals(List.of(runId + "|sail-agent-" + runId), List.copyOf(relaunched));
+  }
+
   @Test
   void aForeignNodesRunIsNeverRearmedHere() {
     createInProgressSpec("auth");
@@ -119,11 +193,11 @@ class WatcherRearmerTest {
         new WatcherRearmer(
             specStore,
             sessionStore,
-            project -> true,
+            (project, runId, unit) -> true,
             NO_UNIT,
             DEAD,
             () -> "node-b",
-            project -> {
+            run -> {
               relaunches.incrementAndGet();
               return Optional.of(LAUNCHED);
             });
@@ -140,10 +214,10 @@ class WatcherRearmerTest {
 
     var rearmed =
         rearmer(
-                project -> true,
+                (project, runId, unit) -> true,
                 NO_UNIT,
                 DEAD,
-                project -> {
+                run -> {
                   relaunches.incrementAndGet();
                   return Optional.of(LAUNCHED);
                 })
@@ -161,13 +235,13 @@ class WatcherRearmerTest {
 
     var rearmed =
         rearmer(
-                project -> {
+                (project, runId, unit) -> {
                   probed.incrementAndGet();
                   return true;
                 },
                 UNIT_ACTIVE,
                 DEAD,
-                project -> Optional.of(LAUNCHED))
+                run -> Optional.of(LAUNCHED))
             .rearm();
 
     assertEquals(0, rearmed);
@@ -182,10 +256,10 @@ class WatcherRearmerTest {
 
     var rearmed =
         rearmer(
-                project -> true,
+                (project, runId, unit) -> true,
                 NO_UNIT,
                 ALIVE,
-                project -> {
+                run -> {
                   relaunches.incrementAndGet();
                   return Optional.of(LAUNCHED);
                 })
@@ -200,7 +274,8 @@ class WatcherRearmerTest {
     createInProgressSpec("auth");
     runningSession("auth", null);
 
-    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(ADOPTED)).rearm();
+    var rearmed =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(ADOPTED)).rearm();
 
     assertEquals(1, rearmed);
   }
@@ -213,10 +288,10 @@ class WatcherRearmerTest {
 
     var rearmed =
         rearmer(
-                project -> false,
+                (project, runId, unit) -> false,
                 NO_UNIT,
                 DEAD,
-                project -> {
+                run -> {
                   relaunches.incrementAndGet();
                   return Optional.of(LAUNCHED);
                 })
@@ -233,7 +308,9 @@ class WatcherRearmerTest {
     sessionStore.complete(completed, "stopped", 0);
     createInProgressSpec("bare");
 
-    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED)).rearm();
+    var rearmed =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))
+            .rearm();
 
     assertEquals(0, rearmed);
   }
@@ -243,7 +320,8 @@ class WatcherRearmerTest {
     createInProgressSpec("auth");
     runningSession("auth", 5678);
 
-    var rearmed = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.empty()).rearm();
+    var rearmed =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.empty()).rearm();
 
     assertEquals(0, rearmed);
   }
@@ -258,10 +336,10 @@ class WatcherRearmerTest {
 
     var rearmed =
         rearmer(
-                project -> true,
+                (project, runId, unit) -> true,
                 NO_UNIT,
                 DEAD,
-                project -> {
+                run -> {
                   if (attempts.incrementAndGet() == 1) {
                     throw new IllegalStateException("relaunch failed");
                   }
@@ -277,7 +355,8 @@ class WatcherRearmerTest {
   void aStoreErrorIsSwallowedSoStartupIsNeverBlocked() {
     createInProgressSpec("auth");
     runningSession("auth", 5678);
-    var rearmer = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED));
+    var rearmer =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED));
     db.close();
     db = null;
 
@@ -288,7 +367,8 @@ class WatcherRearmerTest {
   void periodicRearmSchedulesRunsAndClosesWithoutStackingPasses() {
     createInProgressSpec("auth");
     runningSession("auth", 5678);
-    try (var rearmer = rearmer(project -> true, NO_UNIT, DEAD, project -> Optional.of(LAUNCHED))) {
+    try (var rearmer =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))) {
       rearmer.start();
       rearmer.start(Duration.ofHours(1));
 

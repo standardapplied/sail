@@ -245,8 +245,10 @@ class AgentReporterTest {
             "completed",
             0,
             null,
+            null,
             start.toString(),
-            end.toString());
+            end.toString(),
+            List.of());
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")
@@ -281,8 +283,10 @@ class AgentReporterTest {
             "stopped",
             137,
             null,
+            null,
             start.toString(),
-            Instant.now().toString());
+            Instant.now().toString(),
+            List.of());
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat /home/dev/.sail/agent.pid", "No such file")

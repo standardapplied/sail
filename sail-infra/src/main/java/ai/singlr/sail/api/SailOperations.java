@@ -344,8 +344,8 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<AgentStatusResponse> agentStatus(String project) {
-    return safe(() -> agentStatusValue(project));
+  public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
+    return safe(() -> agentStatusValue(project, localHandle));
   }
 
   @Override
@@ -593,17 +593,66 @@ public final class SailOperations implements Operations {
     };
   }
 
-  private AgentStatusResponse agentStatusValue(String project) {
+  /**
+   * The agent status of a project that may now host several concurrent runs: every local {@code
+   * running} run is probed on its own recorded unit and listed, with the newest one filling the
+   * single-session fields so the common one-run case reads exactly as before. A project with no
+   * running run rows falls back to the fixed ad-hoc session probe, which also covers {@code sail
+   * agent start} sessions that mint no run.
+   */
+  private AgentStatusResponse agentStatusValue(String project, String localHandle) {
     projects.requireExists(project);
-    var info = querySession(new AgentSession(shell), project);
+    var agentSession = new AgentSession(shell);
+    var running =
+        runStore == null
+            ? List.<RunStore.RunRow>of()
+            : runStore.listForProject(project).stream()
+                .filter(run -> "running".equals(run.status()))
+                .filter(run -> ownsRun(run.node(), localHandle))
+                .toList();
+    if (running.isEmpty()) {
+      var info = querySession(agentSession, project, AgentUnit.BUILD);
+      return agentStatusResponse(project, info, List.of());
+    }
+    var runs =
+        running.stream()
+            .map(run -> agentRunView(run, querySession(agentSession, project, runUnit(run))))
+            .toList();
+    var newest = querySession(agentSession, project, runUnit(running.getFirst()));
+    return agentStatusResponse(project, newest, runs);
+  }
+
+  private static AgentStatusResponse agentStatusResponse(
+      String project, AgentSession.SessionInfo info, List<AgentRunView> runs) {
     return new AgentStatusResponse(
         project,
-        info != null && info.running(),
+        info != null && info.running() || runs.stream().anyMatch(AgentRunView::running),
         info != null ? info.pid() : null,
         info != null ? info.task() : null,
         info != null ? info.startedAt() : null,
         info != null ? info.branch() : null,
-        info != null ? info.logPath() : null);
+        info != null ? info.logPath() : null,
+        runs);
+  }
+
+  private static AgentRunView agentRunView(RunStore.RunRow run, AgentSession.SessionInfo info) {
+    return new AgentRunView(
+        run.id(),
+        run.specId(),
+        run.branch(),
+        info != null && info.running(),
+        info != null ? info.pid() : null,
+        run.startedAt(),
+        run.logPath());
+  }
+
+  /**
+   * The systemd/file identity of a local run: rebuilt from the unit name recorded at launch, or the
+   * fixed ad-hoc identity for a run launched before units were run-scoped — that agent runs as
+   * {@code sail-agent}, so the fixed paths are exactly where it lives.
+   */
+  private static AgentUnit runUnit(RunStore.RunRow run) {
+    return Strings.isBlank(run.unit()) ? AgentUnit.BUILD : AgentUnit.recorded(run.id(), run.unit());
   }
 
   /**
@@ -637,18 +686,20 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * Stops the agent process only when {@code run} is genuinely the one executing now: an
+   * Stops the agent process only when {@code run} is genuinely the one executing now, addressing
+   * the run's own recorded unit so a concurrent run of the same project is untouched: an
    * already-finished run, or a run whose recorded pid does not match the live agent, is a no-op —
-   * so stopping a stale run id can never kill a different, newer run of the same project. The
-   * provenance guard has already established the run is local.
+   * so stopping a stale run id can never kill a different, newer run. The provenance guard has
+   * already established the run is local.
    */
   private StopRunResponse stopRunValue(RunStore.RunRow run) {
     projects.requireExists(run.project());
     if (!"running".equals(run.status())) {
       return new StopRunResponse(run.id(), false, "run_not_running", null);
     }
+    var unit = runUnit(run);
     var agentSession = new AgentSession(shell);
-    var info = querySession(agentSession, run.project());
+    var info = querySession(agentSession, run.project(), unit);
     if (info == null || !info.running()) {
       return new StopRunResponse(run.id(), false, "no_agent_running", null);
     }
@@ -656,7 +707,7 @@ public final class SailOperations implements Operations {
       return new StopRunResponse(run.id(), false, "run_not_active", info.pid());
     }
     try {
-      agentSession.killAgent(run.project());
+      agentSession.killAgent(run.project(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
     }
@@ -717,27 +768,30 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * Relaunches the guardrail watcher for a project whose original watcher died (e.g. with a daemon
-   * restart mid-run). Unit-or-nothing: the relaunch never falls back to a plain process, so a
-   * doubled watcher is unrepresentable on this path — empty means the project declares no agent
-   * block or no systemd scope accepted the unit. The relaunched {@code sail agent watch} recomputes
-   * its deadlines from the session's original {@code started_at} inside the container, so a
-   * re-armed agent keeps its remaining budget rather than getting a fresh one.
+   * Relaunches the guardrail watcher for a run whose original watcher died (e.g. with a daemon
+   * restart mid-run), addressed at the run's recorded unit. Unit-or-nothing: the relaunch never
+   * falls back to a plain process, so a doubled watcher is unrepresentable on this path — empty
+   * means the project declares no agent block or no systemd scope accepted the unit. The relaunched
+   * {@code sail agent watch} recomputes its deadlines from the session's original {@code
+   * started_at} inside the container, so a re-armed agent keeps its remaining budget rather than
+   * getting a fresh one.
    */
-  public Optional<WatcherSpawner.Unit> relaunchWatcher(String project) throws IOException {
-    var loaded = projects.load(project);
+  public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
+    var loaded = projects.load(run.project());
     if (loaded.config().agent() == null) {
       return Optional.empty();
     }
-    return watcherSpawner.spawnUnit(
-        project,
-        SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-        SailPaths.projectDir(project).resolve("watch.log"));
+    return watcherSpawner.spawnUnitForRun(
+        run.project(),
+        SailPaths.resolveSailYaml(run.project(), file).toAbsolutePath(),
+        run.id(),
+        run.unit());
   }
 
-  private AgentSession.SessionInfo querySession(AgentSession session, String project) {
+  private AgentSession.SessionInfo querySession(
+      AgentSession session, String project, AgentUnit unit) {
     try {
-      return session.queryStatus(project);
+      return session.queryStatus(project, unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }

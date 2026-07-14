@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
@@ -38,11 +40,14 @@ import java.util.function.Supplier;
  * session and replay its stop over a newer foreign run that is still executing. Database-only
  * checks come first, so a pass with nothing to reconcile issues no systemctl calls. A terminal
  * session replays the stop with its recorded exit code. A running session past the launch grace
- * period whose systemd unit is inactive or absent gets a synthesized stop with <em>no exit
- * code</em>: the transient unit is garbage-collected on exit, so the real code is unrecoverable,
- * and the replay path makes the same choice for a terminal session that never recorded one — the
- * pipeline treats the absent code as not-a-failure and lets review judge the work. Every replayed
- * stop carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
+ * period whose <em>recorded</em> systemd unit is inactive or absent gets a synthesized stop — a
+ * running session with no recorded unit (launched before units were run-scoped) is skipped instead:
+ * this sweep cannot know that unit's liveness, and the run's own detached watcher already owns its
+ * stop. The synthesized stop carries <em>no exit code</em>: the transient unit is garbage-collected
+ * on exit, so the real code is unrecoverable, and the replay path makes the same choice for a
+ * terminal session that never recorded one — the pipeline treats the absent code as not-a-failure
+ * and lets review judge the work. Every replayed stop carries {@code source=reconcile} so the event
+ * log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -62,15 +67,21 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
+  private static final SpecStore.SpecFilter PENDING =
+      new SpecStore.SpecFilter(null, "pending", null, null, null);
+
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
 
   private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("completed", "stopped", "failed");
 
-  /** Answers whether a project's agent systemd unit is still active. */
+  /**
+   * Answers whether a run's agent systemd unit is still active — addressed by the unit name
+   * recorded on the run at launch, never re-derived.
+   */
   @FunctionalInterface
   public interface UnitProbe {
-    boolean active(String project) throws Exception;
+    boolean active(String project, String runId, String unit) throws Exception;
   }
 
   private final SpecStore specStore;
@@ -102,14 +113,15 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Probes the agent unit through systemd — the authoritative liveness source. A transient unit
-   * vanishes after a clean exit, and systemd reports an absent unit as {@code inactive}, so absent
-   * counts as dead; conversely a probe that cannot reach the container reports active, biasing the
-   * sweep toward doing nothing when it cannot know.
+   * Probes the run's agent unit through systemd — the authoritative liveness source. A transient
+   * unit vanishes after a clean exit, and systemd reports an absent unit as {@code inactive}, so
+   * absent counts as dead; conversely a probe that cannot reach the container reports active,
+   * biasing the sweep toward doing nothing when it cannot know.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
-    return project -> agentSession.queryExitStatus(project).active();
+    return (project, runId, unit) ->
+        agentSession.queryExitStatus(project, AgentUnit.recorded(runId, unit)).active();
   }
 
   /** Starts the periodic sweep at the default cadence. */
@@ -154,10 +166,45 @@ public final class MissedStopReconciler implements AutoCloseable {
       for (var spec : specStore.list(REVIEW)) {
         replayed += rescueStrandedReview(spec) ? 1 : 0;
       }
+      replayed += releaseStrandedReservations();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
     return replayed;
+  }
+
+  /**
+   * Releases a repo reservation orphaned by a crash between reserving a dispatch run and claiming
+   * its spec: the run committed {@code running} but the spec never left {@code pending}, so the
+   * in-progress reconcile pass never reaches it and its repo would block every future overlapping
+   * dispatch. Only a run older than {@link #LAUNCH_GRACE} is touched, so a run still inside the
+   * microsecond reserve-then-claim window of a healthy dispatch is never disturbed. The spec was
+   * never claimed, so it stays {@code pending} and dispatchable; only the dead reservation is
+   * cleared. Foreign runs are left to their executing box.
+   */
+  private int releaseStrandedReservations() {
+    var node = localHandle.get();
+    var deadline = clock.get().minus(LAUNCH_GRACE);
+    var released = 0;
+    for (var spec : specStore.list(PENDING)) {
+      for (var run : sessionStore.listForSpec(spec.id())) {
+        if ("running".equals(run.status())
+            && SailOperations.ownsRun(run.node(), node)
+            && MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)) {
+          System.err.println(
+              "  [reconcile] releasing stranded reservation for "
+                  + spec.project()
+                  + "/"
+                  + spec.id()
+                  + " (run "
+                  + run.id()
+                  + "): running with a still-pending spec past the launch grace");
+          sessionStore.complete(run.id(), "failed", null);
+          released++;
+        }
+      }
+    }
+    return released;
   }
 
   /**
@@ -214,7 +261,10 @@ public final class MissedStopReconciler implements AutoCloseable {
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (unitProbe.active(spec.project())) {
+        if (Strings.isBlank(session.unit())) {
+          yield false;
+        }
+        if (unitProbe.active(spec.project(), session.id(), session.unit())) {
           yield false;
         }
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());

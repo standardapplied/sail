@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -16,21 +17,23 @@ import java.util.function.Supplier;
 
 /**
  * Keeps every running agent guarded: for each {@code in_progress} spec whose latest session is
- * still {@code running} and whose agent unit is still active, but which no live watcher covers,
- * this relaunches the watcher — at daemon start and then periodically, so a watcher that dies
- * mid-run (crash, OOM kill) leaves the agent unguarded for at most one pass interval. The
+ * still {@code running} and whose recorded agent unit is still active, but which no live watcher
+ * covers, this relaunches the watcher — at daemon start and then periodically, so a watcher that
+ * dies mid-run (crash, OOM kill) leaves the agent unguarded for at most one pass interval. The
  * relaunched {@code sail agent watch} recomputes its wall-clock deadline from the session's
  * original {@code started_at}, so an agent three hours into a four-hour budget gets the remaining
  * hour, not a fresh four. Only sessions this node executed are considered — a synced foreign run is
  * its executing node's to guard, and arming a local watcher against it would eventually enforce a
- * foreign deadline on this box's container.
+ * foreign deadline on this box's container. A run with no recorded unit (launched before units were
+ * run-scoped) is skipped: this pass cannot know that unit's liveness, and the run's own detached
+ * watcher — built to survive daemon restarts — already owns it.
  *
  * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
- * that is still alive (free, in-process check) or any {@code sail agent watch} process for the
- * project ({@link WatcherSpawner#watcherProcessRunning}, which sees every systemd scope, every
- * user's manager, and plain fallback processes alike) means covered. Unit-name probes alone would
- * be blind to a watcher armed in another user's manager and re-arm a double whose guardrail actions
- * fire twice. Relaunching is unit-or-nothing ({@link WatcherSpawner#spawnUnit}); where systemd is
+ * that is still alive (free, in-process check) or any {@code sail agent watch} process for the run
+ * ({@link WatcherSpawner#watcherProcessRunningForRun}, which sees every systemd scope, every user's
+ * manager, and plain fallback processes alike) means covered. Unit-name probes alone would be blind
+ * to a watcher armed in another user's manager and re-arm a double whose guardrail actions fire
+ * twice. Relaunching is unit-or-nothing ({@link WatcherSpawner#spawnUnitForRun}); where systemd is
  * unavailable the relaunch is empty and the missed-stop sweep still replays the stop when the agent
  * ends. A session whose agent unit is already dead is that sweep's job, not this one's.
  */
@@ -42,10 +45,10 @@ public final class WatcherRearmer implements AutoCloseable {
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
-  /** Relaunches a project's watcher as a unit; empty when neither systemd scope accepts it. */
+  /** Relaunches a run's watcher as a unit; empty when neither systemd scope accepts it. */
   @FunctionalInterface
   public interface WatcherRelauncher {
-    Optional<WatcherSpawner.Unit> relaunch(String project) throws Exception;
+    Optional<WatcherSpawner.Unit> relaunch(RunStore.RunRow run) throws Exception;
   }
 
   private final SpecStore specStore;
@@ -126,16 +129,19 @@ public final class WatcherRearmer implements AutoCloseable {
       return false;
     }
     var session = latest.get();
+    if (Strings.isBlank(session.unit())) {
+      return false;
+    }
     if (session.watcherPid() != null && watcherAlive.test(session.watcherPid())) {
       return false;
     }
-    if (watcherRunning.test(spec.project())) {
+    if (watcherRunning.test(session.id())) {
       return false;
     }
-    if (!agentUnitProbe.active(spec.project())) {
+    if (!agentUnitProbe.active(spec.project(), session.id(), session.unit())) {
       return false;
     }
-    var unit = relauncher.relaunch(spec.project());
+    var unit = relauncher.relaunch(session);
     if (unit.isEmpty()) {
       System.err.println(
           "  [rearm] "

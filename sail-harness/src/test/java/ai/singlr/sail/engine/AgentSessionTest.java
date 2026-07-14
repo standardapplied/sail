@@ -208,7 +208,8 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandRedirectsToARunScopedLog() {
-    var runLog = AgentUnit.BUILD.runLogPath("run-xyz");
+    var runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    var runLog = AgentUnit.forRun(runId).logPath();
     var cmd =
         AgentSession.buildBackgroundLaunchCommand(
             "acme",
@@ -221,11 +222,11 @@ class AgentSessionTest {
             "spec-1",
             "claude-code",
             runLog,
-            "run-xyz");
+            runId);
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains(runLog), "the agent's output is redirected to the run-scoped log");
-    assertTrue(cmd.contains("run-xyz"), "the run id is carried in as SAIL_RUN_ID");
+    assertTrue(cmd.contains(runId), "the run id is carried in as SAIL_RUN_ID");
     assertTrue(
         joined.contains("mkdir -p \"$(dirname \"$4\")\""), "the run's log directory is created");
     assertFalse(
@@ -234,8 +235,50 @@ class AgentSessionTest {
   }
 
   @Test
+  void twoConcurrentLaunchesGetDistinctUnitsPidSessionAndTaskFiles() {
+    var runA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    var runB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    var unitA = AgentUnit.forRun(runA);
+    var unitB = AgentUnit.forRun(runB);
+    var cmdA = backgroundLaunch(runA, unitA);
+    var cmdB = backgroundLaunch(runB, unitB);
+
+    var joinedA = String.join(" ", cmdA);
+    var joinedB = String.join(" ", cmdB);
+    assertTrue(joinedA.contains("--unit " + unitA.unitName()), joinedA);
+    assertTrue(joinedB.contains("--unit " + unitB.unitName()), joinedB);
+    assertTrue(cmdA.contains(unitA.pidPath()) && cmdB.contains(unitB.pidPath()));
+    assertTrue(joinedA.contains(unitA.taskPath()) && joinedB.contains(unitB.taskPath()));
+    assertFalse(joinedA.contains(unitB.unitName()), "run A never touches run B's unit");
+    assertFalse(joinedB.contains(unitA.unitName()), "run B never touches run A's unit");
+    assertFalse(
+        joinedA.contains(AgentUnit.BUILD.pidPath() + " ")
+            || joinedA.contains(AgentUnit.BUILD.taskPath()),
+        "a dispatched launch writes nothing at the fixed per-container paths");
+    assertFalse(
+        AgentUnit.forRun(runA).sessionPath().equals(AgentUnit.forRun(runB).sessionPath()),
+        "two runs never share a session file");
+  }
+
+  private static List<String> backgroundLaunch(String runId, AgentUnit unit) {
+    return AgentSession.buildBackgroundLaunchCommand(
+        "acme",
+        "dev",
+        "/home/dev/workspace",
+        true,
+        AgentCli.CLAUDE_CODE,
+        null,
+        null,
+        "spec-1",
+        "claude-code",
+        unit.logPath(),
+        runId);
+  }
+
+  @Test
   void buildForegroundTaskCommandRedirectsToARunScopedLog() {
-    var runLog = AgentUnit.BUILD.runLogPath("run-fg");
+    var runId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    var runLog = AgentUnit.forRun(runId).logPath();
     var cmd =
         AgentSession.buildForegroundTaskCommand(
             "acme",
@@ -248,25 +291,42 @@ class AgentSessionTest {
             "spec-1",
             "claude-code",
             runLog,
-            "run-fg");
+            runId);
 
     var joined = String.join(" ", cmd);
     assertTrue(
         joined.contains(runLog), "the foreground agent's output is redirected to its run log");
-    assertTrue(cmd.contains("run-fg"), "the run id is carried in as SAIL_RUN_ID");
+    assertTrue(cmd.contains(runId), "the run id is carried in as SAIL_RUN_ID");
     assertTrue(
         joined.contains("SAIL_RUN_ID=\"$6\""), "the run id is exported into the launched process");
   }
 
   @Test
-  void resetLogTruncatesTheGivenRolesLog() throws Exception {
+  void writeTaskFileCreatesTheRunScopedParentDirectoryBeforeWriting() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
 
-    new AgentSession(shell).resetLog("acme", AgentUnit.REVIEW);
+    new AgentSession(shell).writeTaskFile("acme", "do it", unit);
 
     var cmd = shell.invocations().getFirst();
-    assertTrue(cmd.contains(": > "), "reset truncates the log to empty");
-    assertTrue(cmd.contains("/home/dev/.sail/review.log"), "resets the review negotiation log");
+    assertTrue(
+        cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"),
+        "the run directory must exist before the redirect: dispatch stages the task before the"
+            + " launch script's own mkdir runs");
+    assertTrue(cmd.contains(unit.taskPath()));
+  }
+
+  @Test
+  void writeSessionCreatesTheRunScopedParentDirectoryBeforeWriting() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
+
+    new AgentSession(shell)
+        .writeSession("acme", "do it", "b1", "auth", "claude-code", "r1", List.of("app"), unit);
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"));
+    assertTrue(cmd.contains(unit.sessionPath()));
   }
 
   @Test

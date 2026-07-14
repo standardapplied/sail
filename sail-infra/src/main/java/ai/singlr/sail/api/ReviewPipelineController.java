@@ -341,7 +341,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
       var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories());
 
-      var output = agentRunner.run(project, agent, prompt);
+      var output = agentRunner.run(project, agent, prompt, stage.reviewId());
       var parseResult = FindingParser.parse(output);
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
         var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
@@ -416,7 +416,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var openFindings = reviewStore.openFindingsForReview(reviewId);
     if (openFindings.isEmpty()) return;
 
-    triggerFixIteration(specId, openFindings, project);
+    triggerFixIteration(reviewId, specId, openFindings, project);
     reReview(config, project, specId, review.get().iteration() + 1);
   }
 
@@ -432,7 +432,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     executePipeline(reviewId, config, project, specId);
   }
 
-  private void triggerFixIteration(String specId, List<Finding> findings, String project) {
+  /** The fix agent runs under the failed review's identity, appending to that review's log. */
+  private void triggerFixIteration(
+      String reviewId, String specId, List<Finding> findings, String project) {
     var spec = specStore.findById(specId);
     if (spec.isEmpty()) return;
 
@@ -442,7 +444,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     try {
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
-      agentRunner.run(project, agent, fixTask);
+      agentRunner.run(project, agent, fixTask, reviewId);
     } catch (Exception e) {
       System.err.println(
           "review-pipeline: fix iteration failed for spec " + specId + ": " + e.getMessage());
