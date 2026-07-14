@@ -459,31 +459,6 @@ class SailOperationsTest {
   }
 
   @Test
-  void aLiveAdHocAgentRefusesDispatchEvenOnDisjointRepos() throws Exception {
-    var operations =
-        operationsWithStore(
-            multiRepoYaml(),
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
-                .on("kill -0 123", "")
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"exploratory work\"}"),
-            store -> {
-              seedAuthBillingSetup(store);
-              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
-            });
-
-    var error =
-        dispatch(
-            operations,
-            "acme",
-            new DispatchRequest("web-work", "background", true, List.of("web")));
-
-    assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
-    assertTrue(fullError(error).contains("ad-hoc"), fullError(error));
-  }
-
-  @Test
   void aDeadAdHocPidFileNeverBlocksDispatch() throws Exception {
     var stores = new SpecStore[1];
     var operations =
@@ -1355,6 +1330,33 @@ class SailOperationsTest {
     assertTrue(
         shell.invocations().stream().noneMatch(command -> command.contains("review.log")),
         "dispatch must never touch a review's log: a concurrent pipeline may be mid-review");
+  }
+
+  @Test
+  void aForegroundRunRecordsABlankUnit() throws Exception {
+    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
+            .on("agent.pid", "123")
+            .on("kill -0 123", "")
+            .on("agent-session.json", "{\"task\": \"work\"}")
+            .on("mkdir -p /home/dev/workspace/specs", "")
+            .on("printf '%s'", "")
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("bash -l -c", "");
+    var operations =
+        operationsWithStores(
+            baseYaml(), shell, null, SailOperationsTest::seedAuthBillingSetup, runs::set);
+
+    dispatch(operations, "acme", request("auth", "foreground", false));
+
+    var recorded = runs.get().listForProject("acme").getFirst();
+    assertTrue(
+        recorded.unit() == null || recorded.unit().isBlank(),
+        "a foreground run records a blank unit so the missed-stop reconciler skips it rather than"
+            + " false-stopping a still-running agent and releasing its repo");
   }
 
   @Test

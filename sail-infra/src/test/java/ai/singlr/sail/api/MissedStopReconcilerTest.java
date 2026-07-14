@@ -116,6 +116,59 @@ class MissedStopReconcilerTest {
             List.of()));
   }
 
+  private void createPendingSpec(String id) {
+    specStore.create(
+        new SpecStore.SpecRow(
+            id,
+            "test-project",
+            "Test spec",
+            SpecStatus.PENDING,
+            null,
+            "claude-code",
+            null,
+            null,
+            "feat/test",
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of(),
+            List.of()));
+  }
+
+  @Test
+  void releasesAStrandedReservationForAPendingSpecPastGrace() {
+    createPendingSpec("auth");
+    runningSession("auth");
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(1, released);
+    assertEquals(
+        "failed",
+        sessionStore.listForSpec("auth").getFirst().status(),
+        "a run left running by a crash between reserve and claim is freed");
+    assertEquals(
+        SpecStatus.PENDING,
+        specStore.findById("auth").orElseThrow().status(),
+        "the never-claimed spec stays dispatchable");
+  }
+
+  @Test
+  void keepsAFreshReservationInsideTheLaunchGrace() {
+    createPendingSpec("auth");
+    runningSession("auth");
+
+    var released = reconciler(new CountingProbe(true), Instant::now).sweep();
+
+    assertEquals(0, released);
+    assertEquals(
+        "running",
+        sessionStore.listForSpec("auth").getFirst().status(),
+        "a run still inside the reserve-then-claim window is not disturbed");
+  }
+
   private String finishedSession(String specId, String status, Integer exitCode) {
     var id = runningSession(specId);
     sessionStore.complete(id, status, exitCode);

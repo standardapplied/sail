@@ -119,8 +119,8 @@ class CommandTaxonomyTest {
             .keySet()
             .containsAll(
                 Set.of(
-                    "start", "run", "status", "stop", "logs", "report", "review", "sweep",
-                    "context", "watch")));
+                    "run", "status", "stop", "logs", "report", "review", "sweep", "context",
+                    "watch")));
   }
 
   @Test
@@ -131,10 +131,9 @@ class CommandTaxonomyTest {
   }
 
   @Test
-  void agentStartAndLogsKeepExpertAliases() {
+  void agentLogsKeepsExpertAlias() {
     var agent = new CommandLine(new AgentCommand());
 
-    assertSame(agent.getSubcommands().get("start"), agent.getSubcommands().get("launch"));
     assertSame(agent.getSubcommands().get("logs"), agent.getSubcommands().get("log"));
   }
 

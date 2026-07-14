@@ -232,7 +232,6 @@ public final class DispatchOperations {
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    requireNoAdHocAgent(project);
     var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
     var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
@@ -276,7 +275,8 @@ public final class DispatchOperations {
         agentType,
         branch,
         task,
-        unit);
+        unit,
+        background);
     try {
       var prepared =
           claimAndPrepare(
@@ -323,7 +323,7 @@ public final class DispatchOperations {
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      failRun(runId);
+      releaseIfAbsent(runId, project, unit, background);
       throw e;
     }
   }
@@ -667,23 +667,6 @@ public final class DispatchOperations {
   }
 
   /**
-   * Refuses dispatch while the container's fixed ad-hoc identity ({@code sail agent start}) has a
-   * live agent. An ad-hoc session mints no run row, so the repo reservation cannot see it, and its
-   * task may touch any repo in the container — whole-container is the only safe reading. A
-   * pre-upgrade dispatched agent also lives on the fixed identity, but its run row already blocks
-   * through the gate; this probe covers the genuinely row-less lane.
-   */
-  private void requireNoAdHocAgent(String project) {
-    var status = querySession(new AgentSession(shell), project, AgentUnit.BUILD);
-    if (status != null && status.running()) {
-      throw new ApiException(
-          ErrorCode.AGENT_ALREADY_RUNNING,
-          "An ad-hoc agent session (sail agent start) is running in this container.",
-          "Wait for it to finish or stop it with 'sail agent stop'.");
-    }
-  }
-
-  /**
    * The project's runs this box is executing right now, each with the repo set its dispatch
    * reserved. A box that keeps no run aggregate has nothing to consult and allows the dispatch. A
    * run recorded before repos were persisted reads as no repos, which the gate treats as
@@ -723,6 +706,11 @@ public final class DispatchOperations {
    * later overlap check and provenance guard depends on, so proceeding without it is not safe. Also
    * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
    * boxes that keep no run aggregate, which have nothing to reserve against.
+   *
+   * <p>A foreground dispatch records a blank unit: it runs as a plain child process and creates no
+   * systemd unit, so the missed-stop reconciler must skip it (it skips blank-unit runs) rather than
+   * probe a unit that never exists and falsely stop the still-running agent — which would release
+   * its repo mid-run. The foreground run completes when its blocking launcher returns.
    */
   private void reserveRun(
       String runId,
@@ -733,10 +721,12 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      boolean background) {
     if (runStore == null) {
       return;
     }
+    var recordedUnit = background ? unit.unitName() : "";
     Optional<DispatchGate.Conflict> conflict;
     try {
       conflict =
@@ -750,7 +740,7 @@ public final class DispatchOperations {
               branch,
               task,
               unit.logPath(),
-              unit.unitName());
+              recordedUnit);
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
@@ -798,6 +788,31 @@ public final class DispatchOperations {
    */
   private void failRun(String runId) {
     runBookkeeping("mark run failed " + runId, () -> runStore.complete(runId, "failed", null));
+  }
+
+  /**
+   * Releases the run's repo reservation on a launch failure only when the agent is proven absent. A
+   * failure before or during launch leaves no live unit, so the run is failed and its repo freed.
+   * But once a background systemd unit has started, a later failure (watcher spawn, status probe)
+   * leaves a live agent on its run-scoped unit; failing the run would free the repo under it and
+   * admit an overlapping dispatch. An unprobeable unit is treated as live for the same reason — the
+   * missed-stop reconciler releases a genuinely dead unit on its next pass. A foreground run
+   * creates no unit, so a foreground launch failure always frees the reservation.
+   */
+  private void releaseIfAbsent(String runId, String project, AgentUnit unit, boolean background) {
+    if (background && backgroundAgentLive(project, unit)) {
+      return;
+    }
+    failRun(runId);
+  }
+
+  private boolean backgroundAgentLive(String project, AgentUnit unit) {
+    try {
+      var status = new AgentSession(shell).queryStatus(project, unit);
+      return status != null && status.running();
+    } catch (Exception e) {
+      return true;
+    }
   }
 
   /**

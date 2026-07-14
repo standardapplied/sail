@@ -67,6 +67,9 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
+  private static final SpecStore.SpecFilter PENDING =
+      new SpecStore.SpecFilter(null, "pending", null, null, null);
+
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
 
@@ -163,10 +166,45 @@ public final class MissedStopReconciler implements AutoCloseable {
       for (var spec : specStore.list(REVIEW)) {
         replayed += rescueStrandedReview(spec) ? 1 : 0;
       }
+      replayed += releaseStrandedReservations();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
     return replayed;
+  }
+
+  /**
+   * Releases a repo reservation orphaned by a crash between reserving a dispatch run and claiming
+   * its spec: the run committed {@code running} but the spec never left {@code pending}, so the
+   * in-progress reconcile pass never reaches it and its repo would block every future overlapping
+   * dispatch. Only a run older than {@link #LAUNCH_GRACE} is touched, so a run still inside the
+   * microsecond reserve-then-claim window of a healthy dispatch is never disturbed. The spec was
+   * never claimed, so it stays {@code pending} and dispatchable; only the dead reservation is
+   * cleared. Foreign runs are left to their executing box.
+   */
+  private int releaseStrandedReservations() {
+    var node = localHandle.get();
+    var deadline = clock.get().minus(LAUNCH_GRACE);
+    var released = 0;
+    for (var spec : specStore.list(PENDING)) {
+      for (var run : sessionStore.listForSpec(spec.id())) {
+        if ("running".equals(run.status())
+            && SailOperations.ownsRun(run.node(), node)
+            && MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)) {
+          System.err.println(
+              "  [reconcile] releasing stranded reservation for "
+                  + spec.project()
+                  + "/"
+                  + spec.id()
+                  + " (run "
+                  + run.id()
+                  + "): running with a still-pending spec past the launch grace");
+          sessionStore.complete(run.id(), "failed", null);
+          released++;
+        }
+      }
+    }
+    return released;
   }
 
   /**

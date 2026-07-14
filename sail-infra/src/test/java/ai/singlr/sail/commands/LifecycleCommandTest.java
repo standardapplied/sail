@@ -275,36 +275,6 @@ class LifecycleCommandTest {
   }
 
   @Test
-  void agentLaunchHelpShowsOptions() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "start", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("--dry-run"));
-    assertTrue(output.contains("--json"));
-    assertTrue(output.contains("--path"));
-    assertTrue(output.contains("--file"));
-    assertTrue(output.contains("--task"));
-    assertTrue(output.contains("--background"));
-    assertTrue(output.contains("Launch"));
-  }
-
-  @Test
-  void agentLaunchWithInvalidNameShowsError() {
-    var cmd = new CommandLine(new Sail());
-    cmd.setOut(new PrintWriter(new StringWriter()));
-    cmd.setErr(new PrintWriter(new StringWriter()));
-
-    var exitCode = cmd.execute("agent", "start", "INVALID NAME!");
-
-    assertNotEquals(0, exitCode);
-  }
-
-  @Test
   void agentStatusHelpShowsOptions() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
