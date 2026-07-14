@@ -917,6 +917,7 @@ class SailOperationsTest {
 
   private static final String R1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String R2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  private static final String R3 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   private static final String RUN_LOG = "/home/dev/.sail/runs/" + R1 + "/agent.log";
   private static final String R2_LOG = "/home/dev/.sail/runs/" + R2 + "/agent.log";
 
@@ -1249,6 +1250,15 @@ class SailOperationsTest {
                   null,
                   R2_LOG,
                   "sail-agent-" + R2);
+              runs.createReview(
+                  R3,
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "codex",
+                  "feat/auth",
+                  "review it",
+                  "/home/dev/.sail/runs/" + R3 + "/review.log");
             });
 
     var result = operations.stopRun(R1, "node-a", ADMIN);
@@ -1316,6 +1326,7 @@ class SailOperationsTest {
     assertEquals(2, runs.size(), "every local running run is listed");
     var encoded = ApiJson.withSchema(result.orThrow()).toString();
     assertTrue(encoded.contains(R1) && encoded.contains(R2), encoded);
+    assertFalse(encoded.contains("review.log"), "build agent status excludes review executions");
   }
 
   @Test

@@ -71,7 +71,7 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
         shell.exec(
             ContainerExec.asDevUser(project, List.of("bash", "-lc", command)), null, AGENT_TIMEOUT);
     if (!result.ok()) {
-      throw new IllegalStateException(
+      throw new ReviewAgentExecutionException(
           "Review agent '"
               + agent
               + "' exited non-zero in '"
@@ -79,7 +79,8 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
               + "' (see "
               + unit.logPath()
               + "): "
-              + result.stderr());
+              + result.stderr(),
+          result.exitCode());
     }
 
     return StreamJsonResult.extract(readLogSince(project, unit, startOffset));

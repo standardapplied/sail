@@ -186,6 +186,10 @@ public final class ServerStartCommand implements Runnable {
             syncScheduler,
             new FdeStore(db));
     var orphaned = reviewStore.failOrphanedRunning();
+    var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
+    if (orphanedRuns > 0) {
+      syncScheduler.afterWrite();
+    }
     if (orphaned > 0) {
       System.out.println(
           Ansi.AUTO.string(
@@ -200,7 +204,9 @@ public final class ServerStartCommand implements Runnable {
             bus,
             ServerStartCommand::loadProjectYaml,
             new ShellExecutor(false),
-            syncScheduler::afterWrite);
+            syncScheduler::afterWrite,
+            runStore,
+            NodeIdentity::handle);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
     if (narratesSlack(HostSync.config())) {
       bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));

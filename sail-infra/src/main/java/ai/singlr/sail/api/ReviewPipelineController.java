@@ -9,11 +9,13 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FindingParser;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.net.InetAddress;
 import java.util.LinkedHashMap;
@@ -31,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Orchestrates the review pipeline when an agent completes a spec. Subscribes to the event bus,
@@ -56,6 +59,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private final ReviewAgentRunner agentRunner;
   private final EventBus eventBus;
   private final Runnable syncTrigger;
+  private final RunStore runStore;
+  private final Supplier<String> localHandle;
   private final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight =
       new ConcurrentHashMap<>();
   private final ExecutorService pipelineExecutor;
@@ -81,7 +86,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         agentRunner,
         eventBus,
         syncTrigger,
-        Executors.newVirtualThreadPerTaskExecutor());
+        Executors.newVirtualThreadPerTaskExecutor(),
+        null,
+        null);
   }
 
   /**
@@ -105,6 +112,30 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       EventBus eventBus,
       Runnable syncTrigger,
       ExecutorService pipelineExecutor) {
+    this(
+        specStore,
+        reviewStore,
+        configResolver,
+        reviewerResolver,
+        agentRunner,
+        eventBus,
+        syncTrigger,
+        pipelineExecutor,
+        null,
+        null);
+  }
+
+  ReviewPipelineController(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      Function<String, ReviewPipelineConfig> configResolver,
+      Function<String, String> reviewerResolver,
+      ReviewAgentRunner agentRunner,
+      EventBus eventBus,
+      Runnable syncTrigger,
+      ExecutorService pipelineExecutor,
+      RunStore runStore,
+      Supplier<String> localHandle) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.configResolver = configResolver;
@@ -113,6 +144,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     this.eventBus = eventBus;
     this.syncTrigger = Objects.requireNonNull(syncTrigger, "syncTrigger");
     this.pipelineExecutor = pipelineExecutor;
+    this.runStore = runStore;
+    this.localHandle = runStore == null ? null : Objects.requireNonNull(localHandle, "localHandle");
   }
 
   /** Sets a spec's status and immediately signals sync so the transition reaches main. */
@@ -311,6 +344,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
               + e.getMessage());
       reviewStore.updateReviewStatus(reviewId, "failed");
       syncTrigger.run();
+      failReviewRun(reviewId, e);
+    } finally {
+      completeReviewRun(reviewId);
     }
   }
 
@@ -341,6 +377,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
       var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories());
 
+      startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
       var output = agentRunner.run(project, agent, prompt, stage.reviewId());
       var parseResult = FindingParser.parse(output);
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
@@ -371,6 +408,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       System.err.println(
           "review-pipeline: agent stage '" + stage.name() + "' errored: " + e.getMessage());
       reviewStore.completeStage(stage.id(), "failed", e.getMessage());
+      failReviewRun(stage.reviewId(), e);
       return new StageOutcome.Errored(e.getMessage());
     }
   }
@@ -444,11 +482,52 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     try {
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
+      startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
       agentRunner.run(project, agent, fixTask, reviewId);
     } catch (Exception e) {
+      failReviewRun(reviewId, e);
       System.err.println(
           "review-pipeline: fix iteration failed for spec " + specId + ": " + e.getMessage());
     }
+    completeReviewRun(reviewId);
+  }
+
+  private void startReviewRun(
+      String reviewId, String project, String specId, String agent, String branch, String task) {
+    if (runStore == null || runStore.findById(reviewId).isPresent()) {
+      return;
+    }
+    var unit = AgentUnit.forReview(reviewId);
+    runStore.createReview(
+        reviewId, project, specId, localHandle.get(), agent, branch, task, unit.logPath());
+    syncTrigger.run();
+  }
+
+  private void failReviewRun(String reviewId, Exception failure) {
+    if (runStore == null) {
+      return;
+    }
+    var exitCode =
+        failure instanceof ReviewAgentExecutionException execution ? execution.exitCode() : null;
+    runStore
+        .findById(reviewId)
+        .filter(run -> "running".equals(run.status()))
+        .ifPresent(run -> completeReviewRun(reviewId, "failed", exitCode));
+  }
+
+  private void completeReviewRun(String reviewId) {
+    if (runStore == null) {
+      return;
+    }
+    runStore
+        .findById(reviewId)
+        .filter(run -> "running".equals(run.status()))
+        .ifPresent(run -> completeReviewRun(reviewId, "completed", 0));
+  }
+
+  private void completeReviewRun(String reviewId, String status, Integer exitCode) {
+    runStore.complete(reviewId, status, exitCode);
+    syncTrigger.run();
   }
 
   private void escalate(String project, String specId, String reviewId) {

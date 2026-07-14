@@ -629,6 +629,7 @@ public final class SailOperations implements Operations {
             ? List.<RunStore.RunRow>of()
             : runStore.listForProject(project).stream()
                 .filter(run -> "running".equals(run.status()))
+                .filter(run -> "build".equals(Objects.requireNonNullElse(run.role(), "build")))
                 .filter(run -> ownsRun(run.node(), localHandle))
                 .toList();
     if (running.isEmpty()) {
