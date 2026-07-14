@@ -142,6 +142,26 @@ class RestartResolutionTest {
     assertFalse(ex.failure().action().contains("--restart"), "collision fix must be lane-neutral");
   }
 
+  @Test
+  void freshBranchForksOffTheFetchedUpstreamTipWhenOriginBaseIsAvailable() {
+    var args = RestartResolution.freshBranchArgs("/w/mast", "agent/x", "main", true);
+
+    assertEquals(
+        List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x", "origin/main"),
+        args,
+        "a fresh branch must fork from origin/main so it never inherits a stale local base");
+  }
+
+  @Test
+  void freshBranchFallsBackToLocalHeadWhenOriginBaseIsUnavailable() {
+    var offline = RestartResolution.freshBranchArgs("/w/mast", "agent/x", "main", false);
+    var detached = RestartResolution.freshBranchArgs("/w/mast", "agent/x", "", false);
+
+    var localCreate = List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x");
+    assertEquals(localCreate, offline, "an unreachable origin must not block the dispatch");
+    assertEquals(localCreate, detached, "a blank base falls back to the current HEAD");
+  }
+
   private static void assertLaneNeutral(RestartResolution.Refused refused) {
     assertFalse(refused.message().contains("--"), "refusal must not name a CLI flag spelling");
     assertFalse(refused.fix().contains("--"), "fix must not name a CLI flag spelling");
