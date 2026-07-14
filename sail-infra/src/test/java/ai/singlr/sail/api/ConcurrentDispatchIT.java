@@ -72,10 +72,13 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
             List.of(
                 "bash",
                 "-c",
-                "userdel -r ubuntu 2>/dev/null || true;"
+                "set -e;"
+                    + " userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
                     + " mkdir -p /home/dev/.sail /home/dev/workspace;"
                     + " chown -R dev:dev /home/dev;"
+                    + " for i in $(seq 1 30); do"
+                    + " loginctl enable-linger dev 2>/dev/null && exit 0; sleep 1; done;"
                     + " loginctl enable-linger dev"));
     assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
     awaitUserManager();
