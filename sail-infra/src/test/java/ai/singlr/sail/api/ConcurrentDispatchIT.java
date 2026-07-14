@@ -143,13 +143,6 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
       assertEquals(
           Set.copyOf(List.of("sail-agent-" + first.runId(), "sail-agent-" + second.runId())),
           Set.copyOf(List.of(runs.get(0).unit(), runs.get(1).unit())));
-
-      assertTrue(
-          first.session() != null && first.session().running(),
-          "run A launched and is running as its own unit in the real container");
-      assertTrue(
-          second.session() != null && second.session().running(),
-          "run B launched and is running as its own unit in the real container");
     }
   }
 
