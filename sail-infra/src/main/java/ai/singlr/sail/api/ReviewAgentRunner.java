@@ -18,8 +18,10 @@ public interface ReviewAgentRunner {
    * @param project container/project name
    * @param agent agent CLI type (e.g., "codex", "claude-code")
    * @param prompt the review task prompt
+   * @param reviewId the owning review; selects the review's own prompt and log files so pipelines
+   *     running concurrently on the executor never share or truncate each other's state
    * @return the agent's raw stdout output
    * @throws Exception if the agent fails to start or exits with an error
    */
-  String run(String project, String agent, String prompt) throws Exception;
+  String run(String project, String agent, String prompt, String reviewId) throws Exception;
 }

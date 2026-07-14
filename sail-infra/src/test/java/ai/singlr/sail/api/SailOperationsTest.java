@@ -459,8 +459,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void aRunningAgentOnADisjointRepoDoesNotBlockDispatch() throws Exception {
-    var stores = new SpecStore[1];
+  void aLiveAdHocAgentRefusesDispatchEvenOnDisjointRepos() throws Exception {
     var operations =
         operationsWithStore(
             multiRepoYaml(),
@@ -468,13 +467,35 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
                 .on("kill -0 123", "")
-                .on(
-                    "cat /home/dev/.sail/agent-session.json",
-                    "{\"task\": \"work\", \"spec_id\": \"auth\"}"),
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"exploratory work\"}"),
+            store -> {
+              seedAuthBillingSetup(store);
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            });
+
+    var error =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", true, List.of("web")));
+
+    assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
+    assertTrue(fullError(error).contains("ad-hoc"), fullError(error));
+  }
+
+  @Test
+  void aDeadAdHocPidFileNeverBlocksDispatch() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStore(
+            multiRepoYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("kill -0 123", new ShellExec.Result(1, "", "no such process")),
             store -> {
               stores[0] = store;
               seedAuthBillingSetup(store);
-              store.updateReposAndStatus("auth", List.of("app"), SpecStatus.IN_PROGRESS, "b1");
               seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
             });
 
@@ -503,17 +524,15 @@ class SailOperationsTest {
               seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
             },
             runs ->
-                runs.create(
+                runs.reserveDispatch(
                     R1,
                     "acme",
                     "auth",
                     LOCAL_HANDLE,
-                    "build",
+                    List.of("app"),
                     "claude-code",
                     "b1",
                     "task",
-                    123,
-                    null,
                     RUN_LOG,
                     "sail-agent-" + R1));
 
@@ -541,17 +560,15 @@ class SailOperationsTest {
               seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
             },
             runs ->
-                runs.create(
+                runs.reserveDispatch(
                     R1,
                     "acme",
                     "auth",
                     LOCAL_HANDLE,
-                    "build",
+                    List.of("app", "web"),
                     "claude-code",
                     "b1",
                     "task",
-                    123,
-                    null,
                     RUN_LOG,
                     "sail-agent-" + R1));
 
@@ -565,6 +582,91 @@ class SailOperationsTest {
     assertTrue(fullError(error).contains("auth"), fullError(error));
     assertTrue(fullError(error).contains(R1), fullError(error));
     assertTrue(fullError(error).contains("web"), fullError(error));
+  }
+
+  @Test
+  void aLiveDispatchRefusesAnOverlapAtomicallyBeforeClaimingTheSpec() throws Exception {
+    var stores = new SpecStore[1];
+    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var operations =
+        operationsWithStores(
+            multiRepoYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            store -> {
+              stores[0] = store;
+              seedAuthBillingSetup(store);
+              store.updateReposAndStatus(
+                  "auth", List.of("app", "web"), SpecStatus.IN_PROGRESS, "b1");
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            },
+            runStore -> {
+              runs.set(runStore);
+              runStore.reserveDispatch(
+                  R1,
+                  "acme",
+                  "auth",
+                  LOCAL_HANDLE,
+                  List.of("app", "web"),
+                  "claude-code",
+                  "b1",
+                  "task",
+                  RUN_LOG,
+                  "sail-agent-" + R1);
+            });
+
+    var error =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", false, List.of("web")));
+
+    assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
+    assertEquals(
+        SpecStatus.PENDING,
+        stores[0].findById("web-work").orElseThrow().status(),
+        "a refused reservation fires before any spec mutation");
+    assertEquals(
+        1,
+        runs.get().listForProject("acme").size(),
+        "the refused dispatch must not leave a run row behind");
+  }
+
+  @Test
+  void aFailedRunReservationAbortsDispatchBeforeAnyMutation() throws Exception {
+    var yaml = tempDir.resolve("sail-broken-runs.yaml");
+    Files.writeString(yaml, baseYaml());
+    try (var db = Sqlite.open(tempDir.resolve("specs-broken-runs.db"))) {
+      new SchemaManager(db).migrate();
+      var specStore = new SpecStore(db);
+      seedAuthBillingSetup(specStore);
+      var brokenDb = Sqlite.open(tempDir.resolve("runs-broken.db"));
+      new SchemaManager(brokenDb).migrate();
+      var brokenRuns = new RunStore(brokenDb);
+      brokenDb.close();
+      var shell = shell().on("incus list ^acme$", RUNNING_JSON);
+      var operations =
+          new SailOperations(
+              shell,
+              yaml.toString(),
+              (command, logPath) -> 4242L,
+              null,
+              null,
+              specStore,
+              new ReviewStore(db),
+              brokenRuns);
+
+      var error = dispatch(operations, "acme", request("auth"));
+
+      assertError(ErrorCode.COMMAND_FAILED, error);
+      assertEquals(
+          SpecStatus.PENDING,
+          specStore.findById("auth").orElseThrow().status(),
+          "a dispatch that cannot reserve its run must abort before claiming the spec");
+      assertTrue(
+          shell.invocations().stream().noneMatch(command -> command.contains("claude")),
+          "and must never reach the agent launch");
+    }
   }
 
   @Test
@@ -1228,21 +1330,19 @@ class SailOperationsTest {
   @Test
   void dispatchLaunchesBackgroundAgent() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("agent.pid", "4242")
+            .on("kill -0 4242", new ShellExec.Result(1, "", "missing"))
+            .on("agent-session.json", "{\"task\": \"work\"}")
+            .on("mkdir -p /home/dev/workspace/specs", "")
+            .on("printf '%s'", "")
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("claude", "");
     var operations =
         operationsWithStores(
-            baseYaml(),
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("agent.pid", "4242")
-                .on("kill -0 4242", new ShellExec.Result(1, "", "missing"))
-                .on("agent-session.json", "{\"task\": \"work\"}")
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
-                .on("mkdir -p /home/dev/.sail", "")
-                .on("claude", ""),
-            null,
-            SailOperationsTest::seedAuthBillingSetup,
-            runs::set);
+            baseYaml(), shell, null, SailOperationsTest::seedAuthBillingSetup, runs::set);
 
     var result = dispatch(operations, "acme", request("auth"));
 
@@ -1252,6 +1352,9 @@ class SailOperationsTest {
     assertEquals(1, recorded.size(), "a background dispatch records its run in the aggregate");
     assertEquals("running", recorded.getFirst().status());
     assertEquals(4242, recorded.getFirst().pid(), "the launched agent's pid is stamped on the run");
+    assertTrue(
+        shell.invocations().stream().noneMatch(command -> command.contains("review.log")),
+        "dispatch must never touch a review's log: a concurrent pipeline may be mid-review");
   }
 
   @Test
@@ -1308,6 +1411,7 @@ class SailOperationsTest {
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("agent.pid", "123")
                 .on("kill -0 123", "")
                 .on("agent-session.json", "{\"task\": \"work\"}")
@@ -1574,6 +1678,7 @@ class SailOperationsTest {
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
             .on("agent.pid", "123")
             .on("kill -0 123", "")
             .on("agent-session.json", "{\"task\": \"work\"}")
@@ -1632,7 +1737,8 @@ class SailOperationsTest {
         "/home/dev/.sail/runs/" + runId + "/agent.log",
         unit,
         "t0",
-        null);
+        null,
+        java.util.List.of());
   }
 
   @Test
@@ -2335,6 +2441,7 @@ class SailOperationsTest {
       var shell =
           shell()
               .on("incus list ^acme$", RUNNING_JSON)
+              .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
               .on("agent.pid", "123")
               .on("kill -0 123", "")
               .on("agent-session.json", "{\"task\": \"work\"}")

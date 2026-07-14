@@ -16,16 +16,19 @@ import java.util.List;
 
 /**
  * Runs a review or fix agent inside the project container, sharing the dispatch agent's command
- * (streaming {@code stream-json}) and its {@code review.log}, but <em>not</em> its process wrapper.
- * Dispatch launches a detached {@code systemd-run --user} unit because it is fire-and-forget and
- * watched externally; a review blocks the pipeline until it has findings, so it runs as a plain
- * foreground {@code shell.exec} bounded by a generous per-invocation timeout. Blocking here needs
- * no systemd user manager or D-Bus session, so it works in any container.
+ * (streaming {@code stream-json}) but <em>not</em> its process wrapper. Dispatch launches a
+ * detached {@code systemd-run --user} unit because it is fire-and-forget and watched externally; a
+ * review blocks the pipeline until it has findings, so it runs as a plain foreground {@code
+ * shell.exec} bounded by a generous per-invocation timeout. Blocking here needs no systemd user
+ * manager or D-Bus session, so it works in any container.
  *
- * <p>The agent's output streams to {@code review.log} (appended, so an attempt's reviewer↔fix
- * negotiation accumulates in one live-followable log), and the findings are read back from the
- * bytes this run appended — parsed via {@link StreamJsonResult} so a streamed reviewer and a plain
- * one are handled uniformly.
+ * <p>Every invocation runs under its review's own {@link AgentUnit#forReview} identity: the prompt
+ * and log live under {@code ~/.sail/runs/<reviewId>/}, so pipelines executing concurrently on the
+ * controller's virtual-thread executor never overwrite each other's prompt or interleave output.
+ * The agent's output streams to the review's {@code review.log} (appended, so one attempt's
+ * reviewer↔fix negotiation accumulates in one live-followable log), and the findings are read back
+ * from the bytes this run appended — parsed via {@link StreamJsonResult} so a streamed reviewer and
+ * a plain one are handled uniformly.
  *
  * <p>Run clean: no {@code SAIL_SPEC_ID} and no agent hooks, so the reviewer's own completion never
  * re-enters the pipeline (which would recurse forever).
@@ -54,16 +57,16 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
   }
 
   @Override
-  public String run(String project, String agent, String prompt) throws Exception {
+  public String run(String project, String agent, String prompt, String reviewId) throws Exception {
     var cli = AgentCli.fromYamlName(agent);
+    var unit = AgentUnit.forReview(reviewId);
     session.ensureDirectory(project);
-    session.writeTaskFile(project, prompt, AgentUnit.REVIEW);
+    session.writeTaskFile(project, prompt, unit);
 
-    var startOffset = logSize(project);
+    var startOffset = logSize(project, unit);
 
-    var agentCmd = cli.headlessCommand(AgentUnit.REVIEW.taskPath(), true, null, null, null, true);
-    var command =
-        "cd " + WORKSPACE + " && " + agentCmd + " >> " + AgentUnit.REVIEW.logPath() + " 2>&1";
+    var agentCmd = cli.headlessCommand(unit.taskPath(), true, null, null, null, true);
+    var command = "cd " + WORKSPACE + " && " + agentCmd + " >> " + unit.logPath() + " 2>&1";
     var result =
         shell.exec(
             ContainerExec.asDevUser(project, List.of("bash", "-lc", command)), null, AGENT_TIMEOUT);
@@ -73,33 +76,33 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
               + agent
               + "' exited non-zero in '"
               + project
-              + "' (see review.log): "
+              + "' (see "
+              + unit.logPath()
+              + "): "
               + result.stderr());
     }
 
-    return StreamJsonResult.extract(readLogSince(project, startOffset));
+    return StreamJsonResult.extract(readLogSince(project, unit, startOffset));
   }
 
   /**
-   * The current run's output only: the bytes appended to review.log since {@code startOffset}. The
-   * shared log accumulates the whole attempt's negotiation, so reading from the offset keeps this
-   * run's findings from being mistaken for a prior iteration's (which would stall the loop for a
-   * plain, non-stream-json agent whose output carries no per-run delimiter).
+   * The current run's output only: the bytes appended to the review's log since {@code
+   * startOffset}. The log accumulates the attempt's whole negotiation (reviewer, then fix, then any
+   * later stage), so reading from the offset keeps this invocation's findings from being mistaken
+   * for an earlier one's (which would stall the loop for a plain, non-stream-json agent whose
+   * output carries no per-run delimiter).
    */
-  private String readLogSince(String project, long startOffset) throws Exception {
+  private String readLogSince(String project, AgentUnit unit, long startOffset) throws Exception {
     var result =
         shell.exec(
             ContainerExec.asDevUser(
-                project,
-                List.of("tail", "-c", "+" + (startOffset + 1), AgentUnit.REVIEW.logPath())));
+                project, List.of("tail", "-c", "+" + (startOffset + 1), unit.logPath())));
     return result.ok() ? result.stdout() : "";
   }
 
-  private long logSize(String project) throws Exception {
+  private long logSize(String project, AgentUnit unit) throws Exception {
     var result =
-        shell.exec(
-            ContainerExec.asDevUser(
-                project, List.of("stat", "-c", "%s", AgentUnit.REVIEW.logPath())));
+        shell.exec(ContainerExec.asDevUser(project, List.of("stat", "-c", "%s", unit.logPath())));
     try {
       return Long.parseLong(result.stdout().trim());
     } catch (RuntimeException e) {

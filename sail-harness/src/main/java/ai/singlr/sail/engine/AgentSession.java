@@ -63,18 +63,6 @@ public final class AgentSession {
   }
 
   /**
-   * Truncates a role's log to empty. Dispatch calls this for {@link AgentUnit#REVIEW} at the start
-   * of each attempt so the append-mode review log carries only the current attempt's negotiation,
-   * not accumulations from prior dispatches. Best-effort: a failure here never blocks a dispatch.
-   */
-  public void resetLog(String containerName, AgentUnit unit)
-      throws IOException, InterruptedException, TimeoutException {
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName, List.of("bash", "-c", ": > \"$1\"", "bash", unit.logPath())));
-  }
-
-  /**
    * Writes the task text to a file inside the container. Uses printf with a positional argument to
    * avoid heredoc injection (content containing the delimiter could escape the heredoc).
    */
@@ -83,13 +71,23 @@ public final class AgentSession {
     writeTaskFile(containerName, task, AgentUnit.BUILD);
   }
 
-  /** Writes the task/prompt file for the given role's unit (build task or review prompt). */
+  /**
+   * Writes the task/prompt file for the given role's unit (build task or review prompt). Creates
+   * the file's parent directory first: a run-scoped unit lives under {@code ~/.sail/runs/<runId>/},
+   * which does not exist yet when dispatch stages the task before launch.
+   */
   public void writeTaskFile(String containerName, String task, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var cmd =
         ContainerExec.asDevUser(
             containerName,
-            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", task, unit.taskPath()));
+            List.of(
+                "bash",
+                "-c",
+                "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
+                "bash",
+                task,
+                unit.taskPath()));
     var result = shell.exec(cmd);
     if (!result.ok()) {
       throw new IOException("Failed to write task file: " + result.stderr());
@@ -172,7 +170,13 @@ public final class AgentSession {
     var cmd =
         ContainerExec.asDevUser(
             containerName,
-            List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", json, unit.sessionPath()));
+            List.of(
+                "bash",
+                "-c",
+                "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
+                "bash",
+                json,
+                unit.sessionPath()));
     var result = shell.exec(cmd);
     if (!result.ok()) {
       throw new IOException("Failed to write session metadata: " + result.stderr());

@@ -20,11 +20,11 @@ import ai.singlr.sail.common.Ids;
  * executing.
  *
  * <p>{@link #BUILD} remains the fixed identity of the ad-hoc lane — {@code sail agent start} and
- * other engineer-initiated sessions that mint no run. {@link #REVIEW} is the read-only reviewer and
- * the fix agent, which share {@code review.log} so a dispatch attempt's whole review↔fix
- * negotiation lands in one live-followable file. The review identity stays a per-container
- * singleton by design: reviews are serialized by the review pipeline's single event-bus subscriber
- * thread, so no two review or fix executions ever overlap in a container.
+ * other engineer-initiated sessions that mint no run. A review gets a <em>per-review</em> identity
+ * via {@link #forReview}: the pipeline executes each spec's review on its own virtual thread, so
+ * concurrently completed specs review concurrently, and a shared prompt or log would
+ * cross-contaminate them. The reviewer and its fix agent share the review's own {@code review.log},
+ * so one attempt's whole review↔fix negotiation still lands in one live-followable file.
  *
  * <p>The paths are the single source of truth for where an agent run lives on disk; {@link
  * AgentSession} and the watcher read them from here rather than hardcoding their own copies.
@@ -50,12 +50,10 @@ public record AgentUnit(
           DIR + "/agent-task.txt");
 
   /**
-   * The read-only reviewer and the fix agent. They share {@code review.log}, which the runner
-   * appends so a dispatch attempt's whole reviewer↔fix negotiation lands in one live-followable
-   * file (the attempt boundary resets it via {@link AgentSession#resetLog}). Review runs as a
-   * blocking foreground exec, not a systemd unit, so only its task file and log are used here.
-   * Deliberately a per-container singleton: the review pipeline's single subscriber thread
-   * serializes every review and fix execution, so this identity is never contended.
+   * The review role's template identity: {@link #fromRole} and the log endpoints use its file names
+   * to derive run-scoped review paths, and {@code sail agent log --review} falls back to its fixed
+   * log when no review exists yet. Live reviews never run here — each executes under its own {@link
+   * #forReview} identity.
    */
   public static final AgentUnit REVIEW =
       new AgentUnit(
@@ -64,6 +62,25 @@ public record AgentUnit(
           DIR + "/review.pid",
           DIR + "/review-session.json",
           DIR + "/review-prompt.txt");
+
+  /**
+   * Derives a review's own identity: prompt, log, and session files under {@code
+   * ~/.sail/runs/<reviewId>/}. The pipeline reviews concurrently completed specs on concurrent
+   * virtual threads, so each review (and its fix agent, which shares the file set) must own its
+   * prompt, log offsets, and output — a shared file would attach one spec's findings to another's
+   * review. Review runs as a blocking foreground exec, not a systemd unit, so only the task file
+   * and log are used in practice.
+   */
+  public static AgentUnit forReview(String reviewId) {
+    var id = Ids.requireUuid(reviewId);
+    var dir = runDir(id);
+    return new AgentUnit(
+        "sail-review-" + id,
+        dir + "/review.log",
+        dir + "/review.pid",
+        dir + "/review-session.json",
+        dir + "/review-prompt.txt");
+  }
 
   /**
    * Derives a dispatched run's identity at launch: unit {@code sail-agent-<runId>}, files under

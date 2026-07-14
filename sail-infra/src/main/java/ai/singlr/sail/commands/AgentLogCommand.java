@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
@@ -136,20 +137,23 @@ public final class AgentLogCommand implements Runnable {
   }
 
   /**
-   * The log file to tail. With {@code --review}, the reviewer/fix negotiation log. Otherwise the
-   * latest build run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}) — since dispatch
-   * moved off the shared {@code agent.log}, tailing the shared file would show nothing for a
-   * dispatched run. Falls back to the shared build log when no run row exists (a manual {@code sail
-   * agent start}) or the control-plane database cannot be read.
+   * The log file to tail. With {@code --review}, the latest review's own negotiation log ({@code
+   * ~/.sail/runs/<reviewId>/review.log}) — each review owns its files so concurrent pipelines never
+   * interleave, which means there is no live shared review log to follow. Otherwise the latest
+   * build run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}) — since dispatch moved off
+   * the shared {@code agent.log}, tailing the shared file would show nothing for a dispatched run.
+   * Falls back to the fixed shared path when no run or review row exists (a manual {@code sail
+   * agent start}, or a pre-upgrade review) or the control-plane database cannot be read.
    */
   private String resolveLogPath(String project, boolean review) {
-    if (review) {
-      return logPathFor(true);
-    }
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return logPathFrom(new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle()));
+      var latestRun = new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle());
+      if (review) {
+        return reviewLogPathFrom(latestRun, new ReviewStore(db));
+      }
+      return logPathFrom(latestRun);
     } catch (RuntimeException e) {
-      return logPathFor(false);
+      return logPathFor(review);
     }
   }
 
@@ -159,6 +163,18 @@ public final class AgentLogCommand implements Runnable {
         .map(RunStore.RunRow::logPath)
         .filter(Strings::isNotBlank)
         .orElseGet(() -> logPathFor(false));
+  }
+
+  /**
+   * The latest run's spec's latest review log, per-review under the review's own directory, or the
+   * fixed legacy review log when the current dispatch attempt has no review yet.
+   */
+  static String reviewLogPathFrom(Optional<RunStore.RunRow> latestRun, ReviewStore reviews) {
+    return latestRun
+        .map(RunStore.RunRow::specId)
+        .flatMap(reviews::latestReviewForSpec)
+        .map(review -> AgentUnit.forReview(review.id()).logPath())
+        .orElseGet(() -> logPathFor(true));
   }
 
   /**

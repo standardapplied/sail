@@ -233,7 +233,7 @@ class MissedStopReconcilerTest {
             reviewStore,
             p -> config,
             p -> "codex",
-            (p, a, pr) -> "[]",
+            (p, a, pr, rid) -> "[]",
             bus,
             () -> {},
             new DirectExecutorService());

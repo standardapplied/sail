@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.api;
+package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,21 +22,21 @@ class DispatchGateTest {
 
   @Test
   void noRunningRunsAllows() {
-    assertTrue(DispatchGate.decide(List.of("web"), List.of()).isEmpty());
+    assertTrue(DispatchGate.decide("target", List.of("web"), List.of()).isEmpty());
   }
 
   @Test
   void disjointRepoSetsAllow() {
     var running = List.of(running("auth", List.of("app")));
 
-    assertTrue(DispatchGate.decide(List.of("web"), running).isEmpty());
+    assertTrue(DispatchGate.decide("target", List.of("web"), running).isEmpty());
   }
 
   @Test
   void intersectingRepoSetsRefuseNamingTheBlockingRunAndOverlap() {
     var running = List.of(running("auth", List.of("app", "web")));
 
-    var conflict = DispatchGate.decide(List.of("web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", List.of("web"), running).orElseThrow();
 
     assertEquals(RUN, conflict.run().runId());
     assertEquals("auth", conflict.run().specId());
@@ -47,7 +47,7 @@ class DispatchGateTest {
   void multiRepoTargetsRefuseOnASingleSharedRepo() {
     var running = List.of(running("auth", List.of("app")));
 
-    var conflict = DispatchGate.decide(List.of("app", "web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", List.of("app", "web"), running).orElseThrow();
 
     assertEquals(List.of("app"), conflict.overlap());
   }
@@ -56,7 +56,7 @@ class DispatchGateTest {
   void anEmptyTargetRepoSetOverlapsEverything() {
     var running = List.of(running("auth", List.of("app")));
 
-    var conflict = DispatchGate.decide(List.of(), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", List.of(), running).orElseThrow();
 
     assertEquals(List.of(), conflict.overlap(), "empty means the whole container");
   }
@@ -65,7 +65,17 @@ class DispatchGateTest {
   void aRunningRunWithNoReposOverlapsEverything() {
     var running = List.of(running("auth", List.of()));
 
-    assertTrue(DispatchGate.decide(List.of("web"), running).isPresent());
+    assertTrue(DispatchGate.decide("target", List.of("web"), running).isPresent());
+  }
+
+  @Test
+  void aLiveRunOfTheTargetSpecItselfAlwaysBlocksEvenOnDisjointRepos() {
+    var running = List.of(running("auth", List.of("app")));
+
+    var conflict = DispatchGate.decide("auth", List.of("web"), running).orElseThrow();
+
+    assertEquals(RUN, conflict.run().runId());
+    assertEquals(List.of(), conflict.overlap(), "one spec, one lifecycle: no second execution");
   }
 
   @Test
@@ -76,7 +86,7 @@ class DispatchGateTest {
             new DispatchGate.RunningRun(
                 "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "auth", List.of("web")));
 
-    var conflict = DispatchGate.decide(List.of("web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", List.of("web"), running).orElseThrow();
 
     assertEquals("auth", conflict.run().specId());
   }

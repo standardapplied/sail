@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -200,10 +201,12 @@ public final class DispatchOperations {
 
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
-   * DispatchPolicy}, claim it {@code in_progress} with its resolved repos and branch persisted,
-   * publish the lifecycle events, snapshot and branch as configured, record the run row before the
-   * agent starts, launch, and arm the guardrail watcher. Throws {@link ApiException} with a
-   * structured code on every refusal or failure.
+   * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
+   * target repo set ({@link #reserveRun} — the binding concurrency gate), then claim the spec
+   * {@code in_progress} with its resolved repos and branch persisted, publish the lifecycle events,
+   * snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal fires
+   * before any mutation; a failure after the reservation marks the run failed so the reservation is
+   * released. Throws {@link ApiException} with a structured code on every refusal or failure.
    */
   public Outcome dispatch(String project, Request request, Actor actor, String localHandle) {
     var loaded = projects.loadRunning(project);
@@ -229,47 +232,32 @@ public final class DispatchOperations {
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    requireNoRepoOverlap(project, localHandle, taskSpec.repos());
-    if (resolution.restarted()) {
-      specStore.updateStatus(nextSpec.id(), SpecStatus.PENDING);
-    }
+    requireNoAdHocAgent(project);
     var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
-    specStore.updateReposAndStatus(nextSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
-    if (reviewStore != null) {
-      reviewStore.supersedeForSpec(nextSpec.id());
-    }
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
     var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
-    listener.claimed(taskSpec, task);
-    if (resolution.restarted()) {
-      publish(
-          project,
-          nextSpec.id(),
-          Event.WellKnownTypes.SPEC_RESTARTED,
-          Map.of("note", "restarted from " + resolution.previousStatus()));
-    }
-    publish(
-        project,
-        nextSpec.id(),
-        Event.WellKnownTypes.SPEC_DISPATCHED,
-        DispatchEvents.dispatchedData(branch, request.mode()));
-    var snapshot = snapshotter.snapshot(project, loaded.config());
-    if (!snapshot.isEmpty()) {
-      publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
-    }
-    var branchCreated =
-        checkoutBranch(project, loaded.config(), targetRepos, branch, resolution.restarted());
 
     if (request.dryRun()) {
+      requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
+      var prepared =
+          claimAndPrepare(
+              project,
+              loaded.config(),
+              targetRepos,
+              resolution,
+              taskSpec,
+              branch,
+              task,
+              request.mode());
       return new Dispatched(
           taskSpec,
           branch,
           agentType,
           task,
           null,
-          snapshot,
-          branchCreated,
+          prepared.snapshot(),
+          prepared.branchCreated(),
           resolution.restarted(),
           null,
           null,
@@ -279,8 +267,27 @@ public final class DispatchOperations {
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    recordRun(runId, project, nextSpec.id(), localHandle, agentType, branch, task, unit);
+    reserveRun(
+        runId,
+        project,
+        nextSpec.id(),
+        localHandle,
+        taskSpec.repos(),
+        agentType,
+        branch,
+        task,
+        unit);
     try {
+      var prepared =
+          claimAndPrepare(
+              project,
+              loaded.config(),
+              targetRepos,
+              resolution,
+              taskSpec,
+              branch,
+              task,
+              request.mode());
       var launch =
           launchAgent(
               project,
@@ -309,8 +316,8 @@ public final class DispatchOperations {
           agentType,
           task,
           runId,
-          snapshot,
-          branchCreated,
+          prepared.snapshot(),
+          prepared.branchCreated(),
           resolution.restarted(),
           status,
           background ? null : launch.exitCode(),
@@ -319,6 +326,54 @@ public final class DispatchOperations {
       failRun(runId);
       throw e;
     }
+  }
+
+  /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
+  private record PreparedClaim(String snapshot, boolean branchCreated) {}
+
+  /**
+   * The claim/branch phase, identical on the dry and live lanes: reset a restarted spec, claim it
+   * {@code in_progress} with its resolved repos and branch, supersede stale reviews, publish the
+   * lifecycle events, snapshot as configured, and check out the work branch. On the live lane this
+   * runs only after {@link #reserveRun} has won the repo reservation, so two concurrent dispatches
+   * can never both mutate spec state or race their checkouts in a shared repo.
+   */
+  private PreparedClaim claimAndPrepare(
+      String project,
+      SailYaml config,
+      List<SailYaml.Repo> targetRepos,
+      SpecResolution resolution,
+      Spec taskSpec,
+      String branch,
+      String task,
+      String mode) {
+    if (resolution.restarted()) {
+      specStore.updateStatus(taskSpec.id(), SpecStatus.PENDING);
+    }
+    specStore.updateReposAndStatus(taskSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
+    if (reviewStore != null) {
+      reviewStore.supersedeForSpec(taskSpec.id());
+    }
+    listener.claimed(taskSpec, task);
+    if (resolution.restarted()) {
+      publish(
+          project,
+          taskSpec.id(),
+          Event.WellKnownTypes.SPEC_RESTARTED,
+          Map.of("note", "restarted from " + resolution.previousStatus()));
+    }
+    publish(
+        project,
+        taskSpec.id(),
+        Event.WellKnownTypes.SPEC_DISPATCHED,
+        DispatchEvents.dispatchedData(branch, mode));
+    var snapshot = snapshotter.snapshot(project, config);
+    if (!snapshot.isEmpty()) {
+      publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
+    }
+    var branchCreated =
+        checkoutBranch(project, config, targetRepos, branch, resolution.restarted());
+    return new PreparedClaim(snapshot, branchCreated);
   }
 
   /** The server-lane snapshotter: gated on {@code agent.auto_snapshot}, at most one per 24h. */
@@ -508,7 +563,6 @@ public final class DispatchOperations {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
       session.ensureDirectory(project);
-      session.resetLog(project, AgentUnit.REVIEW);
       session.writeTaskFile(project, task, unit);
       session.writeSession(
           project,
@@ -583,38 +637,58 @@ public final class DispatchOperations {
   }
 
   /**
-   * Refuses the dispatch when a local run of this project is still {@code running} against a spec
-   * whose repos intersect the target's — the {@link DispatchGate} decision over run rows only.
-   * Disjoint repo sets dispatch concurrently; a row whose agent already died without a stop signal
-   * is healed by the missed-stop sweep within its interval, so a stale row can only ever block
-   * briefly.
+   * Refuses the dry-run dispatch when a local run of this project is still {@code running} with a
+   * reserved repo set intersecting the target's — the {@link DispatchGate} decision over run rows
+   * only. This read-only check serves the dry lane, which must not reserve; a live dispatch is
+   * gated atomically inside {@link #reserveRun} instead. A row whose agent already died without a
+   * stop signal is healed by the missed-stop sweep within its interval, so a stale row can only
+   * ever block briefly.
    */
-  private void requireNoRepoOverlap(String project, String localHandle, List<String> targetRepos) {
-    DispatchGate.decide(targetRepos, runningLocalRuns(project, localHandle))
+  private void requireNoRepoOverlap(
+      String project, String localHandle, String specId, List<String> targetRepos) {
+    DispatchGate.decide(specId, targetRepos, runningLocalRuns(project, localHandle))
         .ifPresent(
             conflict -> {
-              throw new ApiException(
-                  ErrorCode.AGENT_ALREADY_RUNNING,
-                  "Agent run "
-                      + conflict.run().runId()
-                      + " is already working spec '"
-                      + conflict.run().specId()
-                      + "' in "
-                      + (conflict.overlap().isEmpty()
-                          ? "this container"
-                          : "repo(s) " + conflict.overlap())
-                      + ".",
-                  "Wait for it to finish or stop it, or dispatch a spec targeting disjoint"
-                      + " repos.");
+              throw overlapRefusal(conflict);
             });
   }
 
+  private static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
+    return new ApiException(
+        ErrorCode.AGENT_ALREADY_RUNNING,
+        "Agent run "
+            + conflict.run().runId()
+            + " is already working spec '"
+            + conflict.run().specId()
+            + "' in "
+            + (conflict.overlap().isEmpty() ? "this container" : "repo(s) " + conflict.overlap())
+            + ".",
+        "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
+  }
+
   /**
-   * The project's runs this box is executing right now, each with its spec's resolved repos — the
-   * claim stamps resolved repos on the spec, so a running run's spec carries exactly the repos it
-   * works in. A box that keeps no run aggregate has nothing to consult and allows the dispatch. A
-   * running run whose spec vanished resolves to no repos, which the gate treats as whole-container:
-   * refusing is the safe reading of a row it cannot scope.
+   * Refuses dispatch while the container's fixed ad-hoc identity ({@code sail agent start}) has a
+   * live agent. An ad-hoc session mints no run row, so the repo reservation cannot see it, and its
+   * task may touch any repo in the container — whole-container is the only safe reading. A
+   * pre-upgrade dispatched agent also lives on the fixed identity, but its run row already blocks
+   * through the gate; this probe covers the genuinely row-less lane.
+   */
+  private void requireNoAdHocAgent(String project) {
+    var status = querySession(new AgentSession(shell), project, AgentUnit.BUILD);
+    if (status != null && status.running()) {
+      throw new ApiException(
+          ErrorCode.AGENT_ALREADY_RUNNING,
+          "An ad-hoc agent session (sail agent start) is running in this container.",
+          "Wait for it to finish or stop it with 'sail agent stop'.");
+    }
+  }
+
+  /**
+   * The project's runs this box is executing right now, each with the repo set its dispatch
+   * reserved. A box that keeps no run aggregate has nothing to consult and allows the dispatch. A
+   * run recorded before repos were persisted reads as no repos, which the gate treats as
+   * whole-container: refusing is the safe reading of a row it cannot scope, and it heals when the
+   * run finishes.
    */
   private List<DispatchGate.RunningRun> runningLocalRuns(String project, String localHandle) {
     if (runStore == null) {
@@ -623,12 +697,8 @@ public final class DispatchOperations {
     return runStore.listForProject(project).stream()
         .filter(run -> "running".equals(run.status()))
         .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
-        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), specRepos(run.specId())))
+        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
         .toList();
-  }
-
-  private List<String> specRepos(String specId) {
-    return specStore.findById(specId).map(SpecStore.SpecRow::repos).orElse(List.of());
   }
 
   private void ensureSailSetup(String project) {
@@ -645,16 +715,21 @@ public final class DispatchOperations {
   }
 
   /**
-   * Records the launched execution as a run stamped with this box's handle as its {@code node}, so
-   * the provenance guard can serve local runs and refuse foreign ones, and prunes the container's
-   * oldest run-log directories. Never fatal: a bookkeeping failure only forfeits the run's
-   * metadata, never the launch. A run store is absent only on boxes that keep no run aggregate.
+   * Atomically reserves the dispatch as a {@code running} run stamped with this box's handle and
+   * the target repo set: {@link RunStore#reserveDispatch} checks every running local run for a repo
+   * overlap and inserts the row in one {@code BEGIN IMMEDIATE} transaction, so two concurrent
+   * dispatches — even from separate processes — can never both claim the same repo. A conflict or a
+   * store failure aborts the dispatch before any spec mutation or launch: the row is what every
+   * later overlap check and provenance guard depends on, so proceeding without it is not safe. Also
+   * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
+   * boxes that keep no run aggregate, which have nothing to reserve against.
    */
-  private void recordRun(
+  private void reserveRun(
       String runId,
       String project,
       String specId,
       String node,
+      List<String> repos,
       String agentType,
       String branch,
       String task,
@@ -662,25 +737,36 @@ public final class DispatchOperations {
     if (runStore == null) {
       return;
     }
+    Optional<DispatchGate.Conflict> conflict;
     try {
-      runStore.create(
-          runId,
-          project,
-          specId,
-          node,
-          "build",
-          agentType,
-          branch,
-          task,
-          null,
-          null,
-          unit.logPath(),
-          unit.unitName());
+      conflict =
+          runStore.reserveDispatch(
+              runId,
+              project,
+              specId,
+              node,
+              repos,
+              agentType,
+              branch,
+              task,
+              unit.logPath(),
+              unit.unitName());
+    } catch (RuntimeException e) {
+      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
+    }
+    if (conflict.isPresent()) {
+      throw overlapRefusal(conflict.get());
+    }
+    pruneRuns(project);
+  }
+
+  private void pruneRuns(String project) {
+    try {
       var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
       var pruned = RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
-      System.err.println("  [api] Warning: could not record run " + runId + ": " + e.getMessage());
+      System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
     }
   }
 

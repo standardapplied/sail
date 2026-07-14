@@ -897,7 +897,8 @@ class ApiRouterTest {
             "/home/dev/.sail/runs/s1/agent.log",
             null,
             "t0",
-            "t1");
+            "t1",
+            java.util.List.of());
     var view = RunView.from(row);
     assertEquals("s1", view.id());
     assertEquals("node-a", view.node());

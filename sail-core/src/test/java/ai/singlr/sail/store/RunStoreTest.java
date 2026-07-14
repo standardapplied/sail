@@ -407,4 +407,167 @@ class RunStoreTest {
   private static java.util.Map<String, Object> theirs() {
     return moved();
   }
+
+  private java.util.Optional<DispatchGate.Conflict> reserve(
+      RunStore target, String id, String specId, String node, java.util.List<String> repos) {
+    return target.reserveDispatch(
+        id,
+        "backend",
+        specId,
+        node,
+        repos,
+        "claude-code",
+        "feat/x",
+        "do it",
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
+  }
+
+  @Test
+  void reserveDispatchPersistsTheReservedReposOnTheRunningRun() {
+    var id = DateTimeUtils.newId().toString();
+
+    var conflict = reserve(store, id, "auth", "node-a", java.util.List.of("app", "web"));
+
+    assertTrue(conflict.isEmpty());
+    var run = store.findById(id).orElseThrow();
+    assertEquals(java.util.List.of("app", "web"), run.repos());
+    assertEquals("running", run.status());
+    assertEquals("build", run.role());
+    assertEquals("sail-agent-" + id, run.unit());
+  }
+
+  @Test
+  void reservedReposSurviveReplication() {
+    var id = DateTimeUtils.newId().toString();
+    reserve(store, id, "auth", "node-a", java.util.List.of("app"));
+
+    var snapshot = store.comparableSnapshot(id);
+    assertEquals(java.util.List.of("app"), snapshot.get("repos"));
+    var adopted = DateTimeUtils.newId().toString();
+    store.applyRevision(adopted, snapshot, "1-remote");
+    assertEquals(java.util.List.of("app"), store.findById(adopted).orElseThrow().repos());
+  }
+
+  @Test
+  void reserveDispatchRefusesAnOverlapAndInsertsNothing() {
+    var first = DateTimeUtils.newId().toString();
+    reserve(store, first, "auth", "node-a", java.util.List.of("app", "web"));
+
+    var second = DateTimeUtils.newId().toString();
+    var conflict = reserve(store, second, "billing", "node-a", java.util.List.of("web", "docs"));
+
+    var blocked = conflict.orElseThrow();
+    assertEquals(first, blocked.run().runId());
+    assertEquals("auth", blocked.run().specId());
+    assertEquals(java.util.List.of("web"), blocked.overlap());
+    assertTrue(store.findById(second).isEmpty(), "a refused reservation must not insert a row");
+  }
+
+  @Test
+  void reserveDispatchAdmitsDisjointRepos() {
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+
+    var second = DateTimeUtils.newId().toString();
+    var conflict = reserve(store, second, "web-work", "node-a", java.util.List.of("web"));
+
+    assertTrue(conflict.isEmpty());
+    assertEquals("running", store.findById(second).orElseThrow().status());
+  }
+
+  @Test
+  void anEmptyRepoSetReservesTheWholeContainer() {
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of());
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("web"));
+
+    assertTrue(conflict.isPresent());
+    assertEquals(java.util.List.of(), conflict.orElseThrow().overlap());
+  }
+
+  @Test
+  void aLegacyRunningRunWithoutReposBlocksEveryReservation() {
+    newRun("backend", "auth");
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("web"));
+
+    assertTrue(conflict.isPresent(), "a row the gate cannot scope reads as whole-container");
+  }
+
+  @Test
+  void aLiveRunOfTheSameSpecBlocksItsOwnReReservationEvenOnDisjointRepos() {
+    var first = DateTimeUtils.newId().toString();
+    reserve(store, first, "auth", "node-a", java.util.List.of("app"));
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("web"));
+
+    assertEquals(first, conflict.orElseThrow().run().runId());
+  }
+
+  @Test
+  void aFinishedRunNeverBlocksAReservation() {
+    var first = DateTimeUtils.newId().toString();
+    reserve(store, first, "auth", "node-a", java.util.List.of("app"));
+    store.complete(first, "stopped", 0);
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("app"));
+
+    assertTrue(conflict.isEmpty());
+  }
+
+  @Test
+  void aForeignNodesRunNeverBlocksAReservation() {
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "raj", java.util.List.of("app"));
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("app"));
+
+    assertTrue(conflict.isEmpty());
+  }
+
+  @Test
+  void concurrentReservationsAcrossConnectionsAdmitExactlyOne() throws Exception {
+    var path = tempDir.resolve("test.db");
+    var contenders = 4;
+    var start = new java.util.concurrent.CountDownLatch(1);
+    var admitted = new java.util.concurrent.atomic.AtomicInteger();
+    var threads = new java.util.ArrayList<Thread>();
+    for (var i = 0; i < contenders; i++) {
+      var spec = "spec-" + i;
+      threads.add(
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try (var connection = Sqlite.open(path)) {
+                      var contender = new RunStore(connection);
+                      start.await();
+                      var id = DateTimeUtils.newId().toString();
+                      if (reserve(contender, id, spec, "node-a", java.util.List.of("app"))
+                          .isEmpty()) {
+                        admitted.incrementAndGet();
+                      }
+                    } catch (InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                    }
+                  }));
+    }
+    start.countDown();
+    for (var thread : threads) {
+      thread.join();
+    }
+
+    assertEquals(
+        1,
+        admitted.get(),
+        "the BEGIN IMMEDIATE reservation must serialize dispatches across connections");
+  }
 }

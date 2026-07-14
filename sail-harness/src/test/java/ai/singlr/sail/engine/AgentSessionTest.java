@@ -302,14 +302,31 @@ class AgentSessionTest {
   }
 
   @Test
-  void resetLogTruncatesTheGivenRolesLog() throws Exception {
+  void writeTaskFileCreatesTheRunScopedParentDirectoryBeforeWriting() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
 
-    new AgentSession(shell).resetLog("acme", AgentUnit.REVIEW);
+    new AgentSession(shell).writeTaskFile("acme", "do it", unit);
 
     var cmd = shell.invocations().getFirst();
-    assertTrue(cmd.contains(": > "), "reset truncates the log to empty");
-    assertTrue(cmd.contains("/home/dev/.sail/review.log"), "resets the review negotiation log");
+    assertTrue(
+        cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"),
+        "the run directory must exist before the redirect: dispatch stages the task before the"
+            + " launch script's own mkdir runs");
+    assertTrue(cmd.contains(unit.taskPath()));
+  }
+
+  @Test
+  void writeSessionCreatesTheRunScopedParentDirectoryBeforeWriting() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
+
+    new AgentSession(shell)
+        .writeSession("acme", "do it", "b1", "auth", "claude-code", "r1", List.of("app"), unit);
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"));
+    assertTrue(cmd.contains(unit.sessionPath()));
   }
 
   @Test

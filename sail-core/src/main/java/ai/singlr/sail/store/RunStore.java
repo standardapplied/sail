@@ -49,6 +49,11 @@ public final class RunStore implements ConflictResolver {
    * the run actually owns instead of re-deriving a name that could drift across releases. Blank on
    * runs launched before units were run-scoped; consumers that cannot know that unit's liveness do
    * nothing rather than guess.
+   *
+   * <p>{@code repos} is the repo set the dispatch reserved at launch — the run's own claim, not a
+   * lookup through its spec, so the overlap gate reads a value that existed before the spec was
+   * even claimed. Empty means the run works the whole container; a run recorded before repos were
+   * persisted also reads as empty, which the gate treats identically (the safe reading).
    */
   public record RunRow(
       String id,
@@ -66,11 +71,12 @@ public final class RunStore implements ConflictResolver {
       String logPath,
       String unit,
       String startedAt,
-      String completedAt) {}
+      String completedAt,
+      List<String> repos) {}
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
-          + " exit_code, log_path, unit, started_at, completed_at";
+          + " exit_code, log_path, unit, started_at, completed_at, repos";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -130,6 +136,70 @@ public final class RunStore implements ConflictResolver {
           recordRevision(id, "local", false);
         });
     return id;
+  }
+
+  /**
+   * Atomically reserves a dispatch: within one {@code BEGIN IMMEDIATE} transaction, checks every
+   * running local run of the project for a repo overlap or a same-spec run and inserts the new
+   * {@code running} run — with its reserved repos persisted — only when none conflicts. Taking the
+   * write lock up front serializes concurrent dispatches, including a CLI dispatch in another
+   * process against the same database file, so the second reservation always observes the first's
+   * row; a check-then-insert split across transactions could admit both into the same repo. Returns
+   * the blocking conflict, or empty when the run was reserved. Any database failure propagates — a
+   * dispatch must never launch without the row every later overlap check depends on.
+   */
+  public Optional<DispatchGate.Conflict> reserveDispatch(
+      String id,
+      String project,
+      String specId,
+      String node,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit) {
+    var reserved = Objects.requireNonNullElse(repos, List.<String>of());
+    return db.immediateTransaction(
+        () -> {
+          var running =
+              db.query(
+                  "SELECT "
+                      + COLUMNS
+                      + " FROM runs WHERE project = ? AND status = 'running'"
+                      + " AND IFNULL(node, '') = ?",
+                  this::mapRow,
+                  project,
+                  ownerKey(node));
+          var conflict =
+              DispatchGate.decide(
+                  specId,
+                  reserved,
+                  running.stream()
+                      .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
+                      .toList());
+          if (conflict.isPresent()) {
+            return conflict;
+          }
+          db.execute(
+              """
+              INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, status,
+                  started_at, log_path, unit, repos)
+              VALUES (?, ?, ?, ?, 'build', ?, ?, ?, 'running', ?, ?, ?, ?)""",
+              id,
+              project,
+              specId,
+              node,
+              agent,
+              branch,
+              task,
+              DateTimeUtils.now().toString(),
+              logPath,
+              unit,
+              YamlUtil.dumpJson(reserved));
+          recordRevision(id, "local", false);
+          return Optional.empty();
+        });
   }
 
   public Optional<RunRow> findById(String id) {
@@ -454,14 +524,15 @@ public final class RunStore implements ConflictResolver {
     db.execute(
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
-            status, exit_code, log_path, unit, started_at, completed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, exit_code, log_path, unit, started_at, completed_at, repos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
             watcher_pid = excluded.watcher_pid, status = excluded.status,
             exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
-            started_at = excluded.started_at, completed_at = excluded.completed_at""",
+            started_at = excluded.started_at, completed_at = excluded.completed_at,
+            repos = excluded.repos""",
         row.id(),
         row.project(),
         row.specId(),
@@ -477,7 +548,8 @@ public final class RunStore implements ConflictResolver {
         row.logPath(),
         row.unit(),
         Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
-        row.completedAt());
+        row.completedAt(),
+        YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())));
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -498,6 +570,7 @@ public final class RunStore implements ConflictResolver {
     map.put("unit", run.unit());
     map.put("started_at", run.startedAt());
     map.put("completed_at", run.completedAt());
+    map.put("repos", Objects.requireNonNullElse(run.repos(), List.of()));
     return map;
   }
 
@@ -554,12 +627,19 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "log_path"),
         text(snapshot, "unit"),
         text(snapshot, "started_at"),
-        text(snapshot, "completed_at"));
+        text(snapshot, "completed_at"),
+        stringList(snapshot, "repos"));
   }
 
   private static String text(Map<String, Object> map, String key) {
     var value = map.get(key);
     return value == null ? null : value.toString();
+  }
+
+  private static List<String> stringList(Map<String, Object> map, String key) {
+    return map.get(key) instanceof List<?> list
+        ? list.stream().map(String::valueOf).toList()
+        : List.of();
   }
 
   private static Integer integer(Map<String, Object> map, String key) {
@@ -595,6 +675,7 @@ public final class RunStore implements ConflictResolver {
         row.text(12),
         row.text(13),
         row.text(14),
-        row.text(15));
+        row.text(15),
+        YamlUtil.parseStringList(row.text(16)));
   }
 }

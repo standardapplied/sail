@@ -86,6 +86,31 @@ class AgentUnitTest {
   void runScopedIdentitiesRejectANonCanonicalRunId() {
     assertThrows(IllegalArgumentException.class, () -> AgentUnit.forRun("../escape"));
     assertThrows(IllegalArgumentException.class, () -> AgentUnit.recorded("$(rm -rf)", "unit"));
+    assertThrows(IllegalArgumentException.class, () -> AgentUnit.forReview("../escape"));
+  }
+
+  @Test
+  void forReviewDerivesTheWholeIdentityUnderTheReviewsOwnDir() {
+    var reviewId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+    var unit = AgentUnit.forReview(reviewId);
+
+    assertEquals("sail-review-" + reviewId, unit.unitName());
+    assertEquals("/home/dev/.sail/runs/" + reviewId + "/review.log", unit.logPath());
+    assertEquals("/home/dev/.sail/runs/" + reviewId + "/review-prompt.txt", unit.taskPath());
+    assertEquals(
+        unit.logPath(),
+        AgentUnit.REVIEW.runLogPath(reviewId),
+        "the review-role log endpoints resolve exactly the file the review writes");
+  }
+
+  @Test
+  void twoReviewsGetFullyDisjointIdentities() {
+    var a = AgentUnit.forReview("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    var b = AgentUnit.forReview("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+
+    assertNotEquals(a.logPath(), b.logPath());
+    assertNotEquals(a.taskPath(), b.taskPath());
   }
 
   @Test

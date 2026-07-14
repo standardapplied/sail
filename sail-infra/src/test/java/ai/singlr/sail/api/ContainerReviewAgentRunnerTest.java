@@ -17,6 +17,10 @@ import org.junit.jupiter.api.Test;
 
 class ContainerReviewAgentRunnerTest {
 
+  private static final String REVIEW_ID = "0197a2f0-0000-7000-8000-0000000000aa";
+  private static final String OTHER_REVIEW_ID = "0197a2f0-0000-7000-8000-0000000000bb";
+  private static final String REVIEW_DIR = "/home/dev/.sail/runs/" + REVIEW_ID;
+
   private static ContainerReviewAgentRunner runner(ShellExec shell) {
     return new ContainerReviewAgentRunner(shell, new AgentSession(shell));
   }
@@ -27,28 +31,55 @@ class ContainerReviewAgentRunnerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("tail -c", "{\"type\":\"result\",\"result\":\"FINDINGS\"}");
 
-    assertEquals("FINDINGS", runner(shell).run("acme", "codex", "review please"));
+    assertEquals("FINDINGS", runner(shell).run("acme", "codex", "review please", REVIEW_ID));
   }
 
   @Test
-  void runsTheStreamingAgentCleanAndAppendsToReviewLog() throws Exception {
+  void runsTheStreamingAgentCleanAndAppendsToItsOwnReviewLog() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
 
-    runner(shell).run("acme", "claude-code", "p");
+    runner(shell).run("acme", "claude-code", "p", REVIEW_ID);
 
     var exec =
         shell.invocations().stream()
-            .filter(c -> c.contains(">> /home/dev/.sail/review.log"))
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
             .findFirst()
-            .orElseThrow(() -> new AssertionError("the agent must stream to review.log"));
+            .orElseThrow(() -> new AssertionError("the agent must stream to its review's own log"));
     assertTrue(exec.contains("stream-json"), "the reviewer streams so review.log fills live");
     assertTrue(exec.contains("cd /home/dev/workspace"), "runs in the workspace to read the diff");
-    assertTrue(exec.contains("review-prompt.txt"), "prompt staged to the review task file");
+    assertTrue(
+        exec.contains(REVIEW_DIR + "/review-prompt.txt"),
+        "prompt staged to the review's own task file");
     assertFalse(exec.contains("--settings"), "reviewer loads no hooks");
     assertFalse(
         exec.contains("SAIL_SPEC_ID"), "reviewer runs without a spec id, so it can't recurse");
     assertFalse(
         exec.contains("systemd-run"), "review blocks; it needs no detached unit or user bus");
+  }
+
+  @Test
+  void concurrentReviewsNeverShareAPromptOrLogPath() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
+
+    runner(shell).run("acme", "codex", "review a", REVIEW_ID);
+    runner(shell).run("acme", "codex", "review b", OTHER_REVIEW_ID);
+
+    var joined = String.join("\n", shell.invocations());
+    assertTrue(joined.contains(REVIEW_DIR + "/review.log"));
+    assertTrue(joined.contains("/home/dev/.sail/runs/" + OTHER_REVIEW_ID + "/review.log"));
+    assertFalse(
+        joined.contains("/home/dev/.sail/review.log"),
+        "no invocation may touch the fixed shared review log");
+  }
+
+  @Test
+  void rejectsAForgedReviewIdBeforeTouchingAnyFile() {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runner(shell).run("acme", "codex", "p", "../../etc/passwd"));
+    assertEquals(0, shell.invocations().size());
   }
 
   @Test
@@ -60,7 +91,7 @@ class ContainerReviewAgentRunnerTest {
 
     assertEquals(
         "CURRENT",
-        runner(shell).run("acme", "codex", "re-review"),
+        runner(shell).run("acme", "codex", "re-review", REVIEW_ID),
         "reads from the byte after the accumulated negotiation, not the whole appended log");
   }
 
@@ -68,9 +99,10 @@ class ContainerReviewAgentRunnerTest {
   void throwsWhenTheReviewAgentExitsNonZero() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onFail(">> /home/dev/.sail/review.log", "boom");
+            .onFail(">> " + REVIEW_DIR + "/review.log", "boom");
 
-    var ex = assertThrows(Exception.class, () -> runner(shell).run("acme", "codex", "p"));
+    var ex =
+        assertThrows(Exception.class, () -> runner(shell).run("acme", "codex", "p", REVIEW_ID));
     assertTrue(ex.getMessage().contains("boom"), ex.getMessage());
   }
 
@@ -79,6 +111,6 @@ class ContainerReviewAgentRunnerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("tail -c", "gone");
 
-    assertEquals("", runner(shell).run("acme", "codex", "p"));
+    assertEquals("", runner(shell).run("acme", "codex", "p", REVIEW_ID));
   }
 }
