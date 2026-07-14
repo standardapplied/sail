@@ -24,10 +24,11 @@ import java.util.concurrent.TimeoutException;
  *       -f} chain; if any is missing — or the {@code spec} script still references a stale socket
  *       path after the socket moved off {@code /run}, or {@code claude-settings.json} or the codex
  *       {@code hooks.json} predates the tool-progress hooks or the stop gate, or {@code
- *       sail-event.sh} predates the reason argument — the installers re-run and rewrite them. The
- *       content checks matter because the files are install-once: without them, a container
- *       provisioned before the hooks existed would keep a settings file the stall watcher gets no
- *       progress from, and its agents die at {@code max_idle}.
+ *       sail-event.sh} predates the reason argument, or {@code sail-stop-gate} predates the
+ *       run-scoped session file — the installers re-run and rewrite them. The content checks matter
+ *       because the files are install-once: without them, a container provisioned before the hooks
+ *       existed would keep a settings file the stall watcher gets no progress from, and its agents
+ *       die at {@code max_idle}.
  * </ol>
  *
  * Designed for the dispatch hot path: ensureEventSocket is one idempotent shell call, the
@@ -88,6 +89,10 @@ public final class ContainerSailSetup {
                         + " "
                         + SailEventHelper.SCRIPT_PATH
                         + " && test -f "
+                        + SailStopGate.SCRIPT_PATH
+                        + " && grep -qsF "
+                        + SailStopGate.RUN_SESSION_MARKER
+                        + " "
                         + SailStopGate.SCRIPT_PATH
                         + " && test -f "
                         + SpecCliHelper.SCRIPT_PATH

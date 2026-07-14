@@ -428,16 +428,209 @@ class SailOperationsTest {
   @Test
   void dispatchRejectsRunningAgent() throws Exception {
     var operations =
-        operations(
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            store -> {
+              seedSpec(store, "busy", "Busy spec", "in_progress", List.of(), "Do busy");
+              seedSpec(store, "auth", "Add auth", "pending", List.of(), "Do auth");
+            },
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "busy",
+                    LOCAL_HANDLE,
+                    "build",
+                    "claude-code",
+                    "feat/busy",
+                    "task",
+                    123,
+                    null,
+                    RUN_LOG,
+                    "sail-agent-" + R1));
+
+    var error = dispatch(operations, "acme", request("auth"));
+
+    assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
+    assertTrue(fullError(error).contains(R1), fullError(error));
+    assertTrue(fullError(error).contains("busy"), fullError(error));
+  }
+
+  @Test
+  void aRunningAgentOnADisjointRepoDoesNotBlockDispatch() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStore(
+            multiRepoYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
                 .on("kill -0 123", "")
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}"));
+                .on(
+                    "cat /home/dev/.sail/agent-session.json",
+                    "{\"task\": \"work\", \"spec_id\": \"auth\"}"),
+            store -> {
+              stores[0] = store;
+              seedAuthBillingSetup(store);
+              store.updateReposAndStatus("auth", List.of("app"), SpecStatus.IN_PROGRESS, "b1");
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            });
 
-    var error = dispatch(operations, "acme", request());
+    var result =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", true, List.of("web")));
+
+    assertEquals(true, get(result, "dispatched"));
+    assertEquals(List.of("web"), stores[0].findById("web-work").orElseThrow().repos());
+  }
+
+  @Test
+  void aRecordedRunningRunOnADisjointRepoDoesNotBlockDispatch() throws Exception {
+    var stores = new SpecStore[1];
+    var operations =
+        operationsWithStores(
+            multiRepoYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            store -> {
+              stores[0] = store;
+              seedAuthBillingSetup(store);
+              store.updateReposAndStatus("auth", List.of("app"), SpecStatus.IN_PROGRESS, "b1");
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            },
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    LOCAL_HANDLE,
+                    "build",
+                    "claude-code",
+                    "b1",
+                    "task",
+                    123,
+                    null,
+                    RUN_LOG,
+                    "sail-agent-" + R1));
+
+    var result =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", true, List.of("web")));
+
+    assertEquals(true, get(result, "dispatched"));
+    assertEquals(List.of("web"), stores[0].findById("web-work").orElseThrow().repos());
+  }
+
+  @Test
+  void aRecordedRunningRunOnAnOverlappingRepoRefusesNamingSpecRunAndRepos() throws Exception {
+    var operations =
+        operationsWithStores(
+            multiRepoYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            store -> {
+              seedAuthBillingSetup(store);
+              store.updateReposAndStatus(
+                  "auth", List.of("app", "web"), SpecStatus.IN_PROGRESS, "b1");
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            },
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    LOCAL_HANDLE,
+                    "build",
+                    "claude-code",
+                    "b1",
+                    "task",
+                    123,
+                    null,
+                    RUN_LOG,
+                    "sail-agent-" + R1));
+
+    var error =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", true, List.of("web")));
 
     assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
+    assertTrue(fullError(error).contains("auth"), fullError(error));
+    assertTrue(fullError(error).contains(R1), fullError(error));
+    assertTrue(fullError(error).contains("web"), fullError(error));
+  }
+
+  @Test
+  void aForeignNodesRunningRunNeverBlocksDispatchHere() throws Exception {
+    var operations =
+        operationsWithStores(
+            multiRepoYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            store -> {
+              seedAuthBillingSetup(store);
+              store.updateReposAndStatus("auth", List.of("web"), SpecStatus.IN_PROGRESS, "b1");
+              seedSpec(store, "web-work", "Web work", "pending", List.of(), "Do web");
+            },
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    "raj",
+                    "build",
+                    "claude-code",
+                    "b1",
+                    "task",
+                    123,
+                    null,
+                    RUN_LOG,
+                    "sail-agent-" + R1));
+
+    var result =
+        dispatch(
+            operations,
+            "acme",
+            new DispatchRequest("web-work", "background", true, List.of("web")));
+
+    assertEquals(true, get(result, "dispatched"));
+  }
+
+  @Test
+  void aFinishedRunNeverBlocksDispatch() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            null,
+            SailOperationsTest::seedAuthBillingSetup,
+            runs -> {
+              runs.create(
+                  R1,
+                  "acme",
+                  "setup",
+                  LOCAL_HANDLE,
+                  "build",
+                  "claude-code",
+                  "b0",
+                  "task",
+                  123,
+                  null,
+                  RUN_LOG,
+                  "sail-agent-" + R1);
+              runs.complete(R1, "stopped", 0);
+            });
+
+    var result = dispatch(operations, "acme", request("auth", "background", true));
+
+    assertEquals(true, get(result, "dispatched"));
   }
 
   @Test
@@ -548,7 +741,7 @@ class SailOperationsTest {
   void agentEndpointRejectsMissingProject() throws Exception {
     var operations = operations(shell().on("incus list ^acme$", EMPTY_JSON));
 
-    var error = operations.agentStatus("acme");
+    var error = operations.agentStatus("acme", LOCAL_HANDLE);
 
     assertError(ErrorCode.PROJECT_NOT_CREATED, error);
   }
@@ -558,7 +751,7 @@ class SailOperationsTest {
     var operations =
         operations(shell().on("incus list ^acme$", new ShellExec.Result(1, "", "incus down")));
 
-    var error = operations.agentStatus("acme");
+    var error = operations.agentStatus("acme", LOCAL_HANDLE);
 
     assertError(ErrorCode.CONTAINER_ERROR, error);
   }
@@ -571,7 +764,7 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
 
-    var result = operations.agentStatus("acme");
+    var result = operations.agentStatus("acme", LOCAL_HANDLE);
 
     assertEquals(false, get(result, "agent_running"));
   }
@@ -588,7 +781,7 @@ class SailOperationsTest {
                     "cat /home/dev/.sail/agent-session.json",
                     "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}"));
 
-    var result = operations.agentStatus("acme");
+    var result = operations.agentStatus("acme", LOCAL_HANDLE);
 
     assertEquals(true, get(result, "agent_running"));
     assertEquals(123, get(result, "pid"));
@@ -603,7 +796,7 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .throwOn("cat /home/dev/.sail/agent.pid", new IOException("denied")));
 
-    var error = operations.agentStatus("acme");
+    var error = operations.agentStatus("acme", LOCAL_HANDLE);
 
     assertError(ErrorCode.AGENT_STATUS_FAILED, error);
   }
@@ -903,6 +1096,136 @@ class SailOperationsTest {
   }
 
   @Test
+  void stopRunStopsOnlyItsOwnRunsUnit() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("runs/" + R1 + "/agent.pid", "123")
+            .on("kill -0 123", "");
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell,
+            null,
+            s2 -> {},
+            runs -> {
+              runs.create(
+                  R1,
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/auth",
+                  "do it",
+                  123,
+                  null,
+                  RUN_LOG,
+                  "sail-agent-" + R1);
+              runs.create(
+                  R2,
+                  "acme",
+                  "billing",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/billing",
+                  "do it",
+                  456,
+                  null,
+                  R2_LOG,
+                  "sail-agent-" + R2);
+            });
+
+    var result = operations.stopRun(R1, "node-a", ADMIN);
+
+    assertEquals(true, get(result, "stopped"));
+    assertTrue(
+        shell.invocations().stream().anyMatch(cmd -> cmd.contains("runs/" + R1 + "/agent.pid")),
+        "the stop reads the run's own pid file");
+    assertTrue(
+        shell.invocations().stream().noneMatch(cmd -> cmd.contains(R2)),
+        "the concurrent run's unit and files are untouched");
+    assertTrue(
+        shell.invocations().stream().noneMatch(cmd -> cmd.contains("kill 456")),
+        "the concurrent run's agent is never signalled");
+  }
+
+  @Test
+  void agentStatusListsEveryLocalRunningRunProbedOnItsOwnUnit() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("runs/" + R1 + "/agent.pid", "123")
+            .on("kill -0 123", "")
+            .on("runs/" + R2 + "/agent.pid", "456")
+            .on("kill -0 456", new ShellExec.Result(1, "", "gone"));
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell,
+            null,
+            s2 -> {},
+            runs -> {
+              runs.create(
+                  R1,
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/auth",
+                  "do it",
+                  123,
+                  null,
+                  RUN_LOG,
+                  "sail-agent-" + R1);
+              runs.create(
+                  R2,
+                  "acme",
+                  "billing",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  "feat/billing",
+                  "do it",
+                  456,
+                  null,
+                  R2_LOG,
+                  "sail-agent-" + R2);
+            });
+
+    var result = operations.agentStatus("acme", "node-a");
+
+    assertEquals(true, get(result, "agent_running"));
+    var runs = (List<?>) get(result, "runs");
+    assertEquals(2, runs.size(), "every local running run is listed");
+    var encoded = ApiJson.withSchema(result.orThrow()).toString();
+    assertTrue(encoded.contains(R1) && encoded.contains(R2), encoded);
+  }
+
+  @Test
+  void agentStatusFallsBackToTheAdHocSessionWhenNoRunIsRunning() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("kill -0 123", "")
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}"),
+            null,
+            s2 -> {},
+            runs -> {});
+
+    var result = operations.agentStatus("acme", "node-a");
+
+    assertEquals(true, get(result, "agent_running"));
+    assertEquals("ad hoc", get(result, "task"));
+    assertEquals(0, ((List<?>) get(result, "runs")).size());
+  }
+
+  @Test
   void dispatchLaunchesBackgroundAgent() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var operations =
@@ -910,9 +1233,9 @@ class SailOperationsTest {
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "4242")
+                .on("agent.pid", "4242")
                 .on("kill -0 4242", new ShellExec.Result(1, "", "missing"))
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on("agent-session.json", "{\"task\": \"work\"}")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("mkdir -p /home/dev/.sail", "")
@@ -985,9 +1308,9 @@ class SailOperationsTest {
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
-                .on("kill -0 123", new ShellExec.Result(1, "", "missing"))
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on("agent.pid", "123")
+                .on("kill -0 123", "")
+                .on("agent-session.json", "{\"task\": \"work\"}")
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on("mkdir -p /home/dev/.sail", "")
@@ -1251,10 +1574,9 @@ class SailOperationsTest {
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "123")
-            .onSequence(
-                "kill -0 123", new ShellExec.Result(1, "", ""), new ShellExec.Result(0, "", ""))
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+            .on("agent.pid", "123")
+            .on("kill -0 123", "")
+            .on("agent-session.json", "{\"task\": \"work\"}")
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("-- mkdir -p /home/dev/.sail", "")
@@ -1293,6 +1615,26 @@ class SailOperationsTest {
     }
   }
 
+  private static RunStore.RunRow runRow(String runId, String unit) {
+    return new RunStore.RunRow(
+        runId,
+        "acme",
+        "auth",
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/auth",
+        "do it",
+        123,
+        null,
+        "running",
+        null,
+        "/home/dev/.sail/runs/" + runId + "/agent.log",
+        unit,
+        "t0",
+        null);
+  }
+
   @Test
   void relaunchWatcherLaunchesAUnitAndNeverFallsBackToAPlainProcess() throws Exception {
     var operations =
@@ -1305,9 +1647,9 @@ class SailOperationsTest {
               throw new IOException("relaunch must never use the process fallback");
             });
 
-    var unit = operations.relaunchWatcher("acme").orElseThrow();
+    var unit = operations.relaunchWatcher(runRow(R1, "sail-agent-" + R1)).orElseThrow();
 
-    assertEquals(new WatcherSpawner.Unit("sail-watch-acme", "user", false), unit);
+    assertEquals(new WatcherSpawner.Unit("sail-watch-" + R1, "user", false), unit);
   }
 
   @Test
@@ -1318,7 +1660,7 @@ class SailOperationsTest {
             shell().on("incus list ^acme$", RUNNING_JSON),
             (command, logPath) -> 4242L);
 
-    assertTrue(operations.relaunchWatcher("acme").isEmpty());
+    assertTrue(operations.relaunchWatcher(runRow(R1, "sail-agent-" + R1)).isEmpty());
   }
 
   @Test
@@ -1335,7 +1677,7 @@ class SailOperationsTest {
                 .on("systemd-run --user", new ShellExec.Result(0, "", "")),
             (command, logPath) -> 4242L);
 
-    assertTrue(operations.relaunchWatcher("acme").isEmpty());
+    assertTrue(operations.relaunchWatcher(runRow(R1, "sail-agent-" + R1)).isEmpty());
   }
 
   @Test
@@ -1993,12 +2335,9 @@ class SailOperationsTest {
       var shell =
           shell()
               .on("incus list ^acme$", RUNNING_JSON)
-              .onSequence(
-                  "cat /home/dev/.sail/agent.pid",
-                  new ShellExec.Result(1, "", "missing"),
-                  new ShellExec.Result(0, "123", ""))
+              .on("agent.pid", "123")
               .on("kill -0 123", "")
-              .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+              .on("agent-session.json", "{\"task\": \"work\"}")
               .on("mkdir -p /home/dev/workspace/specs", "")
               .on("printf '%s'", "")
               .on("mkdir -p /home/dev/.sail", "")

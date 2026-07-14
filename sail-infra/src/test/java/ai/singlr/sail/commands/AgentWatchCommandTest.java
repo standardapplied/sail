@@ -134,6 +134,46 @@ class AgentWatchCommandTest {
   }
 
   @Test
+  void anotherRunsHeartbeatNeverResetsThisRunsStallTimer() {
+    var mine = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    var other = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    var otherEvent =
+        Event.of(
+            "acme",
+            "auth",
+            Event.WellKnownTypes.AGENT_TOOL_STARTED,
+            "claude-code",
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, other));
+    var myEvent =
+        Event.of(
+            "acme",
+            "auth",
+            Event.WellKnownTypes.AGENT_TOOL_STARTED,
+            "claude-code",
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, mine));
+
+    assertFalse(AgentWatchCommand.matchesRun(otherEvent, mine));
+    assertTrue(AgentWatchCommand.matchesRun(myEvent, mine));
+  }
+
+  @Test
+  void anUnstampedEventNeverResetsARunScopedStallTimer() {
+    var event = sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED);
+
+    assertFalse(AgentWatchCommand.matchesRun(event, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+  }
+
+  @Test
+  void aProjectScopedWatcherAcceptsEveryHeartbeat() {
+    assertTrue(
+        AgentWatchCommand.matchesRun(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED), null));
+    assertTrue(
+        AgentWatchCommand.matchesRun(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED), ""));
+  }
+
+  @Test
   void toolProgressEventsTheWatcherResetsOnAreActuallyEmittedByTheHookConfig() {
     var hookJson = ai.singlr.sail.engine.ClaudeCodeHookConfig.render();
     assertTrue(

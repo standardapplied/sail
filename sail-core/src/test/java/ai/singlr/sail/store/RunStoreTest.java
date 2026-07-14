@@ -74,6 +74,39 @@ class RunStoreTest {
   }
 
   @Test
+  void createRecordsTheLaunchedUnitAndItSurvivesReplication() {
+    var id = DateTimeUtils.newId().toString();
+    store.create(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/x",
+        "do it",
+        1234,
+        null,
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("sail-agent-" + id, run.unit());
+    var snapshot = store.comparableSnapshot(id);
+    assertEquals("sail-agent-" + id, snapshot.get("unit"), "the unit replicates with the run");
+    var adopted = DateTimeUtils.newId().toString();
+    store.applyRevision(adopted, snapshot, "1-remote");
+    assertEquals("sail-agent-" + id, store.findById(adopted).orElseThrow().unit());
+  }
+
+  @Test
+  void aRunCreatedWithoutAUnitReadsBlank() {
+    var id = newRun("backend", "auth");
+
+    assertNull(store.findById(id).orElseThrow().unit(), "the pre-upgrade shape stays observable");
+  }
+
+  @Test
   void createWithNullOptionalFields() {
     var id =
         store.create(

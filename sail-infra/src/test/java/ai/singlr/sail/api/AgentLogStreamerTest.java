@@ -52,6 +52,7 @@ class AgentLogStreamerTest {
         "running",
         null,
         logPath,
+        null,
         "t0",
         null);
   }

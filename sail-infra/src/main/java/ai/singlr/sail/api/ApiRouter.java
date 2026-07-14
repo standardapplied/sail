@@ -432,7 +432,7 @@ public final class ApiRouter implements HttpHandler {
   private ApiResponse routeAgent(RouteRequest request, String project) {
     if (request.size() == 4) {
       requireMethod(request, GET);
-      return ApiResponse.from(operations.agentStatus(project));
+      return ApiResponse.from(operations.agentStatus(project, nodeHandle.get()));
     }
     if (request.size() != 5) {
       throw methodNotAllowed();

@@ -33,6 +33,7 @@ class MissedStopsTest {
         status,
         exitCode,
         null,
+        "sail-agent-run",
         startedAt,
         null);
   }

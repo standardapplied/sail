@@ -92,7 +92,7 @@ public final class AgentStatusCommand implements Runnable {
       var projectName = container.name();
       AgentSession.SessionInfo info = null;
       try {
-        info = agentSession.queryStatus(projectName);
+        info = RunScopedSessions.resolve(shell, projectName).info();
       } catch (Exception ignored) {
       }
 
@@ -171,8 +171,7 @@ public final class AgentStatusCommand implements Runnable {
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var agentSession = new AgentSession(shell);
-    var info = agentSession.queryStatus(name);
+    var info = RunScopedSessions.resolve(shell, name).info();
 
     SailYaml config = null;
     var singYamlPath = SailPaths.resolveSailYaml(name, file);

@@ -335,11 +335,13 @@ public final class AgentSession {
   }
 
   /**
-   * As the other overload, redirecting the agent's stdout/stderr to {@code logPath} — a run-scoped
-   * {@code ~/.sail/runs/<runId>/agent.log} so consecutive dispatches never clobber or interleave
-   * one shared file and a log address names exactly one execution. The log's parent directory is
-   * created before the redirect. {@code runId} flows in as {@code SAIL_RUN_ID} so the agent's hooks
-   * and the watcher can address terminal events at the exact run; blank for an ad-hoc launch.
+   * As the other overload, launching under the run's own identity: unit {@code sail-agent-<runId>},
+   * stdout/stderr redirected to {@code logPath} ({@code ~/.sail/runs/<runId>/agent.log}), and
+   * pid/task files under the run directory — so concurrent dispatches never collide on a unit name
+   * or clobber a shared file, and a log address names exactly one execution. The log's parent
+   * directory is created before the redirect. {@code runId} flows in as {@code SAIL_RUN_ID} so the
+   * agent's hooks and the watcher can address terminal events at the exact run; blank means an
+   * ad-hoc launch on the fixed {@link AgentUnit#BUILD} identity.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -355,12 +357,14 @@ public final class AgentSession {
       String runId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
+    var effectiveRunId = Objects.requireNonNullElse(runId, "");
+    var unit = effectiveRunId.isBlank() ? AgentUnit.BUILD : AgentUnit.forRun(effectiveRunId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath, true);
+        cli.headlessCommand(
+            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
-    var effectiveRunId = Objects.requireNonNullElse(runId, "");
     var script =
         """
         mkdir -p "$1"
@@ -381,8 +385,8 @@ public final class AgentSession {
         systemctl --user status @SERVICE@ --no-pager || true
         exit 1
         """
-            .replace("@SERVICE@", AgentUnit.BUILD.service())
-            .replace("@UNIT@", AgentUnit.BUILD.unitName());
+            .replace("@SERVICE@", unit.service())
+            .replace("@UNIT@", unit.unitName());
     return ContainerExec.asDevUser(
         containerName,
         List.of(
@@ -394,7 +398,7 @@ public final class AgentSession {
             workDir,
             agentCmd,
             logPath,
-            AgentUnit.BUILD.pidPath(),
+            unit.pidPath(),
             effectiveSpec,
             effectiveAgent,
             effectiveRunId));
@@ -485,12 +489,13 @@ public final class AgentSession {
       String runId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
+    var effectiveRunId = Objects.requireNonNullElse(runId, "");
+    var unit = effectiveRunId.isBlank() ? AgentUnit.BUILD : AgentUnit.forRun(effectiveRunId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
+        cli.headlessCommand(unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
-    var effectiveRunId = Objects.requireNonNullElse(runId, "");
     var script =
         "mkdir -p \"$(dirname \"$5\")\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" bash -l -c \"$2\" > \"$5\" 2>&1";

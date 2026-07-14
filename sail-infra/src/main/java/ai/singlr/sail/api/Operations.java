@@ -34,7 +34,12 @@ public interface Operations {
   Result<DispatchResponse> dispatch(
       String project, DispatchRequest request, Actor actor, String localHandle);
 
-  Result<AgentStatusResponse> agentStatus(String project);
+  /**
+   * The project's agent status: every local running run (scoped by {@code localHandle} so a synced
+   * foreign run is never probed on this box) plus the single-session fields the one-run common case
+   * has always shown.
+   */
+  Result<AgentStatusResponse> agentStatus(String project, String localHandle);
 
   /**
    * The morning-after report for {@code project}'s agent on this box. {@code localHandle} scopes

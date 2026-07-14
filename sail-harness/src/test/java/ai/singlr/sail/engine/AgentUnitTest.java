@@ -47,6 +47,48 @@ class AgentUnitTest {
   }
 
   @Test
+  void forRunDerivesTheWholeIdentityUnderTheRunDir() {
+    var runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    var unit = AgentUnit.forRun(runId);
+
+    assertEquals("sail-agent-" + runId, unit.unitName());
+    assertEquals("sail-agent-" + runId + ".service", unit.service());
+    assertEquals("/home/dev/.sail/runs/" + runId + "/agent.log", unit.logPath());
+    assertEquals("/home/dev/.sail/runs/" + runId + "/agent.pid", unit.pidPath());
+    assertEquals("/home/dev/.sail/runs/" + runId + "/agent-session.json", unit.sessionPath());
+    assertEquals("/home/dev/.sail/runs/" + runId + "/agent-task.txt", unit.taskPath());
+  }
+
+  @Test
+  void twoRunsGetFullyDisjointIdentities() {
+    var a = AgentUnit.forRun("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    var b = AgentUnit.forRun("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+    assertNotEquals(a.unitName(), b.unitName());
+    assertNotEquals(a.logPath(), b.logPath());
+    assertNotEquals(a.pidPath(), b.pidPath());
+    assertNotEquals(a.sessionPath(), b.sessionPath());
+    assertNotEquals(a.taskPath(), b.taskPath());
+  }
+
+  @Test
+  void recordedAddressesSystemdByTheRecordedNameAndFilesByTheCanonicalRunId() {
+    var runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    var unit = AgentUnit.recorded(runId, "sail-agent-legacy-shape");
+
+    assertEquals("sail-agent-legacy-shape", unit.unitName());
+    assertEquals("/home/dev/.sail/runs/" + runId + "/agent-session.json", unit.sessionPath());
+  }
+
+  @Test
+  void runScopedIdentitiesRejectANonCanonicalRunId() {
+    assertThrows(IllegalArgumentException.class, () -> AgentUnit.forRun("../escape"));
+    assertThrows(IllegalArgumentException.class, () -> AgentUnit.recorded("$(rm -rf)", "unit"));
+  }
+
+  @Test
   void runScopedLogPathsNameExactlyOneExecutionUnderTheRunDir() {
     assertEquals("/home/dev/.sail/runs/run-1", AgentUnit.runDir("run-1"));
     assertEquals("/home/dev/.sail/runs/run-1/agent.log", AgentUnit.BUILD.runLogPath("run-1"));

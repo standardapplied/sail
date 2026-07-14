@@ -359,13 +359,15 @@ On a trip it snapshots or kills the agent and fires notifications. Rollback uses
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
-The watcher runs detached, as the systemd transient unit `sail-watch-<project>` — the same
+The watcher runs detached, as the systemd transient unit `sail-watch-<runId>` — the same
 mechanism that runs the agent — so it survives Ctrl-C on the dispatch stream, the SSH
-session ending, and daemon restarts. The unit name is deterministic and one agent runs per
-project, so coverage is probed rather than bookkept, and the two spawn intents differ
-deliberately: dispatch stops and replaces any unit left over from the previous session (an
-adopted stale watcher would enforce the old session's nearly-spent deadline against the new
-agent), while the periodic re-armer — whose coverage probe is process-level, seeing units in
+session ending, and daemon restarts. Every dispatched run has its own identity end to end:
+the agent runs as `sail-agent-<runId>` with its pid, session, task, and log files under
+`~/.sail/runs/<runId>/`, the run records the unit it was launched with, and every later
+consumer (stop, probe, reconciler, watcher) addresses that recorded unit — which is what
+lets dispatches on disjoint repo sets share one container concurrently, refused only when
+their repo sets overlap. Coverage is probed rather than bookkept, per run, and the periodic
+re-armer — whose coverage probe is process-level, seeing units in
 any user's systemd scope and plain fallback processes alike — relaunches unit-or-nothing for
 any running agent nothing covers, resuming the original deadline rather than granting a
 fresh budget. The missed-stop sweep still replays the stop of any agent that manages to

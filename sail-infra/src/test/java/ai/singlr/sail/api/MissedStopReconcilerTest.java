@@ -78,7 +78,7 @@ class MissedStopReconcilerTest {
     }
 
     @Override
-    public boolean active(String project) {
+    public boolean active(String project, String runId, String unit) {
       calls.incrementAndGet();
       return active;
     }
@@ -123,6 +123,23 @@ class MissedStopReconcilerTest {
   }
 
   private String runningSession(String specId) {
+    var id = DateTimeUtils.newId().toString();
+    return sessionStore.create(
+        id,
+        "test-project",
+        specId,
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/test",
+        "task",
+        1,
+        null,
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
+  }
+
+  private String preUpgradeRunningSession(String specId) {
     return sessionStore.create(
         DateTimeUtils.newId().toString(),
         "test-project",
@@ -134,7 +151,7 @@ class MissedStopReconcilerTest {
         "task",
         1,
         null,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/agent.log");
   }
 
   private void adoptedForeignRunningSession(String specId, Instant startedAt) {
@@ -598,13 +615,48 @@ class MissedStopReconcilerTest {
 
     var replayed =
         reconciler(
-                project -> {
+                (project, runId, unit) -> {
                   throw new IllegalStateException("container unreachable");
                 },
                 PAST_GRACE)
             .sweep();
 
     assertEquals(1, replayed);
+  }
+
+  @Test
+  void theProbeIsAddressedAtTheRunsRecordedUnit() {
+    createInProgressSpec("auth");
+    var runId = runningSession("auth");
+    var probedUnits = new ConcurrentLinkedQueue<String>();
+
+    var replayed =
+        reconciler(
+                (project, id, unit) -> {
+                  probedUnits.add(id + "|" + unit);
+                  return true;
+                },
+                PAST_GRACE)
+            .sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(List.of(runId + "|sail-agent-" + runId), List.copyOf(probedUnits));
+  }
+
+  @Test
+  void aPreUpgradeRunningSessionWithNoRecordedUnitIsSkippedNotStopped() {
+    createInProgressSpec("auth");
+    var runId = preUpgradeRunningSession("auth");
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(
+        0,
+        replayed,
+        "no premature stop: the sweep cannot know that unit's liveness, so it does nothing");
+    assertEquals(0, probe.calls.get(), "no derived-name probe that would falsely read absent");
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
   }
 
   @Test
@@ -615,7 +667,7 @@ class MissedStopReconcilerTest {
     var reconciler = new MissedStopReconciler[1];
     reconciler[0] =
         reconciler(
-            project -> {
+            (project, runId, unit) -> {
               overlapped.set(reconciler[0].sweepIfIdle());
               return true;
             },
@@ -632,7 +684,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(2);
     try (var reconciler =
         reconciler(
-            project -> {
+            (project, runId, unit) -> {
               latch.countDown();
               throw new IllegalStateException("boom");
             },
@@ -655,9 +707,11 @@ class MissedStopReconcilerTest {
     ShellExec inactiveShell = shellReturning("ActiveState=inactive\nExecMainStatus=0\n");
     ShellExec failedShell = shellReturning("ActiveState=failed\nExecMainStatus=137\n");
 
-    assertTrue(MissedStopReconciler.systemdUnitProbe(activeShell).active("acme"));
-    assertFalse(MissedStopReconciler.systemdUnitProbe(inactiveShell).active("acme"));
-    assertFalse(MissedStopReconciler.systemdUnitProbe(failedShell).active("acme"));
+    var runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    var unit = "sail-agent-" + runId;
+    assertTrue(MissedStopReconciler.systemdUnitProbe(activeShell).active("acme", runId, unit));
+    assertFalse(MissedStopReconciler.systemdUnitProbe(inactiveShell).active("acme", runId, unit));
+    assertFalse(MissedStopReconciler.systemdUnitProbe(failedShell).active("acme", runId, unit));
   }
 
   private static ShellExec shellReturning(String systemctlShow) {

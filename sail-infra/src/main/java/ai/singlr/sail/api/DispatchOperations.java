@@ -220,18 +220,8 @@ public final class DispatchOperations {
           ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
     }
 
-    var agentSession = new AgentSession(shell);
-    var existing = querySession(agentSession, project);
-    if (existing != null && existing.running()) {
-      throw new ApiException(
-          ErrorCode.AGENT_ALREADY_RUNNING,
-          "Agent is already running for project '" + project + "'.",
-          "Stop the active agent before dispatching another spec.");
-    }
-
     var specs = specStore.projectSpecs(project);
-    var resolution =
-        resolveSpec(specs, request.specId(), request.restart(), actor, localHandle, specStore);
+    var resolution = resolveSpec(specs, request.specId(), request.restart(), actor, localHandle);
     if (resolution.spec() == null) {
       return new NoSpecs();
     }
@@ -239,6 +229,10 @@ public final class DispatchOperations {
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
+    requireNoRepoOverlap(project, localHandle, taskSpec.repos());
+    if (resolution.restarted()) {
+      specStore.updateStatus(nextSpec.id(), SpecStatus.PENDING);
+    }
     var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
     specStore.updateReposAndStatus(nextSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
     if (reviewStore != null) {
@@ -284,8 +278,8 @@ public final class DispatchOperations {
 
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
-    var runLogPath = AgentUnit.BUILD.runLogPath(runId);
-    recordRun(runId, project, nextSpec.id(), localHandle, agentType, branch, task, runLogPath);
+    var unit = AgentUnit.forRun(runId);
+    recordRun(runId, project, nextSpec.id(), localHandle, agentType, branch, task, unit);
     try {
       var launch =
           launchAgent(
@@ -297,9 +291,9 @@ public final class DispatchOperations {
               background,
               taskSpec,
               agentType,
-              runLogPath,
+              unit,
               runId);
-      var status = querySession(agentSession, project);
+      var status = querySession(new AgentSession(shell), project, unit);
       if (background) {
         updateRunProcess(runId, status, launch.watcher());
       } else {
@@ -370,18 +364,14 @@ public final class DispatchOperations {
    * Picks the spec to dispatch. Without {@code specId}, the next ready spec assigned to this box's
    * FDE (or none) — unless {@code restart} is set, which {@link RestartResolution} refuses because
    * a restart must name its target. With {@code specId}, the spec must exist and pass {@link
-   * DispatchPolicy} (checked before any mutation, so a refused caller can never reset a status);
-   * {@link RestartResolution} then decides how its status is treated: pending dispatches normally
-   * with its dependencies met, and a non-pending status is either refused or — on {@code restart} —
-   * reset to pending in the store and reported so the caller publishes {@code spec_restarted}.
+   * DispatchPolicy}; {@link RestartResolution} then decides how its status is treated: pending
+   * dispatches normally with its dependencies met, and a non-pending status is either refused or —
+   * on {@code restart} — reported as restarted so the caller resets it and publishes {@code
+   * spec_restarted}. Pure: every refusal here (policy, readiness, the caller's later repo-overlap
+   * gate) fires before any mutation, so a refused caller can never reset a status.
    */
   static SpecResolution resolveSpec(
-      List<Spec> specs,
-      String specId,
-      boolean restart,
-      Actor actor,
-      String localHandle,
-      SpecStore store) {
+      List<Spec> specs, String specId, boolean restart, Actor actor, String localHandle) {
     var spec = Strings.isBlank(specId) ? null : SpecDirectory.findById(specs, specId);
     if (spec == null) {
       if (RestartResolution.decide(specId, null, restart)
@@ -407,10 +397,8 @@ public final class DispatchOperations {
         }
         yield SpecResolution.of(spec);
       }
-      case RestartResolution.Restarted restarted -> {
-        store.updateStatus(specId, SpecStatus.PENDING);
-        yield SpecResolution.restarted(spec, restarted.previousStatus());
-      }
+      case RestartResolution.Restarted restarted ->
+          SpecResolution.restarted(spec, restarted.previousStatus());
     };
   }
 
@@ -514,14 +502,14 @@ public final class DispatchOperations {
       boolean background,
       Spec spec,
       String agentType,
-      String logPath,
+      AgentUnit unit,
       String runId) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
       session.ensureDirectory(project);
       session.resetLog(project, AgentUnit.REVIEW);
-      session.writeTaskFile(project, task);
+      session.writeTaskFile(project, task, unit);
       session.writeSession(
           project,
           task,
@@ -529,7 +517,8 @@ public final class DispatchOperations {
           spec.id(),
           agentType,
           runId,
-          targetRepos.stream().map(SailYaml.Repo::path).toList());
+          targetRepos.stream().map(SailYaml.Repo::path).toList(),
+          unit);
       var agentCli = AgentCli.fromYamlName(agentType);
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var command =
@@ -544,7 +533,7 @@ public final class DispatchOperations {
                   spec.reasoningEffort(),
                   spec.id(),
                   agentType,
-                  logPath,
+                  unit.logPath(),
                   runId)
               : AgentSession.buildForegroundTaskCommand(
                   project,
@@ -556,7 +545,7 @@ public final class DispatchOperations {
                   spec.reasoningEffort(),
                   spec.id(),
                   agentType,
-                  logPath,
+                  unit.logPath(),
                   runId);
       listener.launching(background, command);
       var exitCode = launcher.launch(command);
@@ -564,7 +553,7 @@ public final class DispatchOperations {
         if (exitCode != 0) {
           throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
         }
-        return new LaunchOutcome(exitCode, launchWatcherIfAgent(project, config));
+        return new LaunchOutcome(exitCode, launchWatcherIfAgent(project, config, runId, unit));
       }
       return new LaunchOutcome(exitCode, Optional.empty());
     } catch (ApiException e) {
@@ -575,20 +564,71 @@ public final class DispatchOperations {
   }
 
   /**
-   * Spawns the detached watcher whenever the project declares an agent block — supervision is on by
-   * default, with {@code Guardrails.defaults()} applying when none are declared, and the watcher is
-   * also the authoritative stop observer the review pipeline depends on.
+   * Spawns the detached run-addressed watcher whenever the project declares an agent block —
+   * supervision is on by default, with {@code Guardrails.defaults()} applying when none are
+   * declared, and the watcher is also the authoritative stop observer the review pipeline depends
+   * on. One watcher per dispatch, supervising exactly this run's recorded unit.
    */
-  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(String project, SailYaml config)
-      throws IOException {
+  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(
+      String project, SailYaml config, String runId, AgentUnit unit) throws IOException {
     if (config.agent() == null) {
       return Optional.empty();
     }
     return Optional.of(
-        watcherSpawner.spawn(
+        watcherSpawner.spawnForRun(
             project,
             SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-            SailPaths.projectDir(project).resolve("watch.log")));
+            runId,
+            unit.unitName()));
+  }
+
+  /**
+   * Refuses the dispatch when a local run of this project is still {@code running} against a spec
+   * whose repos intersect the target's — the {@link DispatchGate} decision over run rows only.
+   * Disjoint repo sets dispatch concurrently; a row whose agent already died without a stop signal
+   * is healed by the missed-stop sweep within its interval, so a stale row can only ever block
+   * briefly.
+   */
+  private void requireNoRepoOverlap(String project, String localHandle, List<String> targetRepos) {
+    DispatchGate.decide(targetRepos, runningLocalRuns(project, localHandle))
+        .ifPresent(
+            conflict -> {
+              throw new ApiException(
+                  ErrorCode.AGENT_ALREADY_RUNNING,
+                  "Agent run "
+                      + conflict.run().runId()
+                      + " is already working spec '"
+                      + conflict.run().specId()
+                      + "' in "
+                      + (conflict.overlap().isEmpty()
+                          ? "this container"
+                          : "repo(s) " + conflict.overlap())
+                      + ".",
+                  "Wait for it to finish or stop it, or dispatch a spec targeting disjoint"
+                      + " repos.");
+            });
+  }
+
+  /**
+   * The project's runs this box is executing right now, each with its spec's resolved repos — the
+   * claim stamps resolved repos on the spec, so a running run's spec carries exactly the repos it
+   * works in. A box that keeps no run aggregate has nothing to consult and allows the dispatch. A
+   * running run whose spec vanished resolves to no repos, which the gate treats as whole-container:
+   * refusing is the safe reading of a row it cannot scope.
+   */
+  private List<DispatchGate.RunningRun> runningLocalRuns(String project, String localHandle) {
+    if (runStore == null) {
+      return List.of();
+    }
+    return runStore.listForProject(project).stream()
+        .filter(run -> "running".equals(run.status()))
+        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
+        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), specRepos(run.specId())))
+        .toList();
+  }
+
+  private List<String> specRepos(String specId) {
+    return specStore.findById(specId).map(SpecStore.SpecRow::repos).orElse(List.of());
   }
 
   private void ensureSailSetup(String project) {
@@ -618,13 +658,24 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      String logPath) {
+      AgentUnit unit) {
     if (runStore == null) {
       return;
     }
     try {
       runStore.create(
-          runId, project, specId, node, "build", agentType, branch, task, null, null, logPath);
+          runId,
+          project,
+          specId,
+          node,
+          "build",
+          agentType,
+          branch,
+          task,
+          null,
+          null,
+          unit.logPath(),
+          unit.unitName());
       var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
       var pruned = RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
@@ -710,9 +761,10 @@ public final class DispatchOperations {
     events.publish(Event.of(project, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
   }
 
-  private AgentSession.SessionInfo querySession(AgentSession session, String project) {
+  private AgentSession.SessionInfo querySession(
+      AgentSession session, String project, AgentUnit unit) {
     try {
-      return session.queryStatus(project);
+      return session.queryStatus(project, unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }

@@ -258,7 +258,7 @@ public final class ServerStartCommand implements Runnable {
             specStore,
             runStore,
             unitProbe,
-            watcherSpawner::watcherProcessRunning,
+            watcherSpawner::watcherProcessRunningForRun,
             WatcherRearmer.livingProcess(),
             NodeIdentity::handle,
             operations::relaunchWatcher);

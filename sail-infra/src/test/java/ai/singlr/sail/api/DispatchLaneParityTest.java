@@ -144,6 +144,7 @@ class DispatchLaneParityTest {
             ADMIN,
             HANDLE);
     assertInstanceOf(DispatchOperations.Dispatched.class, cliOutcome);
+    completeLatestRun(cli);
     cli.specStore().updateStatus("auth", SpecStatus.REVIEW);
     var cliRestart =
         cliOps.dispatch(
@@ -198,6 +199,7 @@ class DispatchLaneParityTest {
               "acme", new DispatchRequest("auth", "background", false, null), ADMIN, HANDLE);
       assertTrue(result.isSuccess(), () -> String.valueOf(result.fullError()));
 
+      completeLatestRun(api);
       api.specStore().updateStatus("auth", SpecStatus.REVIEW);
       var restartResult =
           apiOps.dispatch(
@@ -219,6 +221,11 @@ class DispatchLaneParityTest {
                     Event.WellKnownTypes.SPEC_RESTARTED.equals(shape.get("type"))
                         && Map.of("note", "restarted from review").equals(shape.get("data"))),
         "the restart round records its lifecycle event with the note payload");
+  }
+
+  private static void completeLatestRun(Lane lane) {
+    var run = lane.runStore().listForProject("acme").getFirst();
+    lane.runStore().complete(run.id(), "stopped", 0);
   }
 
   private static Map<String, Object> specRow(Lane lane) {

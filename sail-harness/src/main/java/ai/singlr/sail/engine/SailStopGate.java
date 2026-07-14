@@ -22,10 +22,11 @@ import java.util.concurrent.TimeoutException;
  * carry no run id, so all of them keep the old publish-and-allow behavior.
  *
  * <p>The dirty/unpushed/PR checks are scoped to the run's spec repos — read from {@code repos} in
- * {@code ~/.sail/agent-session.json}, which dispatch stamps with the spec's resolved repos. A repo
- * the spec does not target (left dirty by a previous dispatch in the shared container) never nudges
- * this run. When the session lists no repos — an older session file or a non-dispatch launch —
- * every workspace repo is checked, the prior behavior.
+ * the run's own session file, {@code ~/.sail/runs/<runId>/agent-session.json}, which dispatch
+ * stamps with the spec's resolved repos. A repo the spec does not target (dirtied by a concurrent
+ * or previous dispatch in the shared container) never nudges this run. When the session lists no
+ * repos — a missing session file or a non-dispatch launch — every workspace repo is checked, the
+ * prior behavior.
  *
  * <p>The gate blocks at most once per run — the first block drops a marker file under {@code
  * ~/.sail/runs/&lt;runId&gt;/} — so the agent keeps its contractual right to stop-and-report
@@ -41,6 +42,14 @@ public final class SailStopGate {
 
   /** Container-side path of the gate script. */
   public static final String SCRIPT_PATH = "/home/dev/.sail/bin/sail-stop-gate";
+
+  /**
+   * Marker {@link ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a gate script
+   * written before the session file moved into the run directory, so a stale container is refreshed
+   * on the next dispatch. A literal substring of the run-scoped session assignment, chosen without
+   * {@code $} so the probe's shell never expands it.
+   */
+  public static final String RUN_SESSION_MARKER = "RUN_ID/agent-session.json";
 
   /**
    * Explicit {@code Stop}-hook timeout in seconds. A timed-out hook is killed and never blocks, so
@@ -66,7 +75,6 @@ public final class SailStopGate {
       EVENT_HELPER="$SAIL_HOME/.sail/bin/sail-event.sh"
       WORKSPACE="$SAIL_HOME/workspace"
       RUNS_DIR="$SAIL_HOME/.sail/runs"
-      SESSION="$SAIL_HOME/.sail/agent-session.json"
 
       publish() {
         if [ -x "$EVENT_HELPER" ]; then
@@ -83,6 +91,7 @@ public final class SailStopGate {
       RUN_ID="${SAIL_RUN_ID:-}"
 
       [ -n "$RUN_ID" ] || allow
+      SESSION="$RUNS_DIR/$RUN_ID/agent-session.json"
       command -v git >/dev/null 2>&1 || allow
       command -v python3 >/dev/null 2>&1 || allow
 

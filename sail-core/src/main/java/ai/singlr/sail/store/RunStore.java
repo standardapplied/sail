@@ -43,6 +43,13 @@ public final class RunStore implements ConflictResolver {
     this.changeLog = new ChangeLog(db);
   }
 
+  /**
+   * {@code unit} is the systemd unit the run was launched as — recorded at launch as part of the
+   * run's identity, so every later consumer (stop, probe, reconciler, watcher) addresses the unit
+   * the run actually owns instead of re-deriving a name that could drift across releases. Blank on
+   * runs launched before units were run-scoped; consumers that cannot know that unit's liveness do
+   * nothing rather than guess.
+   */
   public record RunRow(
       String id,
       String project,
@@ -57,12 +64,13 @@ public final class RunStore implements ConflictResolver {
       String status,
       Integer exitCode,
       String logPath,
+      String unit,
       String startedAt,
       String completedAt) {}
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
-          + " exit_code, log_path, started_at, completed_at";
+          + " exit_code, log_path, unit, started_at, completed_at";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -81,13 +89,31 @@ public final class RunStore implements ConflictResolver {
       Integer pid,
       Integer watcherPid,
       String logPath) {
+    return create(
+        id, project, specId, node, role, agent, branch, task, pid, watcherPid, logPath, null);
+  }
+
+  /** As the other overload, also recording the systemd {@code unit} the run was launched as. */
+  public String create(
+      String id,
+      String project,
+      String specId,
+      String node,
+      String role,
+      String agent,
+      String branch,
+      String task,
+      Integer pid,
+      Integer watcherPid,
+      String logPath,
+      String unit) {
     db.transaction(
         () -> {
           db.execute(
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
-                  watcher_pid, status, started_at, log_path)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)""",
+                  watcher_pid, status, started_at, log_path, unit)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)""",
               id,
               project,
               specId,
@@ -99,7 +125,8 @@ public final class RunStore implements ConflictResolver {
               pid != null ? pid.longValue() : null,
               watcherPid != null ? watcherPid.longValue() : null,
               DateTimeUtils.now().toString(),
-              logPath);
+              logPath,
+              unit);
           recordRevision(id, "local", false);
         });
     return id;
@@ -427,13 +454,13 @@ public final class RunStore implements ConflictResolver {
     db.execute(
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
-            status, exit_code, log_path, started_at, completed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, exit_code, log_path, unit, started_at, completed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
             watcher_pid = excluded.watcher_pid, status = excluded.status,
-            exit_code = excluded.exit_code, log_path = excluded.log_path,
+            exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
             started_at = excluded.started_at, completed_at = excluded.completed_at""",
         row.id(),
         row.project(),
@@ -448,6 +475,7 @@ public final class RunStore implements ConflictResolver {
         Objects.requireNonNullElse(row.status(), "running"),
         row.exitCode() != null ? row.exitCode().longValue() : null,
         row.logPath(),
+        row.unit(),
         Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
         row.completedAt());
   }
@@ -467,6 +495,7 @@ public final class RunStore implements ConflictResolver {
     map.put("status", run.status());
     map.put("exit_code", run.exitCode());
     map.put("log_path", run.logPath());
+    map.put("unit", run.unit());
     map.put("started_at", run.startedAt());
     map.put("completed_at", run.completedAt());
     return map;
@@ -523,6 +552,7 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "status"),
         integer(snapshot, "exit_code"),
         text(snapshot, "log_path"),
+        text(snapshot, "unit"),
         text(snapshot, "started_at"),
         text(snapshot, "completed_at"));
   }
@@ -564,6 +594,7 @@ public final class RunStore implements ConflictResolver {
         row.isNull(11) ? null : (int) row.integer(11),
         row.text(12),
         row.text(13),
-        row.text(14));
+        row.text(14),
+        row.text(15));
   }
 }

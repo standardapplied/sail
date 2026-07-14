@@ -245,6 +245,7 @@ class AgentReporterTest {
             "completed",
             0,
             null,
+            null,
             start.toString(),
             end.toString());
     var shell =
@@ -280,6 +281,7 @@ class AgentReporterTest {
             null,
             "stopped",
             137,
+            null,
             null,
             start.toString(),
             Instant.now().toString());

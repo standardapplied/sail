@@ -28,6 +28,7 @@ class AgentLogCommandTest {
         "running",
         null,
         logPath,
+        null,
         "t0",
         null);
   }
