@@ -26,8 +26,10 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -391,6 +393,40 @@ class MissedStopReconcilerTest {
     var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
     assertEquals(0, replayed, "no run to replay a stop from");
+  }
+
+  @Test
+  void aSpecReconciledThisSweepIsNotAlsoRescuedInReview() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(true), Instant::now)
+            .rescueStrandedReviews(new HashSet<>(Set.of("auth"))),
+        "a spec whose stop was replayed earlier this sweep — which flips it into review on an async"
+            + " subscriber thread — must not have its stop replayed a second time by the review pass");
+    assertEquals(
+        1,
+        reconciler(new CountingProbe(true), Instant::now).rescueStrandedReviews(new HashSet<>()),
+        "the same genuinely stranded review spec IS rescued when nothing handled it this sweep");
+  }
+
+  @Test
+  void aRunReconciledThisSweepIsNotAlsoReleasedAsStranded() {
+    createSpec("auth", SpecStatus.AWAITING_MERGE);
+    runningSession("auth");
+    var rec = reconciler(new CountingProbe(true), PAST_GRACE);
+
+    assertEquals(
+        0,
+        rec.releaseStrandedReservations(Set.of("auth")),
+        "a run whose stop was replayed earlier this sweep is not also released as a stranded"
+            + " reservation, even once its spec has left in_progress");
+    assertEquals(
+        1,
+        rec.releaseStrandedReservations(Set.of()),
+        "the same run IS released as stranded when nothing handled it this sweep");
   }
 
   private void createReviewSpec(String id) {

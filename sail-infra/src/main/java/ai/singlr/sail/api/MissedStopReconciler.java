@@ -17,6 +17,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
@@ -147,9 +148,13 @@ public final class MissedStopReconciler implements AutoCloseable {
   public int sweep() {
     var replayed = 0;
     try {
+      var handledThisSweep = new HashSet<String>();
       for (var spec : specStore.list(IN_PROGRESS)) {
         try {
-          replayed += reconcile(spec) ? 1 : 0;
+          if (reconcile(spec)) {
+            handledThisSweep.add(spec.id());
+            replayed++;
+          }
         } catch (Exception e) {
           System.err.println(
               "  [reconcile] failed for "
@@ -160,14 +165,34 @@ public final class MissedStopReconciler implements AutoCloseable {
                   + e.getMessage());
         }
       }
-      for (var spec : specStore.list(REVIEW)) {
-        replayed += rescueStrandedReview(spec) ? 1 : 0;
-      }
-      replayed += releaseStrandedReservations();
+      replayed += rescueStrandedReviews(handledThisSweep);
+      replayed += releaseStrandedReservations(handledThisSweep);
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
     return replayed;
+  }
+
+  /**
+   * Rescues every spec stranded in {@code review}, skipping any whose stop was already replayed
+   * earlier in this same sweep. Without the skip a spec that the in-progress pass just reconciled —
+   * whose replayed stop drives it {@code in_progress → review} on an async subscriber thread —
+   * would be seen in {@code review} by this pass and have its stop replayed a second time,
+   * double-handling the one run. The sweep is thereby internally consistent regardless of when the
+   * async transition lands.
+   */
+  int rescueStrandedReviews(Set<String> handledThisSweep) {
+    var rescued = 0;
+    for (var spec : specStore.list(REVIEW)) {
+      if (handledThisSweep.contains(spec.id())) {
+        continue;
+      }
+      if (rescueStrandedReview(spec)) {
+        handledThisSweep.add(spec.id());
+        rescued++;
+      }
+    }
+    return rescued;
   }
 
   /**
@@ -177,14 +202,17 @@ public final class MissedStopReconciler implements AutoCloseable {
    * dispatch. Only a run older than {@link #LAUNCH_GRACE} is touched, so a run still inside the
    * microsecond reserve-then-claim window of a healthy dispatch is never disturbed. The spec was
    * never claimed, so it stays {@code pending} and dispatchable; only the dead reservation is
-   * cleared. Foreign runs are left to their executing box.
+   * cleared. Foreign runs are left to their executing box. A run whose spec was already handled
+   * earlier in this same sweep is skipped, so an async status flip caused by the sweep's own
+   * replayed stop can never make one pass both reconcile and release the one run.
    */
-  private int releaseStrandedReservations() {
+  int releaseStrandedReservations(Set<String> handledThisSweep) {
     var node = localHandle.get();
     var deadline = clock.get().minus(LAUNCH_GRACE);
     var released = 0;
     for (var run : sessionStore.running()) {
-      if (!SailOperations.ownsRun(run.node(), node)
+      if (handledThisSweep.contains(run.specId())
+          || !SailOperations.ownsRun(run.node(), node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
           || specBeingWorked(run.specId())) {
         continue;
