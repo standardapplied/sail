@@ -44,6 +44,28 @@ record WhoamiResponse(
   }
 }
 
+record FdeSummaryView(String handle, String displayName, String email, String role)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("handle", handle);
+    m.put("display_name", displayName);
+    m.put("email", email);
+    m.put("role", role);
+    return m;
+  }
+}
+
+record FdesResponse(List<FdeSummaryView> fdes) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("fdes", fdes);
+    return m;
+  }
+}
+
 record ProjectListItemView(String name, String containerStatus) implements Mappable {
   @Override
   public Map<String, Object> toMap() {

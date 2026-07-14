@@ -208,6 +208,43 @@ class SailOperationsTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void fdesReturnsTheRosterSortedByHandle() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("roster-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var fdeStore = new FdeStore(db);
+    fdeStore.add("bob", "Bob", "bob@x.dev", "member");
+    fdeStore.add("ada", "Ada Lovelace", "ada@x.dev", "admin");
+    var operations =
+        new SailOperations(
+            new FakeShell(),
+            "sail.yaml",
+            null,
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            null,
+            fdeStore);
+
+    var roster = (List<Map<String, Object>>) get(operations.fdes(), "fdes");
+
+    assertEquals(
+        List.of("ada", "bob"),
+        roster.stream().map(row -> row.get("handle")).toList(),
+        "the roster is sorted by handle");
+    assertEquals("Ada Lovelace", roster.get(0).get("display_name"));
+    assertEquals("ada@x.dev", roster.get(0).get("email"));
+    assertEquals("admin", roster.get(0).get("role"));
+  }
+
+  @Test
+  void fdesFailsWhenTheRosterIsNotWired() {
+    assertError(ErrorCode.INTERNAL, new SailOperations(new FakeShell(), "sail.yaml").fdes());
+  }
+
+  @Test
   void connectReturnsTheTwoHopSshTarget() throws Exception {
     var operations =
         operationsWith(shell().on("incus list ^acme$", RUNNING_JSON), store -> {}, environment());

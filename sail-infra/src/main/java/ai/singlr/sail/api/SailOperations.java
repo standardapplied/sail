@@ -53,6 +53,7 @@ public final class SailOperations implements Operations {
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
+  private final FdeStore fdeStore;
 
   public SailOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -277,6 +278,7 @@ public final class SailOperations implements Operations {
     this.projectStore = projectStore;
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
+    this.fdeStore = fdeStore;
     this.projects = new ProjectLoader(shell, file);
     this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
@@ -309,6 +311,25 @@ public final class SailOperations implements Operations {
   @Override
   public Result<ProjectListResponse> projects() {
     return safe(this::projectsValue);
+  }
+
+  @Override
+  public Result<FdesResponse> fdes() {
+    if (fdeStore == null) {
+      return Result.failure(
+          ErrorCode.INTERNAL,
+          "FDE roster not available. Start the server with 'sail server start'.");
+    }
+    return safe(this::fdesValue);
+  }
+
+  private FdesResponse fdesValue() {
+    var roster =
+        fdeStore.list().stream()
+            .map(
+                fde -> new FdeSummaryView(fde.handle(), fde.displayName(), fde.email(), fde.role()))
+            .toList();
+    return new FdesResponse(roster);
   }
 
   @Override

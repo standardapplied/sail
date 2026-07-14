@@ -22,6 +22,9 @@ public interface Operations {
   /** Lists every project on this node with its container status. */
   Result<ProjectListResponse> projects();
 
+  /** The org-wide FDE roster, sorted by handle — a member-tier read backed by the synced roster. */
+  Result<FdesResponse> fdes();
+
   Result<ProjectResponse> project(String project);
 
   /** Returns the two-hop SSH target (server jump + container) for a running project. */
