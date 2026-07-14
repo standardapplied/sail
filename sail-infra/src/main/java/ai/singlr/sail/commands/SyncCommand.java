@@ -100,13 +100,15 @@ public final class SyncCommand implements Callable<Integer> {
           Banner.errorLine("--interval must be a positive number of seconds.", Ansi.AUTO));
       return 1;
     }
-    var resolution = resolveMain(main, HostSync.config());
+    var sync = HostSync.config();
+    var resolution = resolveMain(main, sync);
     if (resolution.target() == null) {
       System.out.println(Ansi.AUTO.string("  @|faint " + resolution.message() + "|@"));
       return 0;
     }
     var target = resolution.target();
     var host = HostInfo.hostname();
+    var handle = sync.handle() == null ? "" : sync.handle();
     SyncDatabase replicaDb;
     try {
       replicaDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), host);
@@ -115,12 +117,12 @@ public final class SyncCommand implements Callable<Integer> {
       return 1;
     }
     try (replicaDb) {
-      var boxes = boxes(replicaDb, host);
+      var boxes = boxes(replicaDb, host, handle);
       return watch ? watchLoop(boxes, target) : runOnce(boxes, target);
     }
   }
 
-  private static Boxes boxes(SyncDatabase converged, String host) {
+  private static Boxes boxes(SyncDatabase converged, String host, String handle) {
     var db = converged.db();
     var changeLog = new ChangeLog(db);
     var conflicts = new SyncConflicts(db);
@@ -131,7 +133,7 @@ public final class SyncCommand implements Callable<Integer> {
         new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
         new FileReplica(host, fileStore, changeLog, conflicts, syncState),
         new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
-        new RunReplica(host, new RunStore(db), changeLog, conflicts, syncState),
+        new RunReplica(host, handle, new RunStore(db), changeLog, conflicts, syncState),
         new ReviewReplica(host, new ReviewStore(db), changeLog, conflicts, syncState),
         new FdeStore(db),
         fileStore,

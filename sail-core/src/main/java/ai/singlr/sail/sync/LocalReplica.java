@@ -20,6 +20,17 @@ public interface LocalReplica {
   /** Every entity id this node knows of, including tombstoned ones. */
   Set<String> entityIds();
 
+  /**
+   * Whether this node may push its own change to {@code id} up to main, or may only pull main's
+   * version. Multi-writer entities (specs, files, projects) always may — the default. A
+   * single-writer entity like a run overrides this so a reader box never pushes a run it did not
+   * author: when its local copy of a foreign run diverges, the engine adopts main's authoritative
+   * version instead of offering an un-owned push that main would only reject.
+   */
+  default boolean mayPush(String id) {
+    return true;
+  }
+
   /** Current comparable state; {@code null} if deleted or absent. */
   Map<String, Object> current(String id);
 

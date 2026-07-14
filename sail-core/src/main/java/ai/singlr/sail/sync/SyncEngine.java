@@ -111,14 +111,29 @@ public final class SyncEngine {
         yield Outcome.PULLED;
       }
       case ConflictDetector.KeepLocal ignored ->
-          push(local, main, id, localSnap, remoteRev, Outcome.PUSHED, redetectsLeft);
+          local.mayPush(id)
+              ? push(local, main, id, localSnap, remoteRev, Outcome.PUSHED, redetectsLeft)
+              : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
       case ConflictDetector.Merged m ->
-          push(local, main, id, m.result(), remoteRev, Outcome.MERGED, redetectsLeft);
+          local.mayPush(id)
+              ? push(local, main, id, m.result(), remoteRev, Outcome.MERGED, redetectsLeft)
+              : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
       case ConflictDetector.Conflict c -> {
         local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
         yield Outcome.CONFLICT;
       }
     };
+  }
+
+  /**
+   * The local diverged on an entity it may not push — a run it did not author. Discard the local
+   * divergence and adopt main's authoritative version, so a reader box converges instead of
+   * offering an un-owned push main would only reject.
+   */
+  private static Outcome pullInsteadOfPush(
+      LocalReplica local, String id, Map<String, Object> remoteSnap, String remoteRev) {
+    local.adopt(id, remoteSnap, remoteRev);
+    return Outcome.PULLED;
   }
 
   private Outcome push(
