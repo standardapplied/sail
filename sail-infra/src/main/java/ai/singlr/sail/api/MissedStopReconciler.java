@@ -41,15 +41,17 @@ import java.util.function.Supplier;
  * selecting the newest run, never before: filtering first would fall back to a superseded local
  * session and replay its stop over a newer foreign run that is still executing. Database-only
  * checks come first, so a pass with nothing to reconcile issues no systemctl calls. A terminal
- * session replays the stop with its recorded exit code. A running session past the launch grace
- * period whose <em>recorded</em> systemd unit is inactive or absent gets a synthesized stop — a
- * running session with no recorded unit (launched before units were run-scoped) is skipped instead:
- * this sweep cannot know that unit's liveness, and the run's own detached watcher already owns its
- * stop. The synthesized stop carries <em>no exit code</em>: the transient unit is garbage-collected
- * on exit, so the real code is unrecoverable, and the replay path makes the same choice for a
- * terminal session that never recorded one — the pipeline treats the absent code as not-a-failure
- * and lets review judge the work. Every replayed stop carries {@code source=reconcile} so the event
- * log shows it was reconstructed, not observed.
+ * session replays the stop with its recorded exit code — after probing its recorded unit, because
+ * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
+ * the replay). A running session past the launch grace period whose <em>recorded</em> systemd unit
+ * is inactive or absent gets a synthesized stop — a running session with no recorded unit (launched
+ * before units were run-scoped) is skipped instead: this sweep cannot know that unit's liveness,
+ * and the run's own detached watcher already owns its stop. The synthesized stop carries <em>no
+ * exit code</em>: the transient unit is garbage-collected on exit, so the real code is
+ * unrecoverable, and the replay path makes the same choice for a terminal session that never
+ * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
+ * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
+ * reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -191,9 +193,19 @@ public final class MissedStopReconciler implements AutoCloseable {
       if (handledThisSweep.contains(spec.id())) {
         continue;
       }
-      if (rescueStrandedReview(spec)) {
-        handledThisSweep.add(spec.id());
-        rescued++;
+      try {
+        if (rescueStrandedReview(spec)) {
+          handledThisSweep.add(spec.id());
+          rescued++;
+        }
+      } catch (Exception e) {
+        System.err.println(
+            "  [reconcile] review rescue failed for "
+                + spec.project()
+                + "/"
+                + spec.id()
+                + ": "
+                + e.getMessage());
       }
     }
     return rescued;
@@ -263,7 +275,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * loop; an escalated or running review is left alone, since a human or a live pipeline owns the
    * spec then.
    */
-  private boolean rescueStrandedReview(SpecStore.SpecRow spec) {
+  private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
     var rescue = rescueFor(spec);
     if (rescue == null || reviewRescueAttempted.contains(rescue.key())) {
       return false;
@@ -274,7 +286,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             .findFirst()
             .filter(run -> SailOperations.ownsRun(run.node(), node))
             .filter(run -> TERMINAL_RUN_STATUSES.contains(run.status()));
-    if (latest.isEmpty()) {
+    if (latest.isEmpty() || unitStillActive(spec, latest.get())) {
       return false;
     }
     reviewRescueAttempted.add(rescue.key());
@@ -323,14 +335,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {
       case MissedStops.Outcome.ReplayStop replay -> {
+        if (unitStillActive(spec, session)) {
+          yield false;
+        }
         publishStop(spec, session, replay.exitCode(), replay.why());
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (Strings.isBlank(session.unit())) {
-          yield false;
-        }
-        if (unitProbe.active(spec.project(), session.id(), session.unit())) {
+        if (Strings.isBlank(session.unit()) || unitStillActive(spec, session)) {
           yield false;
         }
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
@@ -338,6 +350,23 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
       case MissedStops.Outcome.Skip ignored -> false;
     };
+  }
+
+  /**
+   * Whether the run's recorded systemd unit is still alive — the veto that keeps a lying terminal
+   * row from forging a stop. A hook turn-end completes the run row as a watcher-dead backstop, but
+   * a turn-end is not a process exit: in the field a gate-allowed mid-run stop marked the row
+   * terminal while the agent kept working, and the next sweep replayed the "finished" run — the
+   * review then judged half-done work and the fix agent raced the live agent in one clone. The unit
+   * is the authoritative liveness source, so an active unit means the run's own watcher owns the
+   * real stop and the sweep must wait. A row with no recorded unit cannot be probed and keeps the
+   * replay behavior; a probe failure propagates to the per-spec catch — logged, skipped, retried
+   * next sweep — so the sweep never forges a stop on data it cannot interpret, and never silently.
+   */
+  private boolean unitStillActive(SpecStore.SpecRow spec, RunStore.RunRow session)
+      throws Exception {
+    return !Strings.isBlank(session.unit())
+        && unitProbe.active(spec.project(), session.id(), session.unit());
   }
 
   /**
