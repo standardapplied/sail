@@ -118,6 +118,29 @@ class ContainerReviewAgentRunnerTest {
   }
 
   @Test
+  void ensureCommittedSkipsASpecWithNoBranch() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertTrue(runner(shell).ensureCommitted("acme", List.of("api"), " ").isEmpty());
+    assertEquals(0, shell.invocations().size(), "no branch to guard means nothing to touch");
+  }
+
+  @Test
+  void ensureCommittedFailsLoudWhenTheCommitItselfFails() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
+            .onOk("status --porcelain", " M Api.java\n")
+            .onFail("commit -m", "git identity not configured");
+
+    var ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec"));
+    assertTrue(ex.getMessage().contains("git identity not configured"), ex.getMessage());
+  }
+
+  @Test
   void ensureCommittedToleratesAPushFailure() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
