@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -85,6 +86,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final SpecStore specStore;
   private final RunStore sessionStore;
   private final EventStore eventStore;
+  private final ReviewStore reviewStore;
   private final EventBus bus;
   private final UnitProbe unitProbe;
   private final Supplier<String> localHandle;
@@ -96,6 +98,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       SpecStore specStore,
       RunStore sessionStore,
       EventStore eventStore,
+      ReviewStore reviewStore,
       EventBus bus,
       UnitProbe unitProbe,
       Supplier<String> localHandle,
@@ -103,6 +106,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.eventStore = eventStore;
+    this.reviewStore = reviewStore;
     this.bus = bus;
     this.unitProbe = unitProbe;
     this.localHandle = localHandle;
@@ -245,17 +249,23 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Rescues a spec stranded in {@code review} with no review ever started — the shape a dropped
-   * kickoff leaves: an out-of-band status write (a manual edit, or a sync revision from another
-   * box) moved the spec to {@code review} while its agent was still running here, so the
-   * authoritative stop hit the pipeline's guard against a non-{@code in_progress} spec and no
-   * review was created. Replaying the stop lets the review-resilient pipeline kick it off. A {@code
-   * review_stage_started} event means a review did run, so the spec is not stranded; and the rescue
-   * fires at most once per spec per server lifetime, so a project with no automated pipeline (its
-   * {@code review} is a human queue) is never replayed in a loop.
+   * Rescues a spec stranded in {@code review}, in either of the two shapes that leave it parked
+   * with nothing coming to move it. <em>Dropped kickoff</em>: an out-of-band status write (a manual
+   * edit, or a sync revision from another box) moved the spec to {@code review} while its agent was
+   * still running here, so the authoritative stop hit the pipeline's guard against a non-{@code
+   * in_progress} spec and no review was created. <em>Errored review</em>: the pipeline ran but its
+   * last attempt failed by infrastructure (unparseable reviewer output, an agent crash) — the
+   * design retries an errored attempt on the next stop, but the fix agent runs inline and produces
+   * no stop, so without a replay the retry never comes (the nexus-accounts-apis field incident).
+   * Replaying the stop lets the pipeline kick off or retry. Each rescue key — the spec for a
+   * dropped kickoff, the errored review row for a retry — fires at most once per server lifetime,
+   * and the pipeline's errored-attempt budget escalates a persistent failure, so neither shape can
+   * loop; an escalated or running review is left alone, since a human or a live pipeline owns the
+   * spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) {
-    if (reviewRescueAttempted.contains(spec.id()) || reviewStarted(spec.id())) {
+    var rescue = rescueFor(spec);
+    if (rescue == null || reviewRescueAttempted.contains(rescue.key())) {
       return false;
     }
     var node = localHandle.get();
@@ -267,13 +277,32 @@ public final class MissedStopReconciler implements AutoCloseable {
     if (latest.isEmpty()) {
       return false;
     }
-    reviewRescueAttempted.add(spec.id());
-    publishStop(
-        spec,
-        latest.get(),
-        latest.get().exitCode(),
-        "stranded in review with no review started; replaying the stop to kick it off");
+    reviewRescueAttempted.add(rescue.key());
+    publishStop(spec, latest.get(), latest.get().exitCode(), rescue.why());
     return true;
+  }
+
+  private record Rescue(String key, String why) {}
+
+  private Rescue rescueFor(SpecStore.SpecRow spec) {
+    if (!reviewStarted(spec.id())) {
+      return new Rescue(
+          spec.id(),
+          "stranded in review with no review started; replaying the stop to kick it off");
+    }
+    return reviewStore
+        .latestReviewForSpec(spec.id())
+        .filter(review -> review.errored() && "failed".equals(review.status()))
+        .map(
+            review ->
+                new Rescue(
+                    review.id(),
+                    "review "
+                        + review.id()
+                        + " errored ("
+                        + review.error()
+                        + "); replaying the stop to retry the iteration"))
+        .orElse(null);
   }
 
   private boolean reviewStarted(String specId) {
@@ -340,6 +369,7 @@ public final class MissedStopReconciler implements AutoCloseable {
           Event.WellKnownTypes.AGENT_FAILED,
           "review_stage_started",
           "review_stage_failed",
+          "review_errored",
           "review_escalated");
 
   private boolean actedOnSince(String specId, Instant since) {

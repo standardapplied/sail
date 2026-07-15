@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import java.util.List;
+
 /**
  * Runs a review agent in a container and returns its raw output. The controller delegates agent
  * execution to this interface so the orchestration logic is testable without containers.
@@ -24,6 +26,21 @@ public interface ReviewAgentRunner {
    * @throws Exception if the agent fails to start or exits with an error
    */
   String run(String project, String agent, String prompt, String reviewId) throws Exception;
+
+  /**
+   * Commits and pushes any work an agent left uncommitted on the spec's branch. The fix lane runs
+   * hook-free (so a reviewer's completion can never re-enter the pipeline), which also strips the
+   * dispatch lane's stop-readiness gate — so nothing stops a fix agent from ending its run with a
+   * dirty tree, contaminating the shared clone and starving the re-review of the very fixes it is
+   * about to judge. This is the deterministic backstop: a repo is rescued only when it is checked
+   * out on the spec's own branch, never any other.
+   *
+   * @return the repos that had uncommitted work, now committed
+   */
+  default List<String> ensureCommitted(String project, List<String> repos, String branch)
+      throws Exception {
+    return List.of();
+  }
 }
 
 final class ReviewAgentExecutionException extends IllegalStateException {

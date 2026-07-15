@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ContainerReviewAgentRunnerTest {
@@ -70,6 +71,87 @@ class ContainerReviewAgentRunnerTest {
     assertFalse(
         joined.contains("/home/dev/.sail/review.log"),
         "no invocation may touch the fixed shared review log");
+  }
+
+  @Test
+  void ensureCommittedRescuesWorkLeftUncommittedOnTheSpecBranch() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
+            .onOk("status --porcelain", " M Api.java\n");
+
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+
+    assertEquals(List.of("api"), rescued);
+    var joined = String.join("\n", shell.invocations());
+    assertTrue(joined.contains("git -C /home/dev/workspace/api add -A"));
+    assertTrue(joined.contains("git -C /home/dev/workspace/api commit -m"));
+    assertTrue(joined.contains("git -C /home/dev/workspace/api push"));
+  }
+
+  @Test
+  void ensureCommittedLeavesACleanRepoUntouched() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n");
+
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+
+    assertTrue(rescued.isEmpty());
+    assertFalse(String.join("\n", shell.invocations()).contains("add -A"));
+  }
+
+  @Test
+  void ensureCommittedNeverCommitsOnAForeignBranch() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "main\n")
+            .onOk("status --porcelain", " M Api.java\n");
+
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+
+    assertTrue(
+        rescued.isEmpty(),
+        "a repo parked on another branch is not this run's to commit — auto-committing there is"
+            + " how a shared clone's main gets contaminated");
+    assertFalse(String.join("\n", shell.invocations()).contains("add -A"));
+  }
+
+  @Test
+  void ensureCommittedSkipsASpecWithNoBranch() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertTrue(runner(shell).ensureCommitted("acme", List.of("api"), " ").isEmpty());
+    assertEquals(0, shell.invocations().size(), "no branch to guard means nothing to touch");
+  }
+
+  @Test
+  void ensureCommittedFailsLoudWhenTheCommitItselfFails() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
+            .onOk("status --porcelain", " M Api.java\n")
+            .onFail("commit -m", "git identity not configured");
+
+    var ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec"));
+    assertTrue(ex.getMessage().contains("git identity not configured"), ex.getMessage());
+  }
+
+  @Test
+  void ensureCommittedToleratesAPushFailure() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
+            .onOk("status --porcelain", " M Api.java\n")
+            .onFail("push", "no network");
+
+    assertEquals(
+        List.of("api"),
+        runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec"),
+        "the commit is the rescue; a push failure must not fail the pipeline");
   }
 
   @Test

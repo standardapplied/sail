@@ -254,6 +254,7 @@ public final class ServerStartCommand implements Runnable {
             specStore,
             runStore,
             eventStore,
+            reviewStore,
             bus,
             unitProbe,
             NodeIdentity::handle,

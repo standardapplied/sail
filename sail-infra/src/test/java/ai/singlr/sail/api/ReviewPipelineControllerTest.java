@@ -22,6 +22,7 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -53,6 +54,10 @@ class ReviewPipelineControllerTest {
   }
 
   private void createSpec(String id, String status) {
+    createSpec(id, status, List.of());
+  }
+
+  private void createSpec(String id, String status, List<String> repos) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
@@ -70,7 +75,7 @@ class ReviewPipelineControllerTest {
             "",
             null,
             List.of(),
-            List.of()));
+            repos));
   }
 
   private Event agentStoppedEvent(String specId) {
@@ -798,6 +803,113 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void erroredRetriesAreBoundedSoARescueLoopCanNeverBurnAgentsForever() throws Exception {
+    createSpec("auth", "in_progress");
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
+      var ctrl =
+          controller(
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid) -> "prose with no fenced block",
+              bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+
+      var reviews = reviewStore.reviewsForSpec("auth");
+      assertEquals(3, reviews.size());
+      assertTrue(
+          reviews.stream().allMatch(r -> r.errored() && r.iteration() == 1),
+          "errored attempts retry the same iteration");
+
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          3,
+          reviewStore.reviewsForSpec("auth").size(),
+          "the fourth stop must escalate instead of starting a fourth doomed review");
+      assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+      var detail =
+          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
+      assertTrue(
+          detail.contains("errored"),
+          "escalation must say WHY — an error budget, not exhausted iterations: " + detail);
+    }
+  }
+
+  @Test
+  void anUnparseableReviewNarratesAsErroredNotAsAFailedGate() throws Exception {
+    createSpec("auth", "in_progress");
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_errored", "review_stage_failed"), 1);
+      var ctrl =
+          controller(
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid) -> "no fenced block here",
+              bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          List.of("review_errored"),
+          captured.events().stream().map(Event::type).toList(),
+          "a parse failure is an infrastructure error, not a gate verdict — one message, not a"
+              + " misleading 'stage failed (no findings)' followed by 'errored'");
+    }
+  }
+
+  @Test
+  void aFixIterationCommitsWorkTheAgentLeftUncommitted() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]
+        ```
+        """;
+    var ensured = new AtomicReference<List<Object>>();
+    var calls = new AtomicInteger();
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String prompt, String rid) {
+            return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+          }
+
+          @Override
+          public List<String> ensureCommitted(String project, List<String> repos, String branch) {
+            ensured.set(List.of(project, repos, branch));
+            return List.of("api");
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of(Event.WellKnownTypes.GUARDRAIL_TRIGGERED), 1);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          List.of("test-project", List.of("api"), "feat/test"),
+          ensured.get(),
+          "after the fix agent runs, its work is verified committed on the spec branch");
+      var reason =
+          java.util.Objects.toString(captured.events().getFirst().data().get("reason"), "");
+      assertTrue(reason.contains("api"), "the guardrail names the contaminated repo");
+    }
+  }
+
+  @Test
   void executePipelinePublishesEventsWhenBusProvided() {
     createSpec("auth", "in_progress");
     specStore.updateStatus("auth", SpecStatus.REVIEW);
@@ -872,6 +984,10 @@ class ReviewPipelineControllerTest {
   private record Captured(List<Event> events, CountDownLatch latch) {}
 
   private static Captured captureStagePassedEvents(EventBus bus, int expected) {
+    return captureEvents(bus, Set.of("review_stage_passed"), expected);
+  }
+
+  private static Captured captureEvents(EventBus bus, Set<String> types, int expected) {
     var events = new java.util.concurrent.CopyOnWriteArrayList<Event>();
     var latch = new CountDownLatch(expected);
     bus.subscribe(
@@ -884,7 +1000,7 @@ class ReviewPipelineControllerTest {
 
               @Override
               public java.util.function.Predicate<Event> filter() {
-                return e -> "review_stage_passed".equals(e.type());
+                return e -> types.contains(e.type());
               }
 
               @Override

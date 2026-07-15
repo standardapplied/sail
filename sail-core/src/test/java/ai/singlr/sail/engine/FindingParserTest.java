@@ -229,6 +229,78 @@ class FindingParserTest {
   }
 
   @Test
+  void parsesAnUppercaseFence() {
+    var output =
+        """
+        ```JSON
+        [{"severity": "LOW", "category": "LOGIC", "title": "Case", "description": "D"}]
+        ```
+        """;
+
+    var result = FindingParser.parse(output);
+
+    assertEquals(
+        1, result.findings().size(), "fence casing is not a verdict: " + result.warnings());
+    assertEquals("Case", result.findings().getFirst().title());
+  }
+
+  @Test
+  void findsTheArrayEmbeddedInProseWithoutAFence() {
+    var output =
+        """
+        I reviewed the branch and found one issue.
+        [{"severity": "HIGH", "category": "SECURITY", "title": "Leak", "description": "D"}]
+        Let me know if you need more detail.
+        """;
+
+    var result = FindingParser.parse(output);
+
+    assertEquals(1, result.findings().size(), "unfenced JSON is still JSON: " + result.warnings());
+    assertEquals("Leak", result.findings().getFirst().title());
+  }
+
+  @Test
+  void fallsThroughToAnEmbeddedArrayWhenTheOnlyFenceIsThePromptEcho() {
+    var output =
+        """
+        Begin your response with ```json and end with ```.
+        I inspected the diff and found one issue.
+        [{"severity": "MEDIUM", "category": "LOGIC", "title": "Bug", "description": "D"}]
+        """;
+
+    var result = FindingParser.parse(output);
+
+    assertEquals(
+        1,
+        result.findings().size(),
+        "an unparseable prompt-echo fence must not hide real findings: " + result.warnings());
+    assertEquals("Bug", result.findings().getFirst().title());
+  }
+
+  @Test
+  void aBareEmptyArrayLineInProseIsACleanVerdict() {
+    var output =
+        """
+        I examined every change on the branch.
+        []
+        No issues worth reporting.
+        """;
+
+    var result = FindingParser.parse(output);
+
+    assertTrue(result.findings().isEmpty());
+    assertTrue(result.warnings().isEmpty(), "a bare [] is a verdict: " + result.warnings());
+  }
+
+  @Test
+  void proseMentioningAnEmptyArrayMidSentenceIsNotAVerdict() {
+    var result = FindingParser.parse("If there are no issues, return an empty array: []");
+
+    assertTrue(result.findings().isEmpty());
+    assertFalse(result.warnings().isEmpty(), "a prompt echo must never count as a clean pass");
+  }
+
+  @Test
   void reportsAWarningWhenNoBlockParses() {
     var result = FindingParser.parse("Begin your response with ```json and end with ```.");
 

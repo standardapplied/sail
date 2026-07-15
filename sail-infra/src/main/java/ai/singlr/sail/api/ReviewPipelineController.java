@@ -52,6 +52,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private static final Set<String> TRIGGER_TYPES =
       Set.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED);
 
+  /**
+   * How many errored (infrastructure-failed) review attempts of one iteration may accumulate before
+   * the spec escalates. Errored attempts retry without burning an iteration, and the reconciler
+   * replays a stop for each one — unbounded, that pair is an infinite loop of doomed reviews;
+   * bounded, a transient failure self-heals and a persistent one surfaces to a human.
+   */
+  static final int MAX_ERRORED_RETRIES = 3;
+
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final Function<String, ReviewPipelineConfig> configResolver;
@@ -262,13 +270,25 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     var iteration = existing.map(ReviewPipelineController::nextIteration).orElse(1);
     if (iteration > config.maxIterations()) {
-      System.err.println(
-          "review-pipeline: spec "
-              + specId
-              + " escalated — iterations exhausted ("
+      var reason =
+          "review iterations exhausted ("
               + config.maxIterations()
-              + "); re-dispatch with --restart to start a fresh attempt");
-      escalate(event.project(), specId, existing.get().id());
+              + "); re-dispatch with --restart to start a fresh attempt";
+      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
+      escalate(event.project(), specId, existing.get().id(), reason);
+      return;
+    }
+
+    if (existing.isPresent()
+        && existing.get().errored()
+        && erroredAttempts(specId, iteration) >= MAX_ERRORED_RETRIES) {
+      var reason =
+          MAX_ERRORED_RETRIES
+              + " review attempts errored in a row at iteration "
+              + iteration
+              + "; fix the reviewer, then re-dispatch with --restart";
+      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
+      escalate(event.project(), specId, existing.get().id(), reason);
       return;
     }
 
@@ -365,7 +385,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (agent == null) {
       var message = "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml";
       reviewStore.completeStage(stage.id(), "failed", message);
-      publishEvent(project, specId, "review_stage_failed", stage.name());
       return new StageOutcome.Errored(message);
     }
     reviewStore.startStage(stage.id(), agent);
@@ -383,7 +402,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
         var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
         reviewStore.completeStage(stage.id(), "failed", message);
-        publishEvent(project, specId, "review_stage_failed", stage.name());
         return new StageOutcome.Errored(message);
       }
 
@@ -447,7 +465,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (review.isEmpty()) return;
 
     if (review.get().iteration() >= config.maxIterations()) {
-      escalate(project, specId, reviewId);
+      escalate(
+          project,
+          specId,
+          reviewId,
+          "review iterations exhausted (" + config.maxIterations() + ")");
       return;
     }
 
@@ -470,7 +492,13 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     executePipeline(reviewId, config, project, specId);
   }
 
-  /** The fix agent runs under the failed review's identity, appending to that review's log. */
+  /**
+   * The fix agent runs under the failed review's identity, appending to that review's log. It runs
+   * hook-free, outside the dispatch lane's stop-readiness gate, so after it finishes {@link
+   * ReviewAgentRunner#ensureCommitted} rescues any work it left uncommitted — otherwise the
+   * re-review judges a branch without the fixes and the shared clone carries the leftovers into the
+   * next dispatch.
+   */
   private void triggerFixIteration(
       String reviewId, String specId, List<Finding> findings, String project) {
     var spec = specStore.findById(specId);
@@ -484,12 +512,39 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
       agentRunner.run(project, agent, fixTask, reviewId);
+      var rescued = agentRunner.ensureCommitted(project, spec.get().repos(), spec.get().branch());
+      if (!rescued.isEmpty()) {
+        publishGuardrail(
+            project,
+            specId,
+            "fix agent left uncommitted changes in " + String.join(", ", rescued),
+            "committed and pushed them to " + spec.get().branch());
+      }
     } catch (Exception e) {
       failReviewRun(reviewId, e);
       System.err.println(
           "review-pipeline: fix iteration failed for spec " + specId + ": " + e.getMessage());
     }
     completeReviewRun(reviewId);
+  }
+
+  /** Errored attempts of this iteration in the current dispatch attempt — the retry budget. */
+  private long erroredAttempts(String specId, int iteration) {
+    return reviewStore.reviewsForSpec(specId).stream()
+        .filter(r -> !r.superseded() && r.errored() && r.iteration() == iteration)
+        .count();
+  }
+
+  private void publishGuardrail(String project, String specId, String reason, String action) {
+    if (eventBus == null) return;
+    eventBus.publish(
+        Event.of(
+            project,
+            specId,
+            Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
+            Event.SAIL_AGENT,
+            hostname(),
+            Map.of("reason", reason, "action", action)));
   }
 
   private void startReviewRun(
@@ -530,10 +585,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     syncTrigger.run();
   }
 
-  private void escalate(String project, String specId, String reviewId) {
+  /** The reason travels as the event detail, so Slack says why — not a one-size-fits-all line. */
+  private void escalate(String project, String specId, String reviewId, String reason) {
     reviewStore.updateReviewStatus(reviewId, "escalated");
     advanceSpec(specId, SpecStatus.REVIEW);
-    publishEvent(project, specId, "review_escalated", null);
+    publishEvent(project, specId, "review_escalated", reason);
   }
 
   private void publishEvent(String project, String specId, String type, String detail) {
