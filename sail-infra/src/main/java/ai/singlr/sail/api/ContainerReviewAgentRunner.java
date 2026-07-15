@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -84,6 +85,56 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
     }
 
     return StreamJsonResult.extract(readLogSince(project, unit, startOffset));
+  }
+
+  /**
+   * A repo is rescued only when it is still checked out on the spec's branch — a repo parked
+   * anywhere else (another spec's branch, or main) is not this run's to commit, and auto-committing
+   * there is exactly how a shared clone gets contaminated. The commit is the rescue; the push is
+   * best-effort, since the branch already has an upstream from dispatch and a network blip must not
+   * fail the pipeline.
+   */
+  @Override
+  public List<String> ensureCommitted(String project, List<String> repos, String branch)
+      throws Exception {
+    if (branch == null || branch.isBlank()) {
+      return List.of();
+    }
+    var rescued = new ArrayList<String>();
+    for (var repo : repos) {
+      var dir = WORKSPACE + "/" + repo;
+      if (!onBranch(project, dir, branch) || git(project, dir, "status", "--porcelain").isBlank()) {
+        continue;
+      }
+      git(project, dir, "add", "-A");
+      git(project, dir, "commit", "-m", "fix: review-fix changes left uncommitted by the agent");
+      var push = shell.exec(ContainerExec.asDevUser(project, List.of("git", "-C", dir, "push")));
+      if (!push.ok()) {
+        System.err.println(
+            "review-pipeline: push failed for " + dir + " on " + branch + ": " + push.stderr());
+      }
+      rescued.add(repo);
+    }
+    return List.copyOf(rescued);
+  }
+
+  private boolean onBranch(String project, String dir, String branch) throws Exception {
+    var result =
+        shell.exec(
+            ContainerExec.asDevUser(
+                project, List.of("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")));
+    return result.ok() && branch.equals(result.stdout().strip());
+  }
+
+  private String git(String project, String dir, String... args) throws Exception {
+    var command = new ArrayList<>(List.of("git", "-C", dir));
+    command.addAll(List.of(args));
+    var result = shell.exec(ContainerExec.asDevUser(project, command));
+    if (!result.ok()) {
+      throw new IllegalStateException(
+          "git " + args[0] + " failed in " + dir + ": " + result.stderr());
+    }
+    return result.stdout();
   }
 
   /**

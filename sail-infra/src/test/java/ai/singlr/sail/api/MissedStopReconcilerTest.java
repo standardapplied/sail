@@ -94,7 +94,7 @@ class MissedStopReconcilerTest {
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
     return new MissedStopReconciler(
-        specStore, sessionStore, eventStore, bus, probe, localHandle, clock);
+        specStore, sessionStore, eventStore, reviewStore, bus, probe, localHandle, clock);
   }
 
   private void createInProgressSpec(String id) {
@@ -384,6 +384,82 @@ class MissedStopReconcilerTest {
 
     assertEquals(1, rec.sweep());
     assertEquals(0, rec.sweep(), "an empty-pipeline review must not be replayed forever");
+  }
+
+  @Test
+  void aSpecWhoseLatestReviewErroredGetsItsStopReplayed() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    erroredReview("auth");
+
+    assertEquals(
+        1,
+        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        "an errored review strands the spec in review forever unless its stop is replayed");
+  }
+
+  @Test
+  void anErroredReviewEarnsExactlyOneReplay() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    erroredReview("auth");
+    var rec = reconciler(new CountingProbe(true), Instant::now);
+
+    assertEquals(1, rec.sweep());
+    assertEquals(0, rec.sweep(), "one errored review, one replay; its retry decides what is next");
+  }
+
+  @Test
+  void aFreshErroredRetryEarnsItsOwnReplay() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    erroredReview("auth");
+    var rec = reconciler(new CountingProbe(true), Instant::now);
+
+    assertEquals(1, rec.sweep());
+    erroredReview("auth");
+
+    assertEquals(
+        1,
+        rec.sweep(),
+        "each errored attempt is rescued once; the pipeline's error budget bounds the loop");
+  }
+
+  @Test
+  void anEscalatedReviewIsNeverReplayed() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    reviewStore.updateReviewStatus(erroredReview("auth"), "escalated");
+
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        "escalation parks the spec for a human; the sweep must not resurrect it");
+  }
+
+  @Test
+  void aRunningRetryReviewIsLeftAlone() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    erroredReview("auth");
+    reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "running");
+
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        "the errored attempt already got its retry; a running review owns the spec now");
+  }
+
+  private String erroredReview(String specId) {
+    var reviewId = reviewStore.createReview(specId, 1);
+    reviewStore.failReviewWithError(
+        reviewId, "reviewer output unparseable: No JSON block found in agent output.");
+    return reviewId;
   }
 
   @Test

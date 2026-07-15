@@ -62,6 +62,14 @@ public final class FixTaskBuilder {
       sb.append("\n");
     }
 
+    sb.append(
+        """
+        When every finding is addressed: run the project's verification, commit all changes to
+        the current branch with a clear message, and push. Never leave uncommitted work in the
+        workspace — the re-review reads the branch, and uncommitted files contaminate the next
+        dispatch in this shared clone.
+        """);
+
     return sb.toString();
   }
 }

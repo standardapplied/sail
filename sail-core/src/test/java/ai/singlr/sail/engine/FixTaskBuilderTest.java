@@ -140,6 +140,28 @@ class FixTaskBuilderTest {
   }
 
   @Test
+  void taskEndsWithAnExplicitCommitProtocol() {
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "a.java",
+            1,
+            1,
+            "Issue",
+            "Desc",
+            "",
+            null,
+            0.9);
+
+    var task = FixTaskBuilder.build("Spec", List.of(finding));
+
+    assertTrue(task.contains("commit"), "the fix agent must be told to commit, not just hinted");
+    assertTrue(task.contains("push"));
+    assertTrue(task.contains("Never leave uncommitted work"));
+  }
+
+  @Test
   void taskIncludesSpecTitleInHeader() {
     var finding =
         Finding.create(
