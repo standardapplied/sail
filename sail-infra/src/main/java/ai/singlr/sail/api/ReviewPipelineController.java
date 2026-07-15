@@ -270,28 +270,25 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     var iteration = existing.map(ReviewPipelineController::nextIteration).orElse(1);
     if (iteration > config.maxIterations()) {
-      System.err.println(
-          "review-pipeline: spec "
-              + specId
-              + " escalated — iterations exhausted ("
+      var reason =
+          "review iterations exhausted ("
               + config.maxIterations()
-              + "); re-dispatch with --restart to start a fresh attempt");
-      escalate(event.project(), specId, existing.get().id());
+              + "); re-dispatch with --restart to start a fresh attempt";
+      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
+      escalate(event.project(), specId, existing.get().id(), reason);
       return;
     }
 
     if (existing.isPresent()
         && existing.get().errored()
         && erroredAttempts(specId, iteration) >= MAX_ERRORED_RETRIES) {
-      System.err.println(
-          "review-pipeline: spec "
-              + specId
-              + " escalated — "
-              + MAX_ERRORED_RETRIES
+      var reason =
+          MAX_ERRORED_RETRIES
               + " review attempts errored in a row at iteration "
               + iteration
-              + "; fix the reviewer, then re-dispatch with --restart");
-      escalate(event.project(), specId, existing.get().id());
+              + "; fix the reviewer, then re-dispatch with --restart";
+      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
+      escalate(event.project(), specId, existing.get().id(), reason);
       return;
     }
 
@@ -468,7 +465,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (review.isEmpty()) return;
 
     if (review.get().iteration() >= config.maxIterations()) {
-      escalate(project, specId, reviewId);
+      escalate(
+          project,
+          specId,
+          reviewId,
+          "review iterations exhausted (" + config.maxIterations() + ")");
       return;
     }
 
@@ -584,10 +585,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     syncTrigger.run();
   }
 
-  private void escalate(String project, String specId, String reviewId) {
+  /** The reason travels as the event detail, so Slack says why — not a one-size-fits-all line. */
+  private void escalate(String project, String specId, String reviewId, String reason) {
     reviewStore.updateReviewStatus(reviewId, "escalated");
     advanceSpec(specId, SpecStatus.REVIEW);
-    publishEvent(project, specId, "review_escalated", null);
+    publishEvent(project, specId, "review_escalated", reason);
   }
 
   private void publishEvent(String project, String specId, String type, String detail) {

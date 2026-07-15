@@ -47,7 +47,9 @@ final class SlackMessage {
       case "review_errored" -> "Review errored: " + detailOr(event, "unknown error");
       case "review_iteration_started" -> "Fix iteration started.";
       case "review_escalated" ->
-          "Escalated: review iterations exhausted. This spec needs a human decision.";
+          "Escalated: "
+              + detailOr(event, "review iterations exhausted")
+              + ". This spec needs a human decision.";
       default -> "Event " + event.type() + " from " + event.agent() + ".";
     };
   }

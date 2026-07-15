@@ -803,29 +803,42 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void erroredRetriesAreBoundedSoARescueLoopCanNeverBurnAgentsForever() {
+  void erroredRetriesAreBoundedSoARescueLoopCanNeverBurnAgentsForever() throws Exception {
     createSpec("auth", "in_progress");
-    var ctrl =
-        controller(
-            singleAgentStage("no_critical"), (p, a, pr, rid) -> "prose with no fenced block");
 
-    ctrl.onEvent(agentStoppedEvent("auth"));
-    ctrl.onEvent(reconcilerStoppedEvent("auth"));
-    ctrl.onEvent(reconcilerStoppedEvent("auth"));
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
+      var ctrl =
+          controller(
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid) -> "prose with no fenced block",
+              bus);
 
-    var reviews = reviewStore.reviewsForSpec("auth");
-    assertEquals(3, reviews.size());
-    assertTrue(
-        reviews.stream().allMatch(r -> r.errored() && r.iteration() == 1),
-        "errored attempts retry the same iteration");
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
 
-    ctrl.onEvent(reconcilerStoppedEvent("auth"));
+      var reviews = reviewStore.reviewsForSpec("auth");
+      assertEquals(3, reviews.size());
+      assertTrue(
+          reviews.stream().allMatch(r -> r.errored() && r.iteration() == 1),
+          "errored attempts retry the same iteration");
 
-    assertEquals(
-        3,
-        reviewStore.reviewsForSpec("auth").size(),
-        "the fourth stop must escalate instead of starting a fourth doomed review");
-    assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          3,
+          reviewStore.reviewsForSpec("auth").size(),
+          "the fourth stop must escalate instead of starting a fourth doomed review");
+      assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+      var detail =
+          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
+      assertTrue(
+          detail.contains("errored"),
+          "escalation must say WHY — an error budget, not exhausted iterations: " + detail);
+    }
   }
 
   @Test
