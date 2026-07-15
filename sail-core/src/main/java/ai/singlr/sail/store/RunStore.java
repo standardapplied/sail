@@ -139,6 +139,24 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
+   * Records a review negotiation under the review UUID that owns its prompt, session, and log
+   * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
+   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation.
+   */
+  public String createReview(
+      String reviewId,
+      String project,
+      String specId,
+      String node,
+      String agent,
+      String branch,
+      String task,
+      String logPath) {
+    return create(
+        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, "");
+  }
+
+  /**
    * Atomically reserves a dispatch: within one {@code BEGIN IMMEDIATE} transaction, checks every
    * running local run of the project for a repo overlap or a same-spec run and inserts the new
    * {@code running} run — with its reserved repos persisted — only when none conflicts. Taking the
@@ -207,17 +225,18 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The latest run of {@code project} that executed on this box, or empty. Ownership is by node: a
-   * box with a handle owns exactly the runs stamped with it; a box with no handle owns exactly its
-   * own blank-node runs and never a run adopted from another box via sync. So "the project's latest
-   * run" can never resolve to a foreign run — the guarantee the completion and report paths rely on
-   * now that the {@code runs} table also holds synced foreign rows.
+   * The latest build run of {@code project} that executed on this box, or empty. Review runs remain
+   * in the aggregate but do not replace the build session used by agent status, log, and report
+   * commands. Ownership is by node: a box with a handle owns exactly the runs stamped with it; a
+   * box with no handle owns exactly its own blank-node runs and never a run adopted from another
+   * box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
-            + " FROM runs WHERE project = ? AND IFNULL(node, '') = ? ORDER BY started_at DESC"
+            + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
+            + " AND IFNULL(role, 'build') = 'build' ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -225,14 +244,15 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The running run of {@code project} that executed on this box, or empty. Node-scoped like {@link
-   * #latestForProjectOnNode}.
+   * The running build run of {@code project} that executed on this box, or empty. Node-scoped like
+   * {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status = 'running' AND IFNULL(node, '') = ?"
+            + " AND IFNULL(role, 'build') = 'build'"
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,
@@ -240,12 +260,28 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Every run still in the {@code running} state, across all projects and nodes — the reaper's full
-   * input. Ownership is filtered by the caller so it matches exactly what the dispatch gate counts,
-   * including rows with a blank node.
+   * Every build run still in the {@code running} state, across all projects and nodes — the
+   * build-session reaper's full input. Review executions are foreground work owned and completed by
+   * the review controller, so the systemd reaper must not probe them as build units.
    */
   public List<RunRow> running() {
-    return db.query("SELECT " + COLUMNS + " FROM runs WHERE status = 'running'", this::mapRow);
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE status = 'running' AND IFNULL(role, 'build') = 'build'",
+        this::mapRow);
+  }
+
+  /** Marks local review executions orphaned by a server restart failed. */
+  public int failRunningReviewsOnNode(String localHandle) {
+    var ids =
+        db.query(
+            "SELECT id FROM runs WHERE status = 'running' AND role = 'review'"
+                + " AND IFNULL(node, '') = ?",
+            row -> row.text(0),
+            ownerKey(localHandle));
+    ids.forEach(id -> complete(id, "failed", null));
+    return ids.size();
   }
 
   private static String ownerKey(String localHandle) {

@@ -15,6 +15,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -974,6 +975,79 @@ class ReviewPipelineControllerTest {
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("passed", review.status());
+  }
+
+  @Test
+  void reviewRunIsVisibleWhileTheAgentRunsAndCompletedOnExit() throws Exception {
+    createSpec("auth", "in_progress");
+    var started = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    ReviewAgentRunner gated =
+        (p, a, pr, rid) -> {
+          started.countDown();
+          await(release);
+          return "[]";
+        };
+    var runs = new RunStore(db);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            gated,
+            null,
+            () -> {},
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor(),
+            runs,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    assertTrue(started.await(5, TimeUnit.SECONDS), "pipeline should reach the agent runner");
+
+    var running = runs.listForSpec("auth").getFirst();
+    assertEquals("review", running.role());
+    assertEquals("running", running.status());
+    assertEquals("node-a", running.node());
+    assertEquals("codex", running.agent());
+    assertEquals("feat/test", running.branch());
+    assertEquals("/home/dev/.sail/runs/" + running.id() + "/review.log", running.logPath());
+
+    release.countDown();
+    ctrl.awaitCompletion(5000);
+
+    var completed = runs.findById(running.id()).orElseThrow();
+    assertEquals("completed", completed.status());
+    assertEquals(0, completed.exitCode());
+    assertNotNull(completed.completedAt());
+    ctrl.close();
+  }
+
+  @Test
+  void reviewRunRecordsTheAgentExitCodeOnFailure() {
+    createSpec("auth", "in_progress");
+    var runs = new RunStore(db);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid) -> {
+              throw new ReviewAgentExecutionException("quota", 17);
+            },
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runs,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var failed = runs.listForSpec("auth").getFirst();
+    assertEquals("failed", failed.status());
+    assertEquals(17, failed.exitCode());
+    assertNotNull(failed.completedAt());
   }
 
   @Test

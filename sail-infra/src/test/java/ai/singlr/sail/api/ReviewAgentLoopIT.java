@@ -11,11 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.FindingParser;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -47,6 +49,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   private static final String FAKE_AGENT =
       """
       #!/usr/bin/env bash
+      if [ -f "$HOME/.sail/review-hold" ]; then
+        printf 'review started\n'
+        touch "$HOME/.sail/review-started"
+        while [ -f "$HOME/.sail/review-hold" ]; do sleep 0.1; done
+      fi
       case "$*" in
         *"Output your findings"*)
           n_file="$HOME/.sail/review-count"
@@ -112,6 +119,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       new SchemaManager(db).migrate();
       var specStore = new SpecStore(db);
       var reviewStore = new ReviewStore(db);
+      var runStore = new RunStore(db);
       specStore.create(
           new SpecStore.SpecRow(
               "auth",
@@ -156,7 +164,14 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
               new ContainerReviewAgentRunner(shell),
               null,
               () -> {},
-              new DirectExecutorService());
+              java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor(),
+              runStore,
+              () -> "node-a");
+
+      var hold =
+          shell.exec(
+              ContainerExec.asDevUser(CONTAINER, List.of("touch", "/home/dev/.sail/review-hold")));
+      assertTrue(hold.ok(), hold.stderr());
 
       controller.onEvent(
           Event.of(
@@ -167,10 +182,54 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
               "host",
               Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER)));
 
+      RunStore.RunRow running = awaitRunningReview(runStore);
+      assertEquals("review", running.role());
+      assertEquals("auth", running.specId());
+      assertEquals("node-a", running.node());
+      assertEquals("codex", running.agent());
+      assertEquals("feat/test", running.branch());
+      assertTrue(awaitLiveReviewLog(running.logPath()).contains("review started"));
+
+      var release =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  CONTAINER, List.of("rm", "-f", "/home/dev/.sail/review-hold")));
+      assertTrue(release.ok(), release.stderr());
+      controller.awaitCompletion(30_000);
+
       assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
       assertEquals(2, reviewStore.reviewsForSpec("auth").size());
+      var completed = runStore.findById(running.id()).orElseThrow();
+      assertEquals("completed", completed.status());
+      assertEquals(0, completed.exitCode());
+      assertTrue(completed.completedAt() != null && !completed.completedAt().isBlank());
+      controller.close();
     } finally {
       deleteRecursively(stateDir);
     }
+  }
+
+  private static RunStore.RunRow awaitRunningReview(RunStore runStore) throws Exception {
+    var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+    while (System.nanoTime() < deadline) {
+      var runs = runStore.listForSpec("auth");
+      if (!runs.isEmpty() && "running".equals(runs.getFirst().status())) {
+        return runs.getFirst();
+      }
+      Thread.sleep(50);
+    }
+    throw new AssertionError("review run did not become visible while the agent was active");
+  }
+
+  private String awaitLiveReviewLog(String logPath) throws Exception {
+    var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+    while (System.nanoTime() < deadline) {
+      var log = shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("cat", logPath)));
+      if (log.ok() && log.stdout().contains("review started")) {
+        return log.stdout();
+      }
+      Thread.sleep(50);
+    }
+    throw new AssertionError("review log did not stream output while the run was active");
   }
 }

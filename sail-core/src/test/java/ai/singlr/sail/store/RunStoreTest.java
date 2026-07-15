@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,6 +72,32 @@ class RunStoreTest {
     assertEquals("/home/dev/.sail/runs/r/agent.log", run.logPath());
     assertNotNull(run.startedAt());
     assertNull(run.completedAt());
+  }
+
+  @Test
+  void createAndCompleteReviewRun() {
+    var id = DateTimeUtils.newId().toString();
+    var logPath = "/home/dev/.sail/runs/" + id + "/review.log";
+
+    store.createReview(id, "backend", "auth", "node-a", "codex", "feat/auth", "review it", logPath);
+
+    var running = store.findById(id).orElseThrow();
+    assertEquals("review", running.role());
+    assertEquals("running", running.status());
+    assertEquals("node-a", running.node());
+    assertEquals("codex", running.agent());
+    assertEquals("feat/auth", running.branch());
+    assertEquals("review it", running.task());
+    assertEquals(logPath, running.logPath());
+    assertTrue(running.unit().isBlank());
+    assertEquals("review", store.comparableSnapshot(id).get("role"));
+
+    store.complete(id, "completed", 0);
+
+    var completed = store.findById(id).orElseThrow();
+    assertEquals("completed", completed.status());
+    assertEquals(0, completed.exitCode());
+    assertNotNull(completed.completedAt());
   }
 
   @Test
@@ -184,6 +211,39 @@ class RunStoreTest {
     assertEquals(
         "spec-2", store.latestForProjectOnNode("backend", "node-a").orElseThrow().specId());
     assertTrue(store.latestForProjectOnNode("nonexistent", "node-a").isEmpty());
+  }
+
+  @Test
+  void buildSessionQueriesIgnoreRunningReviewRows() {
+    var buildId = newRun("backend", "auth");
+    var reviewId = DateTimeUtils.newId().toString();
+    store.createReview(
+        reviewId,
+        "backend",
+        "auth",
+        "node-a",
+        "codex",
+        "feat/x",
+        "review it",
+        "/home/dev/.sail/runs/" + reviewId + "/review.log");
+
+    assertEquals(buildId, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(buildId, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(List.of(buildId), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(2, store.listForProject("backend").size(), "the aggregate still lists both roles");
+  }
+
+  @Test
+  void startupFailsOnlyLocalRunningReviewRows() {
+    var local = DateTimeUtils.newId().toString();
+    var foreign = DateTimeUtils.newId().toString();
+    store.createReview(local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local);
+    store.createReview(foreign, "backend", "auth", "node-b", "codex", "b", "t", "/runs/" + foreign);
+
+    assertEquals(1, store.failRunningReviewsOnNode("node-a"));
+    assertEquals("failed", store.findById(local).orElseThrow().status());
+    assertNotNull(store.findById(local).orElseThrow().completedAt());
+    assertEquals("running", store.findById(foreign).orElseThrow().status());
   }
 
   @Test

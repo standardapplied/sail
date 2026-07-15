@@ -414,6 +414,13 @@ a plain agent's re-review is never fed a prior iteration's findings) via `Stream
 clean (empty `SAIL_SPEC_ID`, no hooks) so its own completion never re-enters the pipeline.
 Follow it live with `sail agent log <project> --review`.
 
+The run aggregate records that negotiation as a `role=review` run using the review UUID. A
+stage UUID would be less truthful: reviewer and fix invocations deliberately share the review's
+file set, while a stage-scoped run ID would resolve to a directory they never write. The run is
+created before the first agent process starts, completes after the review's foreground work ends,
+and syncs like a build run. Retention always protects running run directories, including review
+runs that fall outside the normal keep window during concurrent work.
+
 **Recovery without losing work.** The git branch is the durable record: every coding agent
 (build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
 discards it. So an FDE always recovers by returning to the branch. When a spec is stuck: a

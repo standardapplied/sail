@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -94,5 +95,17 @@ class RunRetentionTest {
     var shell = new RecordingShell();
 
     assertEquals(3, RunRetention.prune(shell, "acme", runIds(3), -1).size());
+  }
+
+  @Test
+  void aRunningReviewBeyondTheKeepWindowIsNeverPruned() throws Exception {
+    var shell = new RecordingShell();
+
+    var pruned = RunRetention.prune(shell, "acme", runIds(5), Set.of(runId(3)), 2);
+
+    assertEquals(List.of(runId(2), runId(4)), pruned);
+    assertTrue(
+        shell.commands.stream().noneMatch(command -> command.contains(AgentUnit.runDir(runId(3)))),
+        "a live review keeps its shared prompt, session, and log directory");
   }
 }

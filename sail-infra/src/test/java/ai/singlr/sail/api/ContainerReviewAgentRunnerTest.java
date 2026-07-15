@@ -104,6 +104,7 @@ class ContainerReviewAgentRunnerTest {
     var ex =
         assertThrows(Exception.class, () -> runner(shell).run("acme", "codex", "p", REVIEW_ID));
     assertTrue(ex.getMessage().contains("boom"), ex.getMessage());
+    assertEquals(1, ((ReviewAgentExecutionException) ex).exitCode());
   }
 
   @Test

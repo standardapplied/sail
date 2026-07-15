@@ -10,8 +10,10 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Builds the per-project resolvers the {@link ReviewPipelineController} needs from a loader that
@@ -37,6 +39,19 @@ public final class ReviewWiring {
       Function<String, SailYaml> projectLoader,
       ShellExec shell,
       Runnable syncTrigger) {
+    return controller(
+        specStore, reviewStore, eventBus, projectLoader, shell, syncTrigger, null, null);
+  }
+
+  public static ReviewPipelineController controller(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      Function<String, SailYaml> projectLoader,
+      ShellExec shell,
+      Runnable syncTrigger,
+      RunStore runStore,
+      Supplier<String> localHandle) {
     return new ReviewPipelineController(
         specStore,
         reviewStore,
@@ -44,7 +59,10 @@ public final class ReviewWiring {
         reviewerResolver(projectLoader),
         new ContainerReviewAgentRunner(shell),
         eventBus,
-        syncTrigger);
+        syncTrigger,
+        java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor(),
+        runStore,
+        localHandle);
   }
 
   /** Resolves a project's review pipeline: its configured one, or the mandatory default. */

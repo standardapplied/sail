@@ -806,8 +806,14 @@ public final class DispatchOperations {
 
   private void pruneRuns(String project) {
     try {
-      var ids = runStore.listForProject(project).stream().map(RunStore.RunRow::id).toList();
-      var pruned = RunRetention.prune(shell, project, ids, RunRetention.DEFAULT_KEEP);
+      var runs = runStore.listForProject(project);
+      var ids = runs.stream().map(RunStore.RunRow::id).toList();
+      var running =
+          runs.stream()
+              .filter(run -> "running".equals(run.status()))
+              .map(RunStore.RunRow::id)
+              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+      var pruned = RunRetention.prune(shell, project, ids, running, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());

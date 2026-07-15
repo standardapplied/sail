@@ -25,3 +25,17 @@ public interface ReviewAgentRunner {
    */
   String run(String project, String agent, String prompt, String reviewId) throws Exception;
 }
+
+final class ReviewAgentExecutionException extends IllegalStateException {
+
+  private final int exitCode;
+
+  ReviewAgentExecutionException(String message, int exitCode) {
+    super(message);
+    this.exitCode = exitCode;
+  }
+
+  int exitCode() {
+    return exitCode;
+  }
+}

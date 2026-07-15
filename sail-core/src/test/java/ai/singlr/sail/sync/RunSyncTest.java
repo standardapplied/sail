@@ -104,6 +104,29 @@ class RunSyncTest {
   }
 
   @Test
+  void aReviewRunReplicatesAsMetadataButRemainsOwnedByItsExecutingNode() {
+    var id = DateTimeUtils.newId().toString();
+    node.runs.createReview(
+        id,
+        "backend",
+        "auth",
+        "node",
+        "codex",
+        "feat/auth",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log");
+
+    sync(node);
+    sync(other);
+
+    var replicated = other.runs.findById(id).orElseThrow();
+    assertEquals("review", replicated.role());
+    assertEquals("node", replicated.node());
+    assertEquals("running", replicated.status());
+    assertFalse(other.replica.mayPush(id));
+  }
+
+  @Test
   void aLifecycleTransitionOnTheOwningNodePropagates() {
     var id = startRun(node, "node");
     sync(node);

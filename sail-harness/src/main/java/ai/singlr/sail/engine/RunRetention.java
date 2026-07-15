@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -34,9 +35,27 @@ public final class RunRetention {
   public static List<String> prune(
       ShellExec shell, String container, List<String> runIdsNewestFirst, int keep)
       throws IOException, InterruptedException, TimeoutException {
+    return prune(shell, container, runIdsNewestFirst, Set.of(), keep);
+  }
+
+  /**
+   * As {@link #prune(ShellExec, String, List, int)}, while retaining every protected run even when
+   * it falls beyond the keep window. Callers protect live runs so concurrent build and review
+   * executions never lose their directory while an agent still has the log open.
+   */
+  public static List<String> prune(
+      ShellExec shell,
+      String container,
+      List<String> runIdsNewestFirst,
+      Set<String> protectedRunIds,
+      int keep)
+      throws IOException, InterruptedException, TimeoutException {
     var pruned = new ArrayList<String>();
     for (var i = Math.max(keep, 0); i < runIdsNewestFirst.size(); i++) {
       var runId = runIdsNewestFirst.get(i);
+      if (protectedRunIds.contains(runId)) {
+        continue;
+      }
       var result =
           shell.exec(ContainerExec.asDevUser(container, List.of("rm", "-rf", runDir(runId))));
       if (result.ok()) {

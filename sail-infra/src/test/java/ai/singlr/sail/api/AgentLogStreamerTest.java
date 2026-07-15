@@ -38,12 +38,16 @@ class AgentLogStreamerTest {
   }
 
   private static RunStore.RunRow run(String node, String logPath) {
+    return run(node, "build", logPath);
+  }
+
+  private static RunStore.RunRow run(String node, String role, String logPath) {
     return new RunStore.RunRow(
         "r1",
         "acme",
         "auth",
         node,
-        "build",
+        role,
         "claude-code",
         "feat/x",
         "do it",
@@ -74,7 +78,11 @@ class AgentLogStreamerTest {
   void streamRefusesAMemberWhoIsNotTheRunSpecAssignee() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
 
-    streamer(id -> Optional.of(runOn("node-a")), id -> Optional.of("uday"), "node-a").handle(out);
+    streamer(
+            id -> Optional.of(run("node-a", "review", "/review.log")),
+            id -> Optional.of("uday"),
+            "node-a")
+        .handle(out);
 
     assertEquals(403, out.status);
     assertTrue(out.body().contains("forbidden_not_assignee"), out.body());
@@ -111,6 +119,16 @@ class AgentLogStreamerTest {
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());
     assertTrue(out.body().contains("node-b"), out.body());
+  }
+
+  @Test
+  void foreignReviewRunUsesTheSameProvenanceGuard() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream");
+
+    streamer(id -> Optional.of(run("node-b", "review", "/review.log")), "node-a").handle(out);
+
+    assertEquals(409, out.status);
+    assertTrue(out.body().contains("run_on_other_node"), out.body());
   }
 
   @Test
@@ -184,6 +202,13 @@ class AgentLogStreamerTest {
     assertEquals("backend", cmd[2]);
     assertTrue(String.join(" ", cmd).contains("tail -f"));
     assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
+  }
+
+  @Test
+  void buildTailCommandUsesTheReviewersRunScopedLog() {
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "review", 0);
+
+    assertTrue(Arrays.asList(cmd).contains("/home/dev/.sail/runs/" + RUN_UUID + "/review.log"));
   }
 
   @Test
