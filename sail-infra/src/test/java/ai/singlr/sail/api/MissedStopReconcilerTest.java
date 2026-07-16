@@ -334,7 +334,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
@@ -348,7 +348,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
@@ -360,7 +360,7 @@ class MissedStopReconcilerTest {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(1, replayed, "a spec stranded in review with no review must be rescued");
   }
@@ -371,7 +371,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(0, replayed, "a review that ran is not stranded");
   }
@@ -380,7 +380,7 @@ class MissedStopReconcilerTest {
   void theReviewStrandRescueRunsAtMostOncePerSpec() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    var rec = reconciler(new CountingProbe(true), Instant::now);
+    var rec = reconciler(new CountingProbe(false), Instant::now);
 
     assertEquals(1, rec.sweep());
     assertEquals(0, rec.sweep(), "an empty-pipeline review must not be replayed forever");
@@ -395,7 +395,7 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         1,
-        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        reconciler(new CountingProbe(false), Instant::now).sweep(),
         "an errored review strands the spec in review forever unless its stop is replayed");
   }
 
@@ -405,7 +405,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
     erroredReview("auth");
-    var rec = reconciler(new CountingProbe(true), Instant::now);
+    var rec = reconciler(new CountingProbe(false), Instant::now);
 
     assertEquals(1, rec.sweep());
     assertEquals(0, rec.sweep(), "one errored review, one replay; its retry decides what is next");
@@ -417,7 +417,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
     erroredReview("auth");
-    var rec = reconciler(new CountingProbe(true), Instant::now);
+    var rec = reconciler(new CountingProbe(false), Instant::now);
 
     assertEquals(1, rec.sweep());
     erroredReview("auth");
@@ -437,7 +437,7 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         0,
-        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        reconciler(new CountingProbe(false), Instant::now).sweep(),
         "escalation parks the spec for a human; the sweep must not resurrect it");
   }
 
@@ -451,7 +451,7 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         0,
-        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        reconciler(new CountingProbe(false), Instant::now).sweep(),
         "the errored attempt already got its retry; a running review owns the spec now");
   }
 
@@ -478,13 +478,13 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         0,
-        reconciler(new CountingProbe(true), Instant::now)
+        reconciler(new CountingProbe(false), Instant::now)
             .rescueStrandedReviews(new HashSet<>(Set.of("auth"))),
         "a spec whose stop was replayed earlier this sweep — which flips it into review on an async"
             + " subscriber thread — must not have its stop replayed a second time by the review pass");
     assertEquals(
         1,
-        reconciler(new CountingProbe(true), Instant::now).rescueStrandedReviews(new HashSet<>()),
+        reconciler(new CountingProbe(false), Instant::now).rescueStrandedReviews(new HashSet<>()),
         "the same genuinely stranded review spec IS rescued when nothing handled it this sweep");
   }
 
@@ -533,7 +533,7 @@ class MissedStopReconcilerTest {
     var latch = new CountDownLatch(1);
     subscribeController(latch);
 
-    reconciler(new CountingProbe(true), Instant::now).sweep();
+    reconciler(new CountingProbe(false), Instant::now).sweep();
 
     BusTesting.awaitDelivery(latch);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -552,16 +552,58 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void terminalReplaysAndSpecsWithoutSessionsNeverTouchSystemctl() {
+  void aTerminalRowWithALiveUnitIsNeverReplayed() {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
-    createInProgressSpec("billing");
     var probe = new CountingProbe(true);
 
     var replayed = reconciler(probe, Instant::now).sweep();
 
+    assertEquals(
+        0,
+        replayed,
+        "a terminal run row is a claim, not an observation — an active unit means the agent is"
+            + " still working and replaying its stop would review half-done work");
+    assertEquals(1, probe.calls.get(), "the row must be checked against the live unit");
+  }
+
+  @Test
+  void aVetoedReplayRetriesOnALaterSweepOnceTheUnitDies() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    var probe = new CountingProbe(true);
+    var rec = reconciler(probe, Instant::now);
+
+    assertEquals(0, rec.sweep());
+    probe.active = false;
+
+    assertEquals(1, rec.sweep(), "the veto skips, it never burns the replay");
+  }
+
+  @Test
+  void aLiveUnitAlsoVetoesTheStrandedReviewRescueWithoutBurningIt() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    var probe = new CountingProbe(true);
+    var rec = reconciler(probe, Instant::now);
+
+    assertEquals(0, rec.sweep(), "the spec's agent is still alive; review must wait for it");
+    probe.active = false;
+
+    assertEquals(1, rec.sweep(), "once the unit dies the one rescue is still available");
+  }
+
+  @Test
+  void specsWithoutSessionsNeverTouchSystemctl() {
+    createInProgressSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    createInProgressSpec("billing");
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, Instant::now).sweep();
+
     assertEquals(1, replayed);
-    assertEquals(0, probe.calls.get());
+    assertEquals(1, probe.calls.get(), "only the terminal row is probed; billing has no session");
   }
 
   @Test
@@ -691,7 +733,7 @@ class MissedStopReconcilerTest {
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_WATCHER));
 
-    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(1, replayed);
   }
@@ -706,7 +748,7 @@ class MissedStopReconcilerTest {
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
     recordEvent("auth", "review_stage_started", Instant.now().plusSeconds(2).toString());
 
-    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(0, replayed);
   }
@@ -725,7 +767,7 @@ class MissedStopReconcilerTest {
             Event.WellKnownData.SOURCE_WATCHER));
     recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2).toString());
 
-    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(0, replayed);
   }
@@ -741,7 +783,7 @@ class MissedStopReconcilerTest {
         Instant.now().plusSeconds(1).toString(),
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
 
-    var replayed = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(1, replayed);
   }
@@ -752,7 +794,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", null);
     recordStopEvent("auth", Instant.now().plusSeconds(1).toString(), Map.of());
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(1, replayed);
   }
@@ -766,7 +808,7 @@ class MissedStopReconcilerTest {
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
     finishedSession("auth", "stopped", 0);
 
-    var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
     assertEquals(1, replayed);
   }
@@ -806,19 +848,46 @@ class MissedStopReconcilerTest {
   @Test
   void aFailingProbeIsLoggedAndDoesNotShadowOtherSpecs() {
     createInProgressSpec("broken");
-    runningSession("broken");
+    var brokenRun = runningSession("broken");
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
 
     var replayed =
         reconciler(
                 (project, runId, unit) -> {
-                  throw new IllegalStateException("container unreachable");
+                  if (unit.contains(brokenRun)) {
+                    throw new IllegalStateException("container unreachable");
+                  }
+                  return false;
                 },
                 PAST_GRACE)
             .sweep();
 
-    assertEquals(1, replayed);
+    assertEquals(
+        1,
+        replayed,
+        "the unreachable spec is deferred — never a forged stop — while the finished one replays");
+  }
+
+  @Test
+  void aFailingProbeDefersTheRescueWithoutBurningIt() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    var failing = new AtomicBoolean(true);
+    var rec =
+        reconciler(
+            (project, runId, unit) -> {
+              if (failing.get()) {
+                throw new IllegalStateException("container unreachable");
+              }
+              return false;
+            },
+            Instant::now);
+
+    assertEquals(0, assertDoesNotThrow(rec::sweep));
+    failing.set(false);
+
+    assertEquals(1, rec.sweep(), "the rescue is deferred, not burned");
   }
 
   @Test
