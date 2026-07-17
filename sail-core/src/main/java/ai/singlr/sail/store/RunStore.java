@@ -322,6 +322,21 @@ public final class RunStore implements ConflictResolver {
     return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY started_at DESC", this::mapRow);
   }
 
+  /**
+   * As {@link #complete(String, String, Integer)}, also running {@code alongside} inside the same
+   * immediate transaction — the seam for a caller that must drive two aggregates terminal as one
+   * intent (a stop cancelling a spec while releasing its run). Any failure rolls back both writes,
+   * so a partial terminal state is never exposed.
+   */
+  public void complete(String id, String status, Integer exitCode, Runnable alongside) {
+    db.immediateTransaction(
+        () -> {
+          alongside.run();
+          complete(id, status, exitCode);
+          return null;
+        });
+  }
+
   /** Marks a run finished with its final status and the agent process's exit code (nullable). */
   public void complete(String id, String status, Integer exitCode) {
     db.transaction(

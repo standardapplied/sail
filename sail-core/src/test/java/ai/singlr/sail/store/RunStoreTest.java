@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -176,6 +177,38 @@ class RunStoreTest {
     store.complete(id, "stopped", 137);
 
     assertEquals(137, store.findById(id).orElseThrow().exitCode());
+  }
+
+  @Test
+  void completeRunsAlongsideWorkInTheSameTransaction() {
+    var id = newRun("backend", "auth");
+    var other = newRun("backend", "auth");
+
+    store.complete(id, "stopped", null, () -> store.complete(other, "stopped", null));
+
+    assertEquals("stopped", store.findById(id).orElseThrow().status());
+    assertEquals("stopped", store.findById(other).orElseThrow().status());
+  }
+
+  @Test
+  void aFailureAfterAlongsideWorkRollsBackBothWrites() {
+    var id = newRun("backend", "auth");
+    var other = newRun("backend", "auth");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.complete(
+                id,
+                "stopped",
+                null,
+                () -> {
+                  store.complete(other, "stopped", null);
+                  throw new IllegalStateException("boom");
+                }));
+
+    assertEquals("running", store.findById(id).orElseThrow().status());
+    assertEquals("running", store.findById(other).orElseThrow().status());
   }
 
   @Test

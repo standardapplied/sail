@@ -120,6 +120,60 @@ class SqliteTest {
   }
 
   @Test
+  void nestedTransactionJoinsTheOuterScope() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+
+    db.transaction(
+        () -> {
+          db.execute("INSERT INTO t VALUES (?)", 1);
+          db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2));
+          db.immediateTransaction(
+              () -> {
+                db.execute("INSERT INTO t VALUES (?)", 3);
+                return null;
+              });
+        });
+
+    var count = db.query("SELECT COUNT(*) FROM t", row -> row.integer(0));
+    assertEquals(3L, count.getFirst());
+  }
+
+  @Test
+  void aFailureAfterANestedJoinRollsBackItsWritesToo() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            db.immediateTransaction(
+                () -> {
+                  db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 1));
+                  throw new RuntimeException("boom");
+                }));
+
+    var count = db.query("SELECT COUNT(*) FROM t", row -> row.integer(0));
+    assertEquals(0L, count.getFirst());
+  }
+
+  @Test
+  void aNewTransactionAfterANestedJoinBeginsItsOwnScope() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    db.transaction(() -> db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 1)));
+
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            db.transaction(
+                () -> {
+                  db.execute("INSERT INTO t VALUES (?)", 2);
+                  throw new RuntimeException("boom");
+                }));
+
+    var count = db.query("SELECT COUNT(*) FROM t", row -> row.integer(0));
+    assertEquals(1L, count.getFirst());
+  }
+
+  @Test
   void changesReturnsAffectedRows() {
     db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
     db.execute("INSERT INTO t VALUES (?, ?)", 1, "alice");

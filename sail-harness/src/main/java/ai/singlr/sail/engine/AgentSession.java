@@ -230,7 +230,11 @@ public final class AgentSession {
     killAgent(containerName, AgentUnit.BUILD);
   }
 
-  /** Kills the given role's running agent inside the container. SIGTERM first, then SIGKILL. */
+  /**
+   * Kills the given role's running agent inside the container. SIGTERM first, then SIGKILL. A
+   * SIGKILL that fails against a still-live process throws instead of returning normally, so a
+   * caller can never record a successful stop for an agent that survived the signal.
+   */
   public void killAgent(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
@@ -252,7 +256,16 @@ public final class AgentSession {
 
     var aliveCmd = ContainerExec.asDevUser(containerName, List.of("kill", "-0", pidStr));
     if (shell.exec(aliveCmd).ok()) {
-      shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
+      var kill = shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
+      if (!kill.ok()) {
+        throw new IOException(
+            "SIGKILL for agent PID "
+                + pidStr
+                + " in "
+                + containerName
+                + " failed: "
+                + kill.stderr().trim());
+      }
     }
 
     shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));

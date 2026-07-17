@@ -23,19 +23,24 @@ import java.util.Objects;
  * events go, how the kill runs, what the operator sees). {@code sail agent stop} and {@code POST
  * /v1/runs/{id}/stop} both delegate here and add nothing but rendering.
  *
- * <p>The order is the whole point: the terminal intent — spec {@code cancelled}, run {@code
- * stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event — is recorded <em>before</em> the
- * process is signalled, so every existing guard makes the cancel win the race with the watcher's
- * own stop. {@link RunTracker} only stamps a run still {@code running}; the review pipeline only
- * acts on a reviewable spec; the missed-stop reconciler sweeps only {@code in_progress} and {@code
- * review}; dispatch selects only {@code pending}. {@link SpecStatus#CANCELLED} sits outside all of
- * those sets, so a deliberate stop is honored by the existing contracts with no new special cases.
+ * <p>The order is the whole point: the spec moves to {@link SpecStatus#CANCELLED} <em>before</em>
+ * the process is signalled, so every existing guard makes the cancel win the race with the
+ * watcher's own stop. {@link RunTracker} only stamps a run still {@code running}; the review
+ * pipeline only acts on a reviewable spec; the missed-stop reconciler sweeps only {@code
+ * in_progress} and {@code review}; dispatch selects only {@code pending}. {@link
+ * SpecStatus#CANCELLED} sits outside all of those sets, so a deliberate stop is honored by the
+ * existing contracts with no new special cases. The rest of the terminal intent — run {@code
+ * stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event — is recorded only once the halt
+ * is verified: a kill that fails or leaves the agent alive restores the spec and throws, so the
+ * database never claims a live agent is terminal in a state no reconciler owns.
  *
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
- * whose agent already died still gets its intent recorded (spec cancelled, a still-{@code running}
- * run released as {@code stopped}). A pid mismatch is a structured no-op — stopping a stale run id
- * can never kill a different, newer run — and a second stop of the same run is idempotent by
- * construction, returning {@link AlreadyTerminal} without signalling anything.
+ * whose agent already died still gets its intent recorded atomically (spec cancelled, a
+ * still-{@code running} run released as {@code stopped}, in one transaction). A pid mismatch is a
+ * structured no-op — stopping a stale run id can never kill a different, newer run — a terminal run
+ * that is no longer its spec's latest attempt is {@link AlreadyTerminal} rather than a lever to
+ * cancel newer work, and a second stop of the same run is idempotent by construction, returning
+ * {@link AlreadyTerminal} without signalling anything.
  */
 public final class StopOperations {
 
@@ -166,6 +171,13 @@ public final class StopOperations {
     return stopResolved(run, actor, dryRun);
   }
 
+  /**
+   * A project-targeted stop resolves the active run row first, but a stale row must not mask the
+   * separate fixed ad-hoc session: a dispatched agent that died without completing its row leaves a
+   * {@code running} row behind while a later {@code sail agent start} session is the live process
+   * the operator means to stop. When the resolved run turns out dead ({@link NotRunning}), the
+   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well.
+   */
   private Outcome stopProject(String project, Actor actor, String localHandle, boolean dryRun) {
     projects.requireExists(project);
     var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
@@ -173,18 +185,26 @@ public final class StopOperations {
       return stopAdHoc(project, dryRun);
     }
     authorize(actor, run);
-    return stopResolved(run, actor, dryRun);
+    var resolved = stopResolved(run, actor, dryRun);
+    if (!(resolved instanceof NotRunning stranded)) {
+      return resolved;
+    }
+    if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
+      return new Stopped(null, stranded.specId(), stopped.pid(), stranded.specCancelled());
+    }
+    return stranded;
   }
 
   /**
    * The clean-stop procedure over the resolved, owned, authorized run: probe liveness on the run's
-   * own recorded unit, record the terminal intent, and only then halt. Every no-op branch is
-   * structured and write-free except the stranded rescues, which record intent without a kill.
+   * own recorded unit, cancel the spec, halt, and record the rest of the terminal intent once the
+   * kill is verified. Every no-op branch is structured and write-free except the stranded rescues,
+   * which record intent without a kill.
    */
   private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var spec = specOf(run);
     if (!"running".equals(run.status())) {
-      if (!cancelable(spec)) {
+      if (!cancelable(spec) || !isCurrentAttempt(run)) {
         return new AlreadyTerminal(run.id(), run.specId(), run.status());
       }
       if (!dryRun) {
@@ -207,9 +227,57 @@ public final class StopOperations {
     if (dryRun) {
       return new Stopped(run.id(), run.specId(), info.pid(), cancelable(spec));
     }
-    var cancelled = recordIntent(run, spec, actor, true);
-    halt(run.project(), unit);
-    return new Stopped(run.id(), run.specId(), info.pid(), cancelled);
+    return killVerified(run, spec, actor, unit, info.pid());
+  }
+
+  /**
+   * The live-kill sequence: cancel the spec first so the cancel wins the race with the watcher's
+   * own stop while the signal is in flight, then halt and verify the agent is actually gone. Only a
+   * verified halt records the rest of the terminal intent — a kill that fails or leaves the run's
+   * pid alive restores the spec and throws, so the run stays {@code running} and reconcilable
+   * instead of being recorded terminal under a live process.
+   */
+  private Outcome killVerified(
+      RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor, AgentUnit unit, int pid) {
+    var cancelled = cancelSpec(spec);
+    try {
+      halt(run.project(), unit);
+      var remaining = probe(run.project(), unit);
+      if (remaining != null && remaining.running() && remaining.pid() == pid) {
+        throw new ApiException(
+            ErrorCode.AGENT_STOP_FAILED,
+            "Agent PID " + pid + " is still running after the stop signal.",
+            "Retry the stop; the run is still recorded as running.");
+      }
+    } catch (RuntimeException failure) {
+      if (cancelled) {
+        specStore.updateStatus(spec.id(), spec.status());
+      }
+      throw failure;
+    }
+    runStore.complete(run.id(), "stopped", null);
+    events.publish(cancelEvent(run, actor));
+    return new Stopped(run.id(), run.specId(), pid, cancelled);
+  }
+
+  /**
+   * Whether this run is still its spec's latest attempt. A terminal run may rescue a stranded spec
+   * only while it is the current attempt: after a restart, stopping an older run id must be an
+   * idempotent no-op, never a lever that cancels the spec out from under the newer active run.
+   */
+  private boolean isCurrentAttempt(RunStore.RunRow run) {
+    return runStore.listForSpec(run.specId()).stream()
+        .findFirst()
+        .map(latest -> latest.id().equals(run.id()))
+        .orElse(false);
+  }
+
+  private boolean cancelSpec(SpecStore.SpecRow spec) {
+    if (!cancelable(spec)) {
+      return false;
+    }
+    specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
+    return true;
   }
 
   /**
@@ -230,20 +298,29 @@ public final class StopOperations {
   }
 
   /**
-   * Records the operator's terminal intent, atomically ahead of any signal: the spec (when still
-   * {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED}, a still-{@code
-   * running} run is released as {@code stopped} with no exit code, and one {@code agent_cancelled}
-   * event carrying {@code source=operator} and the acting FDE marks the run as deliberately
-   * cancelled. Both writes are ordinary synced revisions, so every peer adopts the terminal state.
+   * Records the operator's terminal intent for a run with no live process to kill: the spec (when
+   * still {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED} and a
+   * still-{@code running} run is released as {@code stopped} with no exit code — in one transaction
+   * when both apply, so a failure between the writes can never expose a cancelled spec whose run is
+   * still {@code running} (a state no reconciler owns). One {@code agent_cancelled} event carrying
+   * {@code source=operator} and the acting FDE is published after the commit. Both writes are
+   * ordinary synced revisions, so every peer adopts the terminal state.
    */
   private boolean recordIntent(
       RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor, boolean releaseRun) {
     var cancelling = cancelable(spec);
-    if (cancelling) {
-      specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
-    }
     if (releaseRun) {
-      runStore.complete(run.id(), "stopped", null);
+      runStore.complete(
+          run.id(),
+          "stopped",
+          null,
+          () -> {
+            if (cancelling) {
+              specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
+            }
+          });
+    } else if (cancelling) {
+      specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
     }
     events.publish(cancelEvent(run, actor));
     return cancelling;

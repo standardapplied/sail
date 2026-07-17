@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -158,6 +160,21 @@ class AgentSessionTest {
     var cmds = shell.invocations();
     assertFalse(cmds.stream().anyMatch(c -> c.contains("kill -9 9999")));
     assertTrue(cmds.stream().anyMatch(c -> c.contains("rm -f")));
+  }
+
+  @Test
+  void killAgentThrowsWhenSigkillFailsOnALiveProcess() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("cat /home/dev/.sail/agent.pid", "9999\n")
+            .onFail("kill -9 9999", "Operation not permitted");
+    var session = new AgentSession(shell);
+
+    var failure = assertThrows(IOException.class, () -> session.killAgent("acme-health"));
+
+    assertTrue(failure.getMessage().contains("SIGKILL"));
+    assertTrue(failure.getMessage().contains("9999"));
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("rm -f")));
   }
 
   @Test

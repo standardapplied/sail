@@ -30,7 +30,9 @@ import java.util.function.Supplier;
  * would sporadically die with {@code cannot start a transaction within a transaction} (surfacing as
  * a scrambled {@code sqlite3_errmsg} like "another row available"), which is exactly how the review
  * pipeline silently lost agent stops in the field. The lock is reentrant so statements inside a
- * {@link #transaction} body nest without deadlock.
+ * {@link #transaction} body nest without deadlock, and a nested {@link #transaction} call joins the
+ * enclosing transaction: the outermost scope alone begins, commits, or rolls back, so store methods
+ * that each open their own transaction compose into one atomic write when a caller wraps them.
  *
  * <p>Not a JDBC driver. Exposes exactly the surface Sail needs: execute, query, and transactions.
  */
@@ -50,6 +52,7 @@ public final class Sqlite implements AutoCloseable {
   private final MemorySegment db;
   private final SqliteLib lib;
   private final ReentrantLock lock = new ReentrantLock();
+  private int transactionDepth;
   private volatile boolean closed;
 
   private Sqlite(Arena arena, MemorySegment db, SqliteLib lib) {
@@ -179,7 +182,16 @@ public final class Sqlite implements AutoCloseable {
   private <T> T transaction(String begin, Supplier<T> work) {
     lock.lock();
     try {
+      if (transactionDepth > 0) {
+        transactionDepth++;
+        try {
+          return work.get();
+        } finally {
+          transactionDepth--;
+        }
+      }
       execute(begin);
+      transactionDepth = 1;
       try {
         var result = work.get();
         execute("COMMIT");
@@ -191,6 +203,8 @@ public final class Sqlite implements AutoCloseable {
           e.addSuppressed(rollbackEx);
         }
         throw e;
+      } finally {
+        transactionDepth = 0;
       }
     } finally {
       lock.unlock();
