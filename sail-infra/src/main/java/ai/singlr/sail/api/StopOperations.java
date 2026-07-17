@@ -15,6 +15,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The single clean-stop executor behind every lane, a peer of {@link DispatchOperations} built the
@@ -42,10 +43,11 @@ import java.util.Objects;
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
  * still-{@code running} run released as {@code stopped}, in one transaction). A pid mismatch is a
- * structured no-op — stopping a stale run id can never kill a different, newer run — a terminal run
- * that is no longer its spec's latest attempt is {@link AlreadyTerminal} rather than a lever to
- * cancel newer work, and a second stop of the same run is idempotent by construction, returning
- * {@link AlreadyTerminal} without signalling anything.
+ * structured no-op — stopping a stale run id can never kill a different, newer run — a run that is
+ * no longer its spec's latest attempt is never a lever to cancel newer work (a terminal one is
+ * {@link AlreadyTerminal}; a live or dead one is halted or released without touching the spec), and
+ * a second stop of the same run is idempotent by construction, returning {@link AlreadyTerminal}
+ * without signalling anything.
  */
 public final class StopOperations {
 
@@ -213,10 +215,7 @@ public final class StopOperations {
   private Outcome rescueStaleLegacyRun(
       String project, RunStore.RunRow run, Actor actor, boolean dryRun) {
     var staleSpec = specOf(run);
-    var cancelled = cancelable(staleSpec);
-    if (!dryRun) {
-      recordIntent(run, staleSpec, actor);
-    }
+    var cancelled = dryRun ? previewCancel(run, staleSpec) : recordIntent(run, staleSpec, actor);
     if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
       return new Stopped(null, run.specId(), stopped.pid(), cancelled);
     }
@@ -253,17 +252,17 @@ public final class StopOperations {
     var unit = runUnit(run);
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
-      if (!dryRun) {
-        recordIntent(run, spec, actor);
+      if (dryRun) {
+        return new NotRunning(run.id(), run.specId(), previewCancel(run, spec), true);
       }
-      return new NotRunning(run.id(), run.specId(), cancelable(spec), true);
+      return new NotRunning(run.id(), run.specId(), recordIntent(run, spec, actor), true);
     }
     if (run.pid() == null || info.pid() != run.pid()) {
       return new NotActive(run.id(), run.specId(), info.pid());
     }
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
-      return new Stopped(run.id(), run.specId(), info.pid(), cancelable(spec));
+      return new Stopped(run.id(), run.specId(), info.pid(), previewCancel(run, spec));
     }
     return killVerified(run, spec, actor, unit, info.pid());
   }
@@ -330,18 +329,23 @@ public final class StopOperations {
    * transaction, each compare-and-set from the state this stop resolved. Either CAS losing means a
    * concurrent transition (a watcher completion, a lifecycle advance) won the race after this stop
    * read its snapshot — the claim rolls back entirely and the stop refuses with a conflict rather
-   * than cancelling from stale state. Returns whether the spec was cancelled.
+   * than cancelling from stale state. The cancel itself is further gated on this run still being
+   * its spec's latest attempt, inside the same transaction: a restarted attempt may be live
+   * elsewhere while this box still owns an older {@code running} row, and stopping that older row
+   * must halt its process without cancelling the spec out from under the newer agent. Returns
+   * whether the spec was cancelled.
    */
   private boolean claimStop(RunStore.RunRow run, SpecStore.SpecRow spec) {
-    var cancelling = cancelable(spec);
+    var cancelled = new AtomicBoolean();
     var claimed =
         runStore.transition(
             run.id(),
             "running",
             STOPPING,
             () -> {
-              if (cancelling) {
-                commitCancel(spec);
+              if (cancelable(spec)) {
+                cancelled.set(
+                    runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec)));
               }
             });
     if (!claimed) {
@@ -350,7 +354,7 @@ public final class StopOperations {
           "Run " + run.id() + " changed status while stopping.",
           "Retry the stop.");
     }
-    return cancelling;
+    return cancelled.get();
   }
 
   /**
@@ -409,6 +413,11 @@ public final class StopOperations {
         .orElse(false);
   }
 
+  /** The dry-run preview of the live paths' gated cancel: cancelable and still current. */
+  private boolean previewCancel(RunStore.RunRow run, SpecStore.SpecRow spec) {
+    return cancelable(spec) && isCurrentAttempt(run);
+  }
+
   /**
    * Cancels the spec compare-and-set from the status this stop resolved; a CAS that loses means a
    * concurrent transition consumed that status first, and the stop must be retried against the new
@@ -449,22 +458,36 @@ public final class StopOperations {
    * still {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED} and the run is
    * released as {@code stopped} with no exit code — in one transaction when both apply, so a
    * failure between the writes can never expose a cancelled spec whose run is still {@code running}
-   * (a state no reconciler owns). One {@code agent_cancelled} event carrying {@code
-   * source=operator} and the acting FDE is published after the commit. Both writes are ordinary
-   * synced revisions, so every peer adopts the terminal state.
+   * (a state no reconciler owns). The release is compare-and-set from {@code running}: a watcher
+   * completion landing between the dead probe and this commit wins, and the rescue refuses with a
+   * conflict instead of overwriting a successful finish with {@code stopped}. The cancel is gated
+   * on this run still being its spec's latest attempt, exactly as {@link #claimStop} gates the live
+   * path, so a stale dead row can never cancel a newer attempt's spec. One {@code agent_cancelled}
+   * event carrying {@code source=operator} and the acting FDE is published after the commit. Both
+   * writes are ordinary synced revisions, so every peer adopts the terminal state. Returns whether
+   * the spec was cancelled.
    */
-  private void recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
-    var cancelling = cancelable(spec);
-    runStore.complete(
-        run.id(),
-        "stopped",
-        null,
-        () -> {
-          if (cancelling) {
-            commitCancel(spec);
-          }
-        });
+  private boolean recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
+    var cancelled = new AtomicBoolean();
+    var released =
+        runStore.transition(
+            run.id(),
+            "running",
+            "stopped",
+            () -> {
+              if (cancelable(spec)) {
+                cancelled.set(
+                    runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec)));
+              }
+            });
+    if (!released) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run " + run.id() + " completed while stopping.",
+          "Refresh the run and retry if it is still active.");
+    }
     events.publish(cancelEvent(run, actor));
+    return cancelled.get();
   }
 
   private static Event cancelEvent(RunStore.RunRow run, Actor actor) {

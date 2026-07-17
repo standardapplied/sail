@@ -846,19 +846,7 @@ class StopOperationsTest {
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
     runStore.complete(R1, "completed", 0);
-    runStore.create(
-        R2,
-        "acme",
-        "auth",
-        LOCAL_HANDLE,
-        "build",
-        "codex",
-        "feat/auth",
-        "do it",
-        456,
-        null,
-        RUN_LOG,
-        "sail-agent-" + R2);
+    seedNewerRun();
 
     var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
 
@@ -880,24 +868,75 @@ class StopOperationsTest {
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
     runStore.complete(R1, "completed", 0);
-    runStore.create(
-        R2,
-        "acme",
-        "auth",
-        LOCAL_HANDLE,
-        "build",
-        "codex",
-        "feat/auth",
-        "do it",
-        456,
-        null,
-        RUN_LOG,
-        "sail-agent-" + R2);
+    seedNewerRun();
 
     var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, true);
 
     assertInstanceOf(StopOperations.AlreadyTerminal.class, outcome);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void stoppingAnOlderLiveRunHaltsItWithoutCancellingTheNewerAttempt() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    seedNewerRun();
+
+    var preview = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, true);
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertFalse(assertInstanceOf(StopOperations.Stopped.class, preview).specCancelled());
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals(123, stopped.pid());
+    assertFalse(stopped.specCancelled());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void anOlderDeadRunIsReleasedWithoutCancellingTheNewerAttempt() throws Exception {
+    var ops =
+        stopOps(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            failingHalter(),
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    seedNewerRun();
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
+    assertFalse(notRunning.specCancelled());
+    assertTrue(notRunning.runReleased());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aWatcherCompletionDuringTheDeadRunRescueIsNeverOverwritten() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .hookOn("cat " + RUN_PID_FILE, () -> runStore.complete(R1, "completed", 0));
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals("completed", runStore.findById(R1).orElseThrow().status());
+    assertEquals(0, runStore.findById(R1).orElseThrow().exitCode());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertTrue(events.isEmpty());
   }
 
   @Test
@@ -1064,6 +1103,22 @@ class StopOperationsTest {
         unit);
   }
 
+  private void seedNewerRun() {
+    runStore.create(
+        R2,
+        "acme",
+        "auth",
+        LOCAL_HANDLE,
+        "build",
+        "codex",
+        "feat/auth",
+        "do it",
+        456,
+        null,
+        RUN_LOG,
+        "sail-agent-" + R2);
+  }
+
   private StopOperations.AgentHalter failingHalter() {
     return (project, unit) -> {
       throw new AssertionError("the halter must not be invoked");
@@ -1077,6 +1132,7 @@ class StopOperationsTest {
   private static final class FakeShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
     private final Map<String, Exception> failures = new LinkedHashMap<>();
+    private final Map<String, Runnable> hooks = new LinkedHashMap<>();
     private final List<String> invocations = new ArrayList<>();
 
     FakeShell on(String pattern, String stdout) {
@@ -1093,10 +1149,20 @@ class StopOperationsTest {
       return this;
     }
 
+    FakeShell hookOn(String pattern, Runnable action) {
+      hooks.put(pattern, action);
+      return this;
+    }
+
     @Override
     public Result exec(List<String> command) throws IOException {
       var joined = String.join(" ", command);
       invocations.add(joined);
+      for (var entry : hooks.entrySet()) {
+        if (joined.contains(entry.getKey())) {
+          entry.getValue().run();
+        }
+      }
       for (var entry : failures.entrySet()) {
         if (joined.contains(entry.getKey())) {
           throw (IOException) entry.getValue();
