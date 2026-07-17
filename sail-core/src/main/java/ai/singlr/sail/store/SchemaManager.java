@@ -395,7 +395,39 @@ public final class SchemaManager {
           "CREATE INDEX IF NOT EXISTS idx_reviews_spec ON reviews(spec_id)",
           "ALTER TABLE change_log ADD COLUMN peer TEXT",
           "ALTER TABLE runs ADD COLUMN unit TEXT",
-          "ALTER TABLE runs ADD COLUMN repos TEXT");
+          "ALTER TABLE runs ADD COLUMN repos TEXT",
+          """
+          CREATE TABLE specs_v3 (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
+                      'done', 'cancelled', 'archived')),
+              assignee TEXT,
+              agent TEXT,
+              model TEXT,
+              reasoning_effort TEXT
+                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh')),
+              branch TEXT,
+              priority INTEGER NOT NULL DEFAULT 0,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              project TEXT NOT NULL DEFAULT 'unassigned',
+              updated_by TEXT,
+              rev TEXT,
+              base_rev TEXT
+          )""",
+          """
+          INSERT INTO specs_v3 (id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev)
+              SELECT id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev FROM specs""",
+          "DROP TABLE specs",
+          "ALTER TABLE specs_v3 RENAME TO specs",
+          "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

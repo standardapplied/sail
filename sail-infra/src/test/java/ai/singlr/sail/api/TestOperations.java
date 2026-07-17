@@ -114,7 +114,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
-    return Result.success(new StopRunResponse(runId, false, null, null));
+    return Result.success(new StopRunResponse(runId, false, null, null, false));
   }
 
   @Override
@@ -308,7 +308,7 @@ class TestOperations implements Operations {
   @Override
   public Result<GlobalBoardResponse> globalBoard(String project) {
     return Result.success(
-        new GlobalBoardResponse(new SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, null), 0));
+        new GlobalBoardResponse(new SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, 0, null), 0));
   }
 
   @Override

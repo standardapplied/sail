@@ -176,7 +176,7 @@ public final class SpecDirectory {
 
   /**
    * Returns a map of status counts: {pending: N, in_progress: N, review: N, awaiting_merge: N,
-   * done: N}.
+   * done: N, cancelled: N}.
    */
   public static Map<String, Integer> statusCounts(List<Spec> specs) {
     var counts = new LinkedHashMap<String, Integer>();
@@ -185,6 +185,7 @@ public final class SpecDirectory {
     counts.put(SpecStatus.REVIEW.wire(), 0);
     counts.put(SpecStatus.AWAITING_MERGE.wire(), 0);
     counts.put(SpecStatus.DONE.wire(), 0);
+    counts.put(SpecStatus.CANCELLED.wire(), 0);
     for (var spec : specs) {
       counts.merge(spec.status().wire(), 1, Integer::sum);
     }

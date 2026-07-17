@@ -176,6 +176,20 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aCancelledSpecWithItsReleasedRunIsNeverReconciledOrReplayed() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    finishedSession("auth", "stopped", null);
+
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(
+        SpecStatus.CANCELLED,
+        specStore.findById("auth").orElseThrow().status(),
+        "an operator cancel is terminal; no sweep may drive the spec forward");
+  }
+
+  @Test
   void keepsARunningReservationForAnInProgressSpec() {
     createInProgressSpec("auth");
     runningSession("auth");

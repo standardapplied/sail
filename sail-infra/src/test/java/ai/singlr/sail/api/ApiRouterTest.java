@@ -1244,7 +1244,7 @@ class ApiRouterTest {
 
     @Override
     public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
-      return Result.success(new StopRunResponse(runId, false, null, null));
+      return Result.success(new StopRunResponse(runId, false, null, null, false));
     }
 
     @Override
@@ -1445,7 +1445,7 @@ class ApiRouterTest {
     public Result<GlobalBoardResponse> globalBoard(String project) {
       return Result.success(
           new GlobalBoardResponse(
-              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, null), 0));
+              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, 0, null), 0));
     }
 
     @Override

@@ -53,6 +53,7 @@ public final class SailOperations implements Operations {
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
+  private final StopOperations stopOps;
   private final FdeStore fdeStore;
 
   public SailOperations() {
@@ -295,6 +296,17 @@ public final class SailOperations implements Operations {
             DispatchOperations.autoSnapshotter(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE);
+    this.stopOps =
+        specStore != null && runStore != null
+            ? new StopOperations(
+                shell,
+                file,
+                specStore,
+                runStore,
+                this::publishOnBus,
+                StopOperations.sessionHalter(shell),
+                StopOperations.Listener.NONE)
+            : null;
   }
 
   private void publishOnBus(Event event) {
@@ -399,9 +411,47 @@ public final class SailOperations implements Operations {
     return onLocalRun(runId, localHandle, actor, run -> safe(() -> runLogValue(run, tail)));
   }
 
+  /**
+   * Delegates to {@link StopOperations} — the single clean-stop lane shared with {@code sail agent
+   * stop} — and renders its outcome. Any mutation (a halted agent, a cancelled spec, a released
+   * run) schedules sync-on-write so the terminal state reaches every peer promptly.
+   */
   @Override
   public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
-    return onLocalRun(runId, localHandle, actor, run -> safe(() -> stopRunValue(run)));
+    if (stopOps == null) {
+      return Result.failure(
+          ErrorCode.INTERNAL,
+          "Run store not available. Start the server with 'sail server start'.");
+    }
+    var outcome =
+        safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), actor, localHandle, false));
+    if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
+      return outcome.asFailure();
+    }
+    var value = outcome.orThrow();
+    if (value.mutated()) {
+      triggerSyncAfterWrite();
+    }
+    return Result.success(stopResponse(value));
+  }
+
+  private static StopRunResponse stopResponse(StopOperations.Outcome outcome) {
+    return switch (outcome) {
+      case StopOperations.Stopped stopped ->
+          new StopRunResponse(stopped.runId(), true, null, stopped.pid(), stopped.specCancelled());
+      case StopOperations.NotRunning notRunning ->
+          new StopRunResponse(
+              notRunning.runId(),
+              false,
+              notRunning.runReleased() ? "no_agent_running" : "run_not_running",
+              null,
+              notRunning.specCancelled());
+      case StopOperations.AlreadyTerminal terminal ->
+          new StopRunResponse(terminal.runId(), false, "run_not_running", null, false);
+      case StopOperations.NotActive notActive ->
+          new StopRunResponse(
+              notActive.runId(), false, "run_not_active", notActive.livePid(), false);
+    };
   }
 
   /**
@@ -638,9 +688,12 @@ public final class SailOperations implements Operations {
     }
     var runs =
         running.stream()
-            .map(run -> agentRunView(run, querySession(agentSession, project, runUnit(run))))
+            .map(
+                run ->
+                    agentRunView(
+                        run, querySession(agentSession, project, StopOperations.runUnit(run))))
             .toList();
-    var newest = querySession(agentSession, project, runUnit(running.getFirst()));
+    var newest = querySession(agentSession, project, StopOperations.runUnit(running.getFirst()));
     return agentStatusResponse(project, newest, runs);
   }
 
@@ -666,15 +719,6 @@ public final class SailOperations implements Operations {
         info != null ? info.pid() : null,
         run.startedAt(),
         run.logPath());
-  }
-
-  /**
-   * The systemd/file identity of a local run: rebuilt from the unit name recorded at launch, or the
-   * fixed ad-hoc identity for a run launched before units were run-scoped — that agent runs as
-   * {@code sail-agent}, so the fixed paths are exactly where it lives.
-   */
-  private static AgentUnit runUnit(RunStore.RunRow run) {
-    return Strings.isBlank(run.unit()) ? AgentUnit.BUILD : AgentUnit.recorded(run.id(), run.unit());
   }
 
   /**
@@ -705,35 +749,6 @@ public final class SailOperations implements Operations {
     }
     var lines = Arrays.stream(result.stdout().split("\n")).filter(line -> !line.isEmpty()).toList();
     return new RunLogResponse(run.id(), lines, null);
-  }
-
-  /**
-   * Stops the agent process only when {@code run} is genuinely the one executing now, addressing
-   * the run's own recorded unit so a concurrent run of the same project is untouched: an
-   * already-finished run, or a run whose recorded pid does not match the live agent, is a no-op —
-   * so stopping a stale run id can never kill a different, newer run. The provenance guard has
-   * already established the run is local.
-   */
-  private StopRunResponse stopRunValue(RunStore.RunRow run) {
-    projects.requireExists(run.project());
-    if (!"running".equals(run.status())) {
-      return new StopRunResponse(run.id(), false, "run_not_running", null);
-    }
-    var unit = runUnit(run);
-    var agentSession = new AgentSession(shell);
-    var info = querySession(agentSession, run.project(), unit);
-    if (info == null || !info.running()) {
-      return new StopRunResponse(run.id(), false, "no_agent_running", null);
-    }
-    if (run.pid() == null || info.pid() != run.pid()) {
-      return new StopRunResponse(run.id(), false, "run_not_active", info.pid());
-    }
-    try {
-      agentSession.killAgent(run.project(), unit);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
-    }
-    return new StopRunResponse(run.id(), true, null, info.pid());
   }
 
   private AgentReportResponse agentReportValue(String project, String localHandle) {

@@ -376,6 +376,17 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aStopArrivingAfterAnOperatorCancelNeverKicksAReview() {
+    createSpec("auth", "cancelled");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void ignoresAStopForASpecAlreadyAwaitingMerge() {
     createSpec("auth", "awaiting_merge");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");

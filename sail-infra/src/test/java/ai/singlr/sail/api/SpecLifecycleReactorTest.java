@@ -125,6 +125,15 @@ class SpecLifecycleReactorTest {
   }
 
   @Test
+  void stoppedAfterAnOperatorCancelLeavesTheSpecCancelled() {
+    seed("auth", "cancelled");
+
+    reactor.onEvent(stopped("auth"));
+
+    assertEquals(SpecStatus.CANCELLED, store.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void stoppedForAnUnknownSpecIsANoOp() {
     reactor.onEvent(stopped("ghost"));
     assertTrue(store.findById("ghost").isEmpty());

@@ -350,6 +350,7 @@ class SpecStoreTest {
     store.create(spec("f", "F", "done"));
     store.create(spec("g", "G", "archived"));
     store.create(spec("h", "H", "awaiting_merge"));
+    store.create(spec("i", "I", "cancelled"));
 
     var board = store.board();
     assertEquals(1, board.draft());
@@ -358,8 +359,44 @@ class SpecStoreTest {
     assertEquals(1, board.review());
     assertEquals(1, board.awaitingMerge());
     assertEquals(1, board.done());
+    assertEquals(1, board.cancelled());
     assertEquals(1, board.archived());
     assertEquals("b", board.nextReadyId());
+  }
+
+  @Test
+  void cancelledPersistsAndReadsBack() {
+    store.create(spec("killed", "Killed", "in_progress"));
+
+    store.updateStatus("killed", SpecStatus.CANCELLED);
+
+    assertEquals(SpecStatus.CANCELLED, store.findById("killed").get().status());
+  }
+
+  @Test
+  void cancelledDependencyDoesNotUnblockDependents() {
+    store.create(spec("base", "Base", "cancelled"));
+    var dependent =
+        new SpecStore.SpecRow(
+            "child",
+            "test-project",
+            "Child",
+            SpecStatus.PENDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of("base"),
+            List.of());
+    store.create(dependent);
+
+    assertTrue(store.readySpecs().isEmpty(), "cancelled work must not satisfy a dependency");
   }
 
   @Test

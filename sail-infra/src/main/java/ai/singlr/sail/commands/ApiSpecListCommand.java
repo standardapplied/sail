@@ -181,6 +181,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "Review";
       case "awaiting_merge" -> "Awaiting Merge";
       case "done" -> "Done";
+      case "cancelled" -> "Cancelled";
       case "archived" -> "Archived";
       default -> status;
     };
@@ -194,6 +195,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "yellow";
       case "awaiting_merge" -> "magenta";
       case "done" -> "green";
+      case "cancelled" -> "red";
       case "archived" -> "faint";
       default -> "white";
     };

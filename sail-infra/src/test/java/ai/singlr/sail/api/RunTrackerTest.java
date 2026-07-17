@@ -189,6 +189,26 @@ class RunTrackerTest {
   }
 
   @Test
+  void aWatcherStopArrivingAfterAnOperatorCancelDoesNotReopenTheRun() {
+    var id = runningRun("backend", "auth");
+    runStore.complete(id, "stopped", null);
+
+    tracker.onEvent(
+        stopped(
+            "backend",
+            id,
+            Map.of(
+                Event.WellKnownData.EXIT_CODE,
+                143,
+                Event.WellKnownData.SOURCE,
+                Event.WellKnownData.SOURCE_WATCHER)));
+
+    var run = runStore.findById(id).orElseThrow();
+    assertEquals("stopped", run.status());
+    assertEquals(143, run.exitCode());
+  }
+
+  @Test
   void anAuthoritativeStopUpgradesTheExitCodeOfAnAlreadyFinishedRun() {
     var id = runningRun("backend", "auth");
     runStore.complete(id, "stopped", null);

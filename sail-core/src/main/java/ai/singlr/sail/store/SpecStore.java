@@ -90,6 +90,7 @@ public final class SpecStore implements ConflictResolver {
       int review,
       int awaitingMerge,
       int done,
+      int cancelled,
       int archived,
       String nextReadyId) {}
 
@@ -778,6 +779,7 @@ public final class SpecStore implements ConflictResolver {
     var review = 0;
     var awaitingMerge = 0;
     var done = 0;
+    var cancelled = 0;
     var archived = 0;
     for (var row : counts) {
       var count = (int) (long) row[1];
@@ -788,6 +790,7 @@ public final class SpecStore implements ConflictResolver {
         case "review" -> review = count;
         case "awaiting_merge" -> awaitingMerge = count;
         case "done" -> done = count;
+        case "cancelled" -> cancelled = count;
         case "archived" -> archived = count;
         default -> {}
       }
@@ -795,7 +798,7 @@ public final class SpecStore implements ConflictResolver {
     var ready = readySpecs(projectFilter);
     var nextReadyId = ready.isEmpty() ? null : ready.getFirst().id();
     return new BoardSummary(
-        draft, pending, inProgress, review, awaitingMerge, done, archived, nextReadyId);
+        draft, pending, inProgress, review, awaitingMerge, done, cancelled, archived, nextReadyId);
   }
 
   private SpecRow mapSpec(Sqlite.Row row) {

@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -225,12 +226,14 @@ public final class Fleet implements AutoCloseable {
     private final boolean main;
     private final Path home;
     private final Path bin;
+    private final Path descriptor;
     private final Sqlite db;
     private final EventBus bus;
     private final ReviewPipelineController reviewsController;
     private final SailApiServer server;
     private final CapturingPoster slack;
     private final DispatchOperations dispatcher;
+    private final StopOperations stopper;
     private final SailOperations operations;
     private final SpecStore specs;
     private final ProjectStore projects;
@@ -244,6 +247,7 @@ public final class Fleet implements AutoCloseable {
       this.main = main;
       this.home = home;
       this.bin = bin;
+      this.descriptor = descriptor;
       this.db = db;
       specs = new SpecStore(db);
       projects = new ProjectStore(db);
@@ -276,6 +280,15 @@ public final class Fleet implements AutoCloseable {
               (project, config) -> "",
               command -> 0,
               DispatchOperations.Listener.NONE);
+      stopper =
+          new StopOperations(
+              shell,
+              descriptor.toString(),
+              specs,
+              runs,
+              bus::publish,
+              StopOperations.sessionHalter(shell),
+              StopOperations.Listener.NONE);
       operations =
           new SailOperations(
               shell,
@@ -354,6 +367,30 @@ public final class Fleet implements AutoCloseable {
 
     public void updateStatus(String specId, SpecStatus status) {
       specs.updateStatus(specId, status);
+    }
+
+    public StopOperations.Outcome stop() {
+      return stopper.stop(
+          new StopOperations.ProjectTarget(PROJECT), Actor.cliOperator(handle), handle, false);
+    }
+
+    /**
+     * One missed-stop reconciliation pass under maximally aggressive conditions — every unit probes
+     * dead and every run is past the launch grace — so anything the reaper could ever replay for
+     * this box, it replays here. Returns how many stops were replayed.
+     */
+    public int reconcileSweep() {
+      var reconciler =
+          new MissedStopReconciler(
+              specs,
+              runs,
+              new EventStore(db),
+              reviews,
+              bus,
+              (project, runId, unit) -> false,
+              () -> handle,
+              () -> java.time.Instant.now().plus(Duration.ofHours(1)));
+      return reconciler.sweep();
     }
 
     public void authoritativeStop(String specId) {

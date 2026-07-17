@@ -20,6 +20,13 @@ import java.util.stream.Collectors;
  * including a status synced from a newer peer that this binary does not know yet, which lands in
  * the draft column instead of crashing; {@link #ARCHIVED} is hidden from the default board. Only
  * {@link SpecDirectory#CLI_SETTABLE} statuses may be assigned by hand via {@code sail spec status}.
+ *
+ * <p>{@link #CANCELLED} is the terminal record of an operator's clean stop: the spec's run was
+ * deliberately halted, not finished. It is intentionally outside every set the lifecycle machinery
+ * acts on — not {@code in_progress}/{@code review} (the missed-stop reconciler and the review
+ * pipeline), not {@code pending} (dispatch) — so a cancel is honored by the existing contracts
+ * rather than special-cased in each component. Re-running a cancelled spec is an explicit operator
+ * re-open (dispatch {@code --restart}), never an automatic transition.
  */
 public enum SpecStatus {
   DRAFT,
@@ -28,6 +35,7 @@ public enum SpecStatus {
   REVIEW,
   AWAITING_MERGE,
   DONE,
+  CANCELLED,
   ARCHIVED;
 
   /** The persisted/serialized form: the lowercased enum name. */

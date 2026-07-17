@@ -62,6 +62,14 @@ public record Event(
     public static final String AGENT_SESSION_COMPLETED = "agent_session_completed";
 
     /**
+     * An operator deliberately cancelled a running spec: the terminal intent was recorded (spec
+     * {@code cancelled}, run {@code stopped}) before the agent process was halted. Carries {@code
+     * data.source=operator} and the run id; the event's {@code agent} field names the acting FDE.
+     * Distinct from {@link #AGENT_SESSION_STOPPED} so a kill is never mistaken for a finish.
+     */
+    public static final String AGENT_CANCELLED = "agent_cancelled";
+
+    /**
      * The stop-hook readiness gate blocked a premature turn-end (uncommitted or unpushed work) and
      * nudged the agent to finish the protocol. Carries the nudge text in {@code data.reason}. A
      * blocked stop publishes this instead of {@link #AGENT_SESSION_STOPPED} — the stop never
@@ -104,6 +112,9 @@ public record Event(
 
     /** {@link #SOURCE} value: the guardrail watcher, which observed the process exit code. */
     public static final String SOURCE_WATCHER = "watcher";
+
+    /** {@link #SOURCE} value: a deliberate operator cancel through the clean-stop lane. */
+    public static final String SOURCE_OPERATOR = "operator";
 
     /**
      * {@link #SOURCE} value: a reconciler replay of a stop the control plane missed — at daemon
