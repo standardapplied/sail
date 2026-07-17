@@ -13,10 +13,12 @@ import java.util.function.Predicate;
 
 /**
  * Bus subscriber that advances a spec's lifecycle in the database when its agent session ends: on
- * {@code agent_session_stopped} it transitions the spec from {@code in_progress} to {@code review}.
- * The dispatch-time transition to {@code in_progress} lives with dispatch; this handles the back
- * half once the agent reports it is done. The database is the single source of truth — there is no
- * container file to keep in step.
+ * {@code agent_session_stopped} it transitions the spec from {@code in_progress} to {@code review}
+ * — compare-and-set, so a transition that landed in between (above all an operator's {@code
+ * cancelled}, which is terminal) makes this advance a no-op instead of being overwritten from a
+ * stale read. The dispatch-time transition to {@code in_progress} lives with dispatch; this handles
+ * the back half once the agent reports it is done. The database is the single source of truth —
+ * there is no container file to keep in step.
  *
  * <p>The audit trail is not this reactor's job: every lifecycle event is already persisted to the
  * {@code EventStore} by {@link SpecStoreAuditPersister}. Failures here are logged and swallowed so
@@ -46,10 +48,7 @@ public final class SpecLifecycleReactor implements EventSubscriber {
   @Override
   public void onEvent(Event event) {
     try {
-      specStore
-          .findById(event.spec())
-          .filter(spec -> spec.status() == SpecStatus.IN_PROGRESS)
-          .ifPresent(spec -> specStore.updateStatus(spec.id(), SpecStatus.REVIEW));
+      specStore.compareAndSetStatus(event.spec(), SpecStatus.IN_PROGRESS, SpecStatus.REVIEW);
     } catch (Exception e) {
       System.err.println(
           "  [spec-lifecycle] Warning: failed to advance "

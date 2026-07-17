@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -232,6 +233,31 @@ class SpecStoreTest {
 
     var found = store.findById("a").orElseThrow();
     assertEquals(SpecStatus.IN_PROGRESS, found.status());
+  }
+
+  @Test
+  void compareAndSetStatusCommitsOnlyFromTheExpectedStatus() {
+    store.create(spec("a", "Test", "in_progress"));
+
+    assertTrue(store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.CANCELLED));
+    assertEquals(SpecStatus.CANCELLED, store.findById("a").orElseThrow().status());
+
+    assertFalse(
+        store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.REVIEW),
+        "a writer holding a stale read must lose to the transition that won");
+    assertEquals(SpecStatus.CANCELLED, store.findById("a").orElseThrow().status());
+  }
+
+  @Test
+  void compareAndSetStatusJournalsARevisionOnlyWhenItWins() {
+    store.create(spec("a", "Test", "in_progress"));
+    var created = store.revOf("a");
+
+    store.compareAndSetStatus("a", SpecStatus.REVIEW, SpecStatus.AWAITING_MERGE);
+    assertEquals(created, store.revOf("a"), "a lost CAS writes nothing, so no revision is minted");
+
+    store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.REVIEW);
+    assertNotEquals(created, store.revOf("a"), "a won CAS journals like any other mutation");
   }
 
   @Test

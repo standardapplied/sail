@@ -425,6 +425,25 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void anOperatorCancelLandingMidPipelineIsNeverOverwrittenByThePass() {
+    createSpec("auth", "in_progress");
+    var ctrl =
+        controller(
+            singleAgentStage("no_critical"),
+            (p, a, pr, rid) -> {
+              specStore.updateStatus("auth", SpecStatus.CANCELLED);
+              return "[]";
+            });
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        SpecStatus.CANCELLED,
+        specStore.findById("auth").orElseThrow().status(),
+        "cancelled is terminal; the pipeline's stale advance must lose, not resurrect the spec");
+  }
+
+  @Test
   void aWatcherStopAndAReconcilerReplayBackToBackProduceExactlyOneReview() {
     createSpec("auth", "in_progress");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");

@@ -163,8 +163,10 @@ public final class RunStore implements ConflictResolver {
    * write lock up front serializes concurrent dispatches, including a CLI dispatch in another
    * process against the same database file, so the second reservation always observes the first's
    * row; a check-then-insert split across transactions could admit both into the same repo. Returns
-   * the blocking conflict, or empty when the run was reserved. Any database failure propagates — a
-   * dispatch must never launch without the row every later overlap check depends on.
+   * the blocking conflict, or empty when the run was reserved. A run mid-stop ({@code stopping})
+   * still occupies its repos — its agent is not verified dead until the claim is finalized — so it
+   * conflicts exactly like a running one. Any database failure propagates — a dispatch must never
+   * launch without the row every later overlap check depends on.
    */
   public Optional<DispatchGate.Conflict> reserveDispatch(
       String id,
@@ -184,7 +186,7 @@ public final class RunStore implements ConflictResolver {
               db.query(
                   "SELECT "
                       + COLUMNS
-                      + " FROM runs WHERE project = ? AND status = 'running'"
+                      + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
                       + " AND IFNULL(node, '') = ?",
                   this::mapRow,
                   project,
@@ -244,19 +246,34 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The running build run of {@code project} that executed on this box, or empty. Node-scoped like
-   * {@link #latestForProjectOnNode}.
+   * The active build run of {@code project} that executed on this box, or empty. {@code stopping}
+   * counts as active: an interrupted stop's claim must stay addressable so a project-targeted stop
+   * retry resumes it instead of falling through to the ad-hoc identity. Node-scoped like {@link
+   * #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
-            + " FROM runs WHERE project = ? AND status = 'running' AND IFNULL(node, '') = ?"
-            + " AND IFNULL(role, 'build') = 'build'"
+            + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
+            + " AND IFNULL(node, '') = ? AND IFNULL(role, 'build') = 'build'"
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,
         ownerKey(localHandle));
+  }
+
+  /**
+   * Every build run holding an unfinished stop claim ({@code stopping}) — a stop that recorded its
+   * terminal intent but was interrupted before the halt was verified. The reconciler's
+   * interrupted-stop pass finalizes these once their unit is gone.
+   */
+  public List<RunRow> stopping() {
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE status = 'stopping' AND IFNULL(role, 'build') = 'build'",
+        this::mapRow);
   }
 
   /**
@@ -336,6 +353,38 @@ public final class RunStore implements ConflictResolver {
           return null;
         });
   }
+
+  /**
+   * Status transition that commits only if the run still holds {@code expected}, running {@code
+   * alongside} inside the same immediate transaction once the transition has won — the seam a stop
+   * claim uses to move its spec terminal in the very same commit. Returns whether the transition
+   * happened; a false return wrote nothing and never ran {@code alongside}, and an {@code
+   * alongside} that throws rolls the transition back. A terminal target status stamps {@code
+   * completed_at}; a non-terminal one clears it.
+   */
+  public boolean transition(String id, String expected, String status, Runnable alongside) {
+    return db.immediateTransaction(
+        () -> {
+          db.execute(
+              "UPDATE runs SET status = ?, completed_at = ? WHERE id = ? AND status = ?",
+              status,
+              TERMINAL_STATUSES.contains(status) ? DateTimeUtils.now().toString() : null,
+              id,
+              expected);
+          if (db.changes() == 0) {
+            return false;
+          }
+          alongside.run();
+          recordRevision(id, "local", false);
+          return true;
+        });
+  }
+
+  public boolean transition(String id, String expected, String status) {
+    return transition(id, expected, status, () -> {});
+  }
+
+  private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "stopped", "failed");
 
   /** Marks a run finished with its final status and the agent process's exit code (nullable). */
   public void complete(String id, String status, Integer exitCode) {

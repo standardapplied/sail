@@ -23,16 +23,21 @@ import java.util.Objects;
  * events go, how the kill runs, what the operator sees). {@code sail agent stop} and {@code POST
  * /v1/runs/{id}/stop} both delegate here and add nothing but rendering.
  *
- * <p>The order is the whole point: the spec moves to {@link SpecStatus#CANCELLED} <em>before</em>
- * the process is signalled, so every existing guard makes the cancel win the race with the
- * watcher's own stop. {@link RunTracker} only stamps a run still {@code running}; the review
- * pipeline only acts on a reviewable spec; the missed-stop reconciler sweeps only {@code
- * in_progress} and {@code review}; dispatch selects only {@code pending}. {@link
- * SpecStatus#CANCELLED} sits outside all of those sets, so a deliberate stop is honored by the
- * existing contracts with no new special cases. The rest of the terminal intent — run {@code
- * stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event — is recorded only once the halt
- * is verified: a kill that fails or leaves the agent alive restores the spec and throws, so the
- * database never claims a live agent is terminal in a state no reconciler owns.
+ * <p>The order is the whole point: one transaction — the stop claim — moves the run {@code running
+ * → stopping} and the spec to {@link SpecStatus#CANCELLED} <em>before</em> the process is
+ * signalled, so every existing guard makes the cancel win the race with the watcher's own stop.
+ * {@link RunTracker} only stamps a run still {@code running}; the review pipeline only acts on a
+ * reviewable spec; the missed-stop reconciler sweeps only {@code in_progress} and {@code review};
+ * dispatch selects only {@code pending}. {@link SpecStatus#CANCELLED} sits outside all of those
+ * sets, so a deliberate stop is honored by the existing contracts with no new special cases. Both
+ * claim writes are compare-and-set from the freshly resolved states, so a lifecycle transition that
+ * lands first fails the claim with a conflict instead of being silently overwritten. The rest of
+ * the terminal intent — run {@code stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event
+ * — is finalized only once the halt is verified to have left no live process on the run's unit: a
+ * kill that fails restores the claim and throws, and a crash mid-stop leaves the explicit {@code
+ * stopping} claim — resumed by the next stop of the same target, finalized by the reconciler's
+ * interrupted-stop pass once the unit is gone — so the database never claims a live agent is
+ * terminal in a state no reconciler owns.
  *
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
@@ -43,6 +48,9 @@ import java.util.Objects;
  * {@link AlreadyTerminal} without signalling anything.
  */
 public final class StopOperations {
+
+  /** The run status a committed stop claim holds between the claim and its verified finish. */
+  static final String STOPPING = "stopping";
 
   /** What a stop should act on: one project's active run (CLI) or an exact run id (API). */
   public sealed interface Target permits RunTarget, ProjectTarget {}
@@ -197,12 +205,16 @@ public final class StopOperations {
 
   /**
    * The clean-stop procedure over the resolved, owned, authorized run: probe liveness on the run's
-   * own recorded unit, cancel the spec, halt, and record the rest of the terminal intent once the
-   * kill is verified. Every no-op branch is structured and write-free except the stranded rescues,
-   * which record intent without a kill.
+   * own recorded unit, claim the stop (spec cancelled, run {@code stopping}, one transaction),
+   * halt, and finalize the claim once the kill is verified. A run already holding a claim is an
+   * interrupted stop and resumes instead. Every no-op branch is structured and write-free except
+   * the stranded rescues, which record intent without a kill.
    */
   private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var spec = specOf(run);
+    if (STOPPING.equals(run.status())) {
+      return resumeStop(run, actor, dryRun);
+    }
     if (!"running".equals(run.status())) {
       if (!cancelable(spec) || !isCurrentAttempt(run)) {
         return new AlreadyTerminal(run.id(), run.specId(), run.status());
@@ -231,33 +243,123 @@ public final class StopOperations {
   }
 
   /**
-   * The live-kill sequence: cancel the spec first so the cancel wins the race with the watcher's
-   * own stop while the signal is in flight, then halt and verify the agent is actually gone. Only a
-   * verified halt records the rest of the terminal intent — a kill that fails or leaves the run's
-   * pid alive restores the spec and throws, so the run stays {@code running} and reconcilable
-   * instead of being recorded terminal under a live process.
+   * The live-kill sequence over a durable claim. {@link #claimStop} commits the whole terminal
+   * intent atomically — run {@code running → stopping}, spec {@code → cancelled}, both
+   * compare-and-set — so the cancel wins the race with the watcher's own stop while the signal is
+   * in flight, and an interruption at any later point leaves the explicit claim rather than a
+   * cancelled spec over a run still recorded {@code running}. A verified halt finalizes the claim
+   * ({@code stopping → stopped}) and publishes the operator event; a kill that fails or leaves a
+   * live process on the unit restores the claim and throws, so the run is again {@code running} and
+   * reconcilable.
    */
   private Outcome killVerified(
       RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor, AgentUnit unit, int pid) {
-    var cancelled = cancelSpec(spec);
+    var cancelled = claimStop(run, spec);
     try {
       halt(run.project(), unit);
-      var remaining = probe(run.project(), unit);
-      if (remaining != null && remaining.running() && remaining.pid() == pid) {
-        throw new ApiException(
-            ErrorCode.AGENT_STOP_FAILED,
-            "Agent PID " + pid + " is still running after the stop signal.",
-            "Retry the stop; the run is still recorded as running.");
-      }
+      verifyHalted(run.project(), unit);
     } catch (RuntimeException failure) {
-      if (cancelled) {
-        specStore.updateStatus(spec.id(), spec.status());
-      }
+      abortStop(run, spec, cancelled);
       throw failure;
     }
-    runStore.complete(run.id(), "stopped", null);
-    events.publish(cancelEvent(run, actor));
+    finishStop(run, actor);
     return new Stopped(run.id(), run.specId(), pid, cancelled);
+  }
+
+  /**
+   * Resumes a stop claim left behind by an interrupted kill — a crash between the claim and its
+   * finalization. The terminal intent is already durable (the spec is cancelled), so only the
+   * process side remains: a dead unit just finalizes the claim and publishes the withheld operator
+   * event, a live one is halted, verified, and then finalized. A failure leaves the claim in place
+   * for the next retry or the reconciler's interrupted-stop pass — never restored, because the
+   * original operator intent still stands.
+   */
+  private Outcome resumeStop(RunStore.RunRow run, Actor actor, boolean dryRun) {
+    var unit = runUnit(run);
+    var info = probe(run.project(), unit);
+    if (info == null || !info.running()) {
+      if (!dryRun) {
+        finishStop(run, actor);
+      }
+      return new NotRunning(run.id(), run.specId(), false, true);
+    }
+    listener.halting(run.project(), unit.unitName(), info.pid());
+    if (dryRun) {
+      return new Stopped(run.id(), run.specId(), info.pid(), false);
+    }
+    halt(run.project(), unit);
+    verifyHalted(run.project(), unit);
+    finishStop(run, actor);
+    return new Stopped(run.id(), run.specId(), info.pid(), false);
+  }
+
+  /**
+   * Commits the stop claim: run {@code running → stopping} and spec {@code → cancelled} in one
+   * transaction, each compare-and-set from the state this stop resolved. Either CAS losing means a
+   * concurrent transition (a watcher completion, a lifecycle advance) won the race after this stop
+   * read its snapshot — the claim rolls back entirely and the stop refuses with a conflict rather
+   * than cancelling from stale state. Returns whether the spec was cancelled.
+   */
+  private boolean claimStop(RunStore.RunRow run, SpecStore.SpecRow spec) {
+    var cancelling = cancelable(spec);
+    var claimed =
+        runStore.transition(
+            run.id(),
+            "running",
+            STOPPING,
+            () -> {
+              if (cancelling) {
+                commitCancel(spec);
+              }
+            });
+    if (!claimed) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run " + run.id() + " changed status while stopping.",
+          "Retry the stop.");
+    }
+    return cancelling;
+  }
+
+  /**
+   * Finalizes a claim whose halt is verified; the event is the winner's to publish, exactly once.
+   */
+  private void finishStop(RunStore.RunRow run, Actor actor) {
+    if (runStore.transition(run.id(), STOPPING, "stopped")) {
+      events.publish(cancelEvent(run, actor));
+    }
+  }
+
+  /**
+   * Restores a failed claim — run back to {@code running}, spec back to its pre-claim status — in
+   * one transaction, each side conditional on the claim still being held, so a finalization that
+   * won in between is never overwritten.
+   */
+  private void abortStop(RunStore.RunRow run, SpecStore.SpecRow spec, boolean cancelled) {
+    runStore.transition(
+        run.id(),
+        STOPPING,
+        "running",
+        () -> {
+          if (cancelled) {
+            specStore.compareAndSetStatus(spec.id(), SpecStatus.CANCELLED, spec.status());
+          }
+        });
+  }
+
+  /**
+   * A verified halt leaves no live process on the addressed unit. Rejecting <em>any</em> running
+   * result — not only the original pid — keeps a replacement process (a unit restart, a pid reused
+   * mid-halt) from being mistaken for a successful termination.
+   */
+  private void verifyHalted(String project, AgentUnit unit) {
+    var remaining = probe(project, unit);
+    if (remaining != null && remaining.running()) {
+      throw new ApiException(
+          ErrorCode.AGENT_STOP_FAILED,
+          "Agent PID " + remaining.pid() + " is still running after the stop signal.",
+          "Retry the stop.");
+    }
   }
 
   /**
@@ -272,18 +374,27 @@ public final class StopOperations {
         .orElse(false);
   }
 
-  private boolean cancelSpec(SpecStore.SpecRow spec) {
-    if (!cancelable(spec)) {
-      return false;
+  /**
+   * Cancels the spec compare-and-set from the status this stop resolved; a CAS that loses means a
+   * concurrent transition consumed that status first, and the stop must be retried against the new
+   * state, not committed over it. Runs inside the caller's transaction, so the thrown conflict
+   * rolls back the rest of the intent with it.
+   */
+  private void commitCancel(SpecStore.SpecRow spec) {
+    if (!specStore.compareAndSetStatus(spec.id(), spec.status(), SpecStatus.CANCELLED)) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec " + spec.id() + " changed status while stopping.",
+          "Retry the stop.");
     }
-    specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
-    return true;
   }
 
   /**
    * The ad-hoc fallback for a project with no active run row: a {@code sail agent start} session
-   * owns no run and no spec, so there is no intent to record — the kill is the whole stop, and
-   * nothing exists for the reaper or the pipeline to resume.
+   * owns no run and no spec, so there is no intent to record — the verified kill is the whole stop,
+   * and nothing exists for the reaper or the pipeline to resume. Verified matters here too: the
+   * halter is a no-op when the pid file is missing while the probe can still see the live process
+   * through systemd, and only a re-probe keeps that state from being reported stopped.
    */
   private Outcome stopAdHoc(String project, boolean dryRun) {
     var info = probe(project, AgentUnit.BUILD);
@@ -293,6 +404,7 @@ public final class StopOperations {
     listener.halting(project, AgentUnit.BUILD.unitName(), info.pid());
     if (!dryRun) {
       halt(project, AgentUnit.BUILD);
+      verifyHalted(project, AgentUnit.BUILD);
     }
     return new Stopped(null, null, info.pid(), false);
   }
@@ -316,11 +428,11 @@ public final class StopOperations {
           null,
           () -> {
             if (cancelling) {
-              specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
+              commitCancel(spec);
             }
           });
     } else if (cancelling) {
-      specStore.updateStatus(spec.id(), SpecStatus.CANCELLED);
+      commitCancel(spec);
     }
     events.publish(cancelEvent(run, actor));
     return cancelling;

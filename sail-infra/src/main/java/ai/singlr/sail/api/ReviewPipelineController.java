@@ -156,9 +156,24 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     this.localHandle = runStore == null ? null : Objects.requireNonNull(localHandle, "localHandle");
   }
 
-  /** Sets a spec's status and immediately signals sync so the transition reaches main. */
+  /**
+   * Advances a spec's status and signals sync so the transition reaches main. Compare-and-set from
+   * the two states the pipeline owns ({@code in_progress}, {@code review}): once any other
+   * transition wins — above all an operator's {@code cancelled}, which is terminal — the pipeline's
+   * stale write is dropped instead of resurrecting the spec.
+   */
   private void advanceSpec(String specId, SpecStatus status) {
-    specStore.updateStatus(specId, status);
+    var advanced =
+        specStore.compareAndSetStatus(specId, SpecStatus.IN_PROGRESS, status)
+            || specStore.compareAndSetStatus(specId, SpecStatus.REVIEW, status);
+    if (!advanced) {
+      System.err.println(
+          "review-pipeline: spec "
+              + specId
+              + " no longer in a pipeline-owned status; not advancing it to "
+              + status.wire());
+      return;
+    }
     syncTrigger.run();
   }
 

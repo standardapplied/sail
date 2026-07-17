@@ -74,7 +74,7 @@ class StopOperationsTest {
     assertEquals(123, stopped.pid());
     assertTrue(stopped.specCancelled());
     assertTrue(stopped.mutated());
-    assertEquals(List.of("halt " + UNIT, "spec cancelled", "run running"), order);
+    assertEquals(List.of("halt " + UNIT, "spec cancelled", "run stopping"), order);
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
   }
 
@@ -383,7 +383,10 @@ class StopOperationsTest {
     var ops =
         stopOps(
             shell,
-            (project, unit) -> haltedUnits.add(unit.unitName()),
+            (project, unit) -> {
+              haltedUnits.add(unit.unitName());
+              adHocAgentDies(shell);
+            },
             StopOperations.Listener.NONE);
 
     var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
@@ -408,7 +411,10 @@ class StopOperationsTest {
     var ops =
         stopOps(
             shell,
-            (project, unit) -> haltedUnits.add(unit.unitName()),
+            (project, unit) -> {
+              haltedUnits.add(unit.unitName());
+              adHocAgentDies(shell);
+            },
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
@@ -566,6 +572,178 @@ class StopOperationsTest {
   }
 
   @Test
+  void aReplacementPidAfterTheHaltFailsTheStopAndRestoresEverything() throws Exception {
+    var shell = liveAgentShell();
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {
+              shell.on("cat " + RUN_PID_FILE, "456");
+              shell.on("kill -0 456", "");
+              shell.on("kill -0 123", new ShellExec.Result(1, "", ""));
+            },
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void anAdHocHaltThatLeavesTheAgentAliveFailsInsteadOfReportingStopped() throws Exception {
+    var halts = new ArrayList<String>();
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", "55")
+            .on("kill -0 55", "")
+            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
+    var ops =
+        stopOps(shell, (project, unit) -> halts.add(unit.unitName()), StopOperations.Listener.NONE);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
+    assertEquals(1, halts.size());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aRunCompletedBetweenProbeAndClaimRefusesWithAConflict() throws Exception {
+    var listener =
+        new StopOperations.Listener() {
+          @Override
+          public void halting(String project, String unit, Integer pid) {
+            runStore.complete(R1, "completed", 0);
+          }
+        };
+    var ops = stopOps(liveAgentShell(), failingHalter(), listener);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals("completed", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aSpecTransitionBetweenProbeAndClaimRollsTheWholeClaimBack() throws Exception {
+    var listener =
+        new StopOperations.Listener() {
+          @Override
+          public void halting(String project, String unit, Integer pid) {
+            specStore.updateStatus("auth", SpecStatus.REVIEW);
+          }
+        };
+    var ops = stopOps(liveAgentShell(), failingHalter(), listener);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aStopRetryFinalizesAnInterruptedClaimWhoseAgentDied() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat " + RUN_PID_FILE, "123")
+            .on("kill -0 123", new ShellExec.Result(1, "", ""));
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    interruptStop();
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
+    assertEquals(R1, notRunning.runId());
+    assertTrue(notRunning.runReleased());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+    assertEquals(1, events.size());
+    assertEquals(Event.WellKnownTypes.AGENT_CANCELLED, events.getFirst().type());
+  }
+
+  @Test
+  void aStopRetryKillsALiveAgentStillUnderAnInterruptedClaim() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    interruptStop();
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals(123, stopped.pid());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+    assertEquals(1, events.size());
+  }
+
+  @Test
+  void aDryRunOverAnInterruptedClaimProbesButWritesNothing() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    interruptStop();
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, true);
+
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals(123, stopped.pid());
+    assertEquals("stopping", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aFinishThatLostTheClaimToAConcurrentFinalizerPublishesNoSecondEvent() throws Exception {
+    var shell = liveAgentShell();
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {
+              agentDies(shell);
+              runStore.transition(R1, "stopping", "stopped");
+            },
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
   void stoppingAnOlderTerminalRunCannotCancelANewerActiveRun() throws Exception {
     var ops =
         stopOps(
@@ -639,6 +817,22 @@ class StopOperationsTest {
 
   private static void agentDies(FakeShell shell) {
     shell.on("kill -0 123", new ShellExec.Result(1, "", ""));
+  }
+
+  private static void adHocAgentDies(FakeShell shell) {
+    shell.on("kill -0 55", new ShellExec.Result(1, "", ""));
+  }
+
+  private void interruptStop() {
+    assertTrue(
+        runStore.transition(
+            R1,
+            "running",
+            "stopping",
+            () ->
+                specStore.compareAndSetStatus(
+                    "auth", SpecStatus.IN_PROGRESS, SpecStatus.CANCELLED)),
+        "seeding the claim an interrupted stop leaves behind");
   }
 
   private FakeShell liveAgentShell() {

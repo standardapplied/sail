@@ -23,6 +23,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -190,6 +191,81 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void finalizesAnInterruptedStopOnceItsUnitIsGone() throws Exception {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = interruptedStopSession("auth");
+    var latch = new CountDownLatch(1);
+    var cancels = captureCancels(latch);
+
+    var finalized = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, finalized);
+    assertEquals("stopped", sessionStore.findById(runId).orElseThrow().status());
+    BusTesting.awaitDelivery(latch);
+    assertEquals(1, cancels.size());
+    assertEquals(
+        Event.WellKnownData.SOURCE_RECONCILE,
+        cancels.peek().data().get(Event.WellKnownData.SOURCE));
+    assertEquals(runId, cancels.peek().data().get(Event.WellKnownData.RUN_ID));
+  }
+
+  @Test
+  void anInterruptedStopWithALiveUnitKeepsItsClaim() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = interruptedStopSession("auth");
+
+    var finalized = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, finalized);
+    assertEquals(
+        "stopping",
+        sessionStore.findById(runId).orElseThrow().status(),
+        "an active unit means a stop is mid-halt or a retry owns the kill; the claim stays");
+  }
+
+  @Test
+  void aForeignInterruptedStopIsLeftToItsExecutingBox() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = interruptedStopSession("auth");
+    var probe = new CountingProbe(false);
+
+    var finalized = reconciler(probe, () -> "node-b", PAST_GRACE).sweep();
+
+    assertEquals(0, finalized);
+    assertEquals(0, probe.calls.get());
+    assertEquals("stopping", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void aBlankUnitInterruptedStopIsLeftToTheStopRetryLane() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = preUpgradeRunningSession("auth");
+    sessionStore.transition(runId, "running", "stopping");
+    var probe = new CountingProbe(false);
+
+    var finalized = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(0, finalized);
+    assertEquals(0, probe.calls.get());
+    assertEquals("stopping", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void aProbeFailureOnAnInterruptedStopIsLoggedAndRetriedNextSweep() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = interruptedStopSession("auth");
+    MissedStopReconciler.UnitProbe failing =
+        (project, id, unit) -> {
+          throw new IOException("container unreachable");
+        };
+
+    var finalized = reconciler(failing, PAST_GRACE).sweep();
+
+    assertEquals(0, finalized);
+    assertEquals("stopping", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
   void keepsARunningReservationForAnInProgressSpec() {
     createInProgressSpec("auth");
     runningSession("auth");
@@ -285,6 +361,36 @@ class MissedStopReconcilerTest {
             "claude-code",
             HostInfo.hostname(),
             YamlUtil.dumpJson(data)));
+  }
+
+  private String interruptedStopSession(String specId) {
+    var id = runningSession(specId);
+    sessionStore.transition(id, "running", "stopping");
+    return id;
+  }
+
+  private ConcurrentLinkedQueue<Event> captureCancels(CountDownLatch latch) {
+    var captured = new ConcurrentLinkedQueue<Event>();
+    bus.subscribe(
+        BusTesting.latching(
+            new EventSubscriber() {
+              @Override
+              public String name() {
+                return "capture-cancels";
+              }
+
+              @Override
+              public Predicate<Event> filter() {
+                return e -> Event.WellKnownTypes.AGENT_CANCELLED.equals(e.type());
+              }
+
+              @Override
+              public void onEvent(Event event) {
+                captured.add(event);
+              }
+            },
+            latch));
+    return captured;
   }
 
   private ConcurrentLinkedQueue<Event> captureStops(CountDownLatch latch) {

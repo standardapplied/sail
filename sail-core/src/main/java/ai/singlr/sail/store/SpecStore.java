@@ -246,6 +246,31 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /**
+   * Status transition that commits only if the spec still holds {@code expected}, returning whether
+   * it did. The check and the write are one statement under the write lock ({@code BEGIN
+   * IMMEDIATE}), so a lifecycle writer racing another transition — above all an operator's {@code
+   * cancelled}, which must stay terminal — fails cleanly on its stale read instead of overwriting
+   * the transition that won. Every automated status writer must use this; the unconditional {@link
+   * #updateStatus} is for deliberate operator edits.
+   */
+  public boolean compareAndSetStatus(String id, SpecStatus expected, SpecStatus status) {
+    return db.immediateTransaction(
+        () -> {
+          db.execute(
+              "UPDATE specs SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+              status.wire(),
+              DateTimeUtils.now().toString(),
+              id,
+              expected.wire());
+          if (db.changes() == 0) {
+            return false;
+          }
+          recordRevision(id, "local", false);
+          return true;
+        });
+  }
+
+  /**
    * Status transition that also persists the spec's resolved target repos and its dispatch branch
    * in the same transaction. Dispatch resolves repo overrides and computes the branch name at
    * launch time; recording them here keeps later store reads (the review pipeline builds its prompt

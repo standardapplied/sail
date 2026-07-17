@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,103 @@ class RunStoreTest {
     assertEquals("/home/dev/.sail/runs/r/agent.log", run.logPath());
     assertNotNull(run.startedAt());
     assertNull(run.completedAt());
+  }
+
+  @Test
+  void transitionCommitsOnlyFromTheExpectedStatus() {
+    var id = newRun("backend", "auth");
+
+    assertFalse(store.transition(id, "stopping", "stopped"));
+    assertEquals("running", store.findById(id).orElseThrow().status());
+
+    assertTrue(store.transition(id, "running", "stopping"));
+    var claimed = store.findById(id).orElseThrow();
+    assertEquals("stopping", claimed.status());
+    assertNull(claimed.completedAt(), "a claim is not terminal, so nothing is stamped complete");
+
+    assertTrue(store.transition(id, "stopping", "stopped"));
+    var stopped = store.findById(id).orElseThrow();
+    assertEquals("stopped", stopped.status());
+    assertNotNull(stopped.completedAt());
+  }
+
+  @Test
+  void transitionBackToRunningClearsCompletedAt() {
+    var id = newRun("backend", "auth");
+    store.transition(id, "running", "stopping");
+
+    assertTrue(store.transition(id, "stopping", "running"));
+
+    var restored = store.findById(id).orElseThrow();
+    assertEquals("running", restored.status());
+    assertNull(restored.completedAt());
+  }
+
+  @Test
+  void transitionRunsAlongsideOnlyWhenItWinsAndRollsBackWithIt() {
+    var id = newRun("backend", "auth");
+    var ran = new AtomicBoolean();
+
+    assertFalse(store.transition(id, "stopping", "stopped", () -> ran.set(true)));
+    assertFalse(ran.get(), "a lost transition must never run its alongside work");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.transition(
+                id,
+                "running",
+                "stopping",
+                () -> {
+                  throw new IllegalStateException("conflict");
+                }));
+    assertEquals(
+        "running",
+        store.findById(id).orElseThrow().status(),
+        "an alongside failure rolls the transition back with it");
+  }
+
+  @Test
+  void transitionJournalsARevisionSoTheClaimReplicates() {
+    var id = newRun("backend", "auth");
+    var before = store.latestRev(id);
+
+    store.transition(id, "running", "stopping");
+
+    assertNotEquals(before, store.latestRev(id));
+  }
+
+  @Test
+  void stoppingListsOnlyBuildRunsHoldingAClaim() {
+    var claimed = newRun("backend", "auth");
+    store.transition(claimed, "running", "stopping");
+    newRun("backend", "other");
+    var review =
+        store.createReview(
+            DateTimeUtils.newId().toString(),
+            "backend",
+            "auth",
+            "node-a",
+            "codex",
+            "feat/x",
+            "review",
+            "/home/dev/.sail/runs/rev/review.log");
+    db.execute("UPDATE runs SET status = 'stopping' WHERE id = ?", review);
+
+    var claims = store.stopping();
+
+    assertEquals(1, claims.size());
+    assertEquals(claimed, claims.getFirst().id());
+  }
+
+  @Test
+  void aStoppingRunStaysTheActiveRunForItsProjectAndNode() {
+    var id = newRun("backend", "auth");
+    store.transition(id, "running", "stopping");
+
+    var active = store.runningForProjectOnNode("backend", "node-a").orElseThrow();
+
+    assertEquals(id, active.id());
   }
 
   @Test
