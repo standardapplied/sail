@@ -160,6 +160,41 @@ class RunStoreTest {
   }
 
   @Test
+  void runIfLatestAttemptIgnoresReviewRowsWhenPickingTheLatestAttempt() {
+    var build = newRun("backend", "auth");
+    store.createReview(
+        DateTimeUtils.newId().toString(),
+        "backend",
+        "auth",
+        "node-a",
+        "claude-code",
+        "feat/x",
+        "review",
+        "/home/dev/.sail/runs/r/agent.log");
+    var ran = new AtomicBoolean();
+
+    assertTrue(
+        store.runIfLatestAttempt(build, "auth", () -> ran.set(true)),
+        "a review-lane row is pipeline negotiation, not a newer attempt");
+    assertTrue(ran.get());
+  }
+
+  @Test
+  void transitionWithExitCodeStampsStatusAndCodeInOneWrite() {
+    var id = newRun("backend", "auth");
+
+    assertTrue(store.transition(id, "running", "failed", 2));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("failed", run.status());
+    assertEquals(2, run.exitCode());
+    assertNotNull(run.completedAt());
+
+    assertFalse(store.transition(id, "running", "completed", 0));
+    assertEquals(2, store.findById(id).orElseThrow().exitCode());
+  }
+
+  @Test
   void runIfLatestAttemptRollsBackWorkThatFails() {
     var id = newRun("backend", "auth");
 

@@ -267,7 +267,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       if (!SailOperations.ownsRun(run.node(), node)) {
         continue;
       }
-      var unit = Strings.isBlank(run.unit()) ? AgentUnit.BUILD.unitName() : run.unit();
+      var unit = StopOperations.runUnit(run).unitName();
       try {
         if (unitProbe.active(run.project(), run.id(), unit)) {
           continue;
@@ -296,16 +296,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   private static Event cancelledEvent(RunStore.RunRow run) {
-    var data = new LinkedHashMap<String, Object>();
-    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
-    data.put(Event.WellKnownData.RUN_ID, run.id());
-    return Event.of(
-        run.project(),
-        run.specId(),
-        Event.WellKnownTypes.AGENT_CANCELLED,
-        Event.SAIL_AGENT,
-        HostInfo.hostname(),
-        data);
+    return StopOperations.cancelEvent(run, Event.WellKnownData.SOURCE_RECONCILE, Event.SAIL_AGENT);
   }
 
   /**

@@ -74,6 +74,20 @@ public final class StopOperations {
         case NotActive ignored -> false;
       };
     }
+
+    /**
+     * The single wire vocabulary for why nothing was killed — null for {@link Stopped} — shared by
+     * the API response and the CLI's {@code --json} view so scripts see one set of reasons.
+     */
+    default String reason() {
+      return switch (this) {
+        case Stopped ignored -> null;
+        case NotRunning notRunning ->
+            notRunning.runReleased() ? "no_agent_running" : "run_not_running";
+        case AlreadyTerminal ignored -> "run_not_running";
+        case NotActive ignored -> "run_not_active";
+      };
+    }
   }
 
   /**
@@ -176,6 +190,17 @@ public final class StopOperations {
           "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
           "Stop it from " + node + "'s box.");
     }
+    if (!run.buildRole()) {
+      throw new ApiException(
+          ErrorCode.INVALID_ROLE,
+          "Run "
+              + run.id()
+              + " is a "
+              + run.role()
+              + " run driven by the review pipeline, not a"
+              + " stoppable agent session.",
+          "Stop the spec's build run instead, or let the pipeline finish.");
+    }
     authorize(actor, run);
     projects.requireExists(run.project());
     return stopResolved(run, actor, dryRun);
@@ -215,11 +240,26 @@ public final class StopOperations {
   private Outcome rescueStaleLegacyRun(
       String project, RunStore.RunRow run, Actor actor, boolean dryRun) {
     var staleSpec = specOf(run);
-    var cancelled = dryRun ? previewCancel(run, staleSpec) : recordIntent(run, staleSpec, actor);
+    var cancelled = dryRun ? previewCancel(run, staleSpec) : releaseStale(run, staleSpec, actor);
     if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
       return new Stopped(null, run.specId(), stopped.pid(), cancelled);
     }
     return new NotRunning(run.id(), run.specId(), cancelled, true);
+  }
+
+  /**
+   * Releases a stale legacy row whose own agent is provably gone (a different process owns the
+   * shared fixed unit). A {@code running} row records the full terminal intent; a {@code stopping}
+   * row is an interrupted claim whose intent is already durable — the spec was cancelled by the
+   * claim — so it is finalized instead of re-claimed, which would conflict on every retry and wedge
+   * the project lane.
+   */
+  private boolean releaseStale(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
+    if (STOPPING.equals(run.status())) {
+      finishStop(run, actor);
+      return false;
+    }
+    return recordIntent(run, spec, actor);
   }
 
   /**
@@ -246,7 +286,7 @@ public final class StopOperations {
       if (!runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec))) {
         return new AlreadyTerminal(run.id(), run.specId(), run.status());
       }
-      events.publish(cancelEvent(run, actor));
+      events.publish(operatorCancelEvent(run, actor));
       return new NotRunning(run.id(), run.specId(), true, false);
     }
     var unit = runUnit(run);
@@ -336,19 +376,30 @@ public final class StopOperations {
    * whether the spec was cancelled.
    */
   private boolean claimStop(RunStore.RunRow run, SpecStore.SpecRow spec) {
+    return transitionAndCancel(run, spec, STOPPING);
+  }
+
+  /**
+   * The one gated-cancel write both stop shapes share: run {@code running → status} and, when this
+   * run is still cancelable and its spec's latest build attempt, the spec cancel — one transaction,
+   * every check compare-and-set inside it. A lost run CAS means a concurrent transition consumed
+   * the resolved state first; the stop refuses with a conflict rather than committing over it.
+   * Returns whether the spec was cancelled.
+   */
+  private boolean transitionAndCancel(RunStore.RunRow run, SpecStore.SpecRow spec, String status) {
     var cancelled = new AtomicBoolean();
-    var claimed =
+    var moved =
         runStore.transition(
             run.id(),
             "running",
-            STOPPING,
+            status,
             () -> {
               if (cancelable(spec)) {
                 cancelled.set(
                     runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec)));
               }
             });
-    if (!claimed) {
+    if (!moved) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Run " + run.id() + " changed status while stopping.",
@@ -362,7 +413,7 @@ public final class StopOperations {
    */
   private void finishStop(RunStore.RunRow run, Actor actor) {
     if (runStore.transition(run.id(), STOPPING, "stopped")) {
-      events.publish(cancelEvent(run, actor));
+      events.publish(operatorCancelEvent(run, actor));
     }
   }
 
@@ -408,6 +459,7 @@ public final class StopOperations {
    */
   private boolean isCurrentAttempt(RunStore.RunRow run) {
     return runStore.listForSpec(run.specId()).stream()
+        .filter(RunStore.RunRow::buildRole)
         .findFirst()
         .map(latest -> latest.id().equals(run.id()))
         .orElse(false);
@@ -468,32 +520,24 @@ public final class StopOperations {
    * the spec was cancelled.
    */
   private boolean recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
-    var cancelled = new AtomicBoolean();
-    var released =
-        runStore.transition(
-            run.id(),
-            "running",
-            "stopped",
-            () -> {
-              if (cancelable(spec)) {
-                cancelled.set(
-                    runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec)));
-              }
-            });
-    if (!released) {
-      throw new ApiException(
-          ErrorCode.CONFLICT,
-          "Run " + run.id() + " completed while stopping.",
-          "Refresh the run and retry if it is still active.");
-    }
-    events.publish(cancelEvent(run, actor));
-    return cancelled.get();
+    var cancelled = transitionAndCancel(run, spec, "stopped");
+    events.publish(operatorCancelEvent(run, actor));
+    return cancelled;
   }
 
-  private static Event cancelEvent(RunStore.RunRow run, Actor actor) {
+  private static Event operatorCancelEvent(RunStore.RunRow run, Actor actor) {
     var agent = Strings.isNotBlank(actor.handle()) ? actor.handle() : Event.SAIL_AGENT;
+    return cancelEvent(run, Event.WellKnownData.SOURCE_OPERATOR, agent);
+  }
+
+  /**
+   * The one {@code agent_cancelled} event shape every cancel lane publishes — the operator stop and
+   * the reconciler's interrupted-stop finalization differ only in {@code source} and acting agent,
+   * so a field added here reaches every SSE/audit consumer from both.
+   */
+  static Event cancelEvent(RunStore.RunRow run, String source, String agent) {
     var data = new LinkedHashMap<String, Object>();
-    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_OPERATOR);
+    data.put(Event.WellKnownData.SOURCE, source);
     data.put(Event.WellKnownData.RUN_ID, run.id());
     return Event.of(
         run.project(),

@@ -441,16 +441,12 @@ public final class SailOperations implements Operations {
           new StopRunResponse(stopped.runId(), true, null, stopped.pid(), stopped.specCancelled());
       case StopOperations.NotRunning notRunning ->
           new StopRunResponse(
-              notRunning.runId(),
-              false,
-              notRunning.runReleased() ? "no_agent_running" : "run_not_running",
-              null,
-              notRunning.specCancelled());
+              notRunning.runId(), false, notRunning.reason(), null, notRunning.specCancelled());
       case StopOperations.AlreadyTerminal terminal ->
-          new StopRunResponse(terminal.runId(), false, "run_not_running", null, false);
+          new StopRunResponse(terminal.runId(), false, terminal.reason(), null, false);
       case StopOperations.NotActive notActive ->
           new StopRunResponse(
-              notActive.runId(), false, "run_not_active", notActive.livePid(), false);
+              notActive.runId(), false, notActive.reason(), notActive.livePid(), false);
     };
   }
 
@@ -678,8 +674,8 @@ public final class SailOperations implements Operations {
         runStore == null
             ? List.<RunStore.RunRow>of()
             : runStore.listForProject(project).stream()
-                .filter(run -> "running".equals(run.status()))
-                .filter(run -> "build".equals(Objects.requireNonNullElse(run.role(), "build")))
+                .filter(DispatchOperations::ownsLiveAgent)
+                .filter(RunStore.RunRow::buildRole)
                 .filter(run -> ownsRun(run.node(), localHandle))
                 .toList();
     if (running.isEmpty()) {

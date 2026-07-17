@@ -178,6 +178,23 @@ class AgentSessionTest {
   }
 
   @Test
+  void killAgentTreatsSigkillOfAnAlreadyDeadProcessAsSuccess() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("cat /home/dev/.sail/agent.pid", "9999\n")
+            .onOk("kill 9999")
+            .onOk("sleep 3")
+            .onceOnOk("kill -0 9999")
+            .onFail("kill -9 9999", "No such process")
+            .onOk("rm -f");
+    var session = new AgentSession(shell);
+
+    session.killAgent("acme-health");
+
+    assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("rm -f")));
+  }
+
+  @Test
   void killAgentIgnoresNonNumericPid() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))

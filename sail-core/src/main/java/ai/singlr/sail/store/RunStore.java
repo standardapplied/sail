@@ -72,7 +72,13 @@ public final class RunStore implements ConflictResolver {
       String unit,
       String startedAt,
       String completedAt,
-      List<String> repos) {}
+      List<String> repos) {
+
+    /** Whether this row is a build attempt; a null role predates roles and always meant build. */
+    public boolean buildRole() {
+      return "build".equals(Objects.requireNonNullElse(role, "build"));
+    }
+  }
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
@@ -314,7 +320,7 @@ public final class RunStore implements ConflictResolver {
 
   public List<RunRow> listForSpec(String specId) {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY started_at DESC",
+        "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY started_at DESC, id DESC",
         this::mapRow,
         specId);
   }
@@ -363,12 +369,33 @@ public final class RunStore implements ConflictResolver {
    * completed_at}; a non-terminal one clears it.
    */
   public boolean transition(String id, String expected, String status, Runnable alongside) {
+    return transition(id, expected, status, null, alongside);
+  }
+
+  public boolean transition(String id, String expected, String status) {
+    return transition(id, expected, status, null, () -> {});
+  }
+
+  /**
+   * As {@link #transition(String, String, String, Runnable)}, also stamping {@code exitCode} (when
+   * non-null) in the same UPDATE, so a finisher that knows the process outcome commits the terminal
+   * status and its exit code as one atomic, single-revision write — a crash or a sync push can
+   * never observe the terminal status without its exit code.
+   */
+  public boolean transition(String id, String expected, String status, Integer exitCode) {
+    return transition(id, expected, status, exitCode, () -> {});
+  }
+
+  private boolean transition(
+      String id, String expected, String status, Integer exitCode, Runnable alongside) {
     return db.immediateTransaction(
         () -> {
           db.execute(
-              "UPDATE runs SET status = ?, completed_at = ? WHERE id = ? AND status = ?",
+              "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
+                  + " WHERE id = ? AND status = ?",
               status,
               TERMINAL_STATUSES.contains(status) ? DateTimeUtils.now().toString() : null,
+              exitCode != null ? exitCode.longValue() : null,
               id,
               expected);
           if (db.changes() == 0) {
@@ -380,26 +407,25 @@ public final class RunStore implements ConflictResolver {
         });
   }
 
-  public boolean transition(String id, String expected, String status) {
-    return transition(id, expected, status, () -> {});
-  }
-
   /**
    * Runs {@code work} inside one {@code BEGIN IMMEDIATE} transaction, only if {@code id} is still
-   * {@code specId}'s latest attempt at commit time. Taking the write lock before the check
-   * serializes it against {@link #reserveDispatch}, so a restart that reserves a newer attempt
-   * either lands before this (the check fails, nothing runs) or waits until after (the newer row
-   * sees whatever {@code work} committed) — a check-then-write split across transactions could let
-   * a stop aimed at an old run cancel the spec out from under the newer attempt. Ties on {@code
-   * started_at} break on the UUIDv7 id, which orders by mint time. Returns whether {@code work}
-   * ran; {@code work} throwing rolls the whole transaction back.
+   * {@code specId}'s latest <em>build</em> attempt at commit time. Review-lane rows are not
+   * attempts — the pipeline mints them for the same spec while it negotiates review, and counting
+   * them would make every reviewed spec's build run permanently "stale". Taking the write lock
+   * before the check serializes it against {@link #reserveDispatch}, so a restart that reserves a
+   * newer attempt either lands before this (the check fails, nothing runs) or waits until after
+   * (the newer row sees whatever {@code work} committed) — a check-then-write split across
+   * transactions could let a stop aimed at an old run cancel the spec out from under the newer
+   * attempt. Ties on {@code started_at} break on the UUIDv7 id, which orders by mint time. Returns
+   * whether {@code work} ran; {@code work} throwing rolls the whole transaction back.
    */
   public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
     return db.immediateTransaction(
         () -> {
           var latest =
               db.queryOne(
-                  "SELECT id FROM runs WHERE spec_id = ? ORDER BY started_at DESC, id DESC LIMIT 1",
+                  "SELECT id FROM runs WHERE spec_id = ? AND IFNULL(role, 'build') = 'build'"
+                      + " ORDER BY started_at DESC, id DESC LIMIT 1",
                   row -> row.text(0),
                   specId);
           if (latest.isEmpty() || !latest.get().equals(id)) {

@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * The single dispatch executor behind every lane. Owns the whole procedure — resolve, policy,
@@ -722,17 +723,19 @@ public final class DispatchOperations {
 
   /**
    * The project's runs this box is executing right now, each with the repo set its dispatch
-   * reserved. A box that keeps no run aggregate has nothing to consult and allows the dispatch. A
-   * run recorded before repos were persisted reads as no repos, which the gate treats as
-   * whole-container: refusing is the safe reading of a row it cannot scope, and it heals when the
-   * run finishes.
+   * reserved. Uses the same {@link #ownsLiveAgent} reading as the live reservation, so the dry lane
+   * counts a mid-stop ({@code stopping}) run as occupying its repos exactly like {@code
+   * reserveDispatch} does. A box that keeps no run aggregate has nothing to consult and allows the
+   * dispatch. A run recorded before repos were persisted reads as no repos, which the gate treats
+   * as whole-container: refusing is the safe reading of a row it cannot scope, and it heals when
+   * the run finishes.
    */
   private List<DispatchGate.RunningRun> runningLocalRuns(String project, String localHandle) {
     if (runStore == null) {
       return List.of();
     }
     return runStore.listForProject(project).stream()
-        .filter(run -> "running".equals(run.status()))
+        .filter(DispatchOperations::ownsLiveAgent)
         .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
         .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
         .toList();
@@ -812,7 +815,7 @@ public final class DispatchOperations {
           runs.stream()
               .filter(DispatchOperations::ownsLiveAgent)
               .map(RunStore.RunRow::id)
-              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+              .collect(Collectors.toUnmodifiableSet());
       var pruned = RunRetention.prune(shell, project, ids, active, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
@@ -845,12 +848,23 @@ public final class DispatchOperations {
   /**
    * Completes a foreground run explicitly: its launch command blocks until the agent exits, so the
    * exit code is known here and the run must not be left {@code running} waiting for a terminal
-   * hook event that may never arrive.
+   * hook event that may never arrive. Compare-and-set from {@code running}, exactly like {@link
+   * RunTracker}: an operator stop that already recorded the run terminal wins, and this finisher
+   * only enriches the missing exit code instead of overwriting the cancel with {@code completed}.
    */
   private void completeForegroundRun(String runId, int exitCode) {
     runBookkeeping(
         "complete run " + runId,
-        () -> runStore.complete(runId, exitCode == 0 ? "completed" : "failed", exitCode));
+        () -> {
+          if (runStore.transition(
+              runId, "running", exitCode == 0 ? "completed" : "failed", exitCode)) {
+            return;
+          }
+          var current = runStore.findById(runId).orElse(null);
+          if (current != null && current.exitCode() == null) {
+            runStore.recordExitCode(runId, exitCode);
+          }
+        });
   }
 
   /**

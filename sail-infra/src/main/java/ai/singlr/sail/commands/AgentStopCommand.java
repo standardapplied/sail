@@ -171,7 +171,7 @@ public final class AgentStopCommand implements Runnable {
                       + notActive.livePid()
                       + ") does not belong to run "
                       + notActive.runId()
-                      + "; nothing was stopped.",
+                      + "; nothing was stopped. Check 'sail agent status' and retry.",
                   Ansi.AUTO));
     }
   }
@@ -197,18 +197,19 @@ public final class AgentStopCommand implements Runnable {
       }
       case StopOperations.NotRunning notRunning -> {
         map.put("stopped", false);
-        map.put("reason", "no agent running");
+        map.put("reason", notRunning.reason());
         map.put("run_released", notRunning.runReleased());
         putRunAndSpec(map, notRunning.runId(), notRunning.specId(), notRunning.specCancelled());
       }
       case StopOperations.AlreadyTerminal terminal -> {
         map.put("stopped", false);
-        map.put("reason", "run already " + terminal.runStatus());
+        map.put("reason", terminal.reason());
+        map.put("run_status", terminal.runStatus());
         putRunAndSpec(map, terminal.runId(), terminal.specId(), false);
       }
       case StopOperations.NotActive notActive -> {
         map.put("stopped", false);
-        map.put("reason", "live agent is not this run");
+        map.put("reason", notActive.reason());
         map.put("live_pid", notActive.livePid());
         putRunAndSpec(map, notActive.runId(), notActive.specId(), false);
       }

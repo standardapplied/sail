@@ -257,14 +257,15 @@ public final class AgentSession {
     var aliveCmd = ContainerExec.asDevUser(containerName, List.of("kill", "-0", pidStr));
     if (shell.exec(aliveCmd).ok()) {
       var kill = shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
-      if (!kill.ok()) {
+      if (!kill.ok() && shell.exec(aliveCmd).ok()) {
         throw new IOException(
             "SIGKILL for agent PID "
                 + pidStr
                 + " in "
                 + containerName
                 + " failed: "
-                + kill.stderr().trim());
+                + kill.stderr().trim()
+                + ". Check the process in the container and retry the stop.");
       }
     }
 

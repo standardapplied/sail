@@ -940,6 +940,84 @@ class StopOperationsTest {
   }
 
   @Test
+  void outcomeReasonsShareOneWireVocabulary() {
+    assertNull(new StopOperations.Stopped(R1, "auth", 1, true).reason());
+    assertEquals(
+        "no_agent_running", new StopOperations.NotRunning(R1, "auth", false, true).reason());
+    assertEquals(
+        "run_not_running", new StopOperations.NotRunning(R1, "auth", false, false).reason());
+    assertEquals(
+        "run_not_running", new StopOperations.AlreadyTerminal(R1, "auth", "stopped").reason());
+    assertEquals("run_not_active", new StopOperations.NotActive(R1, "auth", 9).reason());
+  }
+
+  @Test
+  void aNewerReviewRowDoesNotBlockTheOperatorCancel() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    seedReviewRun();
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertTrue(assertInstanceOf(StopOperations.Stopped.class, outcome).specCancelled());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+  }
+
+  @Test
+  void stoppingAReviewRunIsRefusedWithInvalidRole() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    seedReviewRun();
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R2), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.INVALID_ROLE, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aWedgedLegacyStopClaimIsFinalizedAndTheAdHocSessionStopped() throws Exception {
+    var haltedUnits = new ArrayList<String>();
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/agent.pid", "55")
+            .on("kill -0 55", "")
+            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {
+              haltedUnits.add(unit.unitName());
+              adHocAgentDies(shell);
+            },
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, null);
+    interruptStop();
+
+    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
+
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals(55, stopped.pid());
+    assertFalse(stopped.specCancelled());
+    assertEquals(List.of(AgentUnit.BUILD.unitName()), haltedUnits);
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+    assertEquals(1, events.size());
+    assertEquals(Event.WellKnownTypes.AGENT_CANCELLED, events.getFirst().type());
+  }
+
+  @Test
   void aStaleLegacyRescueWhoseAdHocSessionJustDiedStillReportsTheRescue() throws Exception {
     var shell =
         shell()
@@ -1101,6 +1179,11 @@ class StopOperationsTest {
         null,
         RUN_LOG,
         unit);
+  }
+
+  private void seedReviewRun() {
+    runStore.createReview(
+        R2, "acme", "auth", LOCAL_HANDLE, "codex", "feat/auth", "review", RUN_LOG);
   }
 
   private void seedNewerRun() {

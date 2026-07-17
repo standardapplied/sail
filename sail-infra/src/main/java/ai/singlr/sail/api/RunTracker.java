@@ -97,15 +97,15 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void completeOrRecord(RunStore.RunRow run, String status, Integer exitCode) {
-    if (runStore.transition(run.id(), "running", status)) {
-      if (exitCode != null) {
-        runStore.recordExitCode(run.id(), exitCode);
-      }
+    if (runStore.transition(run.id(), "running", status, exitCode)) {
       syncScheduler.afterWrite();
       return;
     }
+    if (exitCode == null) {
+      return;
+    }
     var current = runStore.findById(run.id()).orElse(null);
-    if (current != null && exitCode != null && current.exitCode() == null) {
+    if (current != null && current.exitCode() == null) {
       runStore.recordExitCode(run.id(), exitCode);
       syncScheduler.afterWrite();
     }
