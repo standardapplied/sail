@@ -141,6 +141,45 @@ class RunStoreTest {
   }
 
   @Test
+  void runIfLatestAttemptRunsTheWorkForTheSpecsNewestRun() {
+    var id = newRun("backend", "auth");
+    var ran = new AtomicBoolean();
+
+    assertTrue(store.runIfLatestAttempt(id, "auth", () -> ran.set(true)));
+    assertTrue(ran.get());
+  }
+
+  @Test
+  void runIfLatestAttemptRefusesOnceANewerAttemptExists() {
+    var older = newRun("backend", "auth");
+    newRun("backend", "auth");
+    var ran = new AtomicBoolean();
+
+    assertFalse(store.runIfLatestAttempt(older, "auth", () -> ran.set(true)));
+    assertFalse(ran.get(), "a superseded run must never act on its spec");
+  }
+
+  @Test
+  void runIfLatestAttemptRollsBackWorkThatFails() {
+    var id = newRun("backend", "auth");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.runIfLatestAttempt(
+                id,
+                "auth",
+                () -> {
+                  store.complete(id, "stopped", null);
+                  throw new IllegalStateException("conflict");
+                }));
+    assertEquals(
+        "running",
+        store.findById(id).orElseThrow().status(),
+        "failing work rolls back everything it wrote inside the guard");
+  }
+
+  @Test
   void stoppingListsOnlyBuildRunsHoldingAClaim() {
     var claimed = newRun("backend", "auth");
     store.transition(claimed, "running", "stopping");

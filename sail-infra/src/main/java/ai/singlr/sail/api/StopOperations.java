@@ -184,7 +184,11 @@ public final class StopOperations {
    * separate fixed ad-hoc session: a dispatched agent that died without completing its row leaves a
    * {@code running} row behind while a later {@code sail agent start} session is the live process
    * the operator means to stop. When the resolved run turns out dead ({@link NotRunning}), the
-   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well.
+   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well. A
+   * blank-unit run (launched before units were run-scoped) shares that fixed identity, so a pid
+   * mismatch there ({@link NotActive}) proves the live process is a newer ad-hoc session and the
+   * stale run's own agent is gone — the project lane rescues the stale state and stops the actual
+   * session, while an exact run-target request stays a conservative no-op.
    */
   private Outcome stopProject(String project, Actor actor, String localHandle, boolean dryRun) {
     projects.requireExists(project);
@@ -194,6 +198,9 @@ public final class StopOperations {
     }
     authorize(actor, run);
     var resolved = stopResolved(run, actor, dryRun);
+    if (resolved instanceof NotActive && Strings.isBlank(run.unit())) {
+      return rescueStaleLegacyRun(project, run, actor, dryRun);
+    }
     if (!(resolved instanceof NotRunning stranded)) {
       return resolved;
     }
@@ -201,6 +208,19 @@ public final class StopOperations {
       return new Stopped(null, stranded.specId(), stopped.pid(), stranded.specCancelled());
     }
     return stranded;
+  }
+
+  private Outcome rescueStaleLegacyRun(
+      String project, RunStore.RunRow run, Actor actor, boolean dryRun) {
+    var staleSpec = specOf(run);
+    var cancelled = cancelable(staleSpec);
+    if (!dryRun) {
+      recordIntent(run, staleSpec, actor);
+    }
+    if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
+      return new Stopped(null, run.specId(), stopped.pid(), cancelled);
+    }
+    return new NotRunning(run.id(), run.specId(), cancelled, true);
   }
 
   /**
@@ -216,19 +236,25 @@ public final class StopOperations {
       return resumeStop(run, actor, dryRun);
     }
     if (!"running".equals(run.status())) {
-      if (!cancelable(spec) || !isCurrentAttempt(run)) {
+      if (!cancelable(spec)) {
         return new AlreadyTerminal(run.id(), run.specId(), run.status());
       }
-      if (!dryRun) {
-        recordIntent(run, spec, actor, false);
+      if (dryRun) {
+        return isCurrentAttempt(run)
+            ? new NotRunning(run.id(), run.specId(), true, false)
+            : new AlreadyTerminal(run.id(), run.specId(), run.status());
       }
+      if (!runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec))) {
+        return new AlreadyTerminal(run.id(), run.specId(), run.status());
+      }
+      events.publish(cancelEvent(run, actor));
       return new NotRunning(run.id(), run.specId(), true, false);
     }
     var unit = runUnit(run);
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
       if (!dryRun) {
-        recordIntent(run, spec, actor, true);
+        recordIntent(run, spec, actor);
       }
       return new NotRunning(run.id(), run.specId(), cancelable(spec), true);
     }
@@ -270,9 +296,12 @@ public final class StopOperations {
    * Resumes a stop claim left behind by an interrupted kill — a crash between the claim and its
    * finalization. The terminal intent is already durable (the spec is cancelled), so only the
    * process side remains: a dead unit just finalizes the claim and publishes the withheld operator
-   * event, a live one is halted, verified, and then finalized. A failure leaves the claim in place
-   * for the next retry or the reconciler's interrupted-stop pass — never restored, because the
-   * original operator intent still stands.
+   * event, a live one is halted, verified, and then finalized. The same pid identity guard as the
+   * first stop applies — a durable claim is never authority to kill a different process that later
+   * occupies the unit, which matters most for a migrated blank-unit run whose fixed ad-hoc identity
+   * a newer {@code sail agent start} session may now own. A failure leaves the claim in place for
+   * the next retry or the reconciler's interrupted-stop pass — never restored, because the original
+   * operator intent still stands.
    */
   private Outcome resumeStop(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var unit = runUnit(run);
@@ -282,6 +311,9 @@ public final class StopOperations {
         finishStop(run, actor);
       }
       return new NotRunning(run.id(), run.specId(), false, true);
+    }
+    if (run.pid() == null || info.pid() != run.pid()) {
+      return new NotActive(run.id(), run.specId(), info.pid());
     }
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
@@ -365,7 +397,10 @@ public final class StopOperations {
   /**
    * Whether this run is still its spec's latest attempt. A terminal run may rescue a stranded spec
    * only while it is the current attempt: after a restart, stopping an older run id must be an
-   * idempotent no-op, never a lever that cancels the spec out from under the newer active run.
+   * idempotent no-op, never a lever that cancels the spec out from under the newer active run. This
+   * read only previews the dry-run outcome — the live path decides inside {@link
+   * RunStore#runIfLatestAttempt}, atomically with the cancel, so a restart reserving a newer
+   * attempt between the check and the write can never lose its spec.
    */
   private boolean isCurrentAttempt(RunStore.RunRow run) {
     return runStore.listForSpec(run.specId()).stream()
@@ -411,31 +446,25 @@ public final class StopOperations {
 
   /**
    * Records the operator's terminal intent for a run with no live process to kill: the spec (when
-   * still {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED} and a
-   * still-{@code running} run is released as {@code stopped} with no exit code — in one transaction
-   * when both apply, so a failure between the writes can never expose a cancelled spec whose run is
-   * still {@code running} (a state no reconciler owns). One {@code agent_cancelled} event carrying
-   * {@code source=operator} and the acting FDE is published after the commit. Both writes are
-   * ordinary synced revisions, so every peer adopts the terminal state.
+   * still {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED} and the run is
+   * released as {@code stopped} with no exit code — in one transaction when both apply, so a
+   * failure between the writes can never expose a cancelled spec whose run is still {@code running}
+   * (a state no reconciler owns). One {@code agent_cancelled} event carrying {@code
+   * source=operator} and the acting FDE is published after the commit. Both writes are ordinary
+   * synced revisions, so every peer adopts the terminal state.
    */
-  private boolean recordIntent(
-      RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor, boolean releaseRun) {
+  private void recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
     var cancelling = cancelable(spec);
-    if (releaseRun) {
-      runStore.complete(
-          run.id(),
-          "stopped",
-          null,
-          () -> {
-            if (cancelling) {
-              commitCancel(spec);
-            }
-          });
-    } else if (cancelling) {
-      commitCancel(spec);
-    }
+    runStore.complete(
+        run.id(),
+        "stopped",
+        null,
+        () -> {
+          if (cancelling) {
+            commitCancel(spec);
+          }
+        });
     events.publish(cancelEvent(run, actor));
-    return cancelling;
   }
 
   private static Event cancelEvent(RunStore.RunRow run, Actor actor) {

@@ -808,16 +808,26 @@ public final class DispatchOperations {
     try {
       var runs = runStore.listForProject(project);
       var ids = runs.stream().map(RunStore.RunRow::id).toList();
-      var running =
+      var active =
           runs.stream()
-              .filter(run -> "running".equals(run.status()))
+              .filter(DispatchOperations::ownsLiveAgent)
               .map(RunStore.RunRow::id)
               .collect(java.util.stream.Collectors.toUnmodifiableSet());
-      var pruned = RunRetention.prune(shell, project, ids, running, RunRetention.DEFAULT_KEEP);
+      var pruned = RunRetention.prune(shell, project, ids, active, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
     }
+  }
+
+  /**
+   * Whether a run may still own a live agent process, so its run-scoped files (the pid file the
+   * stop's kill reads, the log an operator is following) must survive retention. A {@code stopping}
+   * run is mid-stop, not terminal: pruning its directory would turn {@code killAgent} into a no-op
+   * that can never verify, wedging the claim until the process exits on its own.
+   */
+  static boolean ownsLiveAgent(RunStore.RunRow run) {
+    return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
   }
 
   /** Stamps the agent + watcher pids on a background run once launch has resolved them. */

@@ -189,6 +189,28 @@ class RunTrackerTest {
   }
 
   @Test
+  void aWatcherCompletionNeverOverwritesACommittedStopClaim() {
+    var id = runningRun("backend", "auth");
+    runStore.transition(id, "running", "stopping");
+
+    tracker.onEvent(
+        Event.of(
+            "backend",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
+            "claude-code",
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, id, Event.WellKnownData.EXIT_CODE, 0)));
+
+    var run = runStore.findById(id).orElseThrow();
+    assertEquals(
+        "stopping",
+        run.status(),
+        "the stop claim owns the run's terminal state; completion only enriches the exit code");
+    assertEquals(0, run.exitCode());
+  }
+
+  @Test
   void aWatcherStopArrivingAfterAnOperatorCancelDoesNotReopenTheRun() {
     var id = runningRun("backend", "auth");
     runStore.complete(id, "stopped", null);

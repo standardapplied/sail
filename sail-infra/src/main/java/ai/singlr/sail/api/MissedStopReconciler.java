@@ -254,18 +254,22 @@ public final class MissedStopReconciler implements AutoCloseable {
    * is the same compare-and-set the live stop uses, so racing a concurrent stop retry can never
    * double-finalize or double-publish. A claim whose unit is still active is left alone — a live
    * stop is mid-halt, or an interrupted one still has its agent to kill and the operator's retry
-   * owns that. A blank-unit claim cannot be probed and is likewise left to the retry lane; foreign
-   * claims are their executing box's to finalize.
+   * owns that. A blank-unit claim (a run launched before units were run-scoped) probes the fixed
+   * ad-hoc identity — the same compatibility mapping the stop itself uses — so a legacy claim whose
+   * agent is verifiably gone still finalizes instead of reserving its repos forever; if a newer
+   * ad-hoc session holds that shared unit, the probe reads active and the claim is left untouched.
+   * Foreign claims are their executing box's to finalize.
    */
   int finalizeInterruptedStops() {
     var node = localHandle.get();
     var finalized = 0;
     for (var run : sessionStore.stopping()) {
-      if (!SailOperations.ownsRun(run.node(), node) || Strings.isBlank(run.unit())) {
+      if (!SailOperations.ownsRun(run.node(), node)) {
         continue;
       }
+      var unit = Strings.isBlank(run.unit()) ? AgentUnit.BUILD.unitName() : run.unit();
       try {
-        if (unitProbe.active(run.project(), run.id(), run.unit())) {
+        if (unitProbe.active(run.project(), run.id(), unit)) {
           continue;
         }
         if (sessionStore.transition(run.id(), "stopping", "stopped")) {

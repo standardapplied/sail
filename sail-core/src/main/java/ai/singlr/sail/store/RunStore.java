@@ -384,6 +384,32 @@ public final class RunStore implements ConflictResolver {
     return transition(id, expected, status, () -> {});
   }
 
+  /**
+   * Runs {@code work} inside one {@code BEGIN IMMEDIATE} transaction, only if {@code id} is still
+   * {@code specId}'s latest attempt at commit time. Taking the write lock before the check
+   * serializes it against {@link #reserveDispatch}, so a restart that reserves a newer attempt
+   * either lands before this (the check fails, nothing runs) or waits until after (the newer row
+   * sees whatever {@code work} committed) — a check-then-write split across transactions could let
+   * a stop aimed at an old run cancel the spec out from under the newer attempt. Ties on {@code
+   * started_at} break on the UUIDv7 id, which orders by mint time. Returns whether {@code work}
+   * ran; {@code work} throwing rolls the whole transaction back.
+   */
+  public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
+    return db.immediateTransaction(
+        () -> {
+          var latest =
+              db.queryOne(
+                  "SELECT id FROM runs WHERE spec_id = ? ORDER BY started_at DESC, id DESC LIMIT 1",
+                  row -> row.text(0),
+                  specId);
+          if (latest.isEmpty() || !latest.get().equals(id)) {
+            return false;
+          }
+          work.run();
+          return true;
+        });
+  }
+
   private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "stopped", "failed");
 
   /** Marks a run finished with its final status and the agent process's exit code (nullable). */

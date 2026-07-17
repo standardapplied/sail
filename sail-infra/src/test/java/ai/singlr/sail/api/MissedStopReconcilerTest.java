@@ -15,6 +15,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
@@ -75,6 +76,7 @@ class MissedStopReconcilerTest {
   private static final class CountingProbe implements MissedStopReconciler.UnitProbe {
     final AtomicInteger calls = new AtomicInteger();
     volatile boolean active;
+    volatile String lastUnit;
 
     CountingProbe(boolean active) {
       this.active = active;
@@ -83,6 +85,7 @@ class MissedStopReconcilerTest {
     @Override
     public boolean active(String project, String runId, String unit) {
       calls.incrementAndGet();
+      lastUnit = unit;
       return active;
     }
   }
@@ -237,7 +240,7 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aBlankUnitInterruptedStopIsLeftToTheStopRetryLane() {
+  void aBlankUnitInterruptedStopIsFinalizedThroughTheFixedAdHocIdentity() {
     createSpec("auth", SpecStatus.CANCELLED);
     var runId = preUpgradeRunningSession("auth");
     sessionStore.transition(runId, "running", "stopping");
@@ -245,9 +248,30 @@ class MissedStopReconcilerTest {
 
     var finalized = reconciler(probe, PAST_GRACE).sweep();
 
+    assertEquals(1, finalized);
+    assertEquals(
+        AgentUnit.BUILD.unitName(),
+        probe.lastUnit,
+        "a legacy claim is probed on the same compatibility identity the stop itself uses");
+    assertEquals(
+        "stopped",
+        sessionStore.findById(runId).orElseThrow().status(),
+        "a dead legacy claim must not reserve its repos forever");
+  }
+
+  @Test
+  void aBlankUnitInterruptedStopWithALiveAdHocSessionKeepsItsClaim() {
+    createSpec("auth", SpecStatus.CANCELLED);
+    var runId = preUpgradeRunningSession("auth");
+    sessionStore.transition(runId, "running", "stopping");
+
+    var finalized = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
     assertEquals(0, finalized);
-    assertEquals(0, probe.calls.get());
-    assertEquals("stopping", sessionStore.findById(runId).orElseThrow().status());
+    assertEquals(
+        "stopping",
+        sessionStore.findById(runId).orElseThrow().status(),
+        "an active shared unit may be a newer ad-hoc session; the claim stays untouched");
   }
 
   @Test
