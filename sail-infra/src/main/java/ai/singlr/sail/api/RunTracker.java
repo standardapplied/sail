@@ -23,6 +23,12 @@ import java.util.function.Supplier;
  * On main and standalone boxes the injected {@link SyncScheduler} is {@link
  * SyncScheduler#disabled()}, so the trigger is a no-op there.
  *
+ * <p>Completion is a {@code running → terminal} compare-and-set, so it is mutually exclusive with a
+ * clean stop's claim: a stop that moves the run to {@code stopping} after this tracker read the row
+ * wins the write, and the tracker falls back to enriching the exit code without ever overwriting
+ * {@code stopping} or {@code stopped} — a cancelled spec can never end up paired with a {@code
+ * completed} run.
+ *
  * <p>Completion addresses the exact run by the {@code run_id} the terminal event carries, not "the
  * newest running run of the project". EventBus delivery is asynchronous, so a stop for run A can
  * arrive after run B has started in the same project; resolving by project alone would let A's
@@ -91,10 +97,15 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void completeOrRecord(RunStore.RunRow run, String status, Integer exitCode) {
-    if ("running".equals(run.status())) {
-      runStore.complete(run.id(), status, exitCode);
+    if (runStore.transition(run.id(), "running", status, exitCode)) {
       syncScheduler.afterWrite();
-    } else if (exitCode != null && run.exitCode() == null) {
+      return;
+    }
+    if (exitCode == null) {
+      return;
+    }
+    var current = runStore.findById(run.id()).orElse(null);
+    if (current != null && current.exitCode() == null) {
       runStore.recordExitCode(run.id(), exitCode);
       syncScheduler.afterWrite();
     }

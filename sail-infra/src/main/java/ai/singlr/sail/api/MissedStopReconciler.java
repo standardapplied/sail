@@ -173,6 +173,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += releaseStrandedReservations(handledThisSweep);
+      replayed += finalizeInterruptedStops();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
@@ -243,6 +244,59 @@ public final class MissedStopReconciler implements AutoCloseable {
       released++;
     }
     return released;
+  }
+
+  /**
+   * Finalizes stop claims interrupted before their verified finish: a run left {@code stopping} —
+   * its spec already cancelled by the claim — whose recorded unit is now dead is released as {@code
+   * stopped} and its withheld {@code agent_cancelled} event published, so a crash between a stop's
+   * claim and its finalization heals within a sweep instead of parking the run forever. The finish
+   * is the same compare-and-set the live stop uses, so racing a concurrent stop retry can never
+   * double-finalize or double-publish. A claim whose unit is still active is left alone — a live
+   * stop is mid-halt, or an interrupted one still has its agent to kill and the operator's retry
+   * owns that. A blank-unit claim (a run launched before units were run-scoped) probes the fixed
+   * ad-hoc identity — the same compatibility mapping the stop itself uses — so a legacy claim whose
+   * agent is verifiably gone still finalizes instead of reserving its repos forever; if a newer
+   * ad-hoc session holds that shared unit, the probe reads active and the claim is left untouched.
+   * Foreign claims are their executing box's to finalize.
+   */
+  int finalizeInterruptedStops() {
+    var node = localHandle.get();
+    var finalized = 0;
+    for (var run : sessionStore.stopping()) {
+      if (!SailOperations.ownsRun(run.node(), node)) {
+        continue;
+      }
+      var unit = StopOperations.runUnit(run).unitName();
+      try {
+        if (unitProbe.active(run.project(), run.id(), unit)) {
+          continue;
+        }
+        if (sessionStore.transition(run.id(), "stopping", "stopped")) {
+          System.err.println(
+              "  [reconcile] finalized interrupted stop "
+                  + run.id()
+                  + " for "
+                  + run.project()
+                  + "/"
+                  + run.specId()
+                  + " (claim held with its unit gone)");
+          bus.publish(cancelledEvent(run));
+          finalized++;
+        }
+      } catch (Exception e) {
+        System.err.println(
+            "  [reconcile] interrupted-stop finalize failed for "
+                + run.id()
+                + ": "
+                + e.getMessage());
+      }
+    }
+    return finalized;
+  }
+
+  private static Event cancelledEvent(RunStore.RunRow run) {
+    return StopOperations.cancelEvent(run, Event.WellKnownData.SOURCE_RECONCILE, Event.SAIL_AGENT);
   }
 
   /**

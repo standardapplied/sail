@@ -129,7 +129,15 @@ public final class ApiSpecListCommand implements Runnable {
   @SuppressWarnings("unchecked")
   static void printGroupedByProjectAndStatus(List<Map<String, Object>> specs) {
     var statusOrder =
-        List.of("draft", "pending", "in_progress", "review", "awaiting_merge", "done", "archived");
+        List.of(
+            "draft",
+            "pending",
+            "in_progress",
+            "review",
+            "awaiting_merge",
+            "done",
+            "cancelled",
+            "archived");
     var byProject = new LinkedHashMap<String, List<Map<String, Object>>>();
     for (var spec : specs) {
       var proj = (String) spec.getOrDefault("project", "unassigned");
@@ -181,6 +189,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "Review";
       case "awaiting_merge" -> "Awaiting Merge";
       case "done" -> "Done";
+      case "cancelled" -> "Cancelled";
       case "archived" -> "Archived";
       default -> status;
     };
@@ -194,6 +203,7 @@ public final class ApiSpecListCommand implements Runnable {
       case "review" -> "yellow";
       case "awaiting_merge" -> "magenta";
       case "done" -> "green";
+      case "cancelled" -> "red";
       case "archived" -> "faint";
       default -> "white";
     };

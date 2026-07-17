@@ -1216,7 +1216,8 @@ class SailOperationsTest {
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("runs/" + R1 + "/agent.pid", "123")
-            .on("kill -0 123", "");
+            .onSequence(
+                "kill -0 123", new ShellExec.Result(0, "", ""), new ShellExec.Result(1, "", ""));
     var operations =
         operationsWithStores(
             baseYaml(),
@@ -2024,7 +2025,11 @@ class SailOperationsTest {
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
-                .on("kill -0 123", "")
+                .onSequence(
+                    "kill -0 123",
+                    new ShellExec.Result(0, "", ""),
+                    new ShellExec.Result(0, "", ""),
+                    new ShellExec.Result(1, "", ""))
                 .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
                 .on("kill 123", "")
                 .on("sleep 3", "")
@@ -2035,6 +2040,46 @@ class SailOperationsTest {
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(123, get(result, "pid"));
+  }
+
+  @Test
+  void stopRunCancelsTheInProgressSpecBeforeKilling() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", "123")
+                .onSequence(
+                    "kill -0 123",
+                    new ShellExec.Result(0, "", ""),
+                    new ShellExec.Result(0, "", ""),
+                    new ShellExec.Result(1, "", ""))
+                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on("kill 123", "")
+                .on("sleep 3", "")
+                .on("kill -9 123", "")
+                .on("rm -f /home/dev/.sail/agent.pid", ""),
+            null,
+            s -> seedAssigned(s, "auth", "in_progress", LOCAL_HANDLE),
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "build",
+                    "claude-code",
+                    "feat/auth",
+                    "do it",
+                    123,
+                    null,
+                    RUN_LOG));
+
+    var result = operations.stopRun(R1, "node-a", ADMIN);
+
+    assertEquals(true, get(result, "stopped"));
+    assertEquals(true, get(result, "spec_cancelled"));
   }
 
   @Test

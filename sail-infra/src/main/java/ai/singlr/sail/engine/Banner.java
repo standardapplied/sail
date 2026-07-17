@@ -1124,6 +1124,7 @@ public final class Banner {
               case IN_PROGRESS -> "@|yellow \u25cb|@";
               case REVIEW -> "@|cyan \u25cb|@";
               case AWAITING_MERGE -> "@|magenta \u25cb|@";
+              case CANCELLED -> "@|red \u2717|@";
               default -> "@|faint \u25cb|@";
             };
         var idPad = String.format("%-16s", spec.id());

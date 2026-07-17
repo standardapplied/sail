@@ -376,6 +376,17 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aStopArrivingAfterAnOperatorCancelNeverKicksAReview() {
+    createSpec("auth", "cancelled");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void ignoresAStopForASpecAlreadyAwaitingMerge() {
     createSpec("auth", "awaiting_merge");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
@@ -411,6 +422,25 @@ class ReviewPipelineControllerTest {
         SpecStatus.AWAITING_MERGE,
         specStore.findById("auth").orElseThrow().status(),
         "a gate pass leaves the PR unmerged — done is the human's call after merging");
+  }
+
+  @Test
+  void anOperatorCancelLandingMidPipelineIsNeverOverwrittenByThePass() {
+    createSpec("auth", "in_progress");
+    var ctrl =
+        controller(
+            singleAgentStage("no_critical"),
+            (p, a, pr, rid) -> {
+              specStore.updateStatus("auth", SpecStatus.CANCELLED);
+              return "[]";
+            });
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        SpecStatus.CANCELLED,
+        specStore.findById("auth").orElseThrow().status(),
+        "cancelled is terminal; the pipeline's stale advance must lose, not resurrect the spec");
   }
 
   @Test

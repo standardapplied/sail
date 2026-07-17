@@ -806,6 +806,7 @@ record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) i
     m.put("review", board.review());
     m.put("awaiting_merge", board.awaitingMerge());
     m.put("done", board.done());
+    m.put("cancelled", board.cancelled());
     m.put("archived", board.archived());
     m.put("next_ready_id", board.nextReadyId());
     m.put("done_open_findings", doneOpenFindings);
@@ -1018,7 +1019,8 @@ record RunLogResponse(String runId, List<String> lines, String error) implements
   }
 }
 
-record StopRunResponse(String runId, boolean stopped, String reason, Integer pid)
+record StopRunResponse(
+    String runId, boolean stopped, String reason, Integer pid, boolean specCancelled)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -1027,6 +1029,7 @@ record StopRunResponse(String runId, boolean stopped, String reason, Integer pid
     m.put("stopped", stopped);
     if (reason != null) m.put("reason", reason);
     if (pid != null) m.put("pid", pid);
+    m.put("spec_cancelled", specCancelled);
     return m;
   }
 }

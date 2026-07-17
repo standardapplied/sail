@@ -275,6 +275,25 @@ class SpecListCommandTest {
     assertTrue(output.contains("(unassigned)"));
   }
 
+  @Test
+  void listRendersCancelledSpecs() {
+    var output =
+        render(
+            List.of(
+                Map.of(
+                    "project",
+                    "sail",
+                    "status",
+                    "cancelled",
+                    "id",
+                    "sail-clean-stop",
+                    "title",
+                    "Clean stop")));
+
+    assertTrue(output.contains("Cancelled (1)"));
+    assertTrue(output.contains("sail-clean-stop"));
+  }
+
   private static String render(List<Map<String, Object>> specs) {
     var captured = new ByteArrayOutputStream();
     var original = System.out;

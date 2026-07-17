@@ -63,6 +63,14 @@ public final class ScriptedShellExecutor implements ShellExec {
     return on(pattern, new Result(1, "", stderr));
   }
 
+  /**
+   * Shorthand: command containing pattern succeeds once, then falls through to default on reuse.
+   */
+  public ScriptedShellExecutor onceOnOk(String pattern) {
+    consumable.add(pattern);
+    return on(pattern, new Result(0, "", ""));
+  }
+
   /** Returns an unmodifiable list of all commands that were executed, in order. */
   public List<String> invocations() {
     return Collections.unmodifiableList(invocations);

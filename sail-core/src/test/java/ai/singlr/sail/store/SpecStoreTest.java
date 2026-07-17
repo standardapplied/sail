@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -235,6 +236,31 @@ class SpecStoreTest {
   }
 
   @Test
+  void compareAndSetStatusCommitsOnlyFromTheExpectedStatus() {
+    store.create(spec("a", "Test", "in_progress"));
+
+    assertTrue(store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.CANCELLED));
+    assertEquals(SpecStatus.CANCELLED, store.findById("a").orElseThrow().status());
+
+    assertFalse(
+        store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.REVIEW),
+        "a writer holding a stale read must lose to the transition that won");
+    assertEquals(SpecStatus.CANCELLED, store.findById("a").orElseThrow().status());
+  }
+
+  @Test
+  void compareAndSetStatusJournalsARevisionOnlyWhenItWins() {
+    store.create(spec("a", "Test", "in_progress"));
+    var created = store.revOf("a");
+
+    store.compareAndSetStatus("a", SpecStatus.REVIEW, SpecStatus.AWAITING_MERGE);
+    assertEquals(created, store.revOf("a"), "a lost CAS writes nothing, so no revision is minted");
+
+    store.compareAndSetStatus("a", SpecStatus.IN_PROGRESS, SpecStatus.REVIEW);
+    assertNotEquals(created, store.revOf("a"), "a won CAS journals like any other mutation");
+  }
+
+  @Test
   void updateReposAndStatusReplacesReposWithTheStatusTransition() {
     store.create(spec("a", "Test", "pending"));
     store.updateReposAndStatus("a", List.of("api", "web"), SpecStatus.IN_PROGRESS, "agent/a");
@@ -350,6 +376,7 @@ class SpecStoreTest {
     store.create(spec("f", "F", "done"));
     store.create(spec("g", "G", "archived"));
     store.create(spec("h", "H", "awaiting_merge"));
+    store.create(spec("i", "I", "cancelled"));
 
     var board = store.board();
     assertEquals(1, board.draft());
@@ -358,8 +385,44 @@ class SpecStoreTest {
     assertEquals(1, board.review());
     assertEquals(1, board.awaitingMerge());
     assertEquals(1, board.done());
+    assertEquals(1, board.cancelled());
     assertEquals(1, board.archived());
     assertEquals("b", board.nextReadyId());
+  }
+
+  @Test
+  void cancelledPersistsAndReadsBack() {
+    store.create(spec("killed", "Killed", "in_progress"));
+
+    store.updateStatus("killed", SpecStatus.CANCELLED);
+
+    assertEquals(SpecStatus.CANCELLED, store.findById("killed").get().status());
+  }
+
+  @Test
+  void cancelledDependencyDoesNotUnblockDependents() {
+    store.create(spec("base", "Base", "cancelled"));
+    var dependent =
+        new SpecStore.SpecRow(
+            "child",
+            "test-project",
+            "Child",
+            SpecStatus.PENDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of("base"),
+            List.of());
+    store.create(dependent);
+
+    assertTrue(store.readySpecs().isEmpty(), "cancelled work must not satisfy a dependency");
   }
 
   @Test

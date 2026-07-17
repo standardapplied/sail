@@ -90,6 +90,7 @@ public final class SpecStore implements ConflictResolver {
       int review,
       int awaitingMerge,
       int done,
+      int cancelled,
       int archived,
       String nextReadyId) {}
 
@@ -241,6 +242,31 @@ public final class SpecStore implements ConflictResolver {
               DateTimeUtils.now().toString(),
               id);
           recordRevision(id, "local", false);
+        });
+  }
+
+  /**
+   * Status transition that commits only if the spec still holds {@code expected}, returning whether
+   * it did. The check and the write are one statement under the write lock ({@code BEGIN
+   * IMMEDIATE}), so a lifecycle writer racing another transition — above all an operator's {@code
+   * cancelled}, which must stay terminal — fails cleanly on its stale read instead of overwriting
+   * the transition that won. Every automated status writer must use this; the unconditional {@link
+   * #updateStatus} is for deliberate operator edits.
+   */
+  public boolean compareAndSetStatus(String id, SpecStatus expected, SpecStatus status) {
+    return db.immediateTransaction(
+        () -> {
+          db.execute(
+              "UPDATE specs SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+              status.wire(),
+              DateTimeUtils.now().toString(),
+              id,
+              expected.wire());
+          if (db.changes() == 0) {
+            return false;
+          }
+          recordRevision(id, "local", false);
+          return true;
         });
   }
 
@@ -778,6 +804,7 @@ public final class SpecStore implements ConflictResolver {
     var review = 0;
     var awaitingMerge = 0;
     var done = 0;
+    var cancelled = 0;
     var archived = 0;
     for (var row : counts) {
       var count = (int) (long) row[1];
@@ -788,6 +815,7 @@ public final class SpecStore implements ConflictResolver {
         case "review" -> review = count;
         case "awaiting_merge" -> awaitingMerge = count;
         case "done" -> done = count;
+        case "cancelled" -> cancelled = count;
         case "archived" -> archived = count;
         default -> {}
       }
@@ -795,7 +823,7 @@ public final class SpecStore implements ConflictResolver {
     var ready = readySpecs(projectFilter);
     var nextReadyId = ready.isEmpty() ? null : ready.getFirst().id();
     return new BoardSummary(
-        draft, pending, inProgress, review, awaitingMerge, done, archived, nextReadyId);
+        draft, pending, inProgress, review, awaitingMerge, done, cancelled, archived, nextReadyId);
   }
 
   private SpecRow mapSpec(Sqlite.Row row) {

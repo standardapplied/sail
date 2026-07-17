@@ -73,6 +73,8 @@ public final class ApiSpecBoardCommand implements Runnable {
               : "";
       System.out.println(
           Ansi.AUTO.string("    @|green Done:|@            " + result.get("done") + doneSuffix));
+      System.out.println(
+          Ansi.AUTO.string("    @|red Cancelled:|@       " + result.get("cancelled")));
 
       var nextReady = result.get("next_ready_id");
       if (nextReady != null) {
