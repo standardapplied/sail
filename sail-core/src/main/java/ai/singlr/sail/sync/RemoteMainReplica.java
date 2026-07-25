@@ -89,6 +89,12 @@ public final class RemoteMainReplica implements MainReplica {
       if (!(response instanceof SyncWire.Fetched f)) {
         throw new SyncTransportException("Expected a fetch response, got: " + response);
       }
+      if (!SyncWire.V1_UPGRADE_FLOOR.equals(f.upgradeFloor())) {
+        throw new SyncTransportException(
+            "Sync requires Sail "
+                + SyncWire.V1_UPGRADE_FLOOR
+                + " or newer on every box. Run 'sail upgrade' on main, then sync again.");
+      }
       fetched = f;
       maxSeq = f.maxSeq();
     }

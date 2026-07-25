@@ -75,7 +75,7 @@ public final class SyncRpcServer {
   private SyncWire.Response respondTo(SyncWire.Request request) {
     try {
       return switch (request) {
-        case SyncWire.Fetch fetch -> fetched(fetch.entityType());
+        case SyncWire.Fetch fetch -> fetched(fetch.entityType(), fetch.upgradeFloor());
         case SyncWire.FetchFdes ignored -> new SyncWire.Fdes(fdeRoster.entries());
         case SyncWire.Commit commit -> onCommit(commit);
         case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session loop");
@@ -102,7 +102,13 @@ public final class SyncRpcServer {
     out.flush();
   }
 
-  private SyncWire.Response fetched(String entityType) {
+  private SyncWire.Response fetched(String entityType, String upgradeFloor) {
+    if (!SyncWire.V1_UPGRADE_FLOOR.equals(upgradeFloor)) {
+      return new SyncWire.Failed(
+          "Sync requires Sail "
+              + SyncWire.V1_UPGRADE_FLOOR
+              + " or newer on every box. Run 'sail upgrade' on this node, then sync again.");
+    }
     var main = replicas.get(entityType);
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + entityType);

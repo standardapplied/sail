@@ -52,6 +52,17 @@ class RemoteMainReplicaTest {
   }
 
   @Test
+  void aPreFloorMainIsRefusedBeforeItsDataIsRead() {
+    var legacy = new SyncWire.Fetched("old-main", 1, Map.of(), null);
+    var replica = replica(SyncWire.encode(legacy));
+
+    var failure = assertThrows(SyncTransportException.class, replica::entityIds);
+
+    assertTrue(failure.getMessage().contains("0.14.0"));
+    assertTrue(failure.getMessage().contains("sail upgrade"));
+  }
+
+  @Test
   void aRefusedCommitSurfacesItsReason() {
     var replica = replica(SyncWire.encode(new SyncWire.Failed("read-only")));
     var ex = assertThrows(SyncTransportException.class, () -> replica.commit("x", Map.of(), null));

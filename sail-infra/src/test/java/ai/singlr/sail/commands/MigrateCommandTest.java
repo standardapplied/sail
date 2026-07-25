@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -53,6 +54,20 @@ class MigrateCommandTest {
         db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
 
     assertDoesNotThrow(() -> new SpecStore(db).findById("none"));
+  }
+
+  @Test
+  void migrateRegistersTheV1DataFloorOnce() {
+    MigrateCommand.applyMigrations(
+        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
+
+    assertEquals(
+        1L,
+        db.queryOne(
+                "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                row -> row.integer(0),
+                LegacyDataMigration.NAME)
+            .orElseThrow());
   }
 
   @Test

@@ -73,6 +73,15 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aPreFloorNodeIsRefusedBeforeMainServesData() throws Exception {
+    var failure =
+        assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("spec", null)));
+
+    assertTrue(failure.message().contains("0.14.0"));
+    assertTrue(failure.message().contains("sail upgrade"));
+  }
+
+  @Test
   void aWritableServerAcceptsACommit() throws Exception {
     var response = serve(true, new SyncWire.Commit("spec", "a", Map.of(), null));
     assertEquals("1-x", assertInstanceOf(SyncWire.Committed.class, response).rev());

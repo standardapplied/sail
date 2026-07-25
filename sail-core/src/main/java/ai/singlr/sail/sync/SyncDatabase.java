@@ -5,9 +5,12 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.LegacyDataMigration;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * The only database handle a sync path may run on: constructing one converges the schema, so a sync
@@ -34,7 +37,8 @@ public final class SyncDatabase implements AutoCloseable {
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
-      new SchemaManager(db).migrate();
+      MigrationRunner.applyAll(
+          db, List.of(new LegacyDataMigration()), DataMigration.Prompter.NON_INTERACTIVE);
     } catch (RuntimeException e) {
       db.close();
       throw new IllegalStateException(
