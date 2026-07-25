@@ -127,21 +127,6 @@ public final class SailApiServer implements AutoCloseable {
       Path socketPath,
       HttpHandler passkeyHandler)
       throws IOException {
-    this(host, port, operations, auth, eventBus, auditSubscriber, socketPath, passkeyHandler, null);
-  }
-
-  /** Backwards-compatible full constructor without a review pipeline controller. */
-  public SailApiServer(
-      String host,
-      int port,
-      Operations operations,
-      ApiAuth auth,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      Path socketPath,
-      HttpHandler passkeyHandler,
-      SpecStore specStore)
-      throws IOException {
     this(
         host,
         port,
@@ -151,7 +136,7 @@ public final class SailApiServer implements AutoCloseable {
         auditSubscriber,
         socketPath,
         passkeyHandler,
-        specStore,
+        null,
         null);
   }
 

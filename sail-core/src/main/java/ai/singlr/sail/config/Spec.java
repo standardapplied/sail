@@ -21,8 +21,7 @@ import java.util.regex.Pattern;
  * record is their in-memory form, with the detailed body held separately.
  *
  * @param id unique identifier
- * @param project client project this spec belongs to (nullable when loaded from legacy specs that
- *     pre-date the project column; control-plane callers must always supply it)
+ * @param project client project this spec belongs to
  * @param title short human-readable title
  * @param status lifecycle state (see {@link SpecStatus})
  * @param assignee engineer responsible (nullable, matches git identity)
@@ -50,29 +49,36 @@ public record Spec(
   private static final Set<String> REASONING_EFFORTS =
       Set.of("none", "low", "medium", "high", "xhigh");
 
+  public Spec {
+    project = Objects.requireNonNull(project, "spec.project is required");
+  }
+
   public Spec(
       String id,
+      String project,
       String title,
       SpecStatus status,
       String assignee,
       List<String> dependsOn,
       String branch) {
-    this(id, null, title, status, assignee, dependsOn, List.of(), null, null, null, branch);
+    this(id, project, title, status, assignee, dependsOn, List.of(), null, null, null, branch);
   }
 
   public Spec(
       String id,
+      String project,
       String title,
       SpecStatus status,
       String assignee,
       List<String> dependsOn,
       List<String> repos,
       String branch) {
-    this(id, null, title, status, assignee, dependsOn, repos, null, null, null, branch);
+    this(id, project, title, status, assignee, dependsOn, repos, null, null, null, branch);
   }
 
   public Spec(
       String id,
+      String project,
       String title,
       SpecStatus status,
       String assignee,
@@ -80,7 +86,7 @@ public record Spec(
       List<String> repos,
       String agent,
       String branch) {
-    this(id, null, title, status, assignee, dependsOn, repos, agent, null, null, branch);
+    this(id, project, title, status, assignee, dependsOn, repos, agent, null, null, branch);
   }
 
   @SuppressWarnings("unchecked")
@@ -90,10 +96,10 @@ public record Spec(
       throw new IllegalArgumentException("spec.id is required");
     }
     NameValidator.requireValidSpecId(id);
-    var project = (String) map.get("project");
+    var project = Objects.requireNonNull((String) map.get("project"), "spec.project is required");
     var title = Objects.requireNonNullElse((String) map.get("title"), "");
     var statusRaw = (String) map.get("status");
-    var status = statusRaw == null ? SpecStatus.PENDING : SpecStatus.fromLegacy(statusRaw);
+    var status = statusRaw == null ? SpecStatus.PENDING : SpecStatus.fromWire(statusRaw);
     var assignee = (String) map.get("assignee");
     var dependsOn = (List<String>) map.get("depends_on");
     var repos = reposFromMap(map);
@@ -118,9 +124,7 @@ public record Spec(
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("id", id);
-    if (project != null) {
-      map.put("project", project);
-    }
+    map.put("project", project);
     if (!title.isBlank()) {
       map.put("title", title);
     }

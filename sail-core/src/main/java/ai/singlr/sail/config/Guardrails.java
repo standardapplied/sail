@@ -39,11 +39,14 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
     return new Guardrails("4h", "20m", "stop");
   }
 
-  /**
-   * Parses a Guardrails record from a YAML map. Unknown keys (including legacy {@code idle_timeout}
-   * and {@code commit_burst}) are silently ignored for backwards compatibility.
-   */
+  /** Parses a Guardrails record from a YAML map. */
   public static Guardrails fromMap(Map<String, Object> map) {
+    return fromMap(map, "sail.yaml");
+  }
+
+  static Guardrails fromMap(Map<String, Object> map, String descriptor) {
+    rejectRetiredKey(map, "idle_timeout", "max_idle", descriptor);
+    rejectRetiredKey(map, "commit_burst", "max_idle", descriptor);
     var maxDuration = (String) map.get("max_duration");
     var maxIdle = (String) map.get("max_idle");
 
@@ -57,6 +60,24 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
     }
 
     return new Guardrails(maxDuration, maxIdle, action);
+  }
+
+  private static void rejectRetiredKey(
+      Map<String, Object> map, String key, String replacement, String descriptor) {
+    if (map.containsKey(key)) {
+      throw new IllegalArgumentException(
+          "Unknown guardrail key `"
+              + key
+              + "` in "
+              + descriptor
+              + "; rename `"
+              + key
+              + "` to `"
+              + replacement
+              + "` in "
+              + descriptor
+              + ".");
+    }
   }
 
   public Map<String, Object> toMap() {

@@ -30,8 +30,8 @@ class AgentReporterTest {
     var lastCommit = String.valueOf(Instant.now().minusSeconds(300).getEpochSecond());
     var specs =
         List.of(
-            new Spec("auth", "Build auth module", SpecStatus.DONE, null, List.of(), null),
-            new Spec("tests", "Write tests", SpecStatus.DONE, null, List.of(), null));
+            new Spec("auth", "test", "Build auth module", SpecStatus.DONE, null, List.of(), null),
+            new Spec("tests", "test", "Write tests", SpecStatus.DONE, null, List.of(), null));
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
@@ -45,7 +45,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace rev-list --count", "18\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
 
@@ -79,7 +79,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace rev-list --count", "5\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
@@ -106,7 +106,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "0\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "45\n");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
@@ -126,7 +126,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
@@ -134,32 +134,6 @@ class AgentReporterTest {
     assertFalse(report.guardrailTriggered());
     assertFalse(report.rolledBack());
     assertTrue(report.specs().isEmpty());
-  }
-
-  @Test
-  void noSpecsDirConfiguredReturnsEmptySpecs(@TempDir java.nio.file.Path stateDir)
-      throws Exception {
-    var startedAt = Instant.now().minusSeconds(3600).toString();
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
-            .onFail("kill -0 12345", "No such process")
-            .onOk(
-                "cat /home/dev/.sail/agent-session.json",
-                "{\"task\":\"fix bug\",\"started_at\":\""
-                    + startedAt
-                    + "\",\"branch\":\"\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
-            .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
-            .onOk("git -C /home/dev/workspace rev-list --count", "3\n");
-
-    var config = buildConfigNoSpecsDir();
-    var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
-
-    assertEquals("Completed", report.sessionStatus());
-    assertTrue(report.specs().isEmpty());
-    assertEquals(3, report.commitCount());
   }
 
   @Test
@@ -185,7 +159,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "10\n");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
 
@@ -200,8 +174,9 @@ class AgentReporterTest {
     var startedAt = Instant.now().minusSeconds(3600).toString();
     var specs =
         List.of(
-            new Spec("auth", "Build auth", SpecStatus.DONE, null, List.of(), null),
-            new Spec("docs", "Update docs", SpecStatus.PENDING, null, List.of("auth"), null));
+            new Spec("auth", "test", "Build auth", SpecStatus.DONE, null, List.of(), null),
+            new Spec(
+                "docs", "test", "Update docs", SpecStatus.PENDING, null, List.of("auth"), null));
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
@@ -215,7 +190,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace rev-list --count", "8\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
-    var config = buildConfig("specs");
+    var config = buildConfig();
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
 
@@ -232,7 +207,7 @@ class AgentReporterTest {
     var end = Instant.now().minusSeconds(3600);
     var session =
         new RunStore.RunRow(
-            "s1",
+            "019bd3a8-94b0-7f3d-a0f5-77d2b4cfda01",
             CONTAINER,
             "auth",
             "node-a",
@@ -245,7 +220,7 @@ class AgentReporterTest {
             "completed",
             0,
             null,
-            null,
+            "sail-agent-build-s1",
             start.toString(),
             end.toString(),
             List.of());
@@ -257,8 +232,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
     var report =
-        new AgentReporter(shell)
-            .generate(CONTAINER, buildConfig("specs"), List.of(), session, stateDir);
+        new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
 
     assertEquals(start.toString(), report.startedAt());
     assertEquals(end.toString(), report.endedAt());
@@ -270,7 +244,7 @@ class AgentReporterTest {
     var start = Instant.now().minusSeconds(120);
     var session =
         new RunStore.RunRow(
-            "s1",
+            "019bd3a8-94b0-7f3d-a0f5-77d2b4cfda02",
             CONTAINER,
             "auth",
             "node-a",
@@ -283,7 +257,7 @@ class AgentReporterTest {
             "stopped",
             137,
             null,
-            null,
+            "sail-agent-build-s1",
             start.toString(),
             Instant.now().toString(),
             List.of());
@@ -295,8 +269,7 @@ class AgentReporterTest {
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
     var report =
-        new AgentReporter(shell)
-            .generate(CONTAINER, buildConfig("specs"), List.of(), session, stateDir);
+        new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
 
     assertEquals("Failed (exit 137)", report.sessionStatus());
     assertEquals(137, report.exitCode());
@@ -315,7 +288,7 @@ class AgentReporterTest {
             "sail/snap",
             List.of(
                 new ai.singlr.sail.config.Spec(
-                    "auth", "Implement JWT", SpecStatus.DONE, null, List.of(), null)),
+                    "auth", "acme", "Implement JWT", SpecStatus.DONE, null, List.of(), null)),
             18,
             47,
             false,
@@ -369,7 +342,7 @@ class AgentReporterTest {
     assertFalse(map.containsKey("last_commit_minutes_ago"));
   }
 
-  private static SailYaml buildConfig(String taskFile) {
+  private static SailYaml buildConfig() {
     return new SailYaml(
         CONTAINER,
         null,
@@ -381,26 +354,7 @@ class AgentReporterTest {
         null,
         null,
         null,
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, taskFile, null, null, null),
-        null,
-        new SailYaml.Ssh("dev", null));
-  }
-
-  private static SailYaml buildConfigNoSpecsDir() {
-    return new SailYaml(
-        CONTAINER,
-        null,
-        new SailYaml.Resources(4, "12GB", "150GB"),
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null),
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null),
         null,
         new SailYaml.Ssh("dev", null));
   }

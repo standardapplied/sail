@@ -939,7 +939,8 @@ class SailOperationsTest {
                 "do it",
                 123,
                 null,
-                RUN_LOG));
+                RUN_LOG,
+                "sail-agent-" + R1));
   }
 
   private SailOperations opsWithLocalRunAndSpec(FakeShell shell) throws Exception {
@@ -960,7 +961,8 @@ class SailOperationsTest {
                 "do it",
                 123,
                 null,
-                RUN_LOG));
+                RUN_LOG,
+                "sail-agent-" + R1));
   }
 
   @Test
@@ -1029,7 +1031,8 @@ class SailOperationsTest {
                     null,
                     null,
                     null,
-                    "/home/dev/.ssh/id_ed25519"));
+                    "/home/dev/.ssh/id_ed25519",
+                    "sail-agent-" + R1));
 
     assertEquals(List.of("safe"), get(operations.runLog(R1, 2, "node-a", ADMIN), "lines"));
     assertTrue(shell.invocations().stream().noneMatch(cmd -> cmd.contains("id_ed25519")));
@@ -1093,7 +1096,8 @@ class SailOperationsTest {
                     null,
                     null,
                     null,
-                    RUN_LOG));
+                    RUN_LOG,
+                    "sail-agent-" + R2));
 
     assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog(R2, 200, "node-a", ADMIN));
   }
@@ -1118,7 +1122,8 @@ class SailOperationsTest {
                     null,
                     null,
                     null,
-                    RUN_LOG));
+                    RUN_LOG,
+                    "sail-agent-" + R2));
 
     assertEquals(List.of("hi"), get(operations.runLog(R2, 2, "", ADMIN), "lines"));
   }
@@ -1159,7 +1164,9 @@ class SailOperationsTest {
         opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")));
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent.pid",
+                    new ShellExec.Result(1, "", "missing")));
 
     assertEquals(false, get(operations.stopRun(R1, "node-a", ADMIN), "stopped"));
   }
@@ -1184,7 +1191,8 @@ class SailOperationsTest {
                   "do it",
                   123,
                   null,
-                  RUN_LOG);
+                  RUN_LOG,
+                  "sail-agent-" + R1);
               runs.complete(R1, "completed", 0);
             });
 
@@ -1200,9 +1208,11 @@ class SailOperationsTest {
         opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "999")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "999")
                 .on("kill -0 999", new ShellExec.Result(0, "", ""))
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"other\"}"));
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                    "{\"task\": \"other\"}"));
 
     var result = operations.stopRun(R1, "node-a", ADMIN);
 
@@ -1382,7 +1392,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void aForegroundRunRecordsABlankUnit() throws Exception {
+  void aForegroundRunRemainsUnprobeableWhileItsLauncherOwnsCompletion() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var shell =
         shell()
@@ -1402,10 +1412,7 @@ class SailOperationsTest {
     dispatch(operations, "acme", request("auth", "foreground", false));
 
     var recorded = runs.get().listForProject("acme").getFirst();
-    assertTrue(
-        recorded.unit() == null || recorded.unit().isBlank(),
-        "a foreground run records a blank unit so the missed-stop reconciler skips it rather than"
-            + " false-stopping a still-running agent and releasing its repo");
+    assertEquals("", recorded.unit());
   }
 
   @Test
@@ -2024,17 +2031,19 @@ class SailOperationsTest {
         opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
                 .onSequence(
                     "kill -0 123",
                     new ShellExec.Result(0, "", ""),
                     new ShellExec.Result(0, "", ""),
                     new ShellExec.Result(1, "", ""))
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                    "{\"task\": \"work\"}")
                 .on("kill 123", "")
                 .on("sleep 3", "")
                 .on("kill -9 123", "")
-                .on("rm -f /home/dev/.sail/agent.pid", ""));
+                .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""));
 
     var result = operations.stopRun(R1, "node-a", ADMIN);
 
@@ -2049,17 +2058,19 @@ class SailOperationsTest {
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
                 .onSequence(
                     "kill -0 123",
                     new ShellExec.Result(0, "", ""),
                     new ShellExec.Result(0, "", ""),
                     new ShellExec.Result(1, "", ""))
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                    "{\"task\": \"work\"}")
                 .on("kill 123", "")
                 .on("sleep 3", "")
                 .on("kill -9 123", "")
-                .on("rm -f /home/dev/.sail/agent.pid", ""),
+                .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""),
             null,
             s -> seedAssigned(s, "auth", "in_progress", LOCAL_HANDLE),
             runs ->
@@ -2074,7 +2085,8 @@ class SailOperationsTest {
                     "do it",
                     123,
                     null,
-                    RUN_LOG));
+                    RUN_LOG,
+                    "sail-agent-" + R1));
 
     var result = operations.stopRun(R1, "node-a", ADMIN);
 
@@ -2088,9 +2100,11 @@ class SailOperationsTest {
         opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
                 .on("kill -0 123", "")
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}")
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                    "{\"task\": \"work\"}")
                 .throwOn("kill 123", new IOException("permission denied")));
 
     assertError(ErrorCode.AGENT_STOP_FAILED, operations.stopRun(R1, "node-a", ADMIN));
@@ -2463,7 +2477,8 @@ class SailOperationsTest {
                     null,
                     null,
                     null,
-                    null));
+                    null,
+                    "sail-agent-" + R1));
 
     assertEquals(
         "This run has no log file.", get(operations.runLog(R1, 200, "node-a", ADMIN), "error"));
@@ -2489,7 +2504,8 @@ class SailOperationsTest {
                     "do it",
                     123,
                     null,
-                    RUN_LOG));
+                    RUN_LOG,
+                    "sail-agent-" + R1));
 
     var result = operations.runs("acme", null);
 
@@ -2521,7 +2537,8 @@ class SailOperationsTest {
                     null,
                     null,
                     null,
-                    RUN_LOG));
+                    RUN_LOG,
+                    "sail-agent-" + R1));
 
     var latest = (Map<String, Object>) get(operations.globalSpec("auth"), "latest_run");
 
@@ -2789,7 +2806,6 @@ class SailOperationsTest {
           user: dev
         agent:
           type: claude-code
-          specs_dir: specs
         """;
   }
 
@@ -2805,7 +2821,6 @@ class SailOperationsTest {
             path: web
         agent:
           type: claude-code
-          specs_dir: specs
         """;
   }
 
@@ -2827,7 +2842,6 @@ class SailOperationsTest {
             path: app
         agent:
           type: claude-code
-          specs_dir: specs
           auto_branch: true
           branch_prefix: sail/
         """;
@@ -2840,7 +2854,6 @@ class SailOperationsTest {
           user: dev
         agent:
           type: claude-code
-          specs_dir: specs
           auto_snapshot: true
         """;
   }
@@ -2852,7 +2865,6 @@ class SailOperationsTest {
           user: dev
         agent:
           type: claude-code
-          specs_dir: specs
           guardrails:
             max_duration: 4h
             action: stop

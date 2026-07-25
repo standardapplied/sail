@@ -8,17 +8,19 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
 
 /**
- * The only database handle a sync path may run on: constructing one converges the schema, so a sync
- * that skips convergence is unrepresentable. Exists because of the in-sync self-update incident
- * where a freshly-replaced binary kept syncing against the previous release's schema and aborted on
- * a stale CHECK constraint — both sync entry points (the node's local-replica open and main's
- * RPC-serving open) go through {@link #converge}. Migration is idempotent and cheap when the schema
- * is already current, so converging unconditionally is safe.
+ * The only database handle a sync path may run on: constructing one converges the schema and
+ * verifies the v1 data floor, so a sync that skips either requirement is unrepresentable. Exists
+ * because of the in-sync self-update incident where a freshly-replaced binary kept syncing against
+ * the previous release's schema and aborted on a stale CHECK constraint — both sync entry points
+ * (the node's local-replica open and main's RPC-serving open) go through {@link #converge}. Schema
+ * migration is idempotent and cheap when already current; data migration on a pre-existing database
+ * remains the explicit responsibility of {@code sail migrate}.
  */
 public final class SyncDatabase implements AutoCloseable {
 
@@ -29,16 +31,30 @@ public final class SyncDatabase implements AutoCloseable {
   }
 
   /**
-   * Opens the database at {@code dbPath} and converges its schema before returning. A convergence
-   * failure closes the handle and aborts with a message naming {@code box} — the box whose binary
-   * and schema disagree — so the operator knows where to run {@code sail upgrade}. No sync data has
-   * been touched at that point.
+   * Opens the database at {@code dbPath}, converges its schema, and guarantees the v1 data floor
+   * before returning. A failure closes the handle before any sync data is touched.
+   *
+   * <p>{@link SchemaManager#migrate} refuses an unrepaired pre-floor database with the 'sail
+   * migrate' remedy — that refusal passes through untouched. A database that converges cleanly but
+   * has no floor marker was necessarily born at or above the floor (the guard forbids any other
+   * crossing), so every data migration is vacuous on it and runs here only to stamp the markers —
+   * keeping a fresh or auxiliary-created box's first sync frictionless.
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
-      MigrationRunner.applyAll(
-          db, List.of(new LegacyDataMigration()), DataMigration.Prompter.NON_INTERACTIVE);
+      new SchemaManager(db).migrate();
+      if (db.queryOne(
+              "SELECT 1 FROM data_migrations WHERE name = ?",
+              row -> row.integer(0),
+              LegacyDataMigration.NAME)
+          .isEmpty()) {
+        MigrationRunner.applyAll(
+            db, List.of(new LegacyDataMigration()), DataMigration.Prompter.NON_INTERACTIVE);
+      }
+    } catch (SchemaManager.PreFloorException e) {
+      db.close();
+      throw e;
     } catch (RuntimeException e) {
       db.close();
       throw new IllegalStateException(

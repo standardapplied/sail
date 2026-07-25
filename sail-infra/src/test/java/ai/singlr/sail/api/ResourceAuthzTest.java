@@ -115,7 +115,7 @@ class ResourceAuthzTest {
 
   private String memberToken(String handle) {
     var fde = fdes.add(handle, null, null, "member");
-    return tokenStore.create(handle + "-laptop", "member", fde.id()).token();
+    return tokenStore.create(handle + "-laptop", "member", fde.id(), null).token();
   }
 
   private String sessionToken(String handle, String role) {

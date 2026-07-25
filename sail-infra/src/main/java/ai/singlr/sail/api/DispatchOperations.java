@@ -132,7 +132,7 @@ public final class DispatchOperations {
 
     default void runsPruned(int count) {}
 
-    default void sailSetupBackfilled(boolean backfilled) {}
+    default void sailSetupUpdated(boolean updated) {}
   }
 
   /**
@@ -744,10 +744,10 @@ public final class DispatchOperations {
   private void ensureSailSetup(String project) {
     try {
       var result = ContainerSailSetup.ensureInstalled(shell, project);
-      listener.sailSetupBackfilled(result == ContainerSailSetup.Result.BACKFILLED);
+      listener.sailSetupUpdated(result == ContainerSailSetup.Result.UPDATED);
     } catch (Exception e) {
       System.err.println(
-          "  [api] Warning: failed to backfill sail event helpers in "
+          "  [api] Warning: failed to update sail event helpers in "
               + project
               + ": "
               + e.getMessage());
@@ -765,9 +765,8 @@ public final class DispatchOperations {
    * boxes that keep no run aggregate, which have nothing to reserve against.
    *
    * <p>A foreground dispatch records a blank unit: it runs as a plain child process and creates no
-   * systemd unit, so the missed-stop reconciler must skip it (it skips blank-unit runs) rather than
-   * probe a unit that never exists and falsely stop the still-running agent — which would release
-   * its repo mid-run. The foreground run completes when its blocking launcher returns.
+   * systemd unit, so the missed-stop reconciler must skip it rather than falsely stop the
+   * still-running agent. The foreground run completes when its blocking launcher returns.
    */
   private void reserveRun(
       String runId,

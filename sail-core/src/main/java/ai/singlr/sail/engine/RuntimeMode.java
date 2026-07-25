@@ -24,7 +24,8 @@ public sealed interface RuntimeMode {
 
   /**
    * Detects the runtime mode. Host if {@code ~/.sail/host.yaml} exists, client if {@code
-   * ~/.sail/config.yaml} exists, host otherwise (backward-compatible default).
+   * ~/.sail/config.yaml} exists, host otherwise. The no-config host default is deliberate first-run
+   * UX: host initialization must work before either config file exists.
    */
   static RuntimeMode detect() {
     return detect(SailPaths.hostConfigPath(), SailPaths.clientConfigPath());

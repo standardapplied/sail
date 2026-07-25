@@ -116,7 +116,7 @@ class SchemaManagerTest {
         "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
             + " VALUES ('rev-1', 'auth', 1, 'passed', 't')");
 
-    schema.migrate();
+    schema.migrateAll();
 
     var row =
         db.queryOne(
@@ -153,13 +153,39 @@ class SchemaManagerTest {
             + " VALUES ('auth', 'OAuth', 'pending', 't', 't')");
     db.execute(
         "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES ('auth', 'b', 'p', 't')");
-    schema.migrate();
+    schema.migrateAll();
 
     db.execute("DELETE FROM specs WHERE id = 'auth'");
 
     assertTrue(
         db.queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
             .isEmpty());
+  }
+
+  @Test
+  void migrateRefusesToCarryAnUnrepairedDatabaseAcrossTheFloor() {
+    var schema = new SchemaManager(db);
+    schema.migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
+    var staged = schema.currentVersion();
+
+    var refusal = assertThrows(SchemaManager.PreFloorException.class, schema::migrate);
+
+    assertTrue(refusal.getMessage().contains("sail migrate"));
+    assertTrue(refusal.getMessage().contains(LegacyDataMigration.NAME));
+    assertEquals(staged, schema.currentVersion());
+  }
+
+  @Test
+  void migrateCrossesTheFloorWhenTheDataMigrationAlreadyRan() {
+    var schema = new SchemaManager(db);
+    schema.migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
+    db.execute(
+        "INSERT INTO data_migrations (name, applied_at) VALUES (?, 'test')",
+        LegacyDataMigration.NAME);
+
+    schema.migrate();
+
+    assertTrue(schema.currentVersion() > SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
   }
 
   @Test

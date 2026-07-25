@@ -126,12 +126,15 @@ public final class AgentReporter {
   }
 
   /**
-   * The identity to probe for live session state: the run's recorded unit when it has one, or the
-   * fixed ad-hoc identity for a pre-run-scoped session or a report with no run at all.
+   * The identity to probe for live session state: a run's recorded unit, or the ad-hoc identity.
    */
   private static AgentUnit unitOf(RunStore.RunRow session) {
-    if (session == null || session.unit() == null || session.unit().isBlank()) {
+    if (session == null) {
       return AgentUnit.BUILD;
+    }
+    if (session.unit() == null || session.unit().isBlank()) {
+      throw new IllegalStateException(
+          "Build run " + session.id() + " has no unit; run 'sail migrate' to repair its data.");
     }
     return AgentUnit.recorded(session.id(), session.unit());
   }

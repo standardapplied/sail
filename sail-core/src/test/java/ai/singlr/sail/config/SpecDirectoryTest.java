@@ -22,8 +22,8 @@ class SpecDirectoryTest {
   void nextReadyReturnsFirstPending() {
     var specs =
         List.of(
-            new Spec("done-spec", "Done", SpecStatus.DONE, null, List.of(), null),
-            new Spec("ready", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec("done-spec", "test", "Done", SpecStatus.DONE, null, List.of(), null),
+            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -35,8 +35,8 @@ class SpecDirectoryTest {
   void nextReadyRespectsDependencies() {
     var specs =
         List.of(
-            new Spec("first", "First", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("second", "Second", SpecStatus.PENDING, null, List.of("first"), null));
+            new Spec("first", "test", "First", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -47,9 +47,9 @@ class SpecDirectoryTest {
   void nextReadySkipsBlockedDependency() {
     var specs =
         List.of(
-            new Spec("first", "First", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("second", "Second", SpecStatus.PENDING, null, List.of("first"), null),
-            new Spec("third", "Third", SpecStatus.PENDING, null, List.of(), null));
+            new Spec("first", "test", "First", SpecStatus.IN_PROGRESS, null, List.of(), null),
+            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null),
+            new Spec("third", "test", "Third", SpecStatus.PENDING, null, List.of(), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -60,8 +60,8 @@ class SpecDirectoryTest {
   void nextReadyReturnsDependentWhenDepDone() {
     var specs =
         List.of(
-            new Spec("first", "First", SpecStatus.DONE, null, List.of(), null),
-            new Spec("second", "Second", SpecStatus.PENDING, null, List.of("first"), null));
+            new Spec("first", "test", "First", SpecStatus.DONE, null, List.of(), null),
+            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -72,8 +72,8 @@ class SpecDirectoryTest {
   void nextReadyReturnsNullWhenAllDone() {
     var specs =
         List.of(
-            new Spec("a", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "B", SpecStatus.DONE, null, List.of(), null));
+            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
+            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null));
 
     assertNull(SpecDirectory.nextReady(specs));
   }
@@ -82,9 +82,9 @@ class SpecDirectoryTest {
   void nextReadyAssignedToPicksOnlyThisFdesSpecStrictly() {
     var specs =
         List.of(
-            new Spec("unassigned", "U", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("other", "Other", SpecStatus.PENDING, "mady", List.of(), null),
-            new Spec("mine", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
+            new Spec("unassigned", "test", "U", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("other", "test", "Other", SpecStatus.PENDING, "mady", List.of(), null),
+            new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
 
     assertEquals("mine", SpecDirectory.nextReadyAssignedTo(specs, "uday").id());
   }
@@ -93,15 +93,16 @@ class SpecDirectoryTest {
   void nextReadyAssignedToSkipsUnassignedAndOtherFdeSpecs() {
     var specs =
         List.of(
-            new Spec("unassigned", "U", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("other", "Other", SpecStatus.PENDING, "mady", List.of(), null));
+            new Spec("unassigned", "test", "U", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("other", "test", "Other", SpecStatus.PENDING, "mady", List.of(), null));
 
     assertNull(SpecDirectory.nextReadyAssignedTo(specs, "uday"));
   }
 
   @Test
   void nextReadyAssignedToReturnsNullWhenNoFdeIsBound() {
-    var specs = List.of(new Spec("mine", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
+    var specs =
+        List.of(new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
 
     assertNull(SpecDirectory.nextReadyAssignedTo(specs, null));
   }
@@ -110,8 +111,8 @@ class SpecDirectoryTest {
   void nextReadyAssignedToRespectsDependencies() {
     var specs =
         List.of(
-            new Spec("dep", "Dep", SpecStatus.PENDING, "uday", List.of(), null),
-            new Spec("mine", "Mine", SpecStatus.PENDING, "uday", List.of("dep"), null));
+            new Spec("dep", "test", "Dep", SpecStatus.PENDING, "uday", List.of(), null),
+            new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of("dep"), null));
 
     assertEquals("dep", SpecDirectory.nextReadyAssignedTo(specs, "uday").id());
   }
@@ -125,8 +126,8 @@ class SpecDirectoryTest {
   void nextReadySkipsInProgress() {
     var specs =
         List.of(
-            new Spec("wip", "WIP", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("ready", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec("wip", "test", "WIP", SpecStatus.IN_PROGRESS, null, List.of(), null),
+            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -137,8 +138,8 @@ class SpecDirectoryTest {
   void nextReadySkipsReviewStatus() {
     var specs =
         List.of(
-            new Spec("reviewing", "Reviewing", SpecStatus.REVIEW, null, List.of(), null),
-            new Spec("ready", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec("reviewing", "test", "Reviewing", SpecStatus.REVIEW, null, List.of(), null),
+            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -149,8 +150,8 @@ class SpecDirectoryTest {
   void nextReadyFiltersbyAssignee() {
     var specs =
         List.of(
-            new Spec("alice-task", "Alice's", SpecStatus.PENDING, "alice", List.of(), null),
-            new Spec("bob-task", "Bob's", SpecStatus.PENDING, "bob", List.of(), null));
+            new Spec("alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null),
+            new Spec("bob-task", "test", "Bob's", SpecStatus.PENDING, "bob", List.of(), null));
 
     var next = SpecDirectory.nextReady(specs, "bob");
 
@@ -159,7 +160,8 @@ class SpecDirectoryTest {
 
   @Test
   void nextReadyIncludesUnassignedForAnyAssignee() {
-    var specs = List.of(new Spec("unassigned", "Open", SpecStatus.PENDING, null, List.of(), null));
+    var specs =
+        List.of(new Spec("unassigned", "test", "Open", SpecStatus.PENDING, null, List.of(), null));
 
     var next = SpecDirectory.nextReady(specs, "alice");
 
@@ -169,7 +171,9 @@ class SpecDirectoryTest {
   @Test
   void nextReadyNullAssigneeMatchesAll() {
     var specs =
-        List.of(new Spec("alice-task", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
+        List.of(
+            new Spec(
+                "alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
 
     var next = SpecDirectory.nextReady(specs, null);
 
@@ -179,7 +183,9 @@ class SpecDirectoryTest {
   @Test
   void nextReadyReturnsNullWhenNoMatchingAssignee() {
     var specs =
-        List.of(new Spec("alice-task", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
+        List.of(
+            new Spec(
+                "alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
 
     assertNull(SpecDirectory.nextReady(specs, "bob"));
   }
@@ -188,9 +194,9 @@ class SpecDirectoryTest {
   void nextReadyMultipleDependenciesAllMet() {
     var specs =
         List.of(
-            new Spec("a", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "B", SpecStatus.DONE, null, List.of(), null),
-            new Spec("c", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
+            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
+            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null),
+            new Spec("c", "test", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
 
     var next = SpecDirectory.nextReady(specs);
 
@@ -201,9 +207,9 @@ class SpecDirectoryTest {
   void nextReadyMultipleDependenciesPartiallyMet() {
     var specs =
         List.of(
-            new Spec("a", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "B", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("c", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
+            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
+            new Spec("b", "test", "B", SpecStatus.IN_PROGRESS, null, List.of(), null),
+            new Spec("c", "test", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
 
     assertNull(SpecDirectory.nextReady(specs));
   }
@@ -212,13 +218,13 @@ class SpecDirectoryTest {
   void statusCountsAllStatuses() {
     var specs =
         List.of(
-            new Spec("a", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "B", SpecStatus.DONE, null, List.of(), null),
-            new Spec("c", "C", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("d", "D", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("e", "E", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("f", "F", SpecStatus.REVIEW, null, List.of(), null),
-            new Spec("g", "G", SpecStatus.AWAITING_MERGE, null, List.of(), null));
+            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
+            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null),
+            new Spec("c", "test", "C", SpecStatus.IN_PROGRESS, null, List.of(), null),
+            new Spec("d", "test", "D", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("e", "test", "E", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("f", "test", "F", SpecStatus.REVIEW, null, List.of(), null),
+            new Spec("g", "test", "G", SpecStatus.AWAITING_MERGE, null, List.of(), null));
 
     var counts = SpecDirectory.statusCounts(specs);
 
@@ -244,8 +250,8 @@ class SpecDirectoryTest {
   void awaitingMergeDependencyKeepsDependentBlocked() {
     var specs =
         List.of(
-            new Spec("base", "Base", SpecStatus.AWAITING_MERGE, null, List.of(), null),
-            new Spec("child", "Child", SpecStatus.PENDING, null, List.of("base"), null));
+            new Spec("base", "test", "Base", SpecStatus.AWAITING_MERGE, null, List.of(), null),
+            new Spec("child", "test", "Child", SpecStatus.PENDING, null, List.of("base"), null));
 
     assertNull(SpecDirectory.nextReady(specs));
     assertTrue(SpecDirectory.isBlocked(specs, specs.get(1)));
@@ -254,7 +260,7 @@ class SpecDirectoryTest {
 
   @Test
   void awaitingMergeIsCliSettable() {
-    var specs = List.of(new Spec("auth", "Auth", SpecStatus.REVIEW, null, List.of(), null));
+    var specs = List.of(new Spec("auth", "test", "Auth", SpecStatus.REVIEW, null, List.of(), null));
 
     var updated = SpecDirectory.updateStatus(specs, "auth", SpecStatus.AWAITING_MERGE);
 
@@ -262,20 +268,51 @@ class SpecDirectoryTest {
   }
 
   @Test
-  void unknownStatusParsesAsDraft() {
-    var spec = Spec.fromMap(Map.<String, Object>of("id", "x", "title", "X", "status", "blocked"));
+  void unknownStatusIsRejectedAsCorruption() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Spec.fromMap(
+                    Map.<String, Object>of(
+                        "id", "x", "project", "test", "title", "X", "status", "blocked")));
 
-    assertEquals(SpecStatus.DRAFT, spec.status());
-    assertEquals(1, SpecDirectory.statusCounts(List.of(spec)).get("draft"));
+    assertEquals(
+        "Invalid spec status: 'blocked'. Must be one of: draft, pending, in_progress, review,"
+            + " awaiting_merge, done, cancelled, archived",
+        refusal.getMessage());
+  }
+
+  @Test
+  void retiredArchiveAliasIsRejectedAsCorruption() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Spec.fromMap(
+                    Map.<String, Object>of(
+                        "id", "x", "project", "test", "title", "X", "status", "archive")));
+
+    assertEquals(
+        "Invalid spec status: 'archive'. Must be one of: draft, pending, in_progress, review,"
+            + " awaiting_merge, done, cancelled, archived",
+        refusal.getMessage());
   }
 
   @Test
   void nextReadyCombinesAssigneeAndDependencyFiltering() {
     var specs =
         List.of(
-            new Spec("setup", "Setup", SpecStatus.DONE, null, List.of(), null),
-            new Spec("alice-dep", "Alice dep", SpecStatus.PENDING, "alice", List.of("setup"), null),
-            new Spec("bob-nodep", "Bob nodep", SpecStatus.PENDING, "bob", List.of(), null));
+            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
+            new Spec(
+                "alice-dep",
+                "test",
+                "Alice dep",
+                SpecStatus.PENDING,
+                "alice",
+                List.of("setup"),
+                null),
+            new Spec("bob-nodep", "test", "Bob nodep", SpecStatus.PENDING, "bob", List.of(), null));
 
     assertEquals("alice-dep", SpecDirectory.nextReady(specs, "alice").id());
     assertEquals("bob-nodep", SpecDirectory.nextReady(specs, "bob").id());
@@ -283,7 +320,8 @@ class SpecDirectoryTest {
 
   @Test
   void findByIdReturnsMatchingSpec() {
-    var specs = List.of(new Spec("oauth-flow", "OAuth", SpecStatus.PENDING, null, List.of(), null));
+    var specs =
+        List.of(new Spec("oauth-flow", "test", "OAuth", SpecStatus.PENDING, null, List.of(), null));
 
     var spec = SpecDirectory.findById(specs, "oauth-flow");
 
@@ -295,8 +333,8 @@ class SpecDirectoryTest {
   void updateStatusReplacesOnlyMatchingSpec() {
     var specs =
         List.of(
-            new Spec("auth", "Auth", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("search", "Search", SpecStatus.PENDING, null, List.of(), null));
+            new Spec("auth", "test", "Auth", SpecStatus.PENDING, null, List.of(), null),
+            new Spec("search", "test", "Search", SpecStatus.PENDING, null, List.of(), null));
 
     var updated = SpecDirectory.updateStatus(specs, "search", SpecStatus.REVIEW);
 
@@ -306,7 +344,8 @@ class SpecDirectoryTest {
 
   @Test
   void updateStatusRejectsNonSettableStatus() {
-    var specs = List.of(new Spec("auth", "Auth", SpecStatus.PENDING, null, List.of(), null));
+    var specs =
+        List.of(new Spec("auth", "test", "Auth", SpecStatus.PENDING, null, List.of(), null));
 
     var error =
         assertThrows(
@@ -320,8 +359,8 @@ class SpecDirectoryTest {
   void isReadyReturnsTrueForPendingSpecWithSatisfiedDependencies() {
     var specs =
         List.of(
-            new Spec("setup", "Setup", SpecStatus.DONE, null, List.of(), null),
-            new Spec("oauth", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
+            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
+            new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
 
     assertTrue(SpecDirectory.isReady(specs, specs.get(1)));
     assertFalse(SpecDirectory.isBlocked(specs, specs.get(1)));
@@ -331,8 +370,8 @@ class SpecDirectoryTest {
   void isBlockedReturnsTrueForPendingSpecWithUnmetDependencies() {
     var specs =
         List.of(
-            new Spec("setup", "Setup", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("oauth", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
+            new Spec("setup", "test", "Setup", SpecStatus.IN_PROGRESS, null, List.of(), null),
+            new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
 
     assertTrue(SpecDirectory.isBlocked(specs, specs.get(1)));
     assertEquals(List.of("setup"), SpecDirectory.unmetDependencies(specs, specs.get(1)));
@@ -342,10 +381,11 @@ class SpecDirectoryTest {
   void summarizeReportsReadyAndBlockedCounts() {
     var specs =
         List.of(
-            new Spec("setup", "Setup", SpecStatus.DONE, null, List.of(), null),
-            new Spec("ready", "Ready", SpecStatus.PENDING, null, List.of("setup"), null),
-            new Spec("blocked", "Blocked", SpecStatus.PENDING, null, List.of("missing"), null),
-            new Spec("review", "Review", SpecStatus.REVIEW, null, List.of(), null));
+            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
+            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of("setup"), null),
+            new Spec(
+                "blocked", "test", "Blocked", SpecStatus.PENDING, null, List.of("missing"), null),
+            new Spec("review", "test", "Review", SpecStatus.REVIEW, null, List.of(), null));
 
     var summary = SpecDirectory.summarize(specs);
 

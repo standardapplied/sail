@@ -145,9 +145,7 @@ public final class AgentLogStreamer implements HttpHandler {
       var since = parseSince(exchange.getRequestURI().getQuery());
       String[] tailCommand;
       try {
-        tailCommand =
-            buildTailCommand(
-                run.project(), run.id(), Objects.requireNonNullElse(run.role(), "build"), since);
+        tailCommand = buildTailCommand(run.project(), run.id(), run.role(), since);
       } catch (IllegalArgumentException e) {
         sendError(exchange, 400, "invalid_request", e.getMessage(), null);
         return;

@@ -89,16 +89,7 @@ class SnapshotDecisionTest {
   private static SailYaml configWithAutoSnapshot(boolean autoSnapshot) {
     var agent =
         new SailYaml.Agent(
-            "claude-code",
-            false,
-            null,
-            autoSnapshot,
-            List.of(),
-            Map.of(),
-            null,
-            "specs",
-            null,
-            null);
+            "claude-code", false, null, autoSnapshot, List.of(), Map.of(), null, null, null);
     return new SailYaml(
         "test", null, null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null,
         null);

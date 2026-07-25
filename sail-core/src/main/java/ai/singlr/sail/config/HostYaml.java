@@ -92,7 +92,7 @@ public record HostYaml(
 
   /**
    * Returns true when this machine is a configured Sail host. The named check matters: {@code
-   * RuntimeMode.detect()} defaults to host mode when NO config exists (backward compatibility), so
+   * RuntimeMode.detect()} defaults to host mode when no config exists for first-run setup, so
    * callers that must act only on real hosts — like the upgrade's database and service steps —
    * check for the host config explicitly.
    */

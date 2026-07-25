@@ -365,7 +365,7 @@ class SailYamlGeneratorTest {
             null,
             null,
             new SailYaml.Agent(
-                "claude-code", true, "agent/", true, null, null, null, null, null, null, null),
+                "claude-code", true, "agent/", true, null, null, null, null, null, null),
             null,
             null);
 
@@ -470,7 +470,7 @@ class SailYamlGeneratorTest {
             services,
             null,
             new SailYaml.Agent(
-                "claude-code", true, "agent/", true, null, null, null, null, null, null, null),
+                "claude-code", true, "agent/", true, null, null, null, null, null, null),
             null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 

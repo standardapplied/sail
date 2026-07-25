@@ -62,8 +62,9 @@ class RunTrackerTest {
   }
 
   private String runningRun(String project, String specId) {
+    var id = DateTimeUtils.newId().toString();
     return runStore.create(
-        DateTimeUtils.newId().toString(),
+        id,
         project,
         specId,
         "node-a",
@@ -73,12 +74,14 @@ class RunTrackerTest {
         "do it",
         123,
         null,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   private String runningRunOn(String project, String specId, String node) {
+    var id = DateTimeUtils.newId().toString();
     return runStore.create(
-        DateTimeUtils.newId().toString(),
+        id,
         project,
         specId,
         node,
@@ -88,7 +91,8 @@ class RunTrackerTest {
         "do it",
         123,
         null,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   private static Event stopped(String project, Map<String, Object> data) {

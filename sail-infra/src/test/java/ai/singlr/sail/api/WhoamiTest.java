@@ -85,7 +85,7 @@ class WhoamiTest {
   @Test
   void fdeOwnedTokenCarriesFdeAndTokenName() throws Exception {
     var fde = fdes.add("uday", null, null, "member");
-    var token = tokenStore.create("uday-laptop", "member", fde.id()).token();
+    var token = tokenStore.create("uday-laptop", "member", fde.id(), null).token();
     var body = YamlUtil.parseMap(get(token).body());
     assertEquals("uday", body.get("fde"));
     assertEquals("uday-laptop", body.get("name"));

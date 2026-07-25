@@ -465,42 +465,27 @@ class SailYamlTest {
   }
 
   @Test
-  void agentGuardrailsParsedFromYaml() throws Exception {
+  void retiredGuardrailKeyNamesTheProjectAndExactEdit() {
     var yaml =
         """
         name: test
         agent:
           type: claude-code
           guardrails:
-            max_duration: 4h
             idle_timeout: 90m
-            commit_burst: 20
-            action: snapshot-and-stop
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertNotNull(config.agent().guardrails());
-    assertEquals("4h", config.agent().guardrails().maxDuration());
-    assertEquals("snapshot-and-stop", config.agent().guardrails().action());
-  }
-
-  @Test
-  void agentSpecsDirRejectsPathTraversal() {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          specs_dir: "../../etc"
-        """;
-    var ex =
+    var refusal =
         assertThrows(
             IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
-    assertTrue(ex.getMessage().contains("agent.specs_dir"));
+
+    assertEquals(
+        "Unknown guardrail key `idle_timeout` in test/sail.yaml; rename `idle_timeout` to"
+            + " `max_idle` in test/sail.yaml.",
+        refusal.getMessage());
   }
 
   @Test
-  void agentSpecsDirParsedFromYaml() throws Exception {
+  void specsDirIsRejectedWithAnExactEdit() {
     var yaml =
         """
         name: test
@@ -508,9 +493,13 @@ class SailYamlTest {
           type: claude-code
           specs_dir: specs
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertEquals("specs", config.agent().specsDir());
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
+    assertEquals(
+        "Unknown agent key `specs_dir` in test/sail.yaml; remove `specs_dir` from test/sail.yaml"
+            + " because specs live in the Sail database.",
+        ex.getMessage());
   }
 
   @Test
@@ -524,7 +513,6 @@ class SailYamlTest {
     var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().guardrails());
-    assertEquals("specs", config.agent().specsDir());
   }
 
   @Test
@@ -607,7 +595,7 @@ class SailYamlTest {
             url: "https://ntfy.sh/singlr-test"
             events:
               - guardrail_triggered
-              - agent_exited
+              - agent_session_stopped
         """;
     var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
 

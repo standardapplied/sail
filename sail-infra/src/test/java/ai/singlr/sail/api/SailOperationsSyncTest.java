@@ -199,7 +199,6 @@ class SailOperationsSyncTest {
           user: dev
         agent:
           type: claude-code
-          specs_dir: specs
         """);
     var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();

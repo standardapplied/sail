@@ -440,19 +440,6 @@ public final class ReviewStore implements ConflictResolver {
         .ifPresent(this::journal);
   }
 
-  /** Back-fills a revision for any pre-sync review row that has none yet. */
-  public int backfillRevisions() {
-    var journaled = syncEntityIds();
-    var pending =
-        db.query("SELECT id FROM reviews", row -> row.text(0)).stream()
-            .filter(id -> !journaled.contains(id))
-            .toList();
-    for (var id : pending) {
-      db.transaction(() -> journal(id));
-    }
-    return pending.size();
-  }
-
   public Set<String> syncEntityIds() {
     return new LinkedHashSet<>(
         db.query(
@@ -579,7 +566,7 @@ public final class ReviewStore implements ConflictResolver {
     deleteAggregate(id);
   }
 
-  private String recordRevision(
+  String recordRevision(
       String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
     var aggregate = aggregateMap(id);
     if (aggregate == null) {

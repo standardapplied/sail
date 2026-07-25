@@ -129,6 +129,25 @@ public final class StopOperations {
   }
 
   /**
+   * Resolves the session shown by CLI status/config views: the active build run's own unit first,
+   * then the independent ad-hoc unit.
+   */
+  public static AgentSession.SessionInfo resolveSession(
+      ShellExec shell, RunStore runs, String project, String localHandle) throws Exception {
+    var session = new AgentSession(shell);
+    AgentSession.SessionInfo runInfo = null;
+    var run = runs.runningForProjectOnNode(project, localHandle).orElse(null);
+    if (run != null) {
+      runInfo = session.queryStatus(project, runUnit(run));
+      if (runInfo != null && runInfo.running()) {
+        return runInfo;
+      }
+    }
+    var adHoc = session.queryStatus(project, AgentUnit.BUILD);
+    return adHoc != null || runInfo == null ? adHoc : runInfo;
+  }
+
+  /**
    * Presentation hook fired with the kill about to be issued (also on a dry run, which stops
    * there), so an interactive lane can narrate without the executor knowing about terminals.
    */
@@ -211,11 +230,7 @@ public final class StopOperations {
    * separate fixed ad-hoc session: a dispatched agent that died without completing its row leaves a
    * {@code running} row behind while a later {@code sail agent start} session is the live process
    * the operator means to stop. When the resolved run turns out dead ({@link NotRunning}), the
-   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well. A
-   * blank-unit run (launched before units were run-scoped) shares that fixed identity, so a pid
-   * mismatch there ({@link NotActive}) proves the live process is a newer ad-hoc session and the
-   * stale run's own agent is gone — the project lane rescues the stale state and stops the actual
-   * session, while an exact run-target request stays a conservative no-op.
+   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well.
    */
   private Outcome stopProject(String project, Actor actor, String localHandle, boolean dryRun) {
     projects.requireExists(project);
@@ -225,9 +240,6 @@ public final class StopOperations {
     }
     authorize(actor, run);
     var resolved = stopResolved(run, actor, dryRun);
-    if (resolved instanceof NotActive && Strings.isBlank(run.unit())) {
-      return rescueStaleLegacyRun(project, run, actor, dryRun);
-    }
     if (!(resolved instanceof NotRunning stranded)) {
       return resolved;
     }
@@ -235,31 +247,6 @@ public final class StopOperations {
       return new Stopped(null, stranded.specId(), stopped.pid(), stranded.specCancelled());
     }
     return stranded;
-  }
-
-  private Outcome rescueStaleLegacyRun(
-      String project, RunStore.RunRow run, Actor actor, boolean dryRun) {
-    var staleSpec = specOf(run);
-    var cancelled = dryRun ? previewCancel(run, staleSpec) : releaseStale(run, staleSpec, actor);
-    if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
-      return new Stopped(null, run.specId(), stopped.pid(), cancelled);
-    }
-    return new NotRunning(run.id(), run.specId(), cancelled, true);
-  }
-
-  /**
-   * Releases a stale legacy row whose own agent is provably gone (a different process owns the
-   * shared fixed unit). A {@code running} row records the full terminal intent; a {@code stopping}
-   * row is an interrupted claim whose intent is already durable — the spec was cancelled by the
-   * claim — so it is finalized instead of re-claimed, which would conflict on every retry and wedge
-   * the project lane.
-   */
-  private boolean releaseStale(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
-    if (STOPPING.equals(run.status())) {
-      finishStop(run, actor);
-      return false;
-    }
-    return recordIntent(run, spec, actor);
   }
 
   /**
@@ -337,10 +324,8 @@ public final class StopOperations {
    * process side remains: a dead unit just finalizes the claim and publishes the withheld operator
    * event, a live one is halted, verified, and then finalized. The same pid identity guard as the
    * first stop applies — a durable claim is never authority to kill a different process that later
-   * occupies the unit, which matters most for a migrated blank-unit run whose fixed ad-hoc identity
-   * a newer {@code sail agent start} session may now own. A failure leaves the claim in place for
-   * the next retry or the reconciler's interrupted-stop pass — never restored, because the original
-   * operator intent still stands.
+   * occupies the unit. A failure leaves the claim in place for the next retry or the reconciler's
+   * interrupted-stop pass — never restored, because the original operator intent still stands.
    */
   private Outcome resumeStop(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var unit = runUnit(run);
@@ -571,13 +556,13 @@ public final class StopOperations {
     }
   }
 
-  /**
-   * The systemd/file identity of a run: rebuilt from the unit name recorded at launch, or the fixed
-   * ad-hoc identity for a run launched before units were run-scoped — that agent runs as {@code
-   * sail-agent}, so the fixed paths are exactly where it lives.
-   */
+  /** The systemd/file identity of a build run, rebuilt from the unit name recorded at launch. */
   static AgentUnit runUnit(RunStore.RunRow run) {
-    return Strings.isBlank(run.unit()) ? AgentUnit.BUILD : AgentUnit.recorded(run.id(), run.unit());
+    if (Strings.isBlank(run.unit())) {
+      throw new IllegalStateException(
+          "Build run " + run.id() + " has no unit; run 'sail migrate' to repair its data.");
+    }
+    return AgentUnit.recorded(run.id(), run.unit());
   }
 
   private AgentSession.SessionInfo probe(String project, AgentUnit unit) {

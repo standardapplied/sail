@@ -104,7 +104,6 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
             path: web
         agent:
           type: codex
-          specs_dir: specs
         """
             .formatted(CONTAINER));
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {

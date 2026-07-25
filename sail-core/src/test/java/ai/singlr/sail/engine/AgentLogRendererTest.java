@@ -78,13 +78,14 @@ class AgentLogRendererTest {
   }
 
   @Test
-  void passesNonStreamJsonObjectThrough() {
+  void passesStructuredLinesOutsideTheCurrentStreamFormatThrough() {
     var line = "key: a human readable colon line";
+    var plainJson = "{\"status\":\"ok\"}";
+    var unknownEvent = "{\"type\":\"future_event\",\"message\":\"still useful\"}";
 
-    assertEquals(
-        line,
-        AgentLogRenderer.render(line),
-        "a plain line that happens to parse as a map but has no stream-json type is left untouched");
+    assertEquals(line, AgentLogRenderer.render(line));
+    assertEquals(plainJson, AgentLogRenderer.render(plainJson));
+    assertEquals(unknownEvent, AgentLogRenderer.render(unknownEvent));
   }
 
   @Test

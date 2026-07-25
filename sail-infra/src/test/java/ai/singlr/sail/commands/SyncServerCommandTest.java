@@ -14,7 +14,9 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -60,7 +62,11 @@ class SyncServerCommandTest {
 
   @BeforeEach
   void setUp() {
-    mainReplicaDb = SyncDatabase.converge(tempDir.resolve("main.db"), "main");
+    var mainPath = tempDir.resolve("main.db");
+    try (var db = Sqlite.open(mainPath)) {
+      MigrationRunner.applyAll(db, MigrateCommand.REGISTRY, DataMigration.Prompter.NON_INTERACTIVE);
+    }
+    mainReplicaDb = SyncDatabase.converge(mainPath, "main");
     mainDb = mainReplicaDb.db();
     nodeDb = open("node");
     mainSpecs = new SpecStore(mainDb);
@@ -190,7 +196,18 @@ class SyncServerCommandTest {
     var id = DateTimeUtils.newId().toString();
     new RunStore(nodeDb)
         .create(
-            id, "proj", "auth", node, "build", "claude-code", "feat/x", "task", 1, null, "/log");
+            id,
+            "proj",
+            "auth",
+            node,
+            "build",
+            "claude-code",
+            "feat/x",
+            "task",
+            1,
+            null,
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id);
     return id;
   }
 

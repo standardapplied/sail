@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.RunStore;
@@ -218,29 +219,56 @@ class StopOperationsTest {
   }
 
   @Test
-  void aRunWithABlankUnitFallsBackToTheAdHocIdentity() throws Exception {
-    var haltedUnits = new ArrayList<String>();
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "123")
-            .on("kill -0 123", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"work\"}");
+  void aBuildRunWithABlankUnitIsRefusedLoudly() throws Exception {
     var ops =
         stopOps(
-            shell,
-            (project, unit) -> {
-              haltedUnits.add(unit.unitName());
-              agentDies(shell);
-            },
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            failingHalter(),
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, null);
 
-    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+    var refusal =
+        assertThrows(
+            IllegalStateException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
 
-    assertInstanceOf(StopOperations.Stopped.class, outcome);
-    assertEquals(List.of(AgentUnit.BUILD.unitName()), haltedUnits);
+    assertEquals(
+        "Build run " + R1 + " has no unit; run 'sail migrate' to repair its data.",
+        refusal.getMessage());
+  }
+
+  @Test
+  void sessionResolutionPrefersTheActiveRunScopedUnit() throws Exception {
+    var shell =
+        shell()
+            .on("cat " + RUN_PID_FILE, "123")
+            .on("kill -0 123", "")
+            .on(
+                "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                "{\"task\":\"run scoped\"}");
+    stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedRun(123, UNIT);
+
+    var info = StopOperations.resolveSession(shell, runStore, "acme", LOCAL_HANDLE);
+
+    assertEquals(new AgentSession.SessionInfo(true, 123, "run scoped", "", "", RUN_LOG), info);
+  }
+
+  @Test
+  void sessionResolutionFallsBackToTheAdHocUnit() throws Exception {
+    var shell =
+        shell()
+            .on("cat /home/dev/.sail/agent.pid", "456")
+            .on("kill -0 456", "")
+            .on("cat /home/dev/.sail/agent-session.json", "{\"task\":\"ad hoc\"}");
+    stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+
+    var info = StopOperations.resolveSession(shell, runStore, "acme", LOCAL_HANDLE);
+
+    assertEquals(
+        new AgentSession.SessionInfo(true, 456, "ad hoc", "", "", "/home/dev/.sail/agent.log"),
+        info);
   }
 
   @Test
@@ -430,60 +458,6 @@ class StopOperationsTest {
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
     assertEquals(1, events.size());
-  }
-
-  @Test
-  void aStaleLegacyRunWhoseIdentityAnAdHocSessionTookIsRescuedAndTheSessionStopped()
-      throws Exception {
-    var haltedUnits = new ArrayList<String>();
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "55")
-            .on("kill -0 55", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
-    var ops =
-        stopOps(
-            shell,
-            (project, unit) -> {
-              haltedUnits.add(unit.unitName());
-              adHocAgentDies(shell);
-            },
-            StopOperations.Listener.NONE);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, null);
-
-    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
-
-    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
-    assertEquals(55, stopped.pid());
-    assertNull(stopped.runId());
-    assertEquals("auth", stopped.specId());
-    assertTrue(stopped.specCancelled());
-    assertEquals(List.of(AgentUnit.BUILD.unitName()), haltedUnits);
-    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
-    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
-    assertEquals(1, events.size());
-  }
-
-  @Test
-  void anExactRunTargetOnAStaleLegacyRunStaysAConservativeNoOp() throws Exception {
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "55")
-            .on("kill -0 55", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
-    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, null);
-
-    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
-
-    assertInstanceOf(StopOperations.NotActive.class, outcome);
-    assertEquals("running", runStore.findById(R1).orElseThrow().status());
-    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
-    assertTrue(events.isEmpty());
   }
 
   @Test
@@ -780,27 +754,6 @@ class StopOperationsTest {
   }
 
   @Test
-  void aResumedLegacyClaimNeverKillsTheAdHocSessionThatTookItsIdentity() throws Exception {
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "456")
-            .on("kill -0 456", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
-    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, null);
-    interruptStop();
-
-    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
-
-    var notActive = assertInstanceOf(StopOperations.NotActive.class, outcome);
-    assertEquals(456, notActive.livePid());
-    assertEquals("stopping", runStore.findById(R1).orElseThrow().status());
-    assertTrue(events.isEmpty());
-  }
-
-  @Test
   void aDryRunOverAnInterruptedClaimProbesButWritesNothing() throws Exception {
     var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
@@ -985,66 +938,6 @@ class StopOperationsTest {
   }
 
   @Test
-  void aWedgedLegacyStopClaimIsFinalizedAndTheAdHocSessionStopped() throws Exception {
-    var haltedUnits = new ArrayList<String>();
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "55")
-            .on("kill -0 55", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
-    var ops =
-        stopOps(
-            shell,
-            (project, unit) -> {
-              haltedUnits.add(unit.unitName());
-              adHocAgentDies(shell);
-            },
-            StopOperations.Listener.NONE);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, null);
-    interruptStop();
-
-    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
-
-    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
-    assertEquals(55, stopped.pid());
-    assertFalse(stopped.specCancelled());
-    assertEquals(List.of(AgentUnit.BUILD.unitName()), haltedUnits);
-    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
-    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
-    assertEquals(1, events.size());
-    assertEquals(Event.WellKnownTypes.AGENT_CANCELLED, events.getFirst().type());
-  }
-
-  @Test
-  void aStaleLegacyRescueWhoseAdHocSessionJustDiedStillReportsTheRescue() throws Exception {
-    var shell =
-        shell()
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/agent.pid", "55")
-            .on("kill -0 55", "")
-            .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}");
-    DispatchOperations.EventSink sink =
-        event -> {
-          events.add(event);
-          adHocAgentDies(shell);
-        };
-    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE, sink);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, null);
-
-    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
-
-    var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
-    assertEquals(R1, notRunning.runId());
-    assertTrue(notRunning.specCancelled());
-    assertTrue(notRunning.runReleased());
-    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
-    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
-  }
-
-  @Test
   void aProbeFailureMapsToAgentStatusFailed() throws Exception {
     var shell =
         shell()
@@ -1135,7 +1028,6 @@ class StopOperationsTest {
           user: dev
         agent:
           type: claude-code
-          specs_dir: specs
         """);
     var db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();

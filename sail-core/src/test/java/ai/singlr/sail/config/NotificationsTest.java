@@ -21,20 +21,20 @@ class NotificationsTest {
   void fromMapParsesUrlAndEvents() {
     var n =
         Notifications.fromMap(
-            Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_exited")));
+            Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_session_stopped")));
 
     assertEquals("https://ntfy.sh/test", n.url());
-    assertEquals(List.of("agent_exited"), n.events());
+    assertEquals(List.of("agent_session_stopped"), n.events());
   }
 
   @Test
   void eventsListIsImmutable() {
-    var mutable = new java.util.ArrayList<String>(List.of("agent_exited"));
+    var mutable = new java.util.ArrayList<String>(List.of("agent_session_stopped"));
     var n = Notifications.fromMap(Map.of("url", "https://ntfy.sh/test", "events", mutable));
 
     assertThrows(UnsupportedOperationException.class, () -> n.events().add("snapshot_created"));
     mutable.add("snapshot_created");
-    assertEquals(List.of("agent_exited"), n.events());
+    assertEquals(List.of("agent_session_stopped"), n.events());
   }
 
   @Test
@@ -78,7 +78,7 @@ class NotificationsTest {
     var original =
         new Notifications(
             "https://hooks.slack.com/services/T/B/x",
-            List.of("guardrail_triggered", "session_done"));
+            List.of("guardrail_triggered", "agent_session_completed"));
     var map = original.toMap();
     var restored = Notifications.fromMap(map);
 
@@ -91,8 +91,8 @@ class NotificationsTest {
     var n = new Notifications("https://ntfy.sh/test", null);
 
     assertTrue(n.shouldNotify("guardrail_triggered"));
-    assertTrue(n.shouldNotify("agent_exited"));
-    assertTrue(n.shouldNotify("session_done"));
+    assertTrue(n.shouldNotify("agent_session_stopped"));
+    assertTrue(n.shouldNotify("agent_session_completed"));
   }
 
   @Test
@@ -100,7 +100,7 @@ class NotificationsTest {
     var n = new Notifications("https://ntfy.sh/test", List.of());
 
     assertTrue(n.shouldNotify("guardrail_triggered"));
-    assertTrue(n.shouldNotify("agent_exited"));
+    assertTrue(n.shouldNotify("agent_session_stopped"));
   }
 
   @Test
@@ -108,24 +108,40 @@ class NotificationsTest {
     var n = new Notifications("https://ntfy.sh/test", List.of("guardrail_triggered"));
 
     assertTrue(n.shouldNotify("guardrail_triggered"));
-    assertFalse(n.shouldNotify("agent_exited"));
-    assertFalse(n.shouldNotify("session_done"));
+    assertFalse(n.shouldNotify("agent_session_stopped"));
+    assertFalse(n.shouldNotify("agent_session_completed"));
   }
 
   @Test
-  void legacyAgentExitedAliasMatchesNewAgentSessionStopped() {
-    var n = new Notifications("https://ntfy.sh/test", List.of("agent_exited"));
+  void retiredAgentExitedNameIsRejectedWithAnExactEdit() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Notifications.fromMap(
+                    Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_exited")),
+                    "acme/sail.yaml"));
 
-    assertTrue(n.shouldNotify("agent_session_stopped"));
-    assertTrue(n.shouldNotify("agent_exited"));
+    assertEquals(
+        "Unknown notification event `agent_exited` in acme/sail.yaml; rename `agent_exited` to"
+            + " `agent_session_stopped` in acme/sail.yaml.",
+        refusal.getMessage());
   }
 
   @Test
-  void legacySessionDoneAliasMatchesNewAgentSessionCompleted() {
-    var n = new Notifications("https://ntfy.sh/test", List.of("session_done"));
+  void retiredSessionDoneNameIsRejectedWithAnExactEdit() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Notifications.fromMap(
+                    Map.of("url", "https://ntfy.sh/test", "events", List.of("session_done")),
+                    "acme/sail.yaml"));
 
-    assertTrue(n.shouldNotify("agent_session_completed"));
-    assertTrue(n.shouldNotify("session_done"));
+    assertEquals(
+        "Unknown notification event `session_done` in acme/sail.yaml; rename `session_done` to"
+            + " `agent_session_completed` in acme/sail.yaml.",
+        refusal.getMessage());
   }
 
   @Test

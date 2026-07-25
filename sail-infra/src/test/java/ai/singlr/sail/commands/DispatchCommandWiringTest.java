@@ -76,7 +76,6 @@ class DispatchCommandWiringTest {
           path: app
       agent:
         type: claude-code
-        specs_dir: specs
         auto_branch: true
         branch_prefix: sail/
       """;

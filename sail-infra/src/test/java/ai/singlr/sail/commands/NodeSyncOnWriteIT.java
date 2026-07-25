@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -88,6 +90,9 @@ class NodeSyncOnWriteIT {
    * token, which the SSH gateway hands to {@code _sync} so the node's pushes are authorized.
    */
   private static String seedMainWithMemberSession(Path mainDb) {
+    try (var db = Sqlite.open(mainDb)) {
+      MigrationRunner.applyAll(db, MigrateCommand.REGISTRY, DataMigration.Prompter.NON_INTERACTIVE);
+    }
     try (var converged = SyncDatabase.converge(mainDb, "mainbox")) {
       var fde = new FdeStore(converged.db()).add("mady", "Mady", "mady@example.dev", "member");
       return new AuthSessionStore(converged.db()).create(fde.id(), Duration.ofHours(1)).token();

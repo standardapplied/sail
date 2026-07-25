@@ -16,10 +16,8 @@ import java.util.Objects;
  *
  * <p>Dispatched Claude Code agents stream newline-delimited JSON events ({@code --output-format
  * stream-json}); this renderer detects such a line and collapses it to readable output — assistant
- * text, a one-line tool-call summary, a tool-result status, or the final result. Any line that is
- * not a recognised stream-json event (Codex's already-readable transcript, or a pre-stream-json
- * log) passes through untouched, so the same renderer is correct for both agents and backward
- * compatible with old logs.
+ * text, a one-line tool-call summary, a tool-result status, or the final result. Unrecognized
+ * lines, including JSON-shaped Codex transcript output, pass through untouched.
  */
 public final class AgentLogRenderer {
 
@@ -32,12 +30,14 @@ public final class AgentLogRenderer {
 
   /**
    * Renders one raw log line. Returns the readable form for stream-json events, the line unchanged
-   * for plain text, and an empty string for events that carry no progress to show (e.g. the noisy
-   * {@code system/init} event).
+   * for plain text, and an empty string for structured events that carry no progress to show.
    */
   public static String render(String line) {
     if (line == null || line.isBlank()) {
       return "";
+    }
+    if (!line.stripLeading().startsWith("{")) {
+      return line;
     }
     Map<String, Object> event;
     try {

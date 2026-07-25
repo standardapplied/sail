@@ -40,13 +40,10 @@ public final class GuardrailChecker {
    * Checks the wall-clock guardrail. Returns {@link GuardrailResult.Triggered} if the agent has
    * been running longer than the configured maximum duration.
    *
-   * @param containerName the Incus container name
    * @param guardrails the guardrail configuration
    * @param startedAt when the agent session started
-   * @param repoPaths unused, kept for API compatibility
    */
-  public GuardrailResult check(
-      String containerName, Guardrails guardrails, Instant startedAt, List<String> repoPaths)
+  public GuardrailResult check(Guardrails guardrails, Instant startedAt)
       throws IOException, InterruptedException, TimeoutException {
     return checkDuration(startedAt, Instant.now(), guardrails);
   }

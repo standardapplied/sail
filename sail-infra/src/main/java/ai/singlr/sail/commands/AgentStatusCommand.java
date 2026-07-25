@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecDirectory;
@@ -16,8 +17,10 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
@@ -92,7 +95,7 @@ public final class AgentStatusCommand implements Runnable {
       var projectName = container.name();
       AgentSession.SessionInfo info = null;
       try {
-        info = RunScopedSessions.resolve(shell, projectName).info();
+        info = resolveSession(shell, projectName);
       } catch (Exception ignored) {
       }
 
@@ -171,7 +174,7 @@ public final class AgentStatusCommand implements Runnable {
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var info = RunScopedSessions.resolve(shell, name).info();
+    var info = resolveSession(shell, name);
 
     SailYaml config = null;
     var singYamlPath = SailPaths.resolveSailYaml(name, file);
@@ -203,10 +206,7 @@ public final class AgentStatusCommand implements Runnable {
     }
 
     Map<String, Integer> taskCounts = null;
-    if (config != null
-        && config.agent() != null
-        && config.agent().specsDir() != null
-        && info != null) {
+    if (config != null && config.agent() != null && info != null) {
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         taskCounts = SpecDirectory.statusCounts(new SpecStore(db).projectSpecs(name));
       } catch (Exception ignored) {
@@ -256,6 +256,14 @@ public final class AgentStatusCommand implements Runnable {
     } catch (Exception ignored) {
     }
     return List.of("/home/dev/workspace");
+  }
+
+  private static AgentSession.SessionInfo resolveSession(ShellExecutor shell, String projectName)
+      throws Exception {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return StopOperations.resolveSession(
+          shell, new RunStore(db), projectName, NodeIdentity.handle());
+    }
   }
 
   private static String formatElapsed(Duration duration) {

@@ -15,7 +15,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.EventStore;
@@ -240,41 +239,6 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aBlankUnitInterruptedStopIsFinalizedThroughTheFixedAdHocIdentity() {
-    createSpec("auth", SpecStatus.CANCELLED);
-    var runId = preUpgradeRunningSession("auth");
-    sessionStore.transition(runId, "running", "stopping");
-    var probe = new CountingProbe(false);
-
-    var finalized = reconciler(probe, PAST_GRACE).sweep();
-
-    assertEquals(1, finalized);
-    assertEquals(
-        AgentUnit.BUILD.unitName(),
-        probe.lastUnit,
-        "a legacy claim is probed on the same compatibility identity the stop itself uses");
-    assertEquals(
-        "stopped",
-        sessionStore.findById(runId).orElseThrow().status(),
-        "a dead legacy claim must not reserve its repos forever");
-  }
-
-  @Test
-  void aBlankUnitInterruptedStopWithALiveAdHocSessionKeepsItsClaim() {
-    createSpec("auth", SpecStatus.CANCELLED);
-    var runId = preUpgradeRunningSession("auth");
-    sessionStore.transition(runId, "running", "stopping");
-
-    var finalized = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
-
-    assertEquals(0, finalized);
-    assertEquals(
-        "stopping",
-        sessionStore.findById(runId).orElseThrow().status(),
-        "an active shared unit may be a newer ad-hoc session; the claim stays untouched");
-  }
-
-  @Test
   void aProbeFailureOnAnInterruptedStopIsLoggedAndRetriedNextSweep() {
     createSpec("auth", SpecStatus.CANCELLED);
     var runId = interruptedStopSession("auth");
@@ -340,21 +304,6 @@ class MissedStopReconcilerTest {
         "sail-agent-" + id);
   }
 
-  private String preUpgradeRunningSession(String specId) {
-    return sessionStore.create(
-        DateTimeUtils.newId().toString(),
-        "test-project",
-        specId,
-        "node-a",
-        "build",
-        "claude-code",
-        "feat/test",
-        "task",
-        1,
-        null,
-        "/home/dev/.sail/agent.log");
-  }
-
   private void adoptedForeignRunningSession(String specId, Instant startedAt) {
     sessionStore.applyRevision(
         DateTimeUtils.newId().toString(),
@@ -362,6 +311,7 @@ class MissedStopReconcilerTest {
             "project", "test-project",
             "spec_id", specId,
             "node", "node-b",
+            "role", "build",
             "agent", "claude-code",
             "status", "running",
             "started_at", startedAt.toString()),
@@ -813,6 +763,20 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aRunningForegroundSessionPastGraceIsNeverProbedOrStopped() {
+    createInProgressSpec("auth");
+    var runId = runningSession("auth");
+    db.execute("UPDATE runs SET unit = '' WHERE id = ?", runId);
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
   void synthesizesAStopWithoutExitCodeWhenTheUnitDiedUnobserved() throws Exception {
     createInProgressSpec("auth");
     runningSession("auth");
@@ -1054,22 +1018,6 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aPreUpgradeRunningSessionWithNoRecordedUnitIsSkippedNotStopped() {
-    createInProgressSpec("auth");
-    var runId = preUpgradeRunningSession("auth");
-    var probe = new CountingProbe(false);
-
-    var replayed = reconciler(probe, PAST_GRACE).sweep();
-
-    assertEquals(
-        0,
-        replayed,
-        "no premature stop: the sweep cannot know that unit's liveness, so it does nothing");
-    assertEquals(0, probe.calls.get(), "no derived-name probe that would falsely read absent");
-    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
-  }
-
-  @Test
   void aPassNeverOverlapsAStillRunningOne() {
     createInProgressSpec("auth");
     runningSession("auth");
@@ -1112,24 +1060,30 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void systemdProbeReadsUnitLivenessThroughTheShell() throws Exception {
-    ShellExec activeShell = shellReturning("ActiveState=active\nExecMainStatus=0\n");
-    ShellExec inactiveShell = shellReturning("ActiveState=inactive\nExecMainStatus=0\n");
-    ShellExec failedShell = shellReturning("ActiveState=failed\nExecMainStatus=137\n");
-
+  void recordedIdentityProbeReadsRunScopedProcessLiveness() throws Exception {
     var runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     var unit = "sail-agent-" + runId;
-    assertTrue(MissedStopReconciler.systemdUnitProbe(activeShell).active("acme", runId, unit));
-    assertFalse(MissedStopReconciler.systemdUnitProbe(inactiveShell).active("acme", runId, unit));
-    assertFalse(MissedStopReconciler.systemdUnitProbe(failedShell).active("acme", runId, unit));
+    assertTrue(
+        MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, true))
+            .active("acme", runId, unit));
+    assertFalse(
+        MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, false))
+            .active("acme", runId, unit));
+    assertFalse(
+        MissedStopReconciler.systemdUnitProbe(runIdentityShell(false, false))
+            .active("acme", runId, unit));
   }
 
-  private static ShellExec shellReturning(String systemctlShow) {
+  private static ShellExec runIdentityShell(boolean pidRecorded, boolean alive) {
     return new ShellExec() {
       @Override
       public Result exec(List<String> command) {
-        if (String.join(" ", command).contains("systemctl")) {
-          return new Result(0, systemctlShow, "");
+        var joined = String.join(" ", command);
+        if (joined.contains("agent.pid") && pidRecorded) {
+          return new Result(0, "123", "");
+        }
+        if (joined.contains("kill -0 123") && alive) {
+          return new Result(0, "", "");
         }
         return new Result(1, "", "no such file");
       }

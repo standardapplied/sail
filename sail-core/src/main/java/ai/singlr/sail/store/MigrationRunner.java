@@ -26,7 +26,7 @@ public final class MigrationRunner {
       Sqlite db, List<DataMigration> dataMigrations, DataMigration.Prompter prompter) {
     var schema = new SchemaManager(db);
     var before = schema.currentVersion();
-    schema.migrate();
+    schema.migrateAll();
     var after = schema.currentVersion();
     var projects = ProjectRegistry.loadFromDisk();
     var runs = new DataMigrator(db, dataMigrations).run(projects, prompter);

@@ -42,7 +42,7 @@ class ProjectProvisionerTest {
             "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
         Map.of("app", new SailYaml.Process("java -jar app.jar", ".")),
         new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, Map.of(), null, null, null, null, null),
+            "claude-code", true, "sail/", true, null, Map.of(), null, null, null, null),
         null,
         new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
   }
@@ -1715,7 +1715,6 @@ class ProjectProvisionerTest {
                 null,
                 null,
                 null,
-                null,
                 null),
             null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
@@ -1774,7 +1773,6 @@ class ProjectProvisionerTest {
                 null,
                 null,
                 null,
-                null,
                 null),
             null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
@@ -1826,7 +1824,6 @@ class ProjectProvisionerTest {
                 true,
                 List.of("claude-code", "codex"),
                 Map.of(),
-                null,
                 null,
                 null,
                 null,
@@ -1969,7 +1966,6 @@ class ProjectProvisionerTest {
                 true,
                 List.of("claude-code"),
                 Map.of(),
-                null,
                 null,
                 null,
                 null,

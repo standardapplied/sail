@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class RestartResolutionTest {
 
   private static Spec spec(SpecStatus status, String branch) {
-    return new Spec("oauth-flow", "OAuth flow", status, "me", List.of(), branch);
+    return new Spec("oauth-flow", "test", "OAuth flow", status, "me", List.of(), branch);
   }
 
   @ParameterizedTest

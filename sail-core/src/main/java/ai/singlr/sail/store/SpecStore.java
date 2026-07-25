@@ -347,7 +347,7 @@ public final class SpecStore implements ConflictResolver {
         });
   }
 
-  private String recordRevision(String id, String origin, boolean deleted) {
+  String recordRevision(String id, String origin, boolean deleted) {
     return recordRevision(id, null, origin, deleted, false);
   }
 
@@ -486,7 +486,7 @@ public final class SpecStore implements ConflictResolver {
         text(s, "id"),
         text(s, "project"),
         text(s, "title"),
-        SpecStatus.fromLegacy(text(s, "status")),
+        SpecStatus.fromWire(text(s, "status")),
         text(s, "assignee"),
         text(s, "agent"),
         text(s, "model"),
@@ -611,7 +611,7 @@ public final class SpecStore implements ConflictResolver {
             ENTITY));
   }
 
-  /** Attributes a legacy spec and journals its new snapshot in the same transaction. */
+  /** Attributes a spec solely for the retained versioned 0.14 data migration. */
   public boolean assignMigrationProject(String id, String project) {
     return db.transaction(
         () -> {
@@ -627,23 +627,6 @@ public final class SpecStore implements ConflictResolver {
           recordRevision(id, "migration", false);
           return true;
         });
-  }
-
-  /**
-   * Records a baseline revision for every spec that has none yet. A spec written before this store
-   * journaled its mutations has a row in {@code specs} but no change-log entry, so it is invisible
-   * to sync until journaled — the same gap {@link ProjectStore#backfillRevisions()} closes for
-   * projects. Idempotent: a spec already in the change log is left untouched. The minted rev is
-   * content-addressed, so two boxes backfilling the same pre-journal spec reach the same revision
-   * and converge without a conflict. Returns how many were backfilled.
-   */
-  public int backfillRevisions() {
-    var journaled = syncEntityIds();
-    var pending = list(SpecFilter.all()).stream().filter(s -> !journaled.contains(s.id())).toList();
-    for (var spec : pending) {
-      db.transaction(() -> recordRevision(spec.id(), "local", false));
-    }
-    return pending.size();
   }
 
   /**
@@ -849,7 +832,7 @@ public final class SpecStore implements ConflictResolver {
         row.text(0),
         row.text(1),
         row.text(2),
-        SpecStatus.fromLegacy(row.text(3)),
+        SpecStatus.fromWire(row.text(3)),
         row.text(4),
         row.text(5),
         row.text(6),

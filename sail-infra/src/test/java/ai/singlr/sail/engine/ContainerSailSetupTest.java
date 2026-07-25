@@ -48,7 +48,7 @@ class ContainerSailSetupTest {
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
+        ContainerSailSetup.Result.UPDATED,
         result,
         "a script still pointing at the old socket path is stale and must be rewritten");
     assertTrue(
@@ -67,7 +67,7 @@ class ContainerSailSetupTest {
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
+        ContainerSailSetup.Result.UPDATED,
         result,
         "a claude-settings.json written before the tool hooks existed is stale and must be "
             + "rewritten, or the stall watcher never sees progress and kills the agent at max_idle");
@@ -87,7 +87,7 @@ class ContainerSailSetupTest {
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
+        ContainerSailSetup.Result.UPDATED,
         result,
         "a claude-settings.json still wiring the bare Stop publisher is stale and must be "
             + "rewritten, or premature turn-ends keep stranding dispatched work uncommitted");
@@ -104,7 +104,7 @@ class ContainerSailSetupTest {
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
+        ContainerSailSetup.Result.UPDATED,
         result,
         "a codex hooks.json still wiring the bare Stop publisher is stale and must be rewritten,"
             + " or premature Codex turn-ends keep stranding dispatched work uncommitted");
@@ -130,7 +130,7 @@ class ContainerSailSetupTest {
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
-        ContainerSailSetup.Result.BACKFILLED,
+        ContainerSailSetup.Result.UPDATED,
         result,
         "a sail-event.sh predating the reason argument would drop the nudge reason from "
             + "agent_stop_nudged events and must be rewritten");
@@ -224,7 +224,7 @@ class ContainerSailSetupTest {
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
-    assertEquals(ContainerSailSetup.Result.BACKFILLED, result);
+    assertEquals(ContainerSailSetup.Result.UPDATED, result);
     var commands = shell.invocations();
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail/bin")),

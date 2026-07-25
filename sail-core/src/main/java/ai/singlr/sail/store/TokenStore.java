@@ -22,8 +22,7 @@ import java.util.Set;
  * once at creation time.
  *
  * <p>A token may carry an {@code expires_at}: once past, {@link #validate} rejects and prunes it,
- * so a leaked token cannot be used indefinitely. A {@code null} expiry never expires — the
- * convenience overloads keep that for back-compat and for break-glass bootstrap tokens; the {@code
+ * so a leaked token cannot be used indefinitely. A {@code null} expiry never expires; the {@code
  * sail server token} CLI opts into a default lifetime so operator-minted tokens expire by default.
  */
 public final class TokenStore {
@@ -49,13 +48,9 @@ public final class TokenStore {
 
   public record CreatedToken(String name, String token, String role, String expiresAt) {}
 
+  /** Creates the non-expiring, unowned token used only for break-glass server bootstrap. */
   public CreatedToken create(String name, String role) {
     return create(name, role, null, null);
-  }
-
-  /** Creates a token optionally owned by an FDE ({@code fdes.id}, or null for an unowned token). */
-  public CreatedToken create(String name, String role, String fdeId) {
-    return create(name, role, fdeId, null);
   }
 
   /**

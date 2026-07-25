@@ -31,16 +31,10 @@ public record Notifications(String url, List<String> events, SlackNotifications 
     this(url, events, null);
   }
 
-  /**
-   * Known event types that can trigger notifications. Includes both legacy names (kept for
-   * backwards-compatibility with existing sail.yaml files) and the new bus event types that flow
-   * through the EventBus.
-   */
+  /** Known event types that can trigger notifications. */
   public static final Set<String> VALID_EVENTS =
       Set.of(
           "guardrail_triggered",
-          "agent_exited",
-          "session_done",
           "spec_dispatched",
           "spec_restarted",
           "agent_session_started",
@@ -49,17 +43,18 @@ public record Notifications(String url, List<String> events, SlackNotifications 
           "agent_stop_nudged",
           "snapshot_created");
 
-  /**
-   * Legacy alias names that map to current bus event type names. {@link #shouldNotify(String)}
-   * accepts either form so users with old configs do not need to migrate.
-   */
-  private static final Map<String, String> LEGACY_ALIAS_OF =
+  private static final Map<String, String> RETIRED_EVENTS =
       Map.of(
-          "agent_session_stopped", "agent_exited",
-          "agent_session_completed", "session_done");
+          "agent_exited", "agent_session_stopped",
+          "session_done", "agent_session_completed");
 
   @SuppressWarnings("unchecked")
   public static Notifications fromMap(Map<String, Object> map) {
+    return fromMap(map, "sail.yaml");
+  }
+
+  @SuppressWarnings("unchecked")
+  static Notifications fromMap(Map<String, Object> map, String descriptor) {
     var url = (String) map.get("url");
     var slackRaw = (Map<String, Object>) map.get("slack");
     var slack = slackRaw != null ? SlackNotifications.fromMap(slackRaw) : null;
@@ -75,6 +70,21 @@ public record Notifications(String url, List<String> events, SlackNotifications 
     var eventsRaw = (List<String>) map.get("events");
     if (eventsRaw != null) {
       for (var event : eventsRaw) {
+        var replacement = RETIRED_EVENTS.get(event);
+        if (replacement != null) {
+          throw new IllegalArgumentException(
+              "Unknown notification event `"
+                  + event
+                  + "` in "
+                  + descriptor
+                  + "; rename `"
+                  + event
+                  + "` to `"
+                  + replacement
+                  + "` in "
+                  + descriptor
+                  + ".");
+        }
         if (!VALID_EVENTS.contains(event)) {
           throw new IllegalArgumentException(
               "Unknown notification event: '"
@@ -102,19 +112,8 @@ public record Notifications(String url, List<String> events, SlackNotifications 
     return map;
   }
 
-  /**
-   * Returns true if the given event should trigger a notification. Accepts either the current bus
-   * event-type name or its legacy alias when one exists, so configs declared with the old
-   * vocabulary (for example {@code agent_exited}) continue to fire for the new bus events.
-   */
+  /** Returns true if the given event should trigger a notification. */
   public boolean shouldNotify(String event) {
-    if (events == null || events.isEmpty()) {
-      return true;
-    }
-    if (events.contains(event)) {
-      return true;
-    }
-    var legacy = LEGACY_ALIAS_OF.get(event);
-    return legacy != null && events.contains(legacy);
+    return events == null || events.isEmpty() || events.contains(event);
   }
 }

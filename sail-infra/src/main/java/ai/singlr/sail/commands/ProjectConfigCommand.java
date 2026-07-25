@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
@@ -14,9 +15,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
@@ -139,7 +142,6 @@ public final class ProjectConfigCommand implements Runnable {
       agent.put("type", config.agent().type());
       agent.put("auto_snapshot", config.agent().autoSnapshot());
       agent.put("auto_branch", config.agent().autoBranch());
-      if (config.agent().specsDir() != null) agent.put("specs_dir", config.agent().specsDir());
       if (config.agent().install() != null) agent.put("install", config.agent().install());
       map.put("agent", agent);
     }
@@ -158,7 +160,10 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    return RunScopedSessions.resolve(shell, containerName).info();
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      return StopOperations.resolveSession(
+          shell, new RunStore(db), containerName, NodeIdentity.handle());
+    }
   }
 
   private SpecSnapshot loadSpecSummary(ShellExecutor shell, SailYaml config, ContainerState state)
@@ -166,7 +171,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return SpecSnapshot.unavailable("project_stopped");
     }
-    if (config.agent() == null || config.agent().specsDir() == null) {
+    if (config.agent() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {

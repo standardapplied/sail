@@ -133,13 +133,13 @@ checkpoints), `ExpiredRowSweeper` (hourly housekeeping), and `PushOutcome` (the 
 Migrations are two-layer and idempotent. `SchemaManager.MIGRATIONS` is an append-only,
 version-tracked list of SQL statements, and entries are never reordered or removed. A
 separate `DataMigration` framework runs one-shot content fix-ups exactly once, tracked by
-name. `MigrationRunner.applyAll` runs schema migrations then data migrations, and
-`MigrateCommand` additionally runs the idempotent data backfills (`applyDataBackfills`).
-Those backfills make pre-journal specs and projects syncable, import on-disk descriptors,
-scrub per-developer identity to placeholders, import shared files, and seed the bundled
-demo. They run on `sail migrate`, on `sail upgrade` (which spawns the new binary's `migrate`
-so a release's new migrations actually execute), and on every daemon start, so a failed
-upgrade-time migration self-heals on the next service start.
+name. `MigrationRunner.applyAll` runs schema migrations then data migrations.
+`MigrateCommand` additionally imports on-disk descriptors and shared files, scrubs
+per-developer identity to placeholders, and seeds the bundled demo. Schema and registered
+data migrations run on `sail migrate`, on `sail upgrade` (which spawns the new binary's
+`migrate` so a release's new migrations actually execute), and on every daemon start, so a
+failed upgrade-time migration self-heals on the next service start. Imports run only from
+the explicit migrate lane.
 
 ## The sync layer: one main, many nodes
 
@@ -186,7 +186,7 @@ Pushes are compare-and-set. Main mints the revision and rejects a stale expected
 so the engine re-reconciles against main's fresh state under a bounded retry rather than
 overwriting silently. Revisions are content-addressed as `<counter>-<shortHash>`, so two
 boxes that independently reach the same content mint the same revision and converge with no
-conflict. That property is what makes the migration backfills and the identity scrub safe
+conflict. That property is what makes the migration's baseline revisions and identity scrub safe
 across a mixed-version fleet. Reserved snapshot keys prefixed with `_` (such as `_actor`,
 which carries author attribution) ride along but are excluded from conflict detection, so
 attribution propagates without ever causing a false conflict.
@@ -313,9 +313,9 @@ path, not silently here.
 **The `sail-api` service** (`SystemdServiceInstaller`) is the per-box control plane: a `sail
 server start` systemd unit, in system scope under root (`/etc/systemd/system`) or in user
 scope per-user (`systemctl --user` with linger). It opens the control-plane SQLite database,
-runs migrations and backfills, ensures an admin token, and serves the REST API and the SSE
-event stream (`/v1/events/stream`) on loopback, the passkey endpoints when configured, and a
-Unix-socket listener so project containers publish events and drive `spec` over the
+runs registered migrations, ensures an admin token, and serves the REST API and the SSE
+event stream (`/v1/events/stream`) on loopback, the passkey endpoints when configured, and
+a Unix-socket listener so project containers publish events and drive `spec` over the
 bind-mounted socket with no TCP and no token. Every box runs it, and it is what lets an
 engineer dispatch agents locally.
 

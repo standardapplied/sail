@@ -43,7 +43,6 @@ class SailYamlNotificationsResolverTest {
         name: light-grid
         agent:
           type: claude-code
-          specs_dir: specs
           notifications:
             url: https://ntfy.sh/light-grid
             events:
@@ -82,7 +81,6 @@ class SailYamlNotificationsResolverTest {
         name: bare
         agent:
           type: claude-code
-          specs_dir: specs
         """;
     var sailYaml = dir.resolve("sail.yaml");
     Files.writeString(sailYaml, yaml);

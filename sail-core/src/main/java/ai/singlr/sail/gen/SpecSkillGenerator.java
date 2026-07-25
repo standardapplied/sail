@@ -24,21 +24,8 @@ public final class SpecSkillGenerator {
 
   private SpecSkillGenerator() {}
 
-  /**
-   * Generates spec skill files for the given agent when specs are enabled for the project.
-   *
-   * @param agent the target agent type
-   * @param specsDir the configured specs directory name; when {@code null}, specs are disabled and
-   *     no skill is generated. (Retained as the project's "uses specs" switch even though specs are
-   *     now stored in the database rather than this directory.)
-   * @param basePath the workspace base path (e.g., {@code /home/dev/workspace/})
-   * @return the SKILL.md + spec-template.md for the agent, or empty when specs are disabled
-   */
-  public static List<GeneratedFile> generateFiles(
-      AgentCli agent, String specsDir, String basePath) {
-    if (specsDir == null) {
-      return List.of();
-    }
+  /** Generates the spec skill files for the given agent. */
+  public static List<GeneratedFile> generateFiles(AgentCli agent, String basePath) {
     var skillDir = basePath + agent.skillsDir() + "spec-board/";
     return List.of(
         new GeneratedFile(skillDir + "SKILL.md", skillMd(), false),

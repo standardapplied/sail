@@ -730,9 +730,7 @@ public final class SailOperations implements Operations {
     if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
-    var logPath =
-        AgentUnit.fromRole(Objects.requireNonNullElse(run.role(), "build"))
-            .runLogPath(Ids.requireUuid(run.id()));
+    var logPath = AgentUnit.fromRole(run.role()).runLogPath(Ids.requireUuid(run.id()));
     var cmd =
         ContainerExec.asDevUser(
             run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
@@ -832,8 +830,7 @@ public final class SailOperations implements Operations {
 
   private static AgentConfigView agentConfigView(SailYaml config) {
     var agent = config.agent();
-    return new AgentConfigView(
-        agent.type(), agent.autoSnapshot(), agent.autoBranch(), agent.specsDir());
+    return new AgentConfigView(agent.type(), agent.autoSnapshot(), agent.autoBranch());
   }
 
   private static AgentStatusView agentStatusView(

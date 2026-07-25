@@ -16,10 +16,9 @@ import java.util.stream.Collectors;
  *
  * <p>{@link #AWAITING_MERGE} sits between the review gate and completion: the review passed, the
  * pull request is open, and a human still has to merge it on the forge and mark the spec {@link
- * #DONE}. {@link #DRAFT} is the bucket for imported specs whose status is unknown or absent —
- * including a status synced from a newer peer that this binary does not know yet, which lands in
- * the draft column instead of crashing; {@link #ARCHIVED} is hidden from the default board. Only
- * {@link SpecDirectory#CLI_SETTABLE} statuses may be assigned by hand via {@code sail spec status}.
+ * #DONE}. {@link #DRAFT} is the explicit pre-planning bucket; {@link #ARCHIVED} is hidden from the
+ * default board. Only {@link SpecDirectory#CLI_SETTABLE} statuses may be assigned by hand via
+ * {@code sail spec status}.
  *
  * <p>{@link #CANCELLED} is the terminal record of an operator's clean stop: the spec's run was
  * deliberately halted, not finished. It is intentionally outside every set the lifecycle machinery
@@ -60,22 +59,6 @@ public enum SpecStatus {
           "Invalid spec status: '" + value + "'. Must be one of: " + wireValues());
     }
     return match;
-  }
-
-  /**
-   * Lenient parse for importing pre-control-plane file specs: a {@code null}/blank or unrecognized
-   * status falls back to {@link #DRAFT}, and the legacy {@code "archive"} alias maps to {@link
-   * #ARCHIVED}.
-   */
-  public static SpecStatus fromLegacy(String value) {
-    if (value == null) {
-      return DRAFT;
-    }
-    var match = byWire(value);
-    if (match != null) {
-      return match;
-    }
-    return "archive".equals(value) ? ARCHIVED : DRAFT;
   }
 
   /** Comma-separated wire forms, for error messages and listings. */

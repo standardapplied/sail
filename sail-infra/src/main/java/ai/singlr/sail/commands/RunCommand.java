@@ -165,7 +165,7 @@ public final class RunCommand implements Runnable {
   }
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
-    if (task == null && config.agent() != null && config.agent().specsDir() != null) {
+    if (task == null && config.agent() != null) {
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var store = new SpecStore(db);
         var nextSpec = SpecDirectory.nextReady(store.projectSpecs(name));
@@ -184,8 +184,7 @@ public final class RunCommand implements Runnable {
 
     if (background && task == null) {
       throw new IllegalArgumentException(
-          "--background requires --task or a specs_dir with pending specs in sail.yaml agent"
-              + " config.");
+          "--background requires --task or a pending spec in the Sail database.");
     }
 
     var sshUser = config.sshUser();
