@@ -299,22 +299,36 @@ class LegacyDataMigrationTest {
 
   private static void stageLegacySchema(Sqlite legacy) {
     new SchemaManager(legacy).migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
-    legacy.execute("PRAGMA writable_schema = ON");
-    legacy.execute(
-        """
-        UPDATE sqlite_schema
-        SET sql = replace(sql,
-            'role TEXT NOT NULL DEFAULT ''build''',
-            'role TEXT DEFAULT ''build''')
-        WHERE type = 'table' AND name = 'runs'""");
-    legacy.execute(
-        """
-        UPDATE sqlite_schema
-        SET sql = replace(sql,
-            'project TEXT NOT NULL DEFAULT ''unassigned''',
-            'project TEXT DEFAULT ''unassigned''')
-        WHERE type = 'table' AND name = 'specs'""");
-    legacy.execute("PRAGMA writable_schema = OFF");
+    relaxColumn(legacy, "runs", "role TEXT NOT NULL DEFAULT 'build'", "role TEXT DEFAULT 'build'");
+    relaxColumn(
+        legacy,
+        "specs",
+        "project TEXT NOT NULL DEFAULT 'unassigned'",
+        "project TEXT DEFAULT 'unassigned'");
     legacy.close();
+  }
+
+  private static void relaxColumn(Sqlite legacy, String table, String strict, String relaxed) {
+    var ddl =
+        legacy
+            .queryOne(
+                "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                row -> row.text(0),
+                table)
+            .orElseThrow();
+    if (!ddl.contains(strict)) {
+      throw new IllegalStateException(
+          "Legacy staging expected '" + strict + "' in the " + table + " DDL: " + ddl);
+    }
+    var legacyDdl =
+        ddl.replace(strict, relaxed)
+            .replace("CREATE TABLE \"" + table + "\"", "CREATE TABLE " + table + "_legacy")
+            .replace("CREATE TABLE " + table + " ", "CREATE TABLE " + table + "_legacy ");
+    legacy.execute("PRAGMA foreign_keys = OFF");
+    legacy.execute(legacyDdl);
+    legacy.execute("INSERT INTO " + table + "_legacy SELECT * FROM " + table);
+    legacy.execute("DROP TABLE " + table);
+    legacy.execute("ALTER TABLE " + table + "_legacy RENAME TO " + table);
+    legacy.execute("PRAGMA foreign_keys = ON");
   }
 }
