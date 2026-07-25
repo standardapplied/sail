@@ -611,6 +611,24 @@ public final class SpecStore implements ConflictResolver {
             ENTITY));
   }
 
+  /** Attributes a legacy spec and journals its new snapshot in the same transaction. */
+  public boolean assignMigrationProject(String id, String project) {
+    return db.transaction(
+        () -> {
+          db.execute(
+              """
+              UPDATE specs SET project = ?
+              WHERE id = ? AND (project IS NULL OR project = 'unassigned')""",
+              project,
+              id);
+          if (db.changes() == 0) {
+            return false;
+          }
+          recordRevision(id, "migration", false);
+          return true;
+        });
+  }
+
   /**
    * Records a baseline revision for every spec that has none yet. A spec written before this store
    * journaled its mutations has a row in {@code specs} but no change-log entry, so it is invisible

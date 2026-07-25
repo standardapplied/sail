@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
@@ -54,11 +55,8 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class MigrateCommand implements Runnable {
 
-  /**
-   * Every one-shot data migration tracked in {@code data_migrations}. Empty today — the early
-   * backfills have all been applied — but the framework stays so future migrations have a home.
-   */
-  public static final List<DataMigration> REGISTRY = List.of();
+  /** Every one-shot data migration tracked in {@code data_migrations}. Add new ones at the end. */
+  public static final List<DataMigration> REGISTRY = List.of(new LegacyDataMigration());
 
   @Option(
       names = "--non-interactive",

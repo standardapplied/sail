@@ -461,7 +461,99 @@ public final class SchemaManager {
           "DROP TABLE runs",
           "ALTER TABLE runs_v2 RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "UPDATE specs SET project = 'unassigned' WHERE project IS NULL",
+          """
+          CREATE TABLE specs_v4 (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
+                      'done', 'cancelled', 'archived')),
+              assignee TEXT,
+              agent TEXT,
+              model TEXT,
+              reasoning_effort TEXT
+                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN
+                      ('none', 'low', 'medium', 'high', 'xhigh')),
+              branch TEXT,
+              priority INTEGER NOT NULL DEFAULT 0,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              project TEXT NOT NULL DEFAULT 'unassigned',
+              updated_by TEXT,
+              rev TEXT,
+              base_rev TEXT
+          )""",
+          """
+          INSERT INTO specs_v4 (id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev)
+              SELECT id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev FROM specs""",
+          "DROP TABLE specs",
+          "ALTER TABLE specs_v4 RENAME TO specs",
+          "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
+          "UPDATE runs SET role = 'build' WHERE role IS NULL",
+          """
+          CREATE TABLE runs_v3 (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              exit_code INTEGER,
+              watcher_pid INTEGER,
+              node TEXT,
+              role TEXT NOT NULL DEFAULT 'build'
+                  CHECK (role IN ('build', 'review')),
+              log_path TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              unit TEXT,
+              repos TEXT
+          )""",
+          """
+          INSERT INTO runs_v3 (id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos)
+              SELECT id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos FROM runs""",
+          "DROP TABLE runs",
+          "ALTER TABLE runs_v3 RENAME TO runs",
+          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          """
+          DELETE FROM api_tokens
+          WHERE fde_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM fdes WHERE fdes.id = api_tokens.fde_id)""",
+          """
+          CREATE TABLE api_tokens_v2 (
+              token_hash TEXT PRIMARY KEY,
+              name TEXT NOT NULL UNIQUE,
+              role TEXT NOT NULL DEFAULT 'member'
+                  CHECK (role IN ('admin', 'member', 'viewer')),
+              fde_id TEXT REFERENCES fdes(id) ON DELETE CASCADE,
+              created_at TEXT NOT NULL,
+              last_used_at TEXT,
+              expires_at TEXT
+          )""",
+          """
+          INSERT INTO api_tokens_v2
+                  (token_hash, name, role, fde_id, created_at, last_used_at, expires_at)
+              SELECT token_hash, name, role, fde_id, created_at, last_used_at, expires_at
+              FROM api_tokens""",
+          "DROP TABLE api_tokens",
+          "ALTER TABLE api_tokens_v2 RENAME TO api_tokens");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The
@@ -471,6 +563,9 @@ public final class SchemaManager {
    * children's {@code ON DELETE CASCADE} and wipe spec content, repos, and dependencies.
    */
   static final int LAST_VERSION_WITH_NARROW_STATUS_CHECK = versionBefore("CREATE TABLE specs_v2");
+
+  static final int LAST_VERSION_BEFORE_V1_FLOOR =
+      versionBefore("UPDATE specs SET project = 'unassigned'");
 
   private static int versionBefore(String statementPrefix) {
     for (var i = 0; i < MIGRATIONS.size(); i++) {

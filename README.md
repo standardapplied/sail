@@ -22,6 +22,12 @@ curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.s
 `sail upgrade` replaces the binary in place and converges the database. Linux (amd64) runs
 a full host. macOS (arm64) runs as a thin client that drives a remote host over SSH.
 
+### Upgrade compatibility
+
+Version 0.14.0 is the v1 upgrade floor. Upgrade every main and node box to 0.14.0 before
+installing any later v1 release. A mixed fleet below that floor is refused before sync touches
+data, with an error naming the required version.
+
 ## The model: one main, many nodes
 
 An org runs one main box. It holds the team's specs and project definitions in a SQLite

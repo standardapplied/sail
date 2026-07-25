@@ -14,14 +14,15 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Main's side of one sync session: a stateless request loop over the SSH channel's stdio. It routes
- * each {@link SyncWire.Fetch}/{@link SyncWire.Commit} to the authoritative {@link MainReplica} for
- * its entity type (specs, files), serves the node's roster pull, and returns at {@link
- * SyncWire.Bye} or end of stream. The {@link SyncPrincipal} carries the push half of Door-2
- * authorization: a {@code viewer} opens a session and pulls every type, but its commits are refused
- * so only {@code member}+ work propagates. The principal's handle additionally binds run commits to
- * execution provenance — a session may create, update, or delete only runs stamped with its own
- * node, so no member can forge run metadata another box would treat as its own execution.
+ * Main's side of one sync session: a request loop over the SSH channel's stdio. It verifies the
+ * peer's upgrade floor before serving data, routes each {@link SyncWire.Fetch}/{@link
+ * SyncWire.Commit} to the authoritative {@link MainReplica} for its entity type (specs, files),
+ * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The {@link
+ * SyncPrincipal} carries the push half of Door-2 authorization: a {@code viewer} opens a session
+ * and pulls every type, but its commits are refused so only {@code member}+ work propagates. The
+ * principal's handle additionally binds run commits to execution provenance — a session may create,
+ * update, or delete only runs stamped with its own node, so no member can forge run metadata
+ * another box would treat as its own execution.
  */
 public final class SyncRpcServer {
 
@@ -31,6 +32,7 @@ public final class SyncRpcServer {
   private final SyncPrincipal principal;
   private final FdeRoster fdeRoster;
   private final SyncTransitionSink transitionSink;
+  private boolean upgradeFloorVerified;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
@@ -57,6 +59,7 @@ public final class SyncRpcServer {
   }
 
   public void serve(Reader in, Writer out) throws IOException {
+    upgradeFloorVerified = false;
     for (var line = SyncWire.readFramed(in); line != null; line = SyncWire.readFramed(in)) {
       var request = SyncWire.decodeRequest(line);
       if (request instanceof SyncWire.Bye) {
@@ -75,9 +78,16 @@ public final class SyncRpcServer {
   private SyncWire.Response respondTo(SyncWire.Request request) {
     try {
       return switch (request) {
-        case SyncWire.Fetch fetch -> fetched(fetch.entityType());
-        case SyncWire.FetchFdes ignored -> new SyncWire.Fdes(fdeRoster.entries());
-        case SyncWire.Commit commit -> onCommit(commit);
+        case SyncWire.Fetch fetch -> {
+          if (!SyncWire.V1_UPGRADE_FLOOR.equals(fetch.upgradeFloor())) {
+            yield incompatiblePeer();
+          }
+          upgradeFloorVerified = true;
+          yield fetched(fetch.entityType());
+        }
+        case SyncWire.FetchFdes ignored ->
+            upgradeFloorVerified ? new SyncWire.Fdes(fdeRoster.entries()) : incompatiblePeer();
+        case SyncWire.Commit commit -> upgradeFloorVerified ? onCommit(commit) : incompatiblePeer();
         case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session loop");
       };
     } catch (RuntimeException e) {
@@ -100,6 +110,13 @@ public final class SyncRpcServer {
     out.write(SyncWire.encode(response));
     out.write('\n');
     out.flush();
+  }
+
+  private static SyncWire.Failed incompatiblePeer() {
+    return new SyncWire.Failed(
+        "Sync requires Sail "
+            + SyncWire.V1_UPGRADE_FLOOR
+            + " or newer on every box. Run 'sail upgrade' on this node, then sync again.");
   }
 
   private SyncWire.Response fetched(String entityType) {

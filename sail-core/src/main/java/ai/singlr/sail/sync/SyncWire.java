@@ -35,12 +35,15 @@ public final class SyncWire {
   private static final String EXPECTED = "expectedRev";
   private static final String STALE = "stale";
   private static final String ENTITY_TYPE = "entityType";
+  private static final String UPGRADE_FLOOR = "upgradeFloor";
 
   private static final String OP_FETCH = "fetch";
   private static final String OP_COMMIT = "commit";
   private static final String OP_BYE = "bye";
   private static final String OP_FETCH_FDES = "fetch-fdes";
   private static final String FDES = "fdes";
+
+  public static final String V1_UPGRADE_FLOOR = "0.14.0";
 
   /**
    * Hard ceiling on one framed message, bounding the memory a single read can claim. A sync message
@@ -79,7 +82,11 @@ public final class SyncWire {
   /**
    * Ask main for its whole shared state of one entity type — specs, files — to reconcile against.
    */
-  public record Fetch(String entityType) implements Request {}
+  public record Fetch(String entityType, String upgradeFloor) implements Request {
+    public Fetch(String entityType) {
+      this(entityType, V1_UPGRADE_FLOOR);
+    }
+  }
 
   /** Ask main for its FDE roster, which the node mirrors (main-authoritative, one-way). */
   public record FetchFdes() implements Request {}
@@ -104,8 +111,13 @@ public final class SyncWire {
   public record Snapshot(String rev, Map<String, Object> snapshot) {}
 
   /** Main's answer to {@link Fetch}: its identity, high-water sequence, and every shared entity. */
-  public record Fetched(String mainId, long maxSeq, Map<String, Snapshot> entities)
-      implements Response {}
+  public record Fetched(
+      String mainId, long maxSeq, Map<String, Snapshot> entities, String upgradeFloor)
+      implements Response {
+    public Fetched(String mainId, long maxSeq, Map<String, Snapshot> entities) {
+      this(mainId, maxSeq, entities, V1_UPGRADE_FLOOR);
+    }
+  }
 
   /** Main accepted a {@link Commit}: the minted rev and main's new high-water sequence. */
   public record Committed(String rev, long maxSeq) implements Response {}
@@ -123,6 +135,7 @@ public final class SyncWire {
       case Fetch fetch -> {
         map.put(OP, OP_FETCH);
         map.put(ENTITY_TYPE, fetch.entityType());
+        map.put(UPGRADE_FLOOR, fetch.upgradeFloor());
       }
       case Commit commit -> {
         map.put(OP, OP_COMMIT);
@@ -143,6 +156,7 @@ public final class SyncWire {
       case Fetched fetched -> {
         map.put(ID, fetched.mainId());
         map.put(MAX_SEQ, fetched.maxSeq());
+        map.put(UPGRADE_FLOOR, fetched.upgradeFloor());
         var entities = new LinkedHashMap<String, Object>();
         fetched
             .entities()
@@ -174,7 +188,7 @@ public final class SyncWire {
     var map = YamlUtil.parseMap(line);
     var op = string(map, OP);
     return switch (op) {
-      case OP_FETCH -> new Fetch(string(map, ENTITY_TYPE));
+      case OP_FETCH -> new Fetch(string(map, ENTITY_TYPE), string(map, UPGRADE_FLOOR));
       case OP_COMMIT ->
           new Commit(
               string(map, ENTITY_TYPE),
@@ -199,7 +213,8 @@ public final class SyncWire {
       return new Fdes(fdeList(map));
     }
     if (map.containsKey(ENTITIES)) {
-      return new Fetched(string(map, ID), longValue(map, MAX_SEQ), entities(map));
+      return new Fetched(
+          string(map, ID), longValue(map, MAX_SEQ), entities(map), string(map, UPGRADE_FLOOR));
     }
     if (map.containsKey(REV)) {
       return new Committed(string(map, REV), longValue(map, MAX_SEQ));

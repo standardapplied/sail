@@ -57,9 +57,20 @@ class SyncRpcServerTest {
   private static SyncWire.Response serve(boolean writable, SyncWire.Request request)
       throws Exception {
     var out = new StringWriter();
-    new SyncRpcServer(new FakeMain(), writable)
-        .serve(new StringReader(SyncWire.encode(request) + "\n"), out);
-    return SyncWire.decodeResponse(out.toString().strip());
+    var input =
+        request instanceof SyncWire.Fetch
+            ? SyncWire.encode(request) + "\n"
+            : verifiedRequest("spec", request);
+    new SyncRpcServer(new FakeMain(), writable).serve(new StringReader(input), out);
+    return lastResponse(out);
+  }
+
+  private static String verifiedRequest(String entityType, SyncWire.Request request) {
+    return SyncWire.encode(new SyncWire.Fetch(entityType)) + "\n" + SyncWire.encode(request) + "\n";
+  }
+
+  private static SyncWire.Response lastResponse(StringWriter out) {
+    return SyncWire.decodeResponse(out.toString().lines().toList().getLast());
   }
 
   @Test
@@ -73,9 +84,32 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aPreFloorNodeIsRefusedBeforeMainServesData() throws Exception {
+    var failure =
+        assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("spec", null)));
+
+    assertTrue(failure.message().contains("0.14.0"));
+    assertTrue(failure.message().contains("sail upgrade"));
+  }
+
+  @Test
   void aWritableServerAcceptsACommit() throws Exception {
     var response = serve(true, new SyncWire.Commit("spec", "a", Map.of(), null));
     assertEquals("1-x", assertInstanceOf(SyncWire.Committed.class, response).rev());
+  }
+
+  @Test
+  void aCommitBeforeTheUpgradeFloorHandshakeIsRefused() throws Exception {
+    var response = new StringWriter();
+
+    new SyncRpcServer(new FakeMain(), true)
+        .serve(
+            new StringReader(
+                SyncWire.encode(new SyncWire.Commit("spec", "a", Map.of(), null)) + "\n"),
+            response);
+
+    var failure = assertInstanceOf(SyncWire.Failed.class, lastResponse(response));
+    assertTrue(failure.message().contains("0.14.0"));
   }
 
   @Test
@@ -93,7 +127,7 @@ class SyncRpcServerTest {
     new SyncRpcServer(Map.of("spec", capturing), new SyncPrincipal("sumesh", true), FdeRoster.EMPTY)
         .serve(
             new StringReader(
-                SyncWire.encode(new SyncWire.Commit("spec", "a", Map.of(), null)) + "\n"),
+                verifiedRequest("spec", new SyncWire.Commit("spec", "a", Map.of(), null))),
             out);
 
     assertEquals(
@@ -128,8 +162,8 @@ class SyncRpcServerTest {
         };
     var out = new StringWriter();
     new SyncRpcServer(Map.of("run", main), new SyncPrincipal(handle, true), FdeRoster.EMPTY)
-        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
-    return SyncWire.decodeResponse(out.toString().strip());
+        .serve(new StringReader(verifiedRequest("run", commit)), out);
+    return lastResponse(out);
   }
 
   @Test
@@ -221,9 +255,9 @@ class SyncRpcServerTest {
 
     new SyncRpcServer(
             Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
-        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+        .serve(new StringReader(verifiedRequest("spec", commit)), out);
 
-    assertInstanceOf(SyncWire.Committed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertInstanceOf(SyncWire.Committed.class, lastResponse(out));
     assertEquals(1, seen.size());
     assertEquals("in_progress", seen.getFirst().to());
   }
@@ -244,9 +278,9 @@ class SyncRpcServerTest {
 
     new SyncRpcServer(
             Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
-        .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+        .serve(new StringReader(verifiedRequest("spec", commit)), out);
 
-    assertInstanceOf(SyncWire.Rejected.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertInstanceOf(SyncWire.Rejected.class, lastResponse(out));
     assertTrue(seen.isEmpty());
   }
 
@@ -281,12 +315,12 @@ class SyncRpcServerTest {
               transition -> {
                 throw new IllegalStateException("slack is down");
               })
-          .serve(new StringReader(SyncWire.encode(commit) + "\n"), out);
+          .serve(new StringReader(verifiedRequest("spec", commit)), out);
     } finally {
       System.setErr(originalErr);
     }
 
-    assertInstanceOf(SyncWire.Committed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertInstanceOf(SyncWire.Committed.class, lastResponse(out));
     assertTrue(captured.toString(StandardCharsets.UTF_8).contains("slack is down"));
   }
 
@@ -295,15 +329,25 @@ class SyncRpcServerTest {
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
     var out = new StringWriter();
     new SyncRpcServer(new FakeMain(), false, () -> roster)
-        .serve(new StringReader(SyncWire.encode(new SyncWire.FetchFdes()) + "\n"), out);
+        .serve(new StringReader(verifiedRequest("spec", new SyncWire.FetchFdes())), out);
 
-    var response = (SyncWire.Fdes) SyncWire.decodeResponse(out.toString().strip());
+    var response = (SyncWire.Fdes) lastResponse(out);
     assertEquals("ada", response.fdes().getFirst().get("handle"));
   }
 
   @Test
   void fetchFdesDefaultsToAnEmptyRoster() throws Exception {
     assertInstanceOf(SyncWire.Fdes.class, serve(true, new SyncWire.FetchFdes()));
+  }
+
+  @Test
+  void fetchFdesBeforeTheUpgradeFloorHandshakeIsRefused() throws Exception {
+    var out = new StringWriter();
+
+    new SyncRpcServer(new FakeMain(), true)
+        .serve(new StringReader(SyncWire.encode(new SyncWire.FetchFdes()) + "\n"), out);
+
+    assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
   }
 
   @Test
@@ -330,9 +374,10 @@ class SyncRpcServerTest {
     var out = new StringWriter();
     var request = new SyncWire.Commit("spec", "a", Map.of(), null);
 
-    new SyncRpcServer(throwing, true).serve(new StringReader(SyncWire.encode(request) + "\n"), out);
+    new SyncRpcServer(throwing, true)
+        .serve(new StringReader(verifiedRequest("spec", request)), out);
 
-    assertInstanceOf(SyncWire.Failed.class, SyncWire.decodeResponse(out.toString().strip()));
+    assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
   }
 
   @Test
@@ -366,10 +411,10 @@ class SyncRpcServerTest {
     var out = new StringWriter();
     var request = new SyncWire.Commit("spec", "a", Map.of(), null);
 
-    new SyncRpcServer(throwing, true).serve(new StringReader(SyncWire.encode(request) + "\n"), out);
+    new SyncRpcServer(throwing, true)
+        .serve(new StringReader(verifiedRequest("spec", request)), out);
 
-    var failed =
-        assertInstanceOf(SyncWire.Failed.class, SyncWire.decodeResponse(out.toString().strip()));
+    var failed = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
     assertTrue(
         failed.message().contains("database is locked"),
         "the actionable root cause must surface, not the wrapper: " + failed.message());
@@ -391,7 +436,7 @@ class SyncRpcServerTest {
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
     try {
       new SyncRpcServer(throwing, true)
-          .serve(new StringReader(SyncWire.encode(request) + "\n"), new StringWriter());
+          .serve(new StringReader(verifiedRequest("spec", request)), new StringWriter());
     } finally {
       System.setErr(originalErr);
     }
