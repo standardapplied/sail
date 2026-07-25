@@ -6,7 +6,9 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -70,6 +72,7 @@ class LegacyDataMigrationTest {
             row -> row.text(0)));
 
     assertRoleConstraint();
+    assertProjectConstraint();
     db.execute("DELETE FROM fdes WHERE id = 'fde-1'");
     assertEquals(
         0L,
@@ -134,7 +137,9 @@ class LegacyDataMigrationTest {
     assertEquals(
         1L,
         db.queryOne(
-                "SELECT COUNT(*) FROM specs WHERE id = 'orphan' AND project IS NULL",
+                """
+                SELECT COUNT(*) FROM specs
+                WHERE id = 'orphan' AND project = 'unassigned'""",
                 row -> row.integer(0))
             .orElseThrow());
 
@@ -151,6 +156,29 @@ class LegacyDataMigrationTest {
                 row -> row.integer(0),
                 LegacyDataMigration.NAME)
             .orElseThrow());
+  }
+
+  @Test
+  void attributingAnAlreadyJournaledSpecMintsARevisionForTheNewSnapshot() throws Exception {
+    db.execute(
+        """
+        INSERT INTO specs (id, title, status, created_at, updated_at, project)
+        VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
+    var legacyStore = new SpecStore(db);
+    assertEquals(1, legacyStore.backfillRevisions());
+    var legacyRev = legacyStore.latestRev("shared");
+    assertNull(legacyStore.comparableAtRev("shared", legacyRev).get("project"));
+
+    migrate(projectRegistry("acme"));
+
+    var migratedStore = new SpecStore(db);
+    var migratedRev = migratedStore.latestRev("shared");
+    assertNotEquals(legacyRev, migratedRev);
+    assertEquals("acme", migratedStore.comparableAtRev("shared", migratedRev).get("project"));
+    assertNull(migratedStore.comparableAtRev("shared", legacyRev).get("project"));
+    assertEquals(
+        List.of("local", "migration"),
+        new ChangeLog(db).history("spec", "shared").stream().map(ChangeLog.Entry::origin).toList());
   }
 
   @Test
@@ -232,6 +260,18 @@ class LegacyDataMigrationTest {
                 """
                 INSERT INTO runs (id, project, agent, status, started_at, role)
                 VALUES ('bad-role', 'acme', 'codex', 'running', '2026-01-01', 'other')"""));
+  }
+
+  private void assertProjectConstraint() {
+    var notNull =
+        db.queryOne(
+                "SELECT \"notnull\" FROM pragma_table_info('specs') WHERE name = 'project'",
+                row -> row.integer(0))
+            .orElseThrow();
+    assertEquals(1L, notNull);
+    assertThrows(
+        SqliteException.class,
+        () -> db.execute("UPDATE specs SET project = NULL WHERE id = 'legacy-spec'"));
   }
 
   private long changeLogCount() {

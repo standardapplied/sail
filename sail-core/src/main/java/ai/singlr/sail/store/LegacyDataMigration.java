@@ -35,7 +35,7 @@ public final class LegacyDataMigration implements DataMigration {
   @Override
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
     var attributed = attributeSpecs(db, projects);
-    var unresolved = nullProjectIds(db);
+    var unresolved = legacyProjectIds(db);
     if (!unresolved.isEmpty()) {
       throw new IllegalStateException(
           "Cannot complete the 0.14.0 migration until these specs have projects: "
@@ -93,16 +93,13 @@ public final class LegacyDataMigration implements DataMigration {
 
   private static int attributeSpecs(Sqlite db, ProjectRegistry projects) {
     var applied = 0;
-    for (var id : nullProjectIds(db)) {
+    var specs = new SpecStore(db);
+    for (var id : legacyProjectIds(db)) {
       var candidates = projectCandidates(db, id, projects);
       if (candidates.size() != 1) {
         continue;
       }
-      db.execute(
-          "UPDATE specs SET project = ? WHERE id = ? AND project IS NULL",
-          candidates.getFirst(),
-          id);
-      applied += db.changes();
+      applied += specs.assignMigrationProject(id, candidates.getFirst()) ? 1 : 0;
     }
     return applied;
   }
@@ -125,8 +122,10 @@ public final class LegacyDataMigration implements DataMigration {
     return List.copyOf(matches);
   }
 
-  private static List<String> nullProjectIds(Sqlite db) {
-    return db.query("SELECT id FROM specs WHERE project IS NULL ORDER BY id", row -> row.text(0));
+  private static List<String> legacyProjectIds(Sqlite db) {
+    return db.query(
+        "SELECT id FROM specs WHERE project IS NULL OR project = 'unassigned' ORDER BY id",
+        row -> row.text(0));
   }
 
   private static String basename(String path) {

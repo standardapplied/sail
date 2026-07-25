@@ -462,6 +462,40 @@ public final class SchemaManager {
           "ALTER TABLE runs_v2 RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
           "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "UPDATE specs SET project = 'unassigned' WHERE project IS NULL",
+          """
+          CREATE TABLE specs_v4 (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
+                      'done', 'cancelled', 'archived')),
+              assignee TEXT,
+              agent TEXT,
+              model TEXT,
+              reasoning_effort TEXT
+                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN
+                      ('none', 'low', 'medium', 'high', 'xhigh')),
+              branch TEXT,
+              priority INTEGER NOT NULL DEFAULT 0,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              project TEXT NOT NULL DEFAULT 'unassigned',
+              updated_by TEXT,
+              rev TEXT,
+              base_rev TEXT
+          )""",
+          """
+          INSERT INTO specs_v4 (id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev)
+              SELECT id, title, status, assignee, agent, model, reasoning_effort,
+                  branch, priority, created_by, created_at, updated_at, project, updated_by,
+                  rev, base_rev FROM specs""",
+          "DROP TABLE specs",
+          "ALTER TABLE specs_v4 RENAME TO specs",
+          "CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project)",
           "UPDATE runs SET role = 'build' WHERE role IS NULL",
           """
           CREATE TABLE runs_v3 (
@@ -530,7 +564,8 @@ public final class SchemaManager {
    */
   static final int LAST_VERSION_WITH_NARROW_STATUS_CHECK = versionBefore("CREATE TABLE specs_v2");
 
-  static final int LAST_VERSION_BEFORE_V1_FLOOR = versionBefore("UPDATE runs SET role");
+  static final int LAST_VERSION_BEFORE_V1_FLOOR =
+      versionBefore("UPDATE specs SET project = 'unassigned'");
 
   private static int versionBefore(String statementPrefix) {
     for (var i = 0; i < MIGRATIONS.size(); i++) {
