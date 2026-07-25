@@ -276,7 +276,8 @@ public final class DispatchOperations {
         agentType,
         branch,
         task,
-        unit);
+        unit,
+        background);
     try {
       var prepared =
           claimAndPrepare(
@@ -763,9 +764,9 @@ public final class DispatchOperations {
    * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
    * boxes that keep no run aggregate, which have nothing to reserve against.
    *
-   * <p>The unit is the run-scoped file/process identity even for a foreground dispatch, whose plain
-   * child process has no systemd service. The foreground run completes when its blocking launcher
-   * returns.
+   * <p>A foreground dispatch records a blank unit: it runs as a plain child process and creates no
+   * systemd unit, so the missed-stop reconciler must skip it rather than falsely stop the
+   * still-running agent. The foreground run completes when its blocking launcher returns.
    */
   private void reserveRun(
       String runId,
@@ -776,10 +777,12 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      boolean background) {
     if (runStore == null) {
       return;
     }
+    var recordedUnit = background ? unit.unitName() : "";
     Optional<DispatchGate.Conflict> conflict;
     try {
       conflict =
@@ -793,7 +796,7 @@ public final class DispatchOperations {
               branch,
               task,
               unit.logPath(),
-              unit.unitName());
+              recordedUnit);
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }

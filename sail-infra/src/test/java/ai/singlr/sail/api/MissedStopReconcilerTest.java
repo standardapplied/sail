@@ -763,6 +763,20 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aRunningForegroundSessionPastGraceIsNeverProbedOrStopped() {
+    createInProgressSpec("auth");
+    var runId = runningSession("auth");
+    db.execute("UPDATE runs SET unit = '' WHERE id = ?", runId);
+    var probe = new CountingProbe(false);
+
+    var replayed = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(0, replayed);
+    assertEquals(0, probe.calls.get());
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
   void synthesizesAStopWithoutExitCodeWhenTheUnitDiedUnobserved() throws Exception {
     createInProgressSpec("auth");
     runningSession("auth");

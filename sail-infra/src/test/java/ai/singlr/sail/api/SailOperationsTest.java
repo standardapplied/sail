@@ -1392,7 +1392,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void aForegroundRunRecordsItsRunScopedIdentity() throws Exception {
+  void aForegroundRunRemainsUnprobeableWhileItsLauncherOwnsCompletion() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var shell =
         shell()
@@ -1412,7 +1412,7 @@ class SailOperationsTest {
     dispatch(operations, "acme", request("auth", "foreground", false));
 
     var recorded = runs.get().listForProject("acme").getFirst();
-    assertEquals("sail-agent-" + recorded.id(), recorded.unit());
+    assertEquals("", recorded.unit());
   }
 
   @Test

@@ -16,8 +16,8 @@ import java.util.Objects;
  *
  * <p>Dispatched Claude Code agents stream newline-delimited JSON events ({@code --output-format
  * stream-json}); this renderer detects such a line and collapses it to readable output — assistant
- * text, a one-line tool-call summary, a tool-result status, or the final result. Codex's plain-text
- * transcript passes through untouched.
+ * text, a one-line tool-call summary, a tool-result status, or the final result. Unrecognized
+ * lines, including JSON-shaped Codex transcript output, pass through untouched.
  */
 public final class AgentLogRenderer {
 
@@ -46,14 +46,14 @@ public final class AgentLogRenderer {
       return line;
     }
     if (!(event.get("type") instanceof String type)) {
-      return "";
+      return line;
     }
     return switch (type) {
       case "assistant" -> renderAssistant(event);
       case "user" -> renderUser(event);
       case "result" -> renderResult(event);
       case "system" -> "";
-      default -> "";
+      default -> line;
     };
   }
 

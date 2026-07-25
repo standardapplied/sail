@@ -5,17 +5,19 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 
 /**
- * The only database handle a sync path may run on: constructing one converges the schema, so a sync
- * that skips convergence is unrepresentable. Exists because of the in-sync self-update incident
- * where a freshly-replaced binary kept syncing against the previous release's schema and aborted on
- * a stale CHECK constraint — both sync entry points (the node's local-replica open and main's
- * RPC-serving open) go through {@link #converge}. Migration is idempotent and cheap when the schema
- * is already current, so converging unconditionally is safe.
+ * The only database handle a sync path may run on: constructing one converges the schema and
+ * verifies the v1 data floor, so a sync that skips either requirement is unrepresentable. Exists
+ * because of the in-sync self-update incident where a freshly-replaced binary kept syncing against
+ * the previous release's schema and aborted on a stale CHECK constraint — both sync entry points
+ * (the node's local-replica open and main's RPC-serving open) go through {@link #converge}. Schema
+ * migration is idempotent and cheap when already current; data migration remains the explicit
+ * responsibility of {@code sail migrate}.
  */
 public final class SyncDatabase implements AutoCloseable {
 
@@ -26,10 +28,8 @@ public final class SyncDatabase implements AutoCloseable {
   }
 
   /**
-   * Opens the database at {@code dbPath} and converges its schema before returning. A convergence
-   * failure closes the handle and aborts with a message naming {@code box} — the box whose binary
-   * and schema disagree — so the operator knows where to run {@code sail upgrade}. No sync data has
-   * been touched at that point.
+   * Opens the database at {@code dbPath}, converges its schema, and verifies the required data
+   * migration marker before returning. A failure closes the handle before any sync data is touched.
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
@@ -46,6 +46,17 @@ public final class SyncDatabase implements AutoCloseable {
               + box
               + "', then sync again.",
           e);
+    }
+    if (db.queryOne(
+            "SELECT 1 FROM data_migrations WHERE name = ?",
+            row -> row.integer(0),
+            LegacyDataMigration.NAME)
+        .isEmpty()) {
+      db.close();
+      throw new IllegalStateException(
+          "Required data migration "
+              + LegacyDataMigration.NAME
+              + " has not completed; run 'sail migrate' before syncing.");
     }
     return new SyncDatabase(db);
   }

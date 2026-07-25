@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -43,11 +44,13 @@ import java.util.function.Supplier;
  * session replays the stop with its recorded exit code — after probing its recorded unit, because
  * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
  * the replay). A running session past the launch grace period whose recorded run identity is
- * inactive or absent gets a synthesized stop. The synthesized stop carries <em>no exit code</em>:
- * the transient unit is garbage-collected on exit, so the real code is unrecoverable, and the
- * replay path makes the same choice for a terminal session that never recorded one — the pipeline
- * treats the absent code as not-a-failure and lets review judge the work. Every replayed stop
- * carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
+ * inactive or absent gets a synthesized stop. A running session with no recorded unit is skipped
+ * because foreground launchers own their blocking process's completion. The synthesized stop
+ * carries <em>no exit code</em>: the transient unit is garbage-collected on exit, so the real code
+ * is unrecoverable, and the replay path makes the same choice for a terminal session that never
+ * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
+ * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
+ * reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -387,7 +390,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (unitStillActive(spec, session)) {
+        if (Strings.isBlank(session.unit()) || unitStillActive(spec, session)) {
           yield false;
         }
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
@@ -403,14 +406,15 @@ public final class MissedStopReconciler implements AutoCloseable {
    * backstop, but a turn-end is not a process exit: in the field a gate-allowed mid-run stop marked
    * the row terminal while the agent kept working, and the next sweep replayed the "finished" run —
    * the review then judged half-done work and the fix agent raced the live agent in one clone. An
-   * active identity means the run's own watcher or blocking launcher owns the real stop and the
-   * sweep must wait. A probe failure propagates to the per-spec catch — logged, skipped, retried
-   * next sweep — so the sweep never forges a stop on data it cannot interpret.
+   * active identity means the run's own watcher owns the real stop and the sweep must wait. A row
+   * with no recorded unit cannot be probed and keeps the replay behavior for terminal rows. A probe
+   * failure propagates to the per-spec catch — logged, skipped, retried next sweep — so the sweep
+   * never forges a stop on data it cannot interpret.
    */
   private boolean unitStillActive(SpecStore.SpecRow spec, RunStore.RunRow session)
       throws Exception {
-    var unit = StopOperations.runUnit(session).unitName();
-    return unitProbe.active(spec.project(), session.id(), unit);
+    return !Strings.isBlank(session.unit())
+        && unitProbe.active(spec.project(), session.id(), session.unit());
   }
 
   /**

@@ -33,8 +33,24 @@ class SyncSchemaConvergenceTest {
     var path = tempDir.resolve(name + ".db");
     try (var db = Sqlite.open(path)) {
       new SchemaManager(db).migrateTo(SchemaManager.LAST_VERSION_WITH_NARROW_STATUS_CHECK);
+      markMigrationCompleted(db);
     }
     return path;
+  }
+
+  private Path currentDatabase(String name) {
+    var path = tempDir.resolve(name + ".db");
+    try (var db = Sqlite.open(path)) {
+      new SchemaManager(db).migrate();
+      markMigrationCompleted(db);
+    }
+    return path;
+  }
+
+  private static void markMigrationCompleted(Sqlite db) {
+    db.execute(
+        "INSERT INTO data_migrations (name, applied_at) VALUES (?, 'test')",
+        LegacyDataMigration.NAME);
   }
 
   private static SpecReplica replica(String id, Sqlite db) {
@@ -78,7 +94,7 @@ class SyncSchemaConvergenceTest {
   @Test
   void aPulledAwaitingMergeRevisionAppliesBecauseTheReplicaOpenConvergedFirst() {
     var nodePath = stagedAtNarrowStatusCheck("node");
-    try (var main = SyncDatabase.converge(tempDir.resolve("main.db"), "main");
+    try (var main = SyncDatabase.converge(currentDatabase("main"), "main");
         var node = SyncDatabase.converge(nodePath, "node")) {
       new SpecStore(main.db()).create(spec("auth", "Auth", "awaiting_merge"));
 
@@ -96,7 +112,7 @@ class SyncSchemaConvergenceTest {
   void mainAcceptsAPushedAwaitingMergeCommitBecauseTheServingOpenConvergedFirst() {
     var mainPath = stagedAtNarrowStatusCheck("main");
     try (var main = SyncDatabase.converge(mainPath, "main");
-        var node = SyncDatabase.converge(tempDir.resolve("node.db"), "node")) {
+        var node = SyncDatabase.converge(currentDatabase("node"), "node")) {
       new SpecStore(node.db()).create(spec("auth", "Auth", "awaiting_merge"));
 
       var report =
@@ -124,8 +140,39 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
+  void convergenceRefusesToSyncUntilTheUpgradeFloorMigrationCompleted() {
+    var path = tempDir.resolve("pre-floor.db");
+    try (var db = Sqlite.open(path)) {
+      new SchemaManager(db).migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
+      db.execute(
+          """
+          INSERT INTO runs (id, project, role, agent, status, started_at, unit)
+          VALUES ('legacy-run', 'proj', 'build', 'codex', 'running', 'test', '')""");
+    }
+
+    var failure =
+        assertThrows(IllegalStateException.class, () -> SyncDatabase.converge(path, "box"));
+
+    assertTrue(failure.getMessage().contains(LegacyDataMigration.NAME));
+    assertTrue(failure.getMessage().contains("sail migrate"));
+    try (var db = Sqlite.open(path)) {
+      assertEquals(
+          0L,
+          db.queryOne(
+                  "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                  row -> row.integer(0),
+                  LegacyDataMigration.NAME)
+              .orElseThrow());
+      assertEquals(
+          "running",
+          db.queryOne("SELECT status FROM runs WHERE id = 'legacy-run'", row -> row.text(0))
+              .orElseThrow());
+    }
+  }
+
+  @Test
   void convergeIsIdempotentOnACurrentDatabase() {
-    var path = tempDir.resolve("current.db");
+    var path = currentDatabase("current");
     int versionAfterFirst;
     try (var first = SyncDatabase.converge(path, "box")) {
       versionAfterFirst = new SchemaManager(first.db()).currentVersion();

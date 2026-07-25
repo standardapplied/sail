@@ -78,11 +78,14 @@ class AgentLogRendererTest {
   }
 
   @Test
-  void dropsStructuredLinesOutsideTheCurrentStreamFormat() {
+  void passesStructuredLinesOutsideTheCurrentStreamFormatThrough() {
     var line = "key: a human readable colon line";
+    var plainJson = "{\"status\":\"ok\"}";
+    var unknownEvent = "{\"type\":\"future_event\",\"message\":\"still useful\"}";
 
     assertEquals(line, AgentLogRenderer.render(line));
-    assertEquals("", AgentLogRenderer.render("{\"message\":\"old log shape\"}"));
+    assertEquals(plainJson, AgentLogRenderer.render(plainJson));
+    assertEquals(unknownEvent, AgentLogRenderer.render(unknownEvent));
   }
 
   @Test
