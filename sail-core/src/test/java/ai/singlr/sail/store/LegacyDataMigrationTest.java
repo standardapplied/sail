@@ -78,7 +78,7 @@ class LegacyDataMigrationTest {
                 row -> row.integer(0))
             .orElseThrow());
     assertEquals(
-        1L,
+        0L,
         db.queryOne(
                 """
                 SELECT COUNT(*) FROM api_tokens
@@ -96,23 +96,60 @@ class LegacyDataMigrationTest {
   }
 
   @Test
-  void ambiguousProjectlessSpecsAreNamedAndLeftUntouched() throws Exception {
+  void currentForegroundBuildRetainsItsRepositoryReservation() throws Exception {
+    db.execute(
+        """
+        INSERT INTO runs
+            (id, project, agent, status, started_at, node, role, unit, repos)
+        VALUES
+            ('foreground', 'acme', 'codex', 'running', '2026-01-01',
+                'node-a', 'build', '', '["repo"]')""");
+
+    migrate(projectRegistry("acme"));
+
+    var foreground = new RunStore(db).findById("foreground").orElseThrow();
+    assertEquals("running", foreground.status());
+    assertEquals(List.of("repo"), foreground.repos());
+  }
+
+  @Test
+  void unresolvedProjectlessSpecsAbortBeforeJournalingAndCanBeRetried() throws Exception {
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
         VALUES ('orphan', 'Orphan', 'pending', '2026-01-01', '2026-01-01', NULL)""");
     var projects = projectRegistry("acme", "beta");
 
-    var run = migrate(projects).getFirst();
+    var failure = assertThrows(IllegalStateException.class, () -> migrate(projects));
 
-    assertEquals(1, run.report().ambiguous());
-    assertTrue(run.report().notes().getFirst().contains("1 spec(s)"));
-    assertTrue(run.report().notes().getFirst().contains("orphan"));
+    assertTrue(failure.getMessage().contains("orphan"));
+    assertEquals(0L, changeLogCount());
+    assertEquals(
+        0L,
+        db.queryOne(
+                "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                row -> row.integer(0),
+                LegacyDataMigration.NAME)
+            .orElseThrow());
     assertEquals(
         1L,
         db.queryOne(
                 "SELECT COUNT(*) FROM specs WHERE id = 'orphan' AND project IS NULL",
                 row -> row.integer(0))
+            .orElseThrow());
+
+    db.execute("UPDATE specs SET project = 'acme' WHERE id = 'orphan'");
+
+    var retry = migrate(projects).getFirst();
+
+    assertEquals(1, retry.report().applied());
+    assertEquals(List.of("orphan"), new SpecStore(db).syncEntityIds().stream().sorted().toList());
+    assertEquals(
+        1L,
+        db.queryOne(
+                "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                row -> row.integer(0),
+                LegacyDataMigration.NAME)
             .orElseThrow());
   }
 

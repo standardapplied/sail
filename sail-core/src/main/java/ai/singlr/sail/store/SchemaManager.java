@@ -499,7 +499,7 @@ public final class SchemaManager {
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
           "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
           """
-          UPDATE api_tokens SET fde_id = NULL
+          DELETE FROM api_tokens
           WHERE fde_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM fdes WHERE fdes.id = api_tokens.fde_id)""",
           """

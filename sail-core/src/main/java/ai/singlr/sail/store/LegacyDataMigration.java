@@ -8,7 +8,6 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.engine.NodeIdentity;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Supplier;
@@ -35,8 +34,13 @@ public final class LegacyDataMigration implements DataMigration {
 
   @Override
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
-    var notes = new ArrayList<String>();
-    var attributed = attributeSpecs(db, projects, notes);
+    var attributed = attributeSpecs(db, projects);
+    var unresolved = nullProjectIds(db);
+    if (!unresolved.isEmpty()) {
+      throw new IllegalStateException(
+          "Cannot complete the 0.14.0 migration until these specs have projects: "
+              + String.join(", ", unresolved));
+    }
     var runs = new RunStore(db);
     var stamped = stampRuns(db, runs);
     var terminalized = terminalizeLegacyBuilds(db, runs);
@@ -45,9 +49,7 @@ public final class LegacyDataMigration implements DataMigration {
             + new SpecStore(db).backfillRevisions()
             + new ProjectStore(db).backfillRevisions()
             + new ReviewStore(db).backfillRevisions();
-    var ambiguous = nullProjectIds(db).size();
-    return new Report(
-        attributed + stamped + terminalized + journaled, ambiguous, 0, List.copyOf(notes));
+    return new Report(attributed + stamped + terminalized + journaled, 0, 0, List.of());
   }
 
   private int stampRuns(Sqlite db, RunStore runs) {
@@ -76,6 +78,7 @@ public final class LegacyDataMigration implements DataMigration {
             """
             SELECT id, status FROM runs
             WHERE role = 'build' AND COALESCE(unit, '') = ''
+                AND repos IS NULL
                 AND status IN ('running', 'stopping')
             ORDER BY id""",
             row -> new LegacyRun(row.text(0), row.text(1)));
@@ -88,7 +91,7 @@ public final class LegacyDataMigration implements DataMigration {
     return changed;
   }
 
-  private static int attributeSpecs(Sqlite db, ProjectRegistry projects, List<String> notes) {
+  private static int attributeSpecs(Sqlite db, ProjectRegistry projects) {
     var applied = 0;
     for (var id : nullProjectIds(db)) {
       var candidates = projectCandidates(db, id, projects);
@@ -100,15 +103,6 @@ public final class LegacyDataMigration implements DataMigration {
           candidates.getFirst(),
           id);
       applied += db.changes();
-    }
-    var unresolved = nullProjectIds(db);
-    if (!unresolved.isEmpty()) {
-      notes.add(
-          "  ! "
-              + unresolved.size()
-              + " spec(s) still have no project: "
-              + String.join(", ", unresolved)
-              + ". Assign each explicitly with 'sail spec edit <id> --project <name>'.");
     }
     return applied;
   }
