@@ -396,7 +396,10 @@ public final class UpgradeCommand implements Runnable {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
       try (var db = Sqlite.open(dbPath)) {
-        new SchemaManager(db).migrate();
+        var schema = new SchemaManager(db);
+        if (schema.currentVersion() == 0) {
+          schema.migrate();
+        }
         var tokenStore = new TokenStore(db);
         if (tokenStore.list().isEmpty()) {
           var created = tokenStore.create("admin", "admin");

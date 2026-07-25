@@ -198,7 +198,7 @@ class LegacyDataMigrationTest {
           """
           INSERT INTO specs (id, title, status, created_at, updated_at, project)
           VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
-      new SchemaManager(other).migrate();
+      new SchemaManager(other).migrateAll();
       new DataMigrator(other, List.of(new LegacyDataMigration(() -> "node-b")))
           .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
 
@@ -207,7 +207,7 @@ class LegacyDataMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate(ProjectRegistry projects) {
-    new SchemaManager(db).migrate();
+    new SchemaManager(db).migrateAll();
     return new DataMigrator(db, List.of(new LegacyDataMigration(() -> "node-a")))
         .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
   }

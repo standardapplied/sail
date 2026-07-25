@@ -5,10 +5,13 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * The only database handle a sync path may run on: constructing one converges the schema and
@@ -16,8 +19,8 @@ import java.nio.file.Path;
  * because of the in-sync self-update incident where a freshly-replaced binary kept syncing against
  * the previous release's schema and aborted on a stale CHECK constraint — both sync entry points
  * (the node's local-replica open and main's RPC-serving open) go through {@link #converge}. Schema
- * migration is idempotent and cheap when already current; data migration remains the explicit
- * responsibility of {@code sail migrate}.
+ * migration is idempotent and cheap when already current; data migration on a pre-existing database
+ * remains the explicit responsibility of {@code sail migrate}.
  */
 public final class SyncDatabase implements AutoCloseable {
 
@@ -28,13 +31,30 @@ public final class SyncDatabase implements AutoCloseable {
   }
 
   /**
-   * Opens the database at {@code dbPath}, converges its schema, and verifies the required data
-   * migration marker before returning. A failure closes the handle before any sync data is touched.
+   * Opens the database at {@code dbPath}, converges its schema, and guarantees the v1 data floor
+   * before returning. A failure closes the handle before any sync data is touched.
+   *
+   * <p>{@link SchemaManager#migrate} refuses an unrepaired pre-floor database with the 'sail
+   * migrate' remedy — that refusal passes through untouched. A database that converges cleanly but
+   * has no floor marker was necessarily born at or above the floor (the guard forbids any other
+   * crossing), so every data migration is vacuous on it and runs here only to stamp the markers —
+   * keeping a fresh or auxiliary-created box's first sync frictionless.
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
       new SchemaManager(db).migrate();
+      if (db.queryOne(
+              "SELECT 1 FROM data_migrations WHERE name = ?",
+              row -> row.integer(0),
+              LegacyDataMigration.NAME)
+          .isEmpty()) {
+        MigrationRunner.applyAll(
+            db, List.of(new LegacyDataMigration()), DataMigration.Prompter.NON_INTERACTIVE);
+      }
+    } catch (SchemaManager.PreFloorException e) {
+      db.close();
+      throw e;
     } catch (RuntimeException e) {
       db.close();
       throw new IllegalStateException(
@@ -46,17 +66,6 @@ public final class SyncDatabase implements AutoCloseable {
               + box
               + "', then sync again.",
           e);
-    }
-    if (db.queryOne(
-            "SELECT 1 FROM data_migrations WHERE name = ?",
-            row -> row.integer(0),
-            LegacyDataMigration.NAME)
-        .isEmpty()) {
-      db.close();
-      throw new IllegalStateException(
-          "Required data migration "
-              + LegacyDataMigration.NAME
-              + " has not completed; run 'sail migrate' before syncing.");
     }
     return new SyncDatabase(db);
   }

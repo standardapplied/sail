@@ -582,8 +582,55 @@ public final class SchemaManager {
     this.db = db;
   }
 
+  /**
+   * Converges the schema to the current version. Refuses to carry a database across the 0.14.0 v1
+   * data floor when the floor's data migration has not run: the floor's schema rebuilds repair
+   * shapes structurally, but only {@code sail migrate} repairs the rows (node attribution, project
+   * assignment, baseline journaling), and a schema-only crossing would bury that need forever —
+   * afterwards nothing can tell a repaired database from a skipped one. Fresh databases (version 0)
+   * and databases already at or above the floor pass untouched; the repair lane crosses via {@link
+   * #migrateAll()}.
+   */
   public void migrate() {
+    var current = currentVersion();
+    if (current > 0 && current <= LAST_VERSION_BEFORE_V1_FLOOR && !dataFloorStamped()) {
+      throw new PreFloorException(
+          "This database predates the 0.14.0 v1 data floor ("
+              + LegacyDataMigration.NAME
+              + " has not run). Run 'sail migrate' to carry it forward, then retry.");
+    }
+    migrateAll();
+  }
+
+  /**
+   * Converges the schema without the floor guard — the lane for {@link MigrationRunner#applyAll},
+   * which runs the data migrations immediately after and is therefore the only caller allowed to
+   * carry a pre-floor database across.
+   */
+  void migrateAll() {
     migrateTo(MIGRATIONS.size());
+  }
+
+  private boolean dataFloorStamped() {
+    try {
+      return !db.query(
+              "SELECT name FROM data_migrations WHERE name = ?",
+              row -> row.text(0),
+              LegacyDataMigration.NAME)
+          .isEmpty();
+    } catch (SqliteException e) {
+      return false;
+    }
+  }
+
+  /**
+   * A database below the v1 floor whose data migration has not run; only 'sail migrate' may carry
+   * it forward. Kept distinct so callers can surface the message without re-wrapping.
+   */
+  public static final class PreFloorException extends IllegalStateException {
+    PreFloorException(String message) {
+      super(message);
+    }
   }
 
   /**

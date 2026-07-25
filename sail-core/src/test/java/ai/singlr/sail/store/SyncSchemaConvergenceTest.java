@@ -171,6 +171,48 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
+  void aBornCleanDatabaseWithoutTheMarkerIsStampedNotRefused() {
+    var path = tempDir.resolve("aux-created.db");
+    try (var db = Sqlite.open(path)) {
+      new SchemaManager(db).migrate();
+    }
+
+    try (var converged = SyncDatabase.converge(path, "aux-box")) {
+      assertEquals(
+          1L,
+          converged
+              .db()
+              .queryOne(
+                  "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                  row -> row.integer(0),
+                  LegacyDataMigration.NAME)
+              .orElseThrow());
+    }
+  }
+
+  @Test
+  void convergeOnABrandNewDatabaseStampsTheFloorAndSyncs() {
+    var path = tempDir.resolve("fresh.db");
+
+    try (var fresh = SyncDatabase.converge(path, "new-box")) {
+      assertEquals(
+          1L,
+          fresh
+              .db()
+              .queryOne(
+                  "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
+                  row -> row.integer(0),
+                  LegacyDataMigration.NAME)
+              .orElseThrow());
+    }
+    try (var again = SyncDatabase.converge(path, "new-box")) {
+      assertEquals(
+          0L,
+          again.db().queryOne("SELECT COUNT(*) FROM specs", row -> row.integer(0)).orElseThrow());
+    }
+  }
+
+  @Test
   void convergeIsIdempotentOnACurrentDatabase() {
     var path = currentDatabase("current");
     int versionAfterFirst;
