@@ -527,8 +527,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
     var config =
         new SailYaml(
             "test", null, null, null, null, null, null, null, null, null, agent, null, null);
@@ -906,8 +905,7 @@ class ProjectApplierTest {
 
   private static SailYaml minimalConfig(String agentType) {
     var agent =
-        new SailYaml.Agent(
-            agentType, true, "sail/", true, null, null, null, "specs", null, null, null);
+        new SailYaml.Agent(agentType, true, "sail/", true, null, null, null, null, null, null);
     return new SailYaml(
         "test",
         null,

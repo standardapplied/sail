@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Guardrails;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class GuardrailCheckerTest {
@@ -62,9 +61,7 @@ class GuardrailCheckerTest {
     var checker = new GuardrailChecker(shell);
     var guardrails = new Guardrails("4h", null, "stop");
 
-    var result =
-        checker.check(
-            CONTAINER, guardrails, Instant.now().minus(Duration.ofMinutes(30)), List.of(REPO));
+    var result = checker.check(guardrails, Instant.now().minus(Duration.ofMinutes(30)));
 
     assertInstanceOf(GuardrailChecker.GuardrailResult.Ok.class, result);
   }
@@ -75,9 +72,7 @@ class GuardrailCheckerTest {
     var checker = new GuardrailChecker(shell);
     var guardrails = new Guardrails("1h", null, "snapshot-and-stop");
 
-    var result =
-        checker.check(
-            CONTAINER, guardrails, Instant.now().minus(Duration.ofHours(2)), List.of(REPO));
+    var result = checker.check(guardrails, Instant.now().minus(Duration.ofHours(2)));
 
     assertInstanceOf(GuardrailChecker.GuardrailResult.Triggered.class, result);
     var triggered = (GuardrailChecker.GuardrailResult.Triggered) result;
@@ -133,9 +128,7 @@ class GuardrailCheckerTest {
     var checker = new GuardrailChecker(shell);
     var guardrails = new Guardrails(null, null, "stop");
 
-    var result =
-        checker.check(
-            CONTAINER, guardrails, Instant.now().minus(Duration.ofHours(10)), List.of(REPO));
+    var result = checker.check(guardrails, Instant.now().minus(Duration.ofHours(10)));
 
     assertInstanceOf(GuardrailChecker.GuardrailResult.Ok.class, result);
   }
@@ -146,9 +139,7 @@ class GuardrailCheckerTest {
     var checker = new GuardrailChecker(shell);
     var guardrails = new Guardrails("1h", null, "notify");
 
-    var result =
-        checker.check(
-            CONTAINER, guardrails, Instant.now().minus(Duration.ofHours(2)), List.of(REPO));
+    var result = checker.check(guardrails, Instant.now().minus(Duration.ofHours(2)));
 
     assertInstanceOf(GuardrailChecker.GuardrailResult.Triggered.class, result);
     var triggered = (GuardrailChecker.GuardrailResult.Triggered) result;
@@ -192,7 +183,7 @@ class GuardrailCheckerTest {
     var checker = new GuardrailChecker(shell);
     var guardrails = new Guardrails("4h", null, "stop");
 
-    checker.check(CONTAINER, guardrails, Instant.now().minusSeconds(300), List.of(REPO));
+    checker.check(guardrails, Instant.now().minusSeconds(300));
 
     var gitCalls = shell.invocations().stream().filter(cmd -> cmd.contains("git")).count();
     assertEquals(0, gitCalls, "check() should not query git — wall clock only");

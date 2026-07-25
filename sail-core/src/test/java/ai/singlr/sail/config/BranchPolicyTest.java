@@ -69,7 +69,7 @@ class BranchPolicyTest {
 
   private static SailYaml.Agent agent(boolean autoBranch, String prefix) {
     return new SailYaml.Agent(
-        "claude-code", autoBranch, prefix, false, null, null, null, null, null, null, null);
+        "claude-code", autoBranch, prefix, false, null, null, null, null, null, null);
   }
 
   private static SailYaml configWithAgent(SailYaml.Agent agent) {

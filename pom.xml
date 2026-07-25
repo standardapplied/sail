@@ -289,7 +289,7 @@
                                     <!--
                                         The single dispatch executor shared by the CLI and API
                                         lanes. The uncovered lines are best-effort bookkeeping
-                                        catches (run-store warnings, sail-setup backfill failure)
+                                        catches (run-store warnings, sail-setup refresh failure)
                                         and the terminal launcher's process spawn, none reachable
                                         without fault injection. Floored just under the actual so
                                         the bar is locked in; raise toward 1.0 as those paths gain

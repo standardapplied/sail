@@ -367,11 +367,8 @@ public final class UpgradeCommand implements Runnable {
    * migration runs as a sub-process invocation of the freshly-installed binary's {@code sail
    * migrate --non-interactive}. That's the only way a release's new migrations can execute during
    * the upgrade itself — the alternative (running migrations from the OLD process's class files)
-   * has bitten us every release since 0.13.4. {@link ServerStartCommand} re-runs the schema
-   * migrations and the idempotent data backfills ({@link MigrateCommand#applyDataBackfills}) on
-   * every daemon start, so the post-upgrade restart is a genuine second-chance fallback if the
-   * sub-process fails for any reason. (The host-level steps — relocating {@code host.yaml}, syncing
-   * {@code authorized_keys} — run only in the full {@code migrate}, as they need root.)
+   * has bitten us every release since 0.13.4. (The host-level steps — relocating {@code host.yaml},
+   * syncing {@code authorized_keys} — run only in the full {@code migrate}, as they need root.)
    */
   private void migrateDatabase(boolean dryRun) {
     var dbPath = SailPaths.controlPlaneDb();

@@ -165,7 +165,7 @@ class LegacyDataMigrationTest {
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
         VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
     var legacyStore = new SpecStore(db);
-    assertEquals(1, legacyStore.backfillRevisions());
+    legacyStore.recordRevision("shared", "local", false);
     var legacyRev = legacyStore.latestRev("shared");
     assertNull(legacyStore.comparableAtRev("shared", legacyRev).get("project"));
 

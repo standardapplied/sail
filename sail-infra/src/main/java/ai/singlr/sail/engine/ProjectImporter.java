@@ -14,12 +14,11 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Backfills the control-plane catalog from on-disk project descriptors ({@code
- * ~/.sail/projects/<name>/sail.yaml}). Its only job is to catch a project that exists on disk but
- * not yet in the database, so it imports a name <em>only when it has never been journaled</em> — an
- * already-known project or tombstone is left untouched, never re-read from disk (which would
- * overwrite a synced definition or resurrect a deletion). The database is the source of truth; this
- * is the read-from-disk fallback for projects created before the catalog existed.
+ * Imports the control-plane catalog from on-disk project descriptors ({@code
+ * ~/.sail/projects/<name>/sail.yaml}). Retained in the explicit migrate lane to recover a current
+ * project creation whose best-effort catalog write failed. It imports a name <em>only when it has
+ * never been journaled</em> — an already-known project or tombstone is left untouched, never
+ * re-read from disk (which would overwrite a synced definition or resurrect a deletion).
  */
 public final class ProjectImporter {
 

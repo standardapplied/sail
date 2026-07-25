@@ -30,6 +30,7 @@ public record SailYaml(
     Ssh ssh) {
   @SuppressWarnings("unchecked")
   public static SailYaml fromMap(Map<String, Object> map) {
+    var name = (String) map.get("name");
     var resourcesRaw = (Map<String, Object>) map.get("resources");
     var runtimesRaw = (Map<String, Object>) map.get("runtimes");
     var gitRaw = (Map<String, Object>) map.get("git");
@@ -41,7 +42,7 @@ public record SailYaml(
     var sshRaw = (Map<String, Object>) map.get("ssh");
 
     return new SailYaml(
-        (String) map.get("name"),
+        name,
         (String) map.get("description"),
         resourcesRaw != null ? Resources.fromMap(resourcesRaw) : null,
         (String) map.get("image"),
@@ -67,9 +68,13 @@ public record SailYaml(
                         (a, b) -> a,
                         LinkedHashMap::new))
             : null,
-        agentRaw != null ? Agent.fromMap(agentRaw) : null,
+        agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null,
         agentCtxRaw != null ? AgentContext.fromMap(agentCtxRaw) : null,
         sshRaw != null ? Ssh.fromMap(sshRaw) : null);
+  }
+
+  private static String descriptor(String name) {
+    return Objects.requireNonNullElse(name, "project") + "/sail.yaml";
   }
 
   /** Converts this config to a map suitable for YAML serialization. */
@@ -283,7 +288,6 @@ public record SailYaml(
       List<String> install,
       Map<String, String> config,
       Guardrails guardrails,
-      String specsDir,
       Notifications notifications,
       Methodology methodology,
       ReviewPipelineConfig reviewPipeline) {
@@ -295,7 +299,6 @@ public record SailYaml(
         List<String> install,
         Map<String, String> config,
         Guardrails guardrails,
-        String specsDir,
         Notifications notifications,
         Methodology methodology) {
       this(
@@ -306,7 +309,6 @@ public record SailYaml(
           install,
           config,
           guardrails,
-          specsDir,
           notifications,
           methodology,
           null);
@@ -320,7 +322,6 @@ public record SailYaml(
         List<String> install,
         Map<String, String> config,
         Guardrails guardrails,
-        String specsDir,
         Notifications notifications) {
       this(
           type,
@@ -330,7 +331,6 @@ public record SailYaml(
           install,
           config,
           guardrails,
-          specsDir,
           notifications,
           null,
           null);
@@ -338,6 +338,19 @@ public record SailYaml(
 
     @SuppressWarnings("unchecked")
     public static Agent fromMap(Map<String, Object> map) {
+      return fromMap(map, "sail.yaml");
+    }
+
+    @SuppressWarnings("unchecked")
+    static Agent fromMap(Map<String, Object> map, String descriptor) {
+      if (map.containsKey("specs_dir")) {
+        throw new IllegalArgumentException(
+            "Unknown agent key `specs_dir` in "
+                + descriptor
+                + "; remove `specs_dir` from "
+                + descriptor
+                + " because specs live in the Sail database.");
+      }
       var guardrailsRaw = (Map<String, Object>) map.get("guardrails");
       var notificationsRaw = (Map<String, Object>) map.get("notifications");
       var methodologyRaw = (Map<String, Object>) map.get("methodology");
@@ -349,9 +362,8 @@ public record SailYaml(
           Boolean.TRUE.equals(map.get("auto_snapshot")),
           (List<String>) map.get("install"),
           (Map<String, String>) map.get("config"),
-          guardrailsRaw != null ? Guardrails.fromMap(guardrailsRaw) : null,
-          validatedSpecsDir(Objects.requireNonNullElse((String) map.get("specs_dir"), "specs")),
-          notificationsRaw != null ? Notifications.fromMap(notificationsRaw) : null,
+          guardrailsRaw != null ? Guardrails.fromMap(guardrailsRaw, descriptor) : null,
+          notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
           methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null,
           reviewPipelineRaw != null ? ReviewPipelineConfig.fromMap(reviewPipelineRaw) : null);
     }
@@ -365,7 +377,6 @@ public record SailYaml(
       if (install != null) map.put("install", new ArrayList<>(install));
       if (config != null) map.put("config", new LinkedHashMap<>(config));
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
-      map.put("specs_dir", Objects.requireNonNullElse(specsDir, "specs"));
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (methodology != null) map.put("methodology", methodology.toMap());
       if (reviewPipeline != null)
@@ -375,13 +386,6 @@ public record SailYaml(
                 "max_iterations", reviewPipeline.maxIterations(),
                 "stages", reviewPipeline.stages()));
       return map;
-    }
-
-    private static String validatedSpecsDir(String specsDir) {
-      if (specsDir != null) {
-        NameValidator.requireSafePath(specsDir, "agent.specs_dir");
-      }
-      return specsDir;
     }
   }
 
@@ -523,7 +527,6 @@ public record SailYaml(
             install,
             agent.config(),
             agent.guardrails(),
-            agent.specsDir(),
             agent.notifications(),
             agent.methodology());
     return new SailYaml(

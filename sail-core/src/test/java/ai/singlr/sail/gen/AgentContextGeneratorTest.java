@@ -60,7 +60,6 @@ class AgentContextGeneratorTest {
             null,
             null,
             null,
-            null,
             null);
     var ssh = new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop"));
 
@@ -417,7 +416,7 @@ class AgentContextGeneratorTest {
     var guardrails = new ai.singlr.sail.config.Guardrails("4h", null, "stop");
     var agent =
         new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, guardrails, "specs", null, null, null);
+            "claude-code", true, "sail/", true, null, null, guardrails, null, null, null);
     var config =
         new SailYaml(
             "test",
@@ -453,7 +452,7 @@ class AgentContextGeneratorTest {
   @Test
   void generateFilesReturnsAgentsMdForCodexAgent() {
     var agent =
-        new SailYaml.Agent("codex", true, "sail/", true, null, null, null, null, null, null, null);
+        new SailYaml.Agent("codex", true, "sail/", true, null, null, null, null, null, null);
     var config = configWithAgent(agent);
     var files = AgentContextGenerator.generateFiles(config);
 
@@ -471,7 +470,6 @@ class AgentContextGeneratorTest {
             List.of("claude-code", "codex"),
             null,
             null,
-            "specs",
             null,
             null,
             null);
@@ -495,7 +493,6 @@ class AgentContextGeneratorTest {
             List.of("claude-code", "codex"),
             null,
             null,
-            "specs",
             null,
             null,
             null);
@@ -515,8 +512,7 @@ class AgentContextGeneratorTest {
   @Test
   void generateFilesUsesCorrectSshUser() {
     var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
     var ssh = new SailYaml.Ssh("alice", null);
     var config =
         new SailYaml(
@@ -557,7 +553,7 @@ class AgentContextGeneratorTest {
   @Test
   void codexHomeFileLandsUnderDotCodex() {
     var agent =
-        new SailYaml.Agent("codex", true, "sail/", true, null, null, null, null, null, null, null);
+        new SailYaml.Agent("codex", true, "sail/", true, null, null, null, null, null, null);
     var files = AgentContextGenerator.generateFiles(configWithAgent(agent));
 
     assertTrue(
@@ -586,8 +582,7 @@ class AgentContextGeneratorTest {
   @Test
   void skillsLandUnderTheHomeSkillsNamespace() {
     var agent =
-        new SailYaml.Agent(
-            "claude-code", true, null, true, null, null, null, "specs", null, null, null);
+        new SailYaml.Agent("claude-code", true, null, true, null, null, null, null, null, null);
     var files = AgentContextGenerator.generateFiles(configWithAgent(agent));
 
     var skills = files.stream().filter(f -> f.remotePath().contains("/skills/")).toList();
@@ -606,7 +601,6 @@ class AgentContextGeneratorTest {
             "sail/",
             true,
             List.of("claude-code", "codex"),
-            null,
             null,
             null,
             null,
@@ -630,7 +624,6 @@ class AgentContextGeneratorTest {
             "sail/",
             true,
             List.of("claude-code", "codex"),
-            null,
             null,
             null,
             null,
@@ -789,7 +782,6 @@ class AgentContextGeneratorTest {
             List.of("claude-code", "codex"),
             null,
             null,
-            "specs",
             null,
             null,
             null);
@@ -800,10 +792,9 @@ class AgentContextGeneratorTest {
   }
 
   @Test
-  void specSectionIncludedWhenSpecsDirConfigured() {
+  void specSectionIncludedForAgentProjects() {
     var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, "specs", null, null, null);
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
     var config = configWithAgent(agent);
 
     var md = AgentContextGenerator.generateContextBody(config);
@@ -818,18 +809,6 @@ class AgentContextGeneratorTest {
     assertTrue(md.contains("depends-on"));
     assertTrue(md.contains("Interactive Mode"));
     assertFalse(md.contains("spec.yaml"), "specs are DB rows, not files");
-  }
-
-  @Test
-  void specSectionOmittedWhenSpecsDirNull() {
-    var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
-    var config = configWithAgent(agent);
-
-    var md = AgentContextGenerator.generateContextBody(config);
-
-    assertFalse(md.contains("Spec-Driven Development"));
   }
 
   private static SailYaml configWithAgent(SailYaml.Agent agent) {
@@ -856,8 +835,7 @@ class AgentContextGeneratorTest {
   private static SailYaml configWithRuntimesAndContext(
       SailYaml.Runtimes runtimes, SailYaml.AgentContext agentContext) {
     var agent =
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null, null);
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
     return new SailYaml(
         "test",
         "Test",

@@ -160,22 +160,6 @@ public final class ProjectStore implements ConflictResolver {
   }
 
   /**
-   * Records a baseline revision for every catalogued project that has none yet. A project written
-   * before this store journaled its mutations has a row but no change-log entry, so it is invisible
-   * to sync until journaled. Idempotent — a project already in the change log is left untouched.
-   * Returns how many were backfilled.
-   */
-  public int backfillRevisions() {
-    var journaled = syncEntityIds();
-    var pending = list().stream().filter(row -> !journaled.contains(row.name())).toList();
-    for (var row : pending) {
-      db.transaction(
-          () -> recordRevision(row.name(), row.definition(), null, "local", false, false));
-    }
-    return pending.size();
-  }
-
-  /**
    * Rewrites every catalogued definition to its {@linkplain PersonalFields#redact redacted} form,
    * so a catalog written before this brick — carrying one box's git identity and SSH keys — is
    * scrubbed and the placeholder form propagates on the next sync. A no-op for definitions already
@@ -313,7 +297,7 @@ public final class ProjectStore implements ConflictResolver {
     db.execute("DELETE FROM projects WHERE name = ?", id);
   }
 
-  private String recordRevision(
+  String recordRevision(
       String id,
       String definition,
       String explicitRev,
@@ -398,9 +382,9 @@ public final class ProjectStore implements ConflictResolver {
   }
 
   /**
-   * The author carried in a synced snapshot, defaulting to {@code sync} when absent (a peer that
-   * predates attribution). Read on the receiving side so a synced project is attributed to the
-   * engineer who actually edited it rather than to {@code sync}.
+   * The author carried in a synced snapshot. The {@code sync} default remains because the retained
+   * versioned 0.14 migration can journal a project row that predates attribution. Read on the
+   * receiving side so a current snapshot is attributed to the engineer who actually edited it.
    */
   private static String actorOf(Map<String, Object> snapshot) {
     var actor = snapshot == null ? null : snapshot.get(ACTOR);

@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -43,15 +42,12 @@ import java.util.function.Supplier;
  * checks come first, so a pass with nothing to reconcile issues no systemctl calls. A terminal
  * session replays the stop with its recorded exit code — after probing its recorded unit, because
  * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
- * the replay). A running session past the launch grace period whose <em>recorded</em> systemd unit
- * is inactive or absent gets a synthesized stop — a running session with no recorded unit (launched
- * before units were run-scoped) is skipped instead: this sweep cannot know that unit's liveness,
- * and the run's own detached watcher already owns its stop. The synthesized stop carries <em>no
- * exit code</em>: the transient unit is garbage-collected on exit, so the real code is
- * unrecoverable, and the replay path makes the same choice for a terminal session that never
- * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
- * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
- * reconstructed, not observed.
+ * the replay). A running session past the launch grace period whose recorded run identity is
+ * inactive or absent gets a synthesized stop. The synthesized stop carries <em>no exit code</em>:
+ * the transient unit is garbage-collected on exit, so the real code is unrecoverable, and the
+ * replay path makes the same choice for a terminal session that never recorded one — the pipeline
+ * treats the absent code as not-a-failure and lets review judge the work. Every replayed stop
+ * carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -76,10 +72,7 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("completed", "stopped", "failed");
 
-  /**
-   * Answers whether a run's agent systemd unit is still active — addressed by the unit name
-   * recorded on the run at launch, never re-derived.
-   */
+  /** Answers whether a run's recorded agent identity is still active. */
   @FunctionalInterface
   public interface UnitProbe {
     boolean active(String project, String runId, String unit) throws Exception;
@@ -117,15 +110,15 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Probes the run's agent unit through systemd — the authoritative liveness source. A transient
-   * unit vanishes after a clean exit, and systemd reports an absent unit as {@code inactive}, so
-   * absent counts as dead; conversely a probe that cannot reach the container reports active,
-   * biasing the sweep toward doing nothing when it cannot know.
+   * Probes the run-scoped pid file first, then its systemd unit. The pid path also covers
+   * foreground builds, which use the same run identity without creating a service.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
-    return (project, runId, unit) ->
-        agentSession.queryExitStatus(project, AgentUnit.recorded(runId, unit)).active();
+    return (project, runId, unit) -> {
+      var info = agentSession.queryStatus(project, AgentUnit.recorded(runId, unit));
+      return info != null && info.running();
+    };
   }
 
   /** Starts the periodic sweep at the default cadence. */
@@ -254,11 +247,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * is the same compare-and-set the live stop uses, so racing a concurrent stop retry can never
    * double-finalize or double-publish. A claim whose unit is still active is left alone — a live
    * stop is mid-halt, or an interrupted one still has its agent to kill and the operator's retry
-   * owns that. A blank-unit claim (a run launched before units were run-scoped) probes the fixed
-   * ad-hoc identity — the same compatibility mapping the stop itself uses — so a legacy claim whose
-   * agent is verifiably gone still finalizes instead of reserving its repos forever; if a newer
-   * ad-hoc session holds that shared unit, the probe reads active and the claim is left untouched.
-   * Foreign claims are their executing box's to finalize.
+   * owns that. Foreign claims are their executing box's to finalize.
    */
   int finalizeInterruptedStops() {
     var node = localHandle.get();
@@ -303,8 +292,8 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Whether the run's spec is actively being worked on this box, so a {@code running} run for it is
    * legitimate and left to the in-progress and review sweeps. Any other spec state — pending (a
    * crash between reserve and claim), or a terminal state the run outlived (a dropped completion,
-   * or a pre-run-scoped run carried across an upgrade) — means the reservation is dead and blocking
-   * the dispatch gate for no agent.
+   * terminal state the run outlived (a dropped completion) — means the reservation is dead and
+   * blocking the dispatch gate for no agent.
    */
   private boolean specBeingWorked(String specId) {
     return specStore
@@ -337,6 +326,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
+            .filter(RunStore.RunRow::buildRole)
             .findFirst()
             .filter(run -> SailOperations.ownsRun(run.node(), node))
             .filter(run -> TERMINAL_RUN_STATUSES.contains(run.status()));
@@ -379,6 +369,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
+            .filter(RunStore.RunRow::buildRole)
             .findFirst()
             .filter(run -> SailOperations.ownsRun(run.node(), node));
     if (latest.isEmpty()) {
@@ -396,7 +387,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (Strings.isBlank(session.unit()) || unitStillActive(spec, session)) {
+        if (unitStillActive(spec, session)) {
           yield false;
         }
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
@@ -407,20 +398,19 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Whether the run's recorded systemd unit is still alive — the veto that keeps a lying terminal
-   * row from forging a stop. A hook turn-end completes the run row as a watcher-dead backstop, but
-   * a turn-end is not a process exit: in the field a gate-allowed mid-run stop marked the row
-   * terminal while the agent kept working, and the next sweep replayed the "finished" run — the
-   * review then judged half-done work and the fix agent raced the live agent in one clone. The unit
-   * is the authoritative liveness source, so an active unit means the run's own watcher owns the
-   * real stop and the sweep must wait. A row with no recorded unit cannot be probed and keeps the
-   * replay behavior; a probe failure propagates to the per-spec catch — logged, skipped, retried
-   * next sweep — so the sweep never forges a stop on data it cannot interpret, and never silently.
+   * Whether the run's recorded process identity is still alive — the veto that keeps a lying
+   * terminal row from forging a stop. A hook turn-end completes the run row as a watcher-dead
+   * backstop, but a turn-end is not a process exit: in the field a gate-allowed mid-run stop marked
+   * the row terminal while the agent kept working, and the next sweep replayed the "finished" run —
+   * the review then judged half-done work and the fix agent raced the live agent in one clone. An
+   * active identity means the run's own watcher or blocking launcher owns the real stop and the
+   * sweep must wait. A probe failure propagates to the per-spec catch — logged, skipped, retried
+   * next sweep — so the sweep never forges a stop on data it cannot interpret.
    */
   private boolean unitStillActive(SpecStore.SpecRow spec, RunStore.RunRow session)
       throws Exception {
-    return !Strings.isBlank(session.unit())
-        && unitProbe.active(spec.project(), session.id(), session.unit());
+    var unit = StopOperations.runUnit(session).unitName();
+    return unitProbe.active(spec.project(), session.id(), unit);
   }
 
   /**

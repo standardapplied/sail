@@ -119,15 +119,13 @@ record ProjectResponse(String name, String containerStatus, AgentConfigView agen
   }
 }
 
-record AgentConfigView(String type, boolean autoSnapshot, boolean autoBranch, String specsDir)
-    implements Mappable {
+record AgentConfigView(String type, boolean autoSnapshot, boolean autoBranch) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("type", type);
     m.put("auto_snapshot", autoSnapshot);
     m.put("auto_branch", autoBranch);
-    m.put("specs_dir", specsDir);
     return m;
   }
 }

@@ -76,8 +76,9 @@ class RunSyncTest {
   }
 
   private String startRun(Box box, String node) {
+    var id = DateTimeUtils.newId().toString();
     return box.runs.create(
-        DateTimeUtils.newId().toString(),
+        id,
         "backend",
         "auth",
         node,
@@ -87,7 +88,8 @@ class RunSyncTest {
         "do it",
         123,
         null,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   @Test

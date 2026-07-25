@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -24,9 +23,7 @@ import java.util.function.Supplier;
  * original {@code started_at}, so an agent three hours into a four-hour budget gets the remaining
  * hour, not a fresh four. Only sessions this node executed are considered — a synced foreign run is
  * its executing node's to guard, and arming a local watcher against it would eventually enforce a
- * foreign deadline on this box's container. A run with no recorded unit (launched before units were
- * run-scoped) is skipped: this pass cannot know that unit's liveness, and the run's own detached
- * watcher — built to survive daemon restarts — already owns it.
+ * foreign deadline on this box's container.
  *
  * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
  * that is still alive (free, in-process check) or any {@code sail agent watch} process for the run
@@ -123,15 +120,13 @@ public final class WatcherRearmer implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore.listForSpec(spec.id()).stream()
+            .filter(RunStore.RunRow::buildRole)
             .filter(run -> SailOperations.ownsRun(run.node(), node))
             .findFirst();
     if (latest.isEmpty() || !"running".equals(latest.get().status())) {
       return false;
     }
     var session = latest.get();
-    if (Strings.isBlank(session.unit())) {
-      return false;
-    }
     if (session.watcherPid() != null && watcherAlive.test(session.watcherPid())) {
       return false;
     }

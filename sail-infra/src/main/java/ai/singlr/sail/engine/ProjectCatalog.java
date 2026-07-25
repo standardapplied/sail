@@ -34,7 +34,7 @@ public final class ProjectCatalog {
               + name
               + "' was not recorded in the catalog ("
               + e.getMessage()
-              + "). Run 'sail migrate' to backfill.");
+              + "). Run 'sail migrate' to import it.");
       return false;
     }
   }

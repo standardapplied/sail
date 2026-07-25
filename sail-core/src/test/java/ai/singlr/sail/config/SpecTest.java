@@ -23,6 +23,7 @@ class SpecTest {
     var map =
         Map.<String, Object>of(
             "id", "oauth-flow",
+            "project", "test",
             "title", "Implement OAuth",
             "status", "in_progress",
             "assignee", "alice",
@@ -43,35 +44,37 @@ class SpecTest {
 
   @Test
   void defaultsStatusToPending() {
-    var spec = Spec.fromMap(Map.of("id", "task1"));
+    var spec = Spec.fromMap(Map.of("id", "task1", "project", "test"));
 
     assertEquals(SpecStatus.PENDING, spec.status());
   }
 
   @Test
   void defaultsTitleToEmpty() {
-    var spec = Spec.fromMap(Map.of("id", "task1"));
+    var spec = Spec.fromMap(Map.of("id", "task1", "project", "test"));
 
     assertEquals("", spec.title());
   }
 
   @Test
   void defaultsDependsOnToEmptyList() {
-    var spec = Spec.fromMap(Map.of("id", "task1"));
+    var spec = Spec.fromMap(Map.of("id", "task1", "project", "test"));
 
     assertTrue(spec.dependsOn().isEmpty());
   }
 
   @Test
   void defaultsReposToEmptyList() {
-    var spec = Spec.fromMap(Map.of("id", "task1"));
+    var spec = Spec.fromMap(Map.of("id", "task1", "project", "test"));
 
     assertTrue(spec.repos().isEmpty());
   }
 
   @Test
   void nullableFieldsAreNull() {
-    var spec = Spec.fromMap(Map.of("id", "task1"));
+    var spec = Spec.fromMap(Map.of("id", "task1", "project", "test"));
+
+    assertEquals("test", spec.project());
 
     assertNull(spec.assignee());
     assertNull(spec.branch());
@@ -79,26 +82,45 @@ class SpecTest {
 
   @Test
   void throwsOnMissingId() {
-    assertThrows(IllegalArgumentException.class, () -> Spec.fromMap(Map.of("title", "No ID")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> Spec.fromMap(Map.of("project", "test", "title", "No ID")));
   }
 
   @Test
   void throwsOnBlankId() {
     assertThrows(
-        IllegalArgumentException.class, () -> Spec.fromMap(Map.of("id", "  ", "title", "Blank")));
+        IllegalArgumentException.class,
+        () -> Spec.fromMap(Map.of("id", "  ", "project", "test", "title", "Blank")));
   }
 
   @Test
   void throwsOnNullId() {
     var map = new HashMap<String, Object>();
     map.put("id", null);
+    map.put("project", "test");
     assertThrows(IllegalArgumentException.class, () -> Spec.fromMap(map));
+  }
+
+  @Test
+  void throwsOnMissingProject() {
+    var refusal =
+        assertThrows(NullPointerException.class, () -> Spec.fromMap(Map.of("id", "projectless")));
+
+    assertEquals("spec.project is required", refusal.getMessage());
   }
 
   @Test
   void toMapContainsAllFields() {
     var spec =
-        new Spec("auth", "Implement Auth", SpecStatus.DONE, "bob", List.of("setup"), "feat/auth");
+        new Spec(
+            "auth",
+            "test",
+            "Implement Auth",
+            SpecStatus.DONE,
+            "bob",
+            List.of("setup"),
+            "feat/auth");
 
     var map = spec.toMap();
 
@@ -112,7 +134,7 @@ class SpecTest {
 
   @Test
   void parsesAgent() {
-    var spec = Spec.fromMap(Map.of("id", "auth", "agent", "codex"));
+    var spec = Spec.fromMap(Map.of("id", "auth", "project", "test", "agent", "codex"));
 
     assertEquals("codex", spec.agent());
   }
@@ -121,12 +143,18 @@ class SpecTest {
   void rejectsUnknownAgent() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> Spec.fromMap(Map.of("id", "auth", "agent", "unknown-agent")));
+        () -> Spec.fromMap(Map.of("id", "auth", "project", "test", "agent", "unknown-agent")));
   }
 
   @Test
   void parsesModelAndReasoningEffort() {
-    var spec = Spec.fromMap(Map.of("id", "auth", "model", "gpt-5.5", "reasoning_effort", "high"));
+    var spec =
+        Spec.fromMap(
+            Map.of(
+                "id", "auth",
+                "project", "test",
+                "model", "gpt-5.5",
+                "reasoning_effort", "high"));
 
     assertEquals("gpt-5.5", spec.model());
     assertEquals("high", spec.reasoningEffort());
@@ -136,14 +164,14 @@ class SpecTest {
   void rejectsUnsafeModel() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> Spec.fromMap(Map.of("id", "auth", "model", "gpt-5.5; rm -rf /")));
+        () -> Spec.fromMap(Map.of("id", "auth", "project", "test", "model", "gpt-5.5; rm -rf /")));
   }
 
   @Test
   void rejectsUnknownReasoningEffort() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> Spec.fromMap(Map.of("id", "auth", "reasoning_effort", "huge")));
+        () -> Spec.fromMap(Map.of("id", "auth", "project", "test", "reasoning_effort", "huge")));
   }
 
   @Test
@@ -151,6 +179,7 @@ class SpecTest {
     var spec =
         new Spec(
             "auth",
+            "test",
             "Implement Auth",
             SpecStatus.DONE,
             "bob",
@@ -166,7 +195,8 @@ class SpecTest {
 
   @Test
   void parsesMultipleRepos() {
-    var spec = Spec.fromMap(Map.of("id", "auth", "repos", List.of("sing", "chorus")));
+    var spec =
+        Spec.fromMap(Map.of("id", "auth", "project", "test", "repos", List.of("sing", "chorus")));
 
     assertEquals(List.of("sing", "chorus"), spec.repos());
   }
@@ -175,12 +205,18 @@ class SpecTest {
   void rejectsRepoAndReposTogether() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> Spec.fromMap(Map.of("id", "auth", "repo", "sing", "repos", List.of("chorus"))));
+        () ->
+            Spec.fromMap(
+                Map.of(
+                    "id", "auth",
+                    "project", "test",
+                    "repo", "sing",
+                    "repos", List.of("chorus"))));
   }
 
   @Test
   void toMapOmitsNullAndEmptyFields() {
-    var spec = new Spec("auth", "", SpecStatus.PENDING, null, List.of(), null);
+    var spec = new Spec("auth", "test", "", SpecStatus.PENDING, null, List.of(), null);
 
     var map = spec.toMap();
 
@@ -196,7 +232,14 @@ class SpecTest {
   @SuppressWarnings("unchecked")
   void roundTrips() {
     var spec =
-        new Spec("auth", "Implement Auth", SpecStatus.REVIEW, "alice", List.of("db"), "feat/auth");
+        new Spec(
+            "auth",
+            "test",
+            "Implement Auth",
+            SpecStatus.REVIEW,
+            "alice",
+            List.of("db"),
+            "feat/auth");
 
     var parsed = Spec.fromMap(spec.toMap());
 
@@ -216,6 +259,7 @@ class SpecTest {
   void dependsOnListIsImmutable() {
     var map = new HashMap<String, Object>();
     map.put("id", "test");
+    map.put("project", "test");
     map.put("depends_on", new java.util.ArrayList<>(List.of("a", "b")));
 
     var spec = Spec.fromMap(map);
@@ -226,7 +270,11 @@ class SpecTest {
   @Test
   void multipleDependencies() {
     var spec =
-        Spec.fromMap(Map.of("id", "final", "depends_on", List.of("step1", "step2", "step3")));
+        Spec.fromMap(
+            Map.of(
+                "id", "final",
+                "project", "test",
+                "depends_on", List.of("step1", "step2", "step3")));
 
     assertEquals(3, spec.dependsOn().size());
     assertEquals(List.of("step1", "step2", "step3"), spec.dependsOn());

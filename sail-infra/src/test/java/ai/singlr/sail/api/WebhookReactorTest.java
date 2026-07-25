@@ -123,18 +123,6 @@ class WebhookReactorTest {
   }
 
   @Test
-  void onEventRespectsLegacyEventAlias() {
-    var calls = new ArrayList<String>();
-    var notifications = new Notifications("https://example.com/wh", List.of("agent_exited"));
-    var reactor = new WebhookReactor(project -> notifications, url -> recorder(calls));
-
-    reactor.onEvent(Event.of("p", null, "agent_session_stopped", "claude-code", "h").withId(1L));
-
-    assertEquals(
-        1, calls.size(), "legacy 'agent_exited' should fire for new agent_session_stopped");
-  }
-
-  @Test
   void senderIsCachedPerUrl() {
     var counter = new AtomicInteger();
     var sender = new RecordingSender();

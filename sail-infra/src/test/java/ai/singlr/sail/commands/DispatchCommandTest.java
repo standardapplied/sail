@@ -97,7 +97,6 @@ class DispatchCommandTest {
           disk: 20GB
         agent:
           type: claude-code
-          specs_dir: specs
         """;
     var yamlPath = tempDir.resolve("sail.yaml");
     Files.writeString(yamlPath, yaml);
@@ -112,7 +111,9 @@ class DispatchCommandTest {
 
   @Test
   void buildTaskPromptIncludesSpecDetails() {
-    var spec = new Spec("oauth-flow", "Implement OAuth", SpecStatus.PENDING, null, List.of(), null);
+    var spec =
+        new Spec(
+            "oauth-flow", "test", "Implement OAuth", SpecStatus.PENDING, null, List.of(), null);
     var description = "Build Google OAuth integration with PKCE flow.";
 
     var prompt = AgentTaskPrompt.build(spec, description);
@@ -125,7 +126,7 @@ class DispatchCommandTest {
 
   @Test
   void buildTaskPromptContainsSpecIdAndDescription() {
-    var spec = new Spec("auth", "Auth", SpecStatus.PENDING, null, List.of(), null);
+    var spec = new Spec("auth", "test", "Auth", SpecStatus.PENDING, null, List.of(), null);
 
     var prompt = AgentTaskPrompt.build(spec, "Details");
 
@@ -135,7 +136,7 @@ class DispatchCommandTest {
 
   @Test
   void buildTaskPromptIncludesFullDescription() {
-    var spec = new Spec("setup", "Setup DB", SpecStatus.PENDING, null, List.of(), null);
+    var spec = new Spec("setup", "test", "Setup DB", SpecStatus.PENDING, null, List.of(), null);
     var longDescription =
         """
         Create PostgreSQL schema with:
@@ -177,7 +178,7 @@ class DispatchCommandTest {
 
   @Test
   void buildTaskPromptCarriesTheAutonomousProtocol() {
-    var spec = new Spec("oauth", "OAuth", SpecStatus.PENDING, null, List.of(), null);
+    var spec = new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of(), null);
 
     var prompt = AgentTaskPrompt.build(spec, "Details");
 
@@ -201,7 +202,7 @@ class DispatchCommandTest {
 
   @Test
   void buildTaskPromptNotesMultiRepoOnlyWhenSpecSpansRepos() {
-    var single = new Spec("a", "A", SpecStatus.PENDING, null, List.of(), null);
+    var single = new Spec("a", "test", "A", SpecStatus.PENDING, null, List.of(), null);
     assertFalse(AgentTaskPrompt.build(single, "d").contains("spans multiple repos"));
 
     var multi =

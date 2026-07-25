@@ -42,8 +42,9 @@ class RunStoreTest {
   }
 
   private String newRun(String project, String specId) {
+    var id = DateTimeUtils.newId().toString();
     return store.create(
-        DateTimeUtils.newId().toString(),
+        id,
         project,
         specId,
         "node-a",
@@ -53,7 +54,8 @@ class RunStoreTest {
         "do it",
         1234,
         5678,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   @Test
@@ -71,7 +73,7 @@ class RunStoreTest {
     assertEquals(1234, run.pid());
     assertEquals(5678, run.watcherPid());
     assertEquals("running", run.status());
-    assertEquals("/home/dev/.sail/runs/r/agent.log", run.logPath());
+    assertEquals("/home/dev/.sail/runs/" + id + "/agent.log", run.logPath());
     assertNotNull(run.startedAt());
     assertNull(run.completedAt());
   }
@@ -300,27 +302,21 @@ class RunStoreTest {
   }
 
   @Test
-  void aRunCreatedWithoutAUnitReadsBlank() {
-    var id = newRun("backend", "auth");
-
-    assertNull(store.findById(id).orElseThrow().unit(), "the pre-upgrade shape stays observable");
-  }
-
-  @Test
   void createWithNullOptionalFields() {
-    var id =
-        store.create(
-            DateTimeUtils.newId().toString(),
-            "backend",
-            null,
-            "node-a",
-            "build",
-            "codex",
-            null,
-            null,
-            null,
-            null,
-            null);
+    var id = DateTimeUtils.newId().toString();
+    store.create(
+        id,
+        "backend",
+        null,
+        "node-a",
+        "build",
+        "codex",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "sail-agent-" + id);
 
     var run = store.findById(id).orElseThrow();
     assertNull(run.specId());
@@ -393,8 +389,9 @@ class RunStoreTest {
   }
 
   private String newRunOn(String project, String specId, String node) {
+    var id = DateTimeUtils.newId().toString();
     return store.create(
-        DateTimeUtils.newId().toString(),
+        id,
         project,
         specId,
         node,
@@ -404,7 +401,8 @@ class RunStoreTest {
         "do it",
         1234,
         5678,
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   @Test
@@ -590,34 +588,6 @@ class RunStoreTest {
 
     assertTrue(store.findById(id).isEmpty());
     assertNull(store.comparableSnapshot(id));
-  }
-
-  @Test
-  void backfillNodeStampsRowsMissingANode() {
-    db.execute(
-        "INSERT INTO runs (id, project, spec_id, agent, status, started_at)"
-            + " VALUES ('legacy', 'acme', 'auth', 'claude-code', 'completed', '2026-01-01')");
-    assertNull(store.findById("legacy").orElseThrow().node());
-
-    assertEquals(1, store.backfillNode("mady"));
-    assertEquals(0, store.backfillNode("mady"), "idempotent");
-    assertEquals(0, store.backfillNode(null), "a blank handle stamps nothing");
-
-    assertEquals("mady", store.findById("legacy").orElseThrow().node());
-    assertTrue(store.syncEntityIds().contains("legacy"), "the stamped row is journaled");
-  }
-
-  @Test
-  void backfillRevisionsMakesAnUnjournaledRunSyncable() {
-    db.execute(
-        "INSERT INTO runs (id, project, spec_id, node, agent, status, started_at)"
-            + " VALUES ('legacy', 'acme', 'auth', 'node-a', 'claude-code', 'completed', '2026-01-01')");
-    assertFalse(store.syncEntityIds().contains("legacy"));
-
-    assertEquals(1, store.backfillRevisions());
-    assertEquals(0, store.backfillRevisions(), "idempotent");
-
-    assertTrue(store.syncEntityIds().contains("legacy"));
   }
 
   @Test

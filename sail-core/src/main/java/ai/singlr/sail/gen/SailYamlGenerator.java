@@ -235,9 +235,6 @@ public final class SailYamlGenerator {
         sb.append("    - ").append(cli).append("\n");
       }
     }
-    if (agent.specsDir() != null) {
-      sb.append("  specs_dir: ").append(quoteYaml(agent.specsDir())).append("\n");
-    }
     if (agent.guardrails() != null) {
       sb.append("  guardrails:\n");
       var g = agent.guardrails();

@@ -302,13 +302,13 @@ public final class DispatchCommand implements Runnable {
       }
 
       @Override
-      public void sailSetupBackfilled(boolean backfilled) {
-        if (backfilled && !json) {
+      public void sailSetupUpdated(boolean updated) {
+        if (updated && !json) {
           System.out.println(
               Ansi.AUTO.string(
-                  "  @|faint Backfilled sail event helpers in "
+                  "  @|faint Updated sail event helpers in "
                       + name
-                      + " (container predates current sail; reinstalled).|@"));
+                      + " (installed files were stale or incomplete).|@"));
         }
       }
     };

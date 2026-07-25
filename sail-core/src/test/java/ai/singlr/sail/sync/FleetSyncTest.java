@@ -129,9 +129,7 @@ class FleetSyncTest {
     main.specs.create(spec("billing", "Billing", "pending", List.of("oauth")));
     main.files.put("acme", "scripts/deploy.sh", b64("deploy"));
     main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
-    main.db.execute(
-        "INSERT INTO projects (name, definition, created_at, updated_at)"
-            + " VALUES ('outline', 'name: outline\n', '2026-01-01', '2026-01-01')");
+    main.projects.upsert("outline", "name: outline\n", "uday");
     main.fdes.add("uday", "Uday Chandra", "uday@example.com", "admin");
     main.fdes.add("mady", "Mady M", "mady@example.com", "member");
   }
@@ -139,8 +137,6 @@ class FleetSyncTest {
   @Test
   void aFreshNodePullsEverythingFromARealisticMain() {
     seedRealisticMain();
-    assertEquals(1, main.projects.backfillRevisions(), "the legacy project becomes syncable");
-
     syncFromMain();
 
     assertEquals("OAuth flow", node.specs.findById("oauth").orElseThrow().title());
@@ -152,9 +148,7 @@ class FleetSyncTest {
     assertEquals(
         "name: acme\nimage: ubuntu/24.04\n",
         node.projects.findByName("acme").orElseThrow().definition());
-    assertTrue(
-        node.projects.findByName("outline").isPresent(),
-        "a project catalogued by an older sail, made syncable by backfill, replicates");
+    assertTrue(node.projects.findByName("outline").isPresent());
 
     assertEquals("deploy", decode(node.files.find("acme", "scripts/deploy.sh").orElseThrow()));
 
@@ -208,23 +202,6 @@ class FleetSyncTest {
   }
 
   @Test
-  void anUnjournaledProjectStaysInvisibleUntilBackfilled() {
-    main.db.execute(
-        "INSERT INTO projects (name, definition, created_at, updated_at)"
-            + " VALUES ('outline', 'name: outline\n', '2026-01-01', '2026-01-01')");
-
-    syncFromMain();
-    assertFalse(
-        node.projects.findByName("outline").isPresent(),
-        "without backfill, a catalogued-but-un-journaled project does not sync");
-
-    main.projects.backfillRevisions();
-    syncFromMain();
-
-    assertTrue(node.projects.findByName("outline").isPresent(), "backfill makes it replicate");
-  }
-
-  @Test
   void aSyncedProjectIsAttributedToItsRealAuthorNotSync() {
     main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
 
@@ -234,22 +211,6 @@ class FleetSyncTest {
         "uday",
         node.projects.findByName("acme").orElseThrow().updatedBy(),
         "the synced row keeps its real author, not the literal 'sync'");
-  }
-
-  @Test
-  void anUnjournaledSpecStaysInvisibleUntilBackfilled() {
-    main.specs.create(spec("oauth", "OAuth flow", "done", List.of()));
-    main.db.execute("DELETE FROM change_log WHERE entity_type = 'spec' AND entity_id = ?", "oauth");
-
-    syncFromMain();
-    assertTrue(
-        node.specs.findById("oauth").isEmpty(),
-        "without backfill, a spec predating the change log does not sync");
-
-    main.specs.backfillRevisions();
-    syncFromMain();
-
-    assertEquals("OAuth flow", node.specs.findById("oauth").orElseThrow().title());
   }
 
   private static String decode(FileStore.FileRow row) {

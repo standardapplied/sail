@@ -72,7 +72,6 @@ public final class Fleet implements AutoCloseable {
         user: dev
       agent:
         type: codex
-        specs_dir: specs
         auto_branch: true
         branch_prefix: sail/
       """;

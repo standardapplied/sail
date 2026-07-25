@@ -75,7 +75,7 @@ class WebhookNotifierTest {
     var payload =
         WebhookNotifier.buildPayload(
             WebhookNotifier.Provider.SLACK,
-            "agent_exited",
+            "agent_session_stopped",
             "acme-health",
             "Agent exited",
             "Process is no longer running.");
@@ -89,7 +89,7 @@ class WebhookNotifierTest {
     var payload =
         WebhookNotifier.buildPayload(
             WebhookNotifier.Provider.DISCORD,
-            "session_done",
+            "agent_session_completed",
             "acme-health",
             "Watch complete",
             "Session ended.");

@@ -46,9 +46,8 @@ public final class RunStore implements ConflictResolver {
   /**
    * {@code unit} is the systemd unit the run was launched as — recorded at launch as part of the
    * run's identity, so every later consumer (stop, probe, reconciler, watcher) addresses the unit
-   * the run actually owns instead of re-deriving a name that could drift across releases. Blank on
-   * runs launched before units were run-scoped; consumers that cannot know that unit's liveness do
-   * nothing rather than guess.
+   * the run actually owns instead of re-deriving a name that could drift across releases. Build
+   * runs always carry one; foreground review runs intentionally do not use systemd.
    *
    * <p>{@code repos} is the repo set the dispatch reserved at launch — the run's own claim, not a
    * lookup through its spec, so the overlap gate reads a value that existed before the spec was
@@ -74,9 +73,9 @@ public final class RunStore implements ConflictResolver {
       String completedAt,
       List<String> repos) {
 
-    /** Whether this row is a build attempt; a null role predates roles and always meant build. */
+    /** Whether this row is a build attempt. */
     public boolean buildRole() {
-      return "build".equals(Objects.requireNonNullElse(role, "build"));
+      return "build".equals(role);
     }
   }
 
@@ -89,23 +88,7 @@ public final class RunStore implements ConflictResolver {
    * replicates. The id is minted by the launcher (a UUIDv7) so the run-scoped log directory is
    * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch.
    */
-  public String create(
-      String id,
-      String project,
-      String specId,
-      String node,
-      String role,
-      String agent,
-      String branch,
-      String task,
-      Integer pid,
-      Integer watcherPid,
-      String logPath) {
-    return create(
-        id, project, specId, node, role, agent, branch, task, pid, watcherPid, logPath, null);
-  }
-
-  /** As the other overload, also recording the systemd {@code unit} the run was launched as. */
+  /** Records a run with the run-scoped process identity assigned at launch. */
   public String create(
       String id,
       String project,
@@ -244,7 +227,7 @@ public final class RunStore implements ConflictResolver {
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
-            + " AND IFNULL(role, 'build') = 'build' ORDER BY started_at DESC"
+            + " AND role = 'build' ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -262,7 +245,7 @@ public final class RunStore implements ConflictResolver {
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-            + " AND IFNULL(node, '') = ? AND IFNULL(role, 'build') = 'build'"
+            + " AND IFNULL(node, '') = ? AND role = 'build'"
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,
@@ -276,9 +259,7 @@ public final class RunStore implements ConflictResolver {
    */
   public List<RunRow> stopping() {
     return db.query(
-        "SELECT "
-            + COLUMNS
-            + " FROM runs WHERE status = 'stopping' AND IFNULL(role, 'build') = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND role = 'build'",
         this::mapRow);
   }
 
@@ -289,9 +270,7 @@ public final class RunStore implements ConflictResolver {
    */
   public List<RunRow> running() {
     return db.query(
-        "SELECT "
-            + COLUMNS
-            + " FROM runs WHERE status = 'running' AND IFNULL(role, 'build') = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND role = 'build'",
         this::mapRow);
   }
 
@@ -424,7 +403,7 @@ public final class RunStore implements ConflictResolver {
         () -> {
           var latest =
               db.queryOne(
-                  "SELECT id FROM runs WHERE spec_id = ? AND IFNULL(role, 'build') = 'build'"
+                  "SELECT id FROM runs WHERE spec_id = ? AND role = 'build'"
                       + " ORDER BY started_at DESC, id DESC LIMIT 1",
                   row -> row.text(0),
                   specId);
@@ -482,44 +461,6 @@ public final class RunStore implements ConflictResolver {
               id);
           recordRevision(id, "local", false);
         });
-  }
-
-  /**
-   * Stamps {@code node} on every run that has none yet — the backfill that carries pre-Run rows
-   * (all of which executed on this box) forward with the local handle so they stop reading as
-   * foreign. Idempotent; returns how many were stamped. Journals each so the stamped node
-   * replicates.
-   */
-  public int backfillNode(String handle) {
-    if (Strings.isBlank(handle)) {
-      return 0;
-    }
-    var ids = db.query("SELECT id FROM runs WHERE node IS NULL OR node = ''", row -> row.text(0));
-    for (var id : ids) {
-      db.transaction(
-          () -> {
-            db.execute("UPDATE runs SET node = ? WHERE id = ?", handle, id);
-            recordRevision(id, "local", false);
-          });
-    }
-    return ids.size();
-  }
-
-  /**
-   * Journals a baseline revision for every run that has none yet, so a run written before this
-   * store journaled its mutations becomes visible to sync. Idempotent; returns how many were
-   * backfilled.
-   */
-  public int backfillRevisions() {
-    var journaled = syncEntityIds();
-    var pending =
-        db.query("SELECT id FROM runs", row -> row.text(0)).stream()
-            .filter(id -> !journaled.contains(id))
-            .toList();
-    for (var id : pending) {
-      db.transaction(() -> recordRevision(id, "local", false));
-    }
-    return pending.size();
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
@@ -654,7 +595,7 @@ public final class RunStore implements ConflictResolver {
     db.execute("DELETE FROM runs WHERE id = ?", id);
   }
 
-  private String recordRevision(String id, String origin, boolean deleted) {
+  String recordRevision(String id, String origin, boolean deleted) {
     return recordRevision(id, null, origin, deleted, false);
   }
 
@@ -698,7 +639,7 @@ public final class RunStore implements ConflictResolver {
         row.project(),
         row.specId(),
         row.node(),
-        Objects.requireNonNullElse(row.role(), "build"),
+        row.role(),
         row.agent(),
         row.branch(),
         row.task(),

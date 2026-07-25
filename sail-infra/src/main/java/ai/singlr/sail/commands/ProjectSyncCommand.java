@@ -95,7 +95,7 @@ public final class ProjectSyncCommand implements Runnable {
     }
 
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
-    var backfilled = 0;
+    var updated = 0;
     var alreadyCurrent = 0;
     var failed = 0;
 
@@ -104,8 +104,8 @@ public final class ProjectSyncCommand implements Runnable {
         var hostnameRealigned = containers.setHostname(project);
         var setup = ContainerSailSetup.ensureInstalled(shell, project);
         var context = regenerateContext(shell, project);
-        if (setup == ContainerSailSetup.Result.BACKFILLED) {
-          backfilled++;
+        if (setup == ContainerSailSetup.Result.UPDATED) {
+          updated++;
         } else {
           alreadyCurrent++;
         }
@@ -140,8 +140,8 @@ public final class ProjectSyncCommand implements Runnable {
     System.out.println();
     System.out.println(
         Ansi.AUTO.string(
-            "  @|bold,green ✓|@ Backfilled "
-                + backfilled
+            "  @|bold,green ✓|@ Updated "
+                + updated
                 + ", already current "
                 + alreadyCurrent
                 + (failed > 0 ? ", failed " + failed : "")
@@ -170,8 +170,7 @@ public final class ProjectSyncCommand implements Runnable {
       ContainerSailSetup.Result setup,
       AgentContextInstaller.Result context,
       boolean hostnameRealigned) {
-    var setupLabel =
-        setup == ContainerSailSetup.Result.BACKFILLED ? "backfilled" : "already current";
+    var setupLabel = setup == ContainerSailSetup.Result.UPDATED ? "updated" : "already current";
     var hostnameClause = hostnameRealigned ? ", hostname: realigned" : "";
     return Ansi.AUTO.string(
         "  @|green ✓|@ "

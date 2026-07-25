@@ -134,34 +134,4 @@ class SyncSchemaConvergenceTest {
       assertEquals(versionAfterFirst, new SchemaManager(second.db()).currentVersion());
     }
   }
-
-  @Test
-  void aPreFloorLegacyBuildIsTerminalBeforeSyncCanUseTheHandle() {
-    var path = tempDir.resolve("pre-floor.db");
-    try (var legacy = Sqlite.open(path)) {
-      new SchemaManager(legacy).migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
-      legacy.execute(
-          """
-          INSERT INTO runs
-              (id, project, spec_id, node, role, agent, status, started_at, unit)
-          VALUES
-              ('legacy', 'acme', 'auth', 'node-a', 'build', 'codex', 'running',
-                  '2026-01-01', '')""");
-    }
-
-    try (var converged = SyncDatabase.converge(path, "node-a")) {
-      var run = new RunStore(converged.db()).findById("legacy").orElseThrow();
-      assertEquals("stopped", run.status());
-      assertTrue(run.completedAt() != null);
-      assertEquals(
-          1L,
-          converged
-              .db()
-              .queryOne(
-                  "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
-                  row -> row.integer(0),
-                  LegacyDataMigration.NAME)
-              .orElseThrow());
-    }
-  }
 }

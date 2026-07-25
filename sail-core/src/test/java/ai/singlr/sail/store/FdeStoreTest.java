@@ -37,7 +37,7 @@ class FdeStoreTest {
   @Test
   void removeDeletesTheFdeItsTokensAndCascadesCredentials() {
     var fde = store.add("ghost", null, null, "member");
-    new TokenStore(db).create("ghost-token", "member", fde.id());
+    new TokenStore(db).create("ghost-token", "member", fde.id(), null);
     new AuthSessionStore(db).create(fde.id(), java.time.Duration.ofMinutes(5));
     new FdeSshKeyStore(db)
         .add(
@@ -57,7 +57,7 @@ class FdeStoreTest {
   void removeLeavesOtherFdesCredentialsAlone() {
     var ghost = store.add("ghost", null, null, "member");
     var keeper = store.add("keeper", null, null, "member");
-    new TokenStore(db).create("keeper-token", "member", keeper.id());
+    new TokenStore(db).create("keeper-token", "member", keeper.id(), null);
 
     store.remove(ghost.id());
 

@@ -105,7 +105,7 @@ class TokenAuthTest {
   @Test
   void tokenOwnedByFdeAuthenticates() throws Exception {
     var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
-    var token = tokenStore.create("uday-laptop", "admin", fde.id()).token();
+    var token = tokenStore.create("uday-laptop", "admin", fde.id(), null).token();
     assertEquals(200, get("/v1/specs/board", token).statusCode());
   }
 

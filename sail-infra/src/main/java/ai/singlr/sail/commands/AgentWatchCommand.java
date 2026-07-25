@@ -173,7 +173,6 @@ public final class AgentWatchCommand implements Runnable {
           guardrails,
           notifier,
           config.agent() != null ? config.agent().notifications() : null,
-          config.repoPaths(),
           startedAt,
           publisher);
     }
@@ -227,7 +226,6 @@ public final class AgentWatchCommand implements Runnable {
       Guardrails guardrails,
       WebhookNotifier notifier,
       Notifications notifications,
-      List<String> repoPaths,
       Instant startedAt,
       StopPublisher publisher)
       throws Exception {
@@ -258,7 +256,7 @@ public final class AgentWatchCommand implements Runnable {
       if (decision == TimeoutDecision.KEEP_WAITING) {
         continue;
       }
-      var result = checker.check(name, guardrails, startedAt, repoPaths);
+      var result = checker.check(guardrails, startedAt);
       if (result instanceof GuardrailChecker.GuardrailResult.Ok) {
         result = GuardrailChecker.checkStall(lastProgressAt, guardrails);
       }
@@ -487,7 +485,7 @@ public final class AgentWatchCommand implements Runnable {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("triggered", false);
-      map.put("reason", "agent_exited");
+      map.put("reason", "agent_session_stopped");
       System.out.println(YamlUtil.dumpJson(map));
     } else {
       System.out.println(Ansi.AUTO.string("  @|faint Agent exited. Watch complete.|@"));
@@ -495,7 +493,7 @@ public final class AgentWatchCommand implements Runnable {
     sendNotification(
         notifier,
         notifications,
-        "agent_exited",
+        "agent_session_stopped",
         name,
         "Agent exited",
         "Agent process is no longer running. Run: sail agent report " + name);
@@ -518,7 +516,7 @@ public final class AgentWatchCommand implements Runnable {
     sendNotification(
         notifier,
         notifications,
-        "session_done",
+        "agent_session_completed",
         name,
         "Watch complete",
         "Agent session ended. Run: sail agent report " + name);

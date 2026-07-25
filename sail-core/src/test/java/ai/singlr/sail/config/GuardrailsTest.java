@@ -38,18 +38,29 @@ class GuardrailsTest {
   }
 
   @Test
-  void legacyFieldsAreIgnored() {
-    var map =
-        Map.<String, Object>of(
-            "max_duration", "4h",
-            "idle_timeout", "90m",
-            "commit_burst", 20,
-            "action", "stop");
+  void retiredIdleTimeoutIsRejectedWithAnExactEdit() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Guardrails.fromMap(Map.of("idle_timeout", "90m"), "acme/sail.yaml"));
 
-    var g = Guardrails.fromMap(map);
+    assertEquals(
+        "Unknown guardrail key `idle_timeout` in acme/sail.yaml; rename `idle_timeout` to"
+            + " `max_idle` in acme/sail.yaml.",
+        refusal.getMessage());
+  }
 
-    assertEquals("4h", g.maxDuration());
-    assertEquals("stop", g.action());
+  @Test
+  void retiredCommitBurstIsRejectedWithAnExactEdit() {
+    var refusal =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Guardrails.fromMap(Map.of("commit_burst", 20), "acme/sail.yaml"));
+
+    assertEquals(
+        "Unknown guardrail key `commit_burst` in acme/sail.yaml; rename `commit_burst` to"
+            + " `max_idle` in acme/sail.yaml.",
+        refusal.getMessage());
   }
 
   @Test

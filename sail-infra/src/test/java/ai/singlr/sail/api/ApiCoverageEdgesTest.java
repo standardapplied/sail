@@ -130,7 +130,8 @@ class ApiCoverageEdgesTest {
               null,
               tmp.resolve("api.sock"),
               null,
-              new SpecStore(db))) {
+              new SpecStore(db),
+              null)) {
         assertSame(bus, server.eventBus());
       }
     }

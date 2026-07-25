@@ -167,7 +167,8 @@ public final class AgentLogCommand implements Runnable {
 
   /**
    * The latest run's spec's latest review log, per-review under the review's own directory, or the
-   * fixed legacy review log when the current dispatch attempt has no review yet.
+   * fixed foreground-review log when the current dispatch attempt has no review yet. Foreground
+   * review identity intentionally remains shared until the ad-hoc run-scoping work lands.
    */
   static String reviewLogPathFrom(Optional<RunStore.RunRow> latestRun, ReviewStore reviews) {
     return latestRun

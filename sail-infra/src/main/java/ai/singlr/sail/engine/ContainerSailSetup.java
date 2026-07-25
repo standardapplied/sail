@@ -44,7 +44,7 @@ public final class ContainerSailSetup {
     /** Mount and all sail-owned files were already in place; no install ran. */
     ALREADY_PRESENT,
     /** Mount was added or replaced, or at least one helper file was missing. */
-    BACKFILLED
+    UPDATED
   }
 
   /**
@@ -70,7 +70,7 @@ public final class ContainerSailSetup {
     new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
-    return Result.BACKFILLED;
+    return Result.UPDATED;
   }
 
   private static boolean allFilesPresent(ShellExec shell, String container)

@@ -30,12 +30,12 @@ class ProjectSyncCommandTest {
     var line =
         ProjectSyncCommand.humanLine(
             "web",
-            ContainerSailSetup.Result.BACKFILLED,
+            ContainerSailSetup.Result.UPDATED,
             context(List.of("/home/dev/workspace/CLAUDE.md")),
             false);
 
     assertTrue(line.contains("web"));
-    assertTrue(line.contains("backfilled"));
+    assertTrue(line.contains("updated"));
     assertTrue(line.contains("1 file regenerated"));
     assertFalse(line.contains("hostname"), "a hostname already current is not mentioned");
   }
@@ -86,8 +86,7 @@ class ProjectSyncCommandTest {
 
   @Test
   void jsonRowMarksAMissingDescriptorAndARealignedHostname() {
-    var row =
-        ProjectSyncCommand.jsonRow("legacy", ContainerSailSetup.Result.BACKFILLED, null, true);
+    var row = ProjectSyncCommand.jsonRow("legacy", ContainerSailSetup.Result.UPDATED, null, true);
 
     assertEquals("no_descriptor", row.get("context"));
     assertEquals(true, row.get("hostname_realigned"));

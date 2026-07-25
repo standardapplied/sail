@@ -112,6 +112,10 @@ public final class SyncRpcServer {
     out.flush();
   }
 
+  /**
+   * Refuses peers below the current fleet-wide upgrade floor. This is live protocol safety: a
+   * mixed-version box must not exchange rows until its data migration has run.
+   */
   private static SyncWire.Failed incompatiblePeer() {
     return new SyncWire.Failed(
         "Sync requires Sail "

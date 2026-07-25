@@ -227,7 +227,7 @@ public final class ProjectInitCommand implements Runnable {
       }
       agent =
           new SailYaml.Agent(
-              agentType, true, "agent/", true, install, null, null, null, null, null, null);
+              agentType, true, "agent/", true, install, null, null, null, null, null);
     }
 
     return new SailYaml(

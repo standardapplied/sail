@@ -835,7 +835,7 @@ class BannerTest {
             services,
             null,
             new SailYaml.Agent(
-                "claude-code", true, "sail/", true, null, null, null, null, null, null, null),
+                "claude-code", true, "sail/", true, null, null, null, null, null, null),
             null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var state = new ContainerState.Running("10.0.0.42");
@@ -927,7 +927,7 @@ class BannerTest {
             null,
             null,
             new SailYaml.Agent(
-                "claude-code", false, null, true, null, null, null, null, null, null, null),
+                "claude-code", false, null, true, null, null, null, null, null, null),
             null,
             new SailYaml.Ssh("dev", null));
     var state = new ContainerState.Running("10.0.0.1");
@@ -1063,9 +1063,10 @@ class BannerTest {
             "3h 42m",
             "sail/20260302-010000",
             List.of(
-                new Spec("auth", "Implement JWT", SpecStatus.DONE, null, List.of(), null),
-                new Spec("tests", "Write tests", SpecStatus.DONE, null, List.of("auth"), null),
-                new Spec("docs", "Update docs", SpecStatus.PENDING, null, List.of(), null)),
+                new Spec("auth", "test", "Implement JWT", SpecStatus.DONE, null, List.of(), null),
+                new Spec(
+                    "tests", "test", "Write tests", SpecStatus.DONE, null, List.of("auth"), null),
+                new Spec("docs", "test", "Update docs", SpecStatus.PENDING, null, List.of(), null)),
             18,
             47,
             false,

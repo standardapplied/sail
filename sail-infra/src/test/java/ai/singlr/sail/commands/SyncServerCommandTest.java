@@ -190,7 +190,18 @@ class SyncServerCommandTest {
     var id = DateTimeUtils.newId().toString();
     new RunStore(nodeDb)
         .create(
-            id, "proj", "auth", node, "build", "claude-code", "feat/x", "task", 1, null, "/log");
+            id,
+            "proj",
+            "auth",
+            node,
+            "build",
+            "claude-code",
+            "feat/x",
+            "task",
+            1,
+            null,
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id);
     return id;
   }
 

@@ -12,7 +12,6 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.IncusDeviceManager;
-import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -24,8 +23,6 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -92,7 +89,7 @@ public final class MigrateCommand implements Runnable {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
-      applyDataBackfills(db, jsonOutput);
+      applyDataImports(db, jsonOutput);
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       relocateContainerSockets(jsonOutput);
@@ -100,80 +97,20 @@ public final class MigrateCommand implements Runnable {
     }
   }
 
-  /**
-   * The database-only data backfills — every one idempotent and quiet when nothing is needed — that
-   * make pre-migration rows visible to sync and seed the bundled demo. Shared with {@link
-   * ServerStartCommand} so a daemon start is a genuine second chance: if the post-upgrade {@code
-   * migrate} sub-process ever fails, the next service start still converges the data. Host-level
-   * steps (relocating {@code host.yaml}, syncing {@code authorized_keys}) are not here — they need
-   * root and run only in the full {@link #runMigrations} path.
-   */
-  public static void applyDataBackfills(Sqlite db, boolean jsonOutput) {
-    backfillSpecRevisions(db, jsonOutput);
+  /** Imports host data that remains outside schema and versioned data migrations. */
+  private static void applyDataImports(Sqlite db, boolean jsonOutput) {
     importProjects(db, jsonOutput);
-    backfillProjectRevisions(db, jsonOutput);
     scrubProjectIdentity(db, jsonOutput);
     importFiles(db, jsonOutput);
-    backfillRuns(db, jsonOutput);
     seedDemo(db, jsonOutput);
   }
 
-  /**
-   * Carries pre-Run rows forward: stamps each with this box's FDE handle as its {@code node} (every
-   * legacy run executed here) so it stops reading as foreign under the provenance guard, and
-   * journals a baseline revision so it replicates. Quiet when nothing needed it; a box with no
-   * handle yet stamps nothing and retries on the next migrate/start.
-   */
-  private static void backfillRuns(Sqlite db, boolean jsonOutput) {
-    var runs = new RunStore(db);
-    var stamped = runs.backfillNode(NodeIdentity.handle());
-    var journaled = runs.backfillRevisions();
-    if (!jsonOutput && stamped + journaled > 0) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ runs: "
-                  + stamped
-                  + " stamped with this node, "
-                  + journaled
-                  + " made syncable"));
-    }
-  }
-
-  /**
-   * Journals a baseline revision for specs that predate the sync machinery, so a spec sitting in
-   * the database without a change-log entry becomes visible to {@code sail sync}. The analog of
-   * {@link #backfillProjectRevisions} for specs. Quiet when nothing needed it.
-   */
-  private static void backfillSpecRevisions(Sqlite db, boolean jsonOutput) {
-    var backfilled = new SpecStore(db).backfillRevisions();
-    if (!jsonOutput && backfilled > 0) {
-      System.out.println(Ansi.AUTO.string("  @|green ✓|@ specs: " + backfilled + " made syncable"));
-    }
-  }
-
-  /**
-   * Backfills the project catalog from on-disk descriptors, so projects created before the catalog
-   * existed appear in the DB (the shared, replicated source of truth). Repeatable and idempotent;
-   * quiet when nothing was imported.
-   */
+  /** Imports catalog writes missed by current best-effort project creation. */
   private static void importProjects(Sqlite db, boolean jsonOutput) {
     var report = new ProjectImporter(SailPaths.projectsDir(), new ProjectStore(db)).importAll();
     if (!jsonOutput && report.imported() > 0) {
       System.out.println(
           Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
-    }
-  }
-
-  /**
-   * Journals a baseline revision for catalogued projects that predate the sync machinery, so a
-   * project sitting in the catalog without a change-log entry becomes visible to {@code sail sync}.
-   * Quiet when nothing needed it.
-   */
-  private static void backfillProjectRevisions(Sqlite db, boolean jsonOutput) {
-    var backfilled = new ProjectStore(db).backfillRevisions();
-    if (!jsonOutput && backfilled > 0) {
-      System.out.println(
-          Ansi.AUTO.string("  @|green ✓|@ project catalog: " + backfilled + " made syncable"));
     }
   }
 

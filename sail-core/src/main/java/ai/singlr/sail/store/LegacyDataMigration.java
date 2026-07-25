@@ -12,7 +12,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** Carries every pre-0.14 row to the v1 data floor exactly once. */
+/**
+ * Carries every pre-0.14 row to the v1 data floor exactly once. This migration remains in the
+ * versioned chain so a box upgrading across 0.14 can reach the current schema; it is not a runtime
+ * compatibility path.
+ */
 public final class LegacyDataMigration implements DataMigration {
 
   public static final String NAME = "legacy-data-floor-0.14.0";
@@ -44,11 +48,7 @@ public final class LegacyDataMigration implements DataMigration {
     var runs = new RunStore(db);
     var stamped = stampRuns(db, runs);
     var terminalized = terminalizeLegacyBuilds(db, runs);
-    var journaled =
-        runs.backfillRevisions()
-            + new SpecStore(db).backfillRevisions()
-            + new ProjectStore(db).backfillRevisions()
-            + new ReviewStore(db).backfillRevisions();
+    var journaled = journalRows(db);
     return new Report(attributed + stamped + terminalized + journaled, 0, 0, List.of());
   }
 
@@ -69,7 +69,59 @@ public final class LegacyDataMigration implements DataMigration {
               + ". Set it with 'sail host config set sync-handle <handle>', then rerun"
               + " 'sail migrate'.");
     }
-    return runs.backfillNode(handle);
+    for (var id : ids) {
+      db.transaction(
+          () -> {
+            db.execute("UPDATE runs SET node = ? WHERE id = ?", handle, id);
+            runs.recordRevision(id, "migration", false);
+          });
+    }
+    return ids.size();
+  }
+
+  private static int journalRows(Sqlite db) {
+    var runs = new RunStore(db);
+    var specs = new SpecStore(db);
+    var projects = new ProjectStore(db);
+    var reviews = new ReviewStore(db);
+    var changed = 0;
+    for (var id : unjournaled(db, "runs", "id", "run")) {
+      db.transaction(() -> runs.recordRevision(id, "migration", false));
+      changed++;
+    }
+    for (var id : unjournaled(db, "specs", "id", "spec")) {
+      db.transaction(() -> specs.recordRevision(id, "migration", false));
+      changed++;
+    }
+    for (var id : unjournaled(db, "projects", "name", "project")) {
+      var definition = projects.findByName(id).orElseThrow().definition();
+      db.transaction(
+          () -> projects.recordRevision(id, definition, null, "migration", false, false));
+      changed++;
+    }
+    for (var id : unjournaled(db, "reviews", "id", "review")) {
+      db.transaction(() -> reviews.recordRevision(id, null, "migration", false, false));
+      changed++;
+    }
+    return changed;
+  }
+
+  private static List<String> unjournaled(
+      Sqlite db, String table, String idColumn, String entityType) {
+    return db.query(
+        "SELECT "
+            + idColumn
+            + " FROM "
+            + table
+            + " WHERE NOT EXISTS (SELECT 1 FROM change_log"
+            + " WHERE entity_type = ? AND entity_id = "
+            + table
+            + "."
+            + idColumn
+            + ") ORDER BY "
+            + idColumn,
+        row -> row.text(0),
+        entityType);
   }
 
   private static int terminalizeLegacyBuilds(Sqlite db, RunStore runs) {

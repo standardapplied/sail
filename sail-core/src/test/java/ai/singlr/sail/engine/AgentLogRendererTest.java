@@ -78,13 +78,11 @@ class AgentLogRendererTest {
   }
 
   @Test
-  void passesNonStreamJsonObjectThrough() {
+  void dropsStructuredLinesOutsideTheCurrentStreamFormat() {
     var line = "key: a human readable colon line";
 
-    assertEquals(
-        line,
-        AgentLogRenderer.render(line),
-        "a plain line that happens to parse as a map but has no stream-json type is left untouched");
+    assertEquals(line, AgentLogRenderer.render(line));
+    assertEquals("", AgentLogRenderer.render("{\"message\":\"old log shape\"}"));
   }
 
   @Test

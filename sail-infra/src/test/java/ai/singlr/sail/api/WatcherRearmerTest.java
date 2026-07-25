@@ -112,47 +112,6 @@ class WatcherRearmerTest {
         relauncher);
   }
 
-  private String preUpgradeRunningSession(String specId) {
-    return sessionStore.create(
-        DateTimeUtils.newId().toString(),
-        "test-project",
-        specId,
-        "node-a",
-        "build",
-        "claude-code",
-        "feat/test",
-        "task",
-        1,
-        null,
-        "/home/dev/.sail/agent.log");
-  }
-
-  @Test
-  void aPreUpgradeRunWithNoRecordedUnitIsLeftToItsOwnDetachedWatcher() {
-    createInProgressSpec("auth");
-    preUpgradeRunningSession("auth");
-    var probed = new AtomicInteger();
-    var relaunches = new AtomicInteger();
-
-    var rearmed =
-        rearmer(
-                (project, runId, unit) -> {
-                  probed.incrementAndGet();
-                  return true;
-                },
-                NO_UNIT,
-                DEAD,
-                run -> {
-                  relaunches.incrementAndGet();
-                  return Optional.of(LAUNCHED);
-                })
-            .rearm();
-
-    assertEquals(0, rearmed);
-    assertEquals(0, probed.get(), "this pass cannot know that unit's liveness");
-    assertEquals(0, relaunches.get());
-  }
-
   @Test
   void theProbeCoverageCheckAndRelaunchAllAddressTheRunItself() {
     createInProgressSpec("auth");
