@@ -5,46 +5,15 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.SailYaml;
 import java.nio.file.Path;
-import picocli.CommandLine.Help.Ansi;
 
 /**
- * Starts the background guardrail watcher ({@code sail agent watch}) for a project. Supervision is
- * on by default: the watcher is spawned for every dispatched agent and applies {@link
- * ai.singlr.sail.config.Guardrails#defaults()} when sail.yaml declares no guardrails of its own.
- * Shared by the CLI dispatch/run/launch commands, which all spawn it the same way through {@link
- * WatcherSpawner} — detached from this process, so it survives Ctrl-C on the dispatch stream and
- * the SSH session ending. Failures are reported but never fatal to the launch.
+ * Renders how a guardrail watcher ({@code sail agent watch}) ended up running, for the launch lanes
+ * that spawn one through {@link WatcherSpawner} and narrate the result.
  */
 public final class GuardrailWatcher {
 
   private GuardrailWatcher() {}
-
-  /**
-   * Spawns a detached watcher for the project's agent (no-op only when there is no agent block),
-   * through the caller's own shell so wiring matches the rest of the command.
-   */
-  public static void launch(String project, String file, SailYaml config, ShellExec shell) {
-    if (config == null || config.agent() == null) {
-      return;
-    }
-    try {
-      var sailYamlPath = SailPaths.resolveSailYaml(project, file);
-      var watchLog = SailPaths.projectDir(project).resolve("watch.log");
-      var spawner = new WatcherSpawner(shell, WatcherSpawner::spawnProcess);
-      var spawned = spawner.spawn(project, sailYamlPath, watchLog);
-      System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + describe(spawned, watchLog)));
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Failed to start guardrail watcher: "
-                  + e.getMessage()
-                  + ". Run manually: sail agent watch "
-                  + project,
-              Ansi.AUTO));
-    }
-  }
 
   public static String describe(WatcherSpawner.Spawned spawned, Path watchLog) {
     return switch (spawned) {

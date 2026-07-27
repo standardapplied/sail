@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
@@ -127,8 +126,10 @@ public final class AgentLogStreamer implements HttpHandler {
       if (RunPolicy.access(
               ApiRouter.actorOf(exchange),
               run.id(),
-              run.specId(),
-              specAssignee.apply(run.specId()).orElse(null))
+              StopOperations.specIdOf(run),
+              Strings.isBlank(run.specId())
+                  ? run.node()
+                  : specAssignee.apply(run.specId()).orElse(null))
           instanceof AccessDecision.Refused refused) {
         var fix =
             Strings.isBlank(refused.fix())
@@ -239,7 +240,7 @@ public final class AgentLogStreamer implements HttpHandler {
    * interpolated into the script, so it can never be interpreted as shell syntax.
    */
   static String[] buildTailCommand(String project, String runId, String role, int since) {
-    var logPath = AgentUnit.fromRole(role).runLogPath(Ids.requireUuid(runId));
+    var logPath = AgentUnit.logPathForRole(role, runId);
     var script =
         since > 0
             ? "touch -- \"$1\" 2>/dev/null; exec tail -n \"+$2\" -f -- \"$1\""

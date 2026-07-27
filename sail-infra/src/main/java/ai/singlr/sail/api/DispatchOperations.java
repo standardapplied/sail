@@ -59,6 +59,25 @@ public final class DispatchOperations {
   public record Request(
       String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {}
 
+  /**
+   * One ad-hoc session launch — {@code sail agent run --task}. No spec, no policy: the operator
+   * supplies the task directly, and the session reserves the whole container. {@code branch} is the
+   * already-checked-out work branch (or null), {@code path} an optional workspace subdirectory.
+   */
+  public record AdhocRequest(
+      String task, String branch, String path, boolean background, boolean dryRun) {}
+
+  /**
+   * A launched ad-hoc session: its minted run id and, live launches only, the probed session,
+   * foreground exit code, and watcher. A dry run carries the run id it would have used and nothing
+   * else.
+   */
+  public record AdhocSession(
+      String runId,
+      AgentSession.SessionInfo session,
+      Integer exitCode,
+      Optional<WatcherSpawner.Spawned> watcher) {}
+
   /** What a dispatch produced. */
   public sealed interface Outcome permits NoSpecs, Dispatched {}
 
@@ -327,6 +346,91 @@ public final class DispatchOperations {
       releaseIfAbsent(runId, project, unit, background);
       throw e;
     }
+  }
+
+  /**
+   * Launches one ad-hoc agent session — the {@code sail agent run --task} lane — as a first-class
+   * run: a minted run id, {@code role='adhoc'} with no spec, a run-scoped unit and file set, and a
+   * whole-container reservation through the same {@link RunStore#reserveDispatch} transaction that
+   * gates dispatches, so an ad-hoc session and a dispatched agent are mutually exclusive by the one
+   * atomic mechanism. Background launches get the same run-addressed guardrail watcher as
+   * dispatches. No spec means no policy: unlike dispatch, a blank node handle is allowed — the
+   * reservation is stamped with whatever identity the box has, exactly like the run rows it gates
+   * against. A dry run mints the id and announces the launch command but writes and executes
+   * nothing.
+   */
+  public AdhocSession startAdhoc(String project, AdhocRequest request, String localHandle) {
+    var loaded = projects.loadRunning(project);
+    var config = loaded.config();
+    var agentType =
+        config.agent() != null ? config.agent().type() : AgentCli.CLAUDE_CODE.yamlName();
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    var background = request.background();
+    var workDir = adhocWorkDir(config, request.path());
+    var fullPermissions = adhocFullPermissions(config);
+    if (request.dryRun()) {
+      listener.launching(
+          background,
+          launchCommand(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              null,
+              null,
+              "",
+              agentType,
+              background,
+              unit,
+              runId));
+      return new AdhocSession(runId, null, null, Optional.empty());
+    }
+    reserveAdhocRun(
+        runId, project, localHandle, agentType, request.branch(), request.task(), unit, background);
+    try {
+      var launch =
+          launchSession(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              null,
+              null,
+              "",
+              agentType,
+              request.task(),
+              request.branch(),
+              List.of(),
+              background,
+              unit,
+              runId);
+      var status = querySession(new AgentSession(shell), project, unit);
+      if (background) {
+        updateRunProcess(runId, status, launch.watcher());
+      } else {
+        completeForegroundRun(runId, launch.exitCode());
+      }
+      if (status != null && status.running()) {
+        publishAgentSessionStarted(project, null, agentType, status.pid(), runId, launch.watcher());
+      }
+      return new AdhocSession(
+          runId, status, background ? null : launch.exitCode(), launch.watcher());
+    } catch (RuntimeException e) {
+      releaseIfAbsent(runId, project, unit, background);
+      throw e;
+    }
+  }
+
+  private static String adhocWorkDir(SailYaml config, String path) {
+    var workDir = "/home/" + config.sshUser() + "/workspace";
+    return Strings.isBlank(path) ? workDir : workDir + "/" + path;
+  }
+
+  private static boolean adhocFullPermissions(SailYaml config) {
+    return config.agent() != null
+        && config.agent().config() != null
+        && "full".equals(config.agent().config().get("permissions"));
   }
 
   /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
@@ -614,6 +718,44 @@ public final class DispatchOperations {
       String agentType,
       AgentUnit unit,
       String runId) {
+    return launchSession(
+        project,
+        config,
+        AgentSession.launchWorkDir(config.sshUser(), targetRepos),
+        true,
+        spec.model(),
+        spec.reasoningEffort(),
+        spec.id(),
+        agentType,
+        task,
+        branch,
+        targetRepos.stream().map(SailYaml.Repo::path).toList(),
+        background,
+        unit,
+        runId);
+  }
+
+  /**
+   * The one launch sequence both the dispatch and ad-hoc lanes execute: stage the run-scoped task
+   * and session files, build the launch command for the run's own unit, run it, and — background
+   * only — verify the launch and arm the run-addressed watcher. The lanes differ only in what they
+   * pass: a dispatch carries its spec's identity and model, an ad-hoc session a blank spec id.
+   */
+  private LaunchOutcome launchSession(
+      String project,
+      SailYaml config,
+      String workDir,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String task,
+      String branch,
+      List<String> repoPaths,
+      boolean background,
+      AgentUnit unit,
+      String runId) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -623,39 +765,24 @@ public final class DispatchOperations {
           project,
           task,
           Objects.requireNonNullElse(branch, ""),
-          spec.id(),
+          specId,
           agentType,
           runId,
-          targetRepos.stream().map(SailYaml.Repo::path).toList(),
+          repoPaths,
           unit);
-      var agentCli = AgentCli.fromYamlName(agentType);
-      var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var command =
-          background
-              ? AgentSession.buildBackgroundLaunchCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  unit.logPath(),
-                  runId)
-              : AgentSession.buildForegroundTaskCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  unit.logPath(),
-                  runId);
+          launchCommand(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              model,
+              reasoningEffort,
+              specId,
+              agentType,
+              background,
+              unit,
+              runId);
       listener.launching(background, command);
       var exitCode = launcher.launch(command);
       if (background) {
@@ -670,6 +797,46 @@ public final class DispatchOperations {
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
+  }
+
+  private static List<String> launchCommand(
+      String project,
+      SailYaml config,
+      String workDir,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      boolean background,
+      AgentUnit unit,
+      String runId) {
+    var agentCli = AgentCli.fromYamlName(agentType);
+    return background
+        ? AgentSession.buildBackgroundLaunchCommand(
+            project,
+            config.sshUser(),
+            workDir,
+            fullPermissions,
+            agentCli,
+            model,
+            reasoningEffort,
+            specId,
+            agentType,
+            unit.logPath(),
+            runId)
+        : AgentSession.buildForegroundTaskCommand(
+            project,
+            config.sshUser(),
+            workDir,
+            fullPermissions,
+            agentCli,
+            model,
+            reasoningEffort,
+            specId,
+            agentType,
+            unit.logPath(),
+            runId);
   }
 
   /**
@@ -709,15 +876,21 @@ public final class DispatchOperations {
   }
 
   private static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
+    var run = conflict.run();
+    var occupied =
+        Strings.isBlank(run.specId())
+            ? "Ad-hoc agent run " + run.runId() + " is occupying this container"
+            : "Agent run "
+                + run.runId()
+                + " is already working spec '"
+                + run.specId()
+                + "' in "
+                + (conflict.overlap().isEmpty()
+                    ? "this container"
+                    : "repo(s) " + conflict.overlap());
     return new ApiException(
         ErrorCode.AGENT_ALREADY_RUNNING,
-        "Agent run "
-            + conflict.run().runId()
-            + " is already working spec '"
-            + conflict.run().specId()
-            + "' in "
-            + (conflict.overlap().isEmpty() ? "this container" : "repo(s) " + conflict.overlap())
-            + ".",
+        occupied + ".",
         "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
   }
 
@@ -782,6 +955,47 @@ public final class DispatchOperations {
     if (runStore == null) {
       return;
     }
+    reserve(
+        runId, project, specId, node, "build", repos, agentType, branch, task, unit, background);
+  }
+
+  /**
+   * Reserves an ad-hoc session through the identical transaction: {@code role='adhoc'}, no spec,
+   * and an empty repo set — which the gate reads as the whole project, so the session excludes and
+   * is excluded by every dispatch atomically. Unlike dispatch, an absent run store is a refusal,
+   * not a skip: the reservation is the only thing standing between two agents in one container, and
+   * an ad-hoc session without a row would also be invisible to stop, status, and retention.
+   */
+  private void reserveAdhocRun(
+      String runId,
+      String project,
+      String node,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      boolean background) {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
+    }
+    reserve(
+        runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit, background);
+  }
+
+  private void reserve(
+      String runId,
+      String project,
+      String specId,
+      String node,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      boolean background) {
     var recordedUnit = background ? unit.unitName() : "";
     Optional<DispatchGate.Conflict> conflict;
     try {
@@ -791,6 +1005,7 @@ public final class DispatchOperations {
               project,
               specId,
               node,
+              role,
               repos,
               agentType,
               branch,

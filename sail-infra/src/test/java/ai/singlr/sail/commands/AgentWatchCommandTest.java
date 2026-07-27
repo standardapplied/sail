@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.time.Instant;
 import java.util.Map;
@@ -23,6 +24,8 @@ import picocli.CommandLine;
 
 class AgentWatchCommandTest {
 
+  private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
   @Test
   void helpTextIncludes() {
     var cmd = new CommandLine(new AgentWatchCommand());
@@ -30,6 +33,8 @@ class AgentWatchCommandTest {
 
     assertTrue(usage.contains("watch"));
     assertTrue(usage.contains("guardrails"));
+    assertTrue(usage.contains("--run"));
+    assertTrue(usage.contains("--unit"));
     assertTrue(usage.contains("--dry-run"));
     assertTrue(usage.contains("--json"));
     assertTrue(usage.contains("--host"));
@@ -40,9 +45,9 @@ class AgentWatchCommandTest {
   }
 
   @Test
-  void requiresProjectName() {
+  void refusesToStartWithoutARunId() {
     var cmd = new CommandLine(new AgentWatchCommand());
-    var exitCode = cmd.execute();
+    var exitCode = cmd.execute("acme");
 
     assertNotEquals(0, exitCode);
   }
@@ -162,15 +167,7 @@ class AgentWatchCommandTest {
   void anUnstampedEventNeverResetsARunScopedStallTimer() {
     var event = sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED);
 
-    assertFalse(AgentWatchCommand.matchesRun(event, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
-  }
-
-  @Test
-  void aProjectScopedWatcherAcceptsEveryHeartbeat() {
-    assertTrue(
-        AgentWatchCommand.matchesRun(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED), null));
-    assertTrue(
-        AgentWatchCommand.matchesRun(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED), ""));
+    assertFalse(AgentWatchCommand.matchesRun(event, RUN_ID));
   }
 
   @Test
@@ -274,7 +271,7 @@ class AgentWatchCommandTest {
   }
 
   @Test
-  void emitSyntheticStopSkipsAnAdHocSessionWithNoSpec() throws Exception {
+  void emitSyntheticStopSkipsOnlyWhenNeitherSpecNorRunIdIsKnown() throws Exception {
     var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
     var exit = new AgentSession.ExitState(false, 0, "", "codex", "");
 
@@ -284,22 +281,40 @@ class AgentWatchCommandTest {
   }
 
   @Test
+  void emitSyntheticStopPublishesARunAddressedStopForABlankSpec() throws Exception {
+    var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
+    var exit = new AgentSession.ExitState(false, 3, "", "codex", RUN_ID);
+
+    AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
+
+    var event = captured.get();
+    assertNotNull(event, "a run-addressed session with no spec must still publish its stop");
+    assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, event.type());
+    assertNull(event.spec());
+    assertEquals(RUN_ID, event.data().get("run_id"));
+    assertEquals(3, event.data().get("exit_code"));
+    assertEquals("watcher", event.data().get("source"));
+  }
+
+  @Test
   void watcherProducesASpecAttributedStopWhenTheUnitWasAlreadyCollected() throws Exception {
+    var unit = AgentUnit.forRun(RUN_ID);
     var shell =
         new ScriptedShellExecutor()
             .onOk(
-                "systemctl --user show sail-agent.service",
+                "systemctl --user show " + unit.service(),
                 """
                 ActiveState=inactive
                 ExecMainStatus=0
                 Environment=
                 """)
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + unit.sessionPath(),
                 """
-                {"task":"t","branch":"b","spec_id":"auth","agent_type":"claude-code","started_at":"2026-06-30T16:55:14Z","log_path":"/home/dev/.sail/agent.log"}
-                """);
-    var exit = new AgentSession(shell).queryExitStatus("acme");
+                {"task":"t","branch":"b","spec_id":"auth","agent_type":"claude-code","run_id":"%s","started_at":"2026-06-30T16:55:14Z","log_path":"%s"}
+                """
+                    .formatted(RUN_ID, unit.logPath()));
+    var exit = new AgentSession(shell).queryExitStatus("acme", unit);
 
     var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
     AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
@@ -311,6 +326,7 @@ class AgentWatchCommandTest {
     assertEquals("auth", event.spec());
     assertEquals("claude-code", event.agent());
     assertEquals(0, event.data().get("exit_code"));
+    assertEquals(RUN_ID, event.data().get("run_id"));
   }
 
   @Test

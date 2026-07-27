@@ -23,6 +23,30 @@ import org.junit.jupiter.api.io.TempDir;
 class AgentReporterTest {
 
   private static final String CONTAINER = "acme-health";
+  private static final String RUN_ID = "019bd3a8-94b0-7f3d-a0f5-77d2b4cfda01";
+  private static final AgentUnit RUN_UNIT = AgentUnit.forRun(RUN_ID);
+
+  private static RunStore.RunRow sessionRow(
+      String unit, String status, Integer exitCode, String startedAt, String completedAt) {
+    return new RunStore.RunRow(
+        RUN_ID,
+        CONTAINER,
+        "auth",
+        "node-a",
+        "build",
+        "claude-code",
+        "feat/auth",
+        "do it",
+        123,
+        null,
+        status,
+        exitCode,
+        null,
+        unit,
+        startedAt,
+        completedAt,
+        List.of());
+  }
 
   @Test
   void completedSessionWithSpecs(@TempDir java.nio.file.Path stateDir) throws Exception {
@@ -32,22 +56,25 @@ class AgentReporterTest {
         List.of(
             new Spec("auth", "test", "Build auth module", SpecStatus.DONE, null, List.of(), null),
             new Spec("tests", "test", "Write tests", SpecStatus.DONE, null, List.of(), null));
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
+            .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
             .onFail("kill -0 12345", "No such process")
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + RUN_UNIT.sessionPath(),
                 "{\"task\":\"build auth\",\"started_at\":\""
                     + startedAt
-                    + "\",\"branch\":\"sail/snap-20260302\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
+                    + "\",\"branch\":\"sail/snap-20260302\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "18\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, session, stateDir);
 
     assertEquals(CONTAINER, report.name());
     assertEquals("Completed", report.sessionStatus());
@@ -66,22 +93,25 @@ class AgentReporterTest {
   void runningSessionReportsRunning(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(1800).toString();
     var lastCommit = String.valueOf(Instant.now().minusSeconds(60).getEpochSecond());
+    var session = sessionRow(RUN_UNIT.unitName(), "running", null, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "9999\n")
+            .onOk("cat " + RUN_UNIT.pidPath(), "9999\n")
             .onOk("kill -0 9999", "")
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + RUN_UNIT.sessionPath(),
                 "{\"task\":\"fix bug\",\"started_at\":\""
                     + startedAt
-                    + "\",\"branch\":\"\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
+                    + "\",\"branch\":\"\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "5\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), session, stateDir);
 
     assertEquals("Running", report.sessionStatus());
     assertEquals(5, report.commitCount());
@@ -89,17 +119,49 @@ class AgentReporterTest {
   }
 
   @Test
-  void guardrailTriggeredSession(@TempDir java.nio.file.Path stateDir) throws Exception {
-    var startedAt = Instant.now().minusSeconds(3600 * 5).toString();
+  void aForegroundSessionWithABlankUnitStillProbesItsRunScopedPidFile(
+      @TempDir java.nio.file.Path stateDir) throws Exception {
+    var startedAt = Instant.now().minusSeconds(600).toString();
+    var session = sessionRow("", "running", null, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
+            .onOk("cat " + RUN_UNIT.pidPath(), "4242\n")
+            .onOk("kill -0 4242", "")
+            .onOk(
+                "cat " + RUN_UNIT.sessionPath(),
+                "{\"task\":\"ad-hoc fix\",\"started_at\":\""
+                    + startedAt
+                    + "\",\"branch\":\"\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
+            .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
+            .onOk("git -C /home/dev/workspace rev-list --count", "0\n")
+            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
+
+    var report =
+        new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
+
+    assertEquals("Running", report.sessionStatus());
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.contains("cat " + RUN_UNIT.pidPath())),
+        "a foreground run's blank unit still probes through the run-scoped pid file");
+  }
+
+  @Test
+  void guardrailTriggeredSession(@TempDir java.nio.file.Path stateDir) throws Exception {
+    var startedAt = Instant.now().minusSeconds(3600 * 5).toString();
+    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, startedAt, null);
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
             .onFail("kill -0 12345", "No such process")
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + RUN_UNIT.sessionPath(),
                 "{\"task\":\"implement API\",\"started_at\":\""
                     + startedAt
-                    + "\",\"branch\":\"sail/api\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
+                    + "\",\"branch\":\"sail/api\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
             .onOk(
                 "cat /home/dev/guardrail-triggered.yaml",
                 "reason: max_duration\naction: snapshot-and-stop\n")
@@ -108,7 +170,7 @@ class AgentReporterTest {
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), session, stateDir);
 
     assertEquals("Killed by guardrail", report.sessionStatus());
     assertTrue(report.guardrailTriggered());
@@ -121,7 +183,6 @@ class AgentReporterTest {
   void noSessionReturnsMinimalReport(@TempDir java.nio.file.Path stateDir) throws Exception {
     var shell =
         new ScriptedShellExecutor()
-            .onFail("cat /home/dev/.sail/agent.pid", "No such file")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
@@ -134,6 +195,9 @@ class AgentReporterTest {
     assertFalse(report.guardrailTriggered());
     assertFalse(report.rolledBack());
     assertTrue(report.specs().isEmpty());
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.contains("agent.pid")),
+        "a null session row probes no pid file at all");
   }
 
   @Test
@@ -146,22 +210,25 @@ class AgentReporterTest {
             + "\"\nexit_code: 1\nsnapshot_restored: pre-agent-20260302\ntask: implement auth\n";
     Files.writeString(stateDir.resolve("last-rollback.yaml"), rollbackYaml);
 
+    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
+            .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
             .onFail("kill -0 12345", "No such process")
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + RUN_UNIT.sessionPath(),
                 "{\"task\":\"implement auth\",\"started_at\":\""
                     + startedAt
-                    + "\",\"branch\":\"sail/snap\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
+                    + "\",\"branch\":\"sail/snap\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "10\n");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, List.of(), null, stateDir);
+    var report = reporter.generate(CONTAINER, config, List.of(), session, stateDir);
 
     assertEquals("Rolled back", report.sessionStatus());
     assertTrue(report.rolledBack());
@@ -177,22 +244,25 @@ class AgentReporterTest {
             new Spec("auth", "test", "Build auth", SpecStatus.DONE, null, List.of(), null),
             new Spec(
                 "docs", "test", "Update docs", SpecStatus.PENDING, null, List.of("auth"), null));
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
-            .onOk("cat /home/dev/.sail/agent.pid", "12345\n")
+            .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
             .onFail("kill -0 12345", "No such process")
             .onOk(
-                "cat /home/dev/.sail/agent-session.json",
+                "cat " + RUN_UNIT.sessionPath(),
                 "{\"task\":\"build auth\",\"started_at\":\""
                     + startedAt
-                    + "\",\"branch\":\"\",\"log_path\":\"/home/dev/.sail/agent.log\"}")
+                    + "\",\"branch\":\"\",\"log_path\":\""
+                    + RUN_UNIT.logPath()
+                    + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "8\n")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(CONTAINER, config, specs, null, stateDir);
+    var report = reporter.generate(CONTAINER, config, specs, session, stateDir);
 
     assertEquals(2, report.specs().size());
     assertEquals("Build auth", report.specs().getFirst().title());
@@ -205,28 +275,10 @@ class AgentReporterTest {
       throws Exception {
     var start = Instant.now().minusSeconds(7200);
     var end = Instant.now().minusSeconds(3600);
-    var session =
-        new RunStore.RunRow(
-            "019bd3a8-94b0-7f3d-a0f5-77d2b4cfda01",
-            CONTAINER,
-            "auth",
-            "node-a",
-            "build",
-            "claude-code",
-            "feat/auth",
-            "do it",
-            123,
-            null,
-            "completed",
-            0,
-            null,
-            "sail-agent-build-s1",
-            start.toString(),
-            end.toString(),
-            List.of());
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, start.toString(), end.toString());
     var shell =
         new ScriptedShellExecutor()
-            .onFail("cat /home/dev/.sail/agent.pid", "No such file")
+            .onFail("cat " + RUN_UNIT.pidPath(), "No such file")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
@@ -243,27 +295,10 @@ class AgentReporterTest {
   void aNonZeroExitIsReportedAsFailed(@TempDir java.nio.file.Path stateDir) throws Exception {
     var start = Instant.now().minusSeconds(120);
     var session =
-        new RunStore.RunRow(
-            "019bd3a8-94b0-7f3d-a0f5-77d2b4cfda02",
-            CONTAINER,
-            "auth",
-            "node-a",
-            "build",
-            "claude-code",
-            "feat/auth",
-            "do it",
-            123,
-            null,
-            "stopped",
-            137,
-            null,
-            "sail-agent-build-s1",
-            start.toString(),
-            Instant.now().toString(),
-            List.of());
+        sessionRow(RUN_UNIT.unitName(), "stopped", 137, start.toString(), Instant.now().toString());
     var shell =
         new ScriptedShellExecutor()
-            .onFail("cat /home/dev/.sail/agent.pid", "No such file")
+            .onFail("cat " + RUN_UNIT.pidPath(), "No such file")
             .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");

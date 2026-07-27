@@ -66,4 +66,25 @@ class RunPolicyTest {
     var r = refused(RunPolicy.access(actor(null, Role.MEMBER), RUN, SPEC, "raj"));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
+
+  @Test
+  void adhocLauncherMayAccessTheirOwnRun() {
+    assertAllowed(RunPolicy.access(actor("uday", Role.MEMBER), RUN, null, "uday"));
+  }
+
+  @Test
+  void adhocRunRefusesOtherMembersNamingTheLauncher() {
+    var r = refused(RunPolicy.access(actor("raj", Role.MEMBER), RUN, null, "uday"));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+    assertTrue(r.message().contains("ad-hoc session"), r.message());
+    assertTrue(r.message().contains("uday"), r.message());
+  }
+
+  @Test
+  void adhocRunFromAHandlelessBoxAllowsOnlyAdmin() {
+    var r = refused(RunPolicy.access(actor("uday", Role.MEMBER), RUN, null, ""));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+    assertTrue(r.message().contains("ad-hoc session"), r.message());
+    assertAllowed(RunPolicy.access(actor("ops", Role.ADMIN), RUN, null, ""));
+  }
 }

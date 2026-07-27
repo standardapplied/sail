@@ -23,16 +23,14 @@ import java.util.Optional;
  * fallback is supplied — a plain detached process last, loudly marked degraded because no unit name
  * can address it.
  *
- * <p>A dispatched run's watcher is run-addressed: unit {@code sail-watch-<runId>}, watching exactly
- * the agent unit recorded on the run, logging to the run's own host-side file {@code
+ * <p>Every watcher is run-addressed: unit {@code sail-watch-<runId>}, watching exactly the agent
+ * unit recorded on the run, logging to the run's own host-side file {@code
  * <project-dir>/runs/<runId>/watch.log} so concurrent watchers never interleave one file. Per-run
- * unit names cannot collide, so a fresh dispatch never needs to stop a previous watcher — and must
- * not: a project-scoped watcher still active from a pre-upgrade agent owns that agent and is left
- * to drain it. The legacy project-scoped unit {@code sail-watch-<project>} remains only for the
- * ad-hoc lane ({@code sail agent start}), whose agent keeps the fixed per-container identity.
+ * unit names cannot collide, so a fresh launch never needs to stop a previous watcher — and must
+ * not: a watcher still active from another run owns that run's agent and is left to drain it.
  *
- * <p>Two spawn intents with different collision semantics. {@link #spawnForRun} serves dispatch and
- * always launches fresh. {@link #spawnUnitForRun} serves the re-armer: it only runs against a run
+ * <p>Two spawn intents with different collision semantics. {@link #spawnForRun} serves launches and
+ * always spawns fresh. {@link #spawnUnitForRun} serves the re-armer: it only runs against a run
  * already verified uncovered, so an active unit of the same name means a concurrent pass won the
  * race and is adopted, never doubled.
  *
@@ -77,11 +75,6 @@ public final class WatcherSpawner {
     this.fallback = fallback;
   }
 
-  /** The legacy project-scoped unit name, still used by the ad-hoc (non-dispatch) lane. */
-  public static String unitName(String project) {
-    return UNIT_PREFIX + project;
-  }
-
   /** The run-scoped watcher unit name: {@code sail-watch-<runId>}. */
   public static String unitNameForRun(String runId) {
     return UNIT_PREFIX + Ids.requireUuid(runId);
@@ -93,17 +86,6 @@ public final class WatcherSpawner {
         .resolve("runs")
         .resolve(Ids.requireUuid(runId))
         .resolve("watch.log");
-  }
-
-  /** The legacy project-scoped watcher argv, still used by the ad-hoc lane. */
-  public static List<String> watchCommand(String project, Path sailYaml) {
-    return List.of(
-        SailPaths.binaryPath().toString(),
-        "agent",
-        "watch",
-        project,
-        "-f",
-        sailYaml.toAbsolutePath().toString());
   }
 
   /**
@@ -136,21 +118,11 @@ public final class WatcherSpawner {
   }
 
   /**
-   * Spawns the legacy project-scoped watcher for a fresh ad-hoc session: any unit still active from
-   * a previous session is stopped first — never adopted, because its wall-clock deadline anchors to
-   * the old session and would be enforced against the new agent. Falls back to a detached process
-   * when no systemd scope accepts and a fallback was supplied; throws when every rung failed or the
+   * Spawns a fresh run-addressed watcher for a launched run. Per-run unit names cannot collide, so
+   * nothing is stopped first — a still-active watcher from another run (or a pre-upgrade
+   * project-scoped one) owns its own agent and is left alone. Falls back to a detached process when
+   * no systemd scope accepts and a fallback was supplied; throws when every rung failed or the
    * thread was interrupted mid-ladder, which the caller treats as a launch failure.
-   */
-  public Spawned spawn(String project, Path sailYaml, Path watchLog) throws IOException {
-    stopExisting(project);
-    return spawnFresh(unitName(project), watchCommand(project, sailYaml), watchLog);
-  }
-
-  /**
-   * Spawns a fresh run-addressed watcher for a dispatched run. Per-run unit names cannot collide,
-   * so nothing is stopped first — a still-active watcher from another run (or a pre-upgrade
-   * project-scoped one) owns its own agent and is left alone.
    */
   public Spawned spawnForRun(String project, Path sailYaml, String runId, String agentUnit)
       throws IOException {
@@ -227,21 +199,6 @@ public final class WatcherSpawner {
       }
     }
     return Optional.empty();
-  }
-
-  private void stopExisting(String project) {
-    for (var mode : Mode.values()) {
-      if (execOk(
-          SystemdServiceInstaller.systemctl(mode, "--quiet", "is-active", unitName(project)))) {
-        execOk(SystemdServiceInstaller.systemctl(mode, "stop", unitName(project)));
-        System.err.println(
-            "  [watch] stopped stale watcher unit "
-                + unitName(project)
-                + " ("
-                + scopeName(mode)
-                + " scope) from a previous session before arming the new one");
-      }
-    }
   }
 
   private Optional<Mode> activeScope(String unit) {

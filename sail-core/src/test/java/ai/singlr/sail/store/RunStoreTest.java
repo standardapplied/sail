@@ -172,7 +172,8 @@ class RunStoreTest {
         "claude-code",
         "feat/x",
         "review",
-        "/home/dev/.sail/runs/r/agent.log");
+        "/home/dev/.sail/runs/r/agent.log",
+        "sail-review-r");
     var ran = new AtomicBoolean();
 
     assertTrue(
@@ -230,7 +231,8 @@ class RunStoreTest {
             "codex",
             "feat/x",
             "review",
-            "/home/dev/.sail/runs/rev/review.log");
+            "/home/dev/.sail/runs/rev/review.log",
+            "sail-review-rev");
     db.execute("UPDATE runs SET status = 'stopping' WHERE id = ?", review);
 
     var claims = store.stopping();
@@ -254,7 +256,16 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var logPath = "/home/dev/.sail/runs/" + id + "/review.log";
 
-    store.createReview(id, "backend", "auth", "node-a", "codex", "feat/auth", "review it", logPath);
+    store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "codex",
+        "feat/auth",
+        "review it",
+        logPath,
+        "sail-review-" + id);
 
     var running = store.findById(id).orElseThrow();
     assertEquals("review", running.role());
@@ -264,7 +275,7 @@ class RunStoreTest {
     assertEquals("feat/auth", running.branch());
     assertEquals("review it", running.task());
     assertEquals(logPath, running.logPath());
-    assertTrue(running.unit().isBlank());
+    assertEquals("sail-review-" + id, running.unit());
     assertEquals("review", store.comparableSnapshot(id).get("role"));
 
     store.complete(id, "completed", 0);
@@ -428,7 +439,8 @@ class RunStoreTest {
         "codex",
         "feat/x",
         "review it",
-        "/home/dev/.sail/runs/" + reviewId + "/review.log");
+        "/home/dev/.sail/runs/" + reviewId + "/review.log",
+        "sail-review-" + reviewId);
 
     assertEquals(buildId, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(buildId, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
@@ -440,8 +452,18 @@ class RunStoreTest {
   void startupFailsOnlyLocalRunningReviewRows() {
     var local = DateTimeUtils.newId().toString();
     var foreign = DateTimeUtils.newId().toString();
-    store.createReview(local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local);
-    store.createReview(foreign, "backend", "auth", "node-b", "codex", "b", "t", "/runs/" + foreign);
+    store.createReview(
+        local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local, "sail-review-l");
+    store.createReview(
+        foreign,
+        "backend",
+        "auth",
+        "node-b",
+        "codex",
+        "b",
+        "t",
+        "/runs/" + foreign,
+        "sail-review-f");
 
     assertEquals(1, store.failRunningReviewsOnNode("node-a"));
     assertEquals("failed", store.findById(local).orElseThrow().status());
@@ -650,12 +672,168 @@ class RunStoreTest {
         "backend",
         specId,
         node,
+        "build",
         repos,
         "claude-code",
         "feat/x",
         "do it",
         "/home/dev/.sail/runs/" + id + "/agent.log",
         "sail-agent-" + id);
+  }
+
+  private java.util.Optional<DispatchGate.Conflict> reserveAdhoc(String id, String node) {
+    return store.reserveDispatch(
+        id,
+        "backend",
+        "",
+        node,
+        "adhoc",
+        java.util.List.of(),
+        "claude-code",
+        null,
+        "do it",
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
+  }
+
+  @Test
+  void anAdhocReservationRecordsItsRoleAndEmptyRepoSet() {
+    var id = DateTimeUtils.newId().toString();
+
+    var conflict = reserveAdhoc(id, "node-a");
+
+    assertTrue(conflict.isEmpty());
+    var run = store.findById(id).orElseThrow();
+    assertEquals("adhoc", run.role());
+    assertEquals("", run.specId());
+    assertEquals(java.util.List.of(), run.repos());
+    assertEquals("running", run.status());
+    assertEquals("sail-agent-" + id, run.unit());
+  }
+
+  @Test
+  void anAdhocReservationBlocksAnyDispatch() {
+    reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
+
+    var conflict =
+        reserve(
+            store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+
+    assertTrue(conflict.isPresent(), "an ad-hoc session reserves the whole container");
+  }
+
+  @Test
+  void aRunningDispatchBlocksAnAdhocReservation() {
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+
+    var conflict = reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
+
+    assertTrue(conflict.isPresent(), "an ad-hoc target overlaps every reserved repo set");
+  }
+
+  @Test
+  void anAdhocReservationBlocksASecondAdhocReservation() {
+    reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
+
+    var conflict = reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
+
+    assertTrue(conflict.isPresent());
+  }
+
+  @Test
+  void aFinishedAdhocRunFreesTheContainerForTheNextReservation() {
+    var first = DateTimeUtils.newId().toString();
+    reserveAdhoc(first, "node-a");
+    store.complete(first, "stopped", 0);
+
+    assertTrue(reserveAdhoc(DateTimeUtils.newId().toString(), "node-a").isEmpty());
+  }
+
+  @Test
+  void aLegacyNullSpecRunningRunStillGatesReservationsWithoutBlowingUp() {
+    var id = DateTimeUtils.newId().toString();
+    store.create(
+        id,
+        "backend",
+        null,
+        "node-a",
+        "build",
+        "codex",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "sail-agent-" + id);
+
+    var conflict = reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
+
+    assertTrue(conflict.isPresent());
+  }
+
+  @Test
+  void sessionQueriesIncludeAdhocRuns() {
+    var id = DateTimeUtils.newId().toString();
+    reserveAdhoc(id, "node-a");
+
+    assertEquals(id, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(id, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(java.util.List.of(id), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertTrue(store.transition(id, "running", "stopping"));
+    assertEquals(
+        java.util.List.of(id), store.stopping().stream().map(RunStore.RunRow::id).toList());
+  }
+
+  @Test
+  void sessionRoleCoversBuildAndAdhocButNeverReview() {
+    var adhoc = DateTimeUtils.newId().toString();
+    reserveAdhoc(adhoc, "node-a");
+    var build = newRun("backend", "auth");
+    var review =
+        store.createReview(
+            DateTimeUtils.newId().toString(),
+            "backend",
+            "auth",
+            "node-a",
+            "codex",
+            "feat/x",
+            "review",
+            "/home/dev/.sail/runs/rev/review.log",
+            "sail-review-rev");
+
+    assertTrue(store.findById(adhoc).orElseThrow().sessionRole());
+    assertTrue(store.findById(build).orElseThrow().sessionRole());
+    assertFalse(store.findById(build).orElseThrow().adhocRole());
+    assertTrue(store.findById(adhoc).orElseThrow().adhocRole());
+    assertFalse(store.findById(review).orElseThrow().sessionRole());
+    assertFalse(store.findById(adhoc).orElseThrow().buildRole());
+  }
+
+  @Test
+  void adhocRunsNeverSurfaceAsSpecAttempts() {
+    var adhoc = DateTimeUtils.newId().toString();
+    reserveAdhoc(adhoc, "node-a");
+
+    assertTrue(store.listForSpec("").stream().noneMatch(RunStore.RunRow::buildRole));
+    assertFalse(store.runIfLatestAttempt(adhoc, "", () -> {}));
+  }
+
+  @Test
+  void createReviewRecordsItsUnit() {
+    var id = DateTimeUtils.newId().toString();
+
+    store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "codex",
+        "feat/auth",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
+
+    assertEquals("sail-review-" + id, store.findById(id).orElseThrow().unit());
   }
 
   @Test

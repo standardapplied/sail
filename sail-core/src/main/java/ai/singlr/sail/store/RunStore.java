@@ -73,11 +73,27 @@ public final class RunStore implements ConflictResolver {
       String completedAt,
       List<String> repos) {
 
-    /** Whether this row is a build attempt. */
+    /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
       return "build".equals(role);
     }
+
+    /** Whether this row is an ad-hoc session — an engineer-initiated run that works no spec. */
+    public boolean adhocRole() {
+      return "adhoc".equals(role);
+    }
+
+    /**
+     * Whether this row is an agent session an operator owns — a build attempt or an ad-hoc run — as
+     * opposed to a pipeline-driven review execution. Session rows are the ones the stop, status,
+     * and log lanes address.
+     */
+    public boolean sessionRole() {
+      return buildRole() || adhocRole();
+    }
   }
+
+  private static final String SESSION_ROLES = "role IN ('build', 'adhoc')";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
@@ -130,7 +146,9 @@ public final class RunStore implements ConflictResolver {
   /**
    * Records a review negotiation under the review UUID that owns its prompt, session, and log
    * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
-   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation.
+   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
+   * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
+   * of any run row is honest even though reviews execute as blocking foreground work.
    */
   public String createReview(
       String reviewId,
@@ -140,9 +158,10 @@ public final class RunStore implements ConflictResolver {
       String agent,
       String branch,
       String task,
-      String logPath) {
+      String logPath,
+      String unit) {
     return create(
-        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, "");
+        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, unit);
   }
 
   /**
@@ -162,6 +181,7 @@ public final class RunStore implements ConflictResolver {
       String project,
       String specId,
       String node,
+      String role,
       List<String> repos,
       String agent,
       String branch,
@@ -194,11 +214,12 @@ public final class RunStore implements ConflictResolver {
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, status,
                   started_at, log_path, unit, repos)
-              VALUES (?, ?, ?, ?, 'build', ?, ?, ?, 'running', ?, ?, ?, ?)""",
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)""",
               id,
               project,
               specId,
               node,
+              role,
               agent,
               branch,
               task,
@@ -216,18 +237,20 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The latest build run of {@code project} that executed on this box, or empty. Review runs remain
-   * in the aggregate but do not replace the build session used by agent status, log, and report
-   * commands. Ownership is by node: a box with a handle owns exactly the runs stamped with it; a
-   * box with no handle owns exactly its own blank-node runs and never a run adopted from another
-   * box via sync.
+   * The latest agent session (build or ad-hoc) of {@code project} that executed on this box, or
+   * empty. Review runs remain in the aggregate but do not replace the session used by agent status,
+   * log, and report commands. Ownership is by node: a box with a handle owns exactly the runs
+   * stamped with it; a box with no handle owns exactly its own blank-node runs and never a run
+   * adopted from another box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
-            + " AND role = 'build' ORDER BY started_at DESC"
+            + " AND "
+            + SESSION_ROLES
+            + " ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -235,17 +258,17 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The active build run of {@code project} that executed on this box, or empty. {@code stopping}
-   * counts as active: an interrupted stop's claim must stay addressable so a project-targeted stop
-   * retry resumes it instead of falling through to the ad-hoc identity. Node-scoped like {@link
-   * #latestForProjectOnNode}.
+   * The active agent session (build or ad-hoc) of {@code project} that executed on this box, or
+   * empty. {@code stopping} counts as active: an interrupted stop's claim must stay addressable so
+   * a project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-            + " AND IFNULL(node, '') = ? AND role = 'build'"
+            + " AND IFNULL(node, '') = ? AND "
+            + SESSION_ROLES
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,
@@ -253,24 +276,24 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Every build run holding an unfinished stop claim ({@code stopping}) — a stop that recorded its
-   * terminal intent but was interrupted before the halt was verified. The reconciler's
-   * interrupted-stop pass finalizes these once their unit is gone.
+   * Every agent session (build or ad-hoc) holding an unfinished stop claim ({@code stopping}) — a
+   * stop that recorded its terminal intent but was interrupted before the halt was verified. The
+   * reconciler's interrupted-stop pass finalizes these once their unit is gone.
    */
   public List<RunRow> stopping() {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND role = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND " + SESSION_ROLES,
         this::mapRow);
   }
 
   /**
-   * Every build run still in the {@code running} state, across all projects and nodes — the
-   * build-session reaper's full input. Review executions are foreground work owned and completed by
-   * the review controller, so the systemd reaper must not probe them as build units.
+   * Every agent session (build or ad-hoc) still in the {@code running} state, across all projects
+   * and nodes — the session reaper's full input. Review executions are foreground work owned and
+   * completed by the review controller, so the systemd reaper must not probe them as build units.
    */
   public List<RunRow> running() {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND role = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND " + SESSION_ROLES,
         this::mapRow);
   }
 

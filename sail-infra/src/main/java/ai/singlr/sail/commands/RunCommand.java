@@ -5,14 +5,19 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentContextInstaller;
-import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
@@ -22,7 +27,11 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -30,6 +39,7 @@ import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -95,6 +105,8 @@ public final class RunCommand implements Runnable {
   private String file;
 
   @picocli.CommandLine.Spec private CommandSpec spec;
+
+  private SailEventPublisher eventPublisher;
 
   @Override
   public void run() {
@@ -241,13 +253,159 @@ public final class RunCommand implements Runnable {
 
     var snapshotLabel = snapshotTaken ? label : null;
 
-    if (task != null && background) {
-      launchBackground(
-          shell, config, sshUser, workDir, fullPermissions, branchName, agentCli, snapshotLabel);
-    } else if (task != null) {
-      launchForegroundTask(shell, sshUser, workDir, fullPermissions, agentCli);
+    if (task != null) {
+      launchTaskSession(shell, branchName, snapshotLabel);
     } else {
       launchInteractive(sshUser, workDir, fullPermissions, agentCli);
+    }
+  }
+
+  /**
+   * Launches the headless task session as a first-class ad-hoc run through the shared {@link
+   * DispatchOperations} launch machinery: a minted run id, a whole-container reservation, a
+   * run-scoped unit and log, and — in the background mode — the same run-addressed guardrail
+   * watcher a dispatch gets. {@code --json} describes the launch (the command and run-scoped paths)
+   * without executing it, exactly as before.
+   */
+  private void launchTaskSession(ShellExecutor shell, String branchName, String snapshotLabel)
+      throws Exception {
+    var handle = Objects.toString(HostSync.handle(), "");
+    var describeOnly = json || dryRun;
+    var launchCommand = new AtomicReference<List<String>>();
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      var operations = operations(shell, db, launchCommand);
+      var request =
+          new DispatchOperations.AdhocRequest(task, branchName, path, background, describeOnly);
+      DispatchOperations.AdhocSession session;
+      try {
+        session = operations.startAdhoc(name, request, handle);
+      } catch (ApiException e) {
+        if (background && snapshotLabel != null) {
+          System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
+          autoRollback(shell, snapshotLabel, 1);
+        }
+        var action = e.failure().action();
+        throw new IllegalStateException(
+            Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action, e);
+      }
+      render(session, launchCommand.get(), branchName);
+    }
+  }
+
+  private DispatchOperations operations(
+      ShellExecutor shell, Sqlite db, AtomicReference<List<String>> launchCommand) {
+    var listener =
+        new DispatchOperations.Listener() {
+          @Override
+          public void launching(boolean bg, List<String> command) {
+            launchCommand.set(command);
+            if (json) {
+              return;
+            }
+            System.out.println(
+                Ansi.AUTO.string(
+                    bg
+                        ? "  @|bold Launching agent in background...|@"
+                        : "  @|bold Launching agent with task...|@"));
+            System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", command) + "|@"));
+            System.out.println();
+          }
+
+          @Override
+          public void runsPruned(int count) {
+            if (count > 0 && !json) {
+              System.out.println(
+                  Ansi.AUTO.string(
+                      "  @|faint Pruned " + count + " old run log(s) in " + name + ".|@"));
+            }
+          }
+
+          @Override
+          public void sailSetupUpdated(boolean updated) {
+            if (updated && !json) {
+              System.out.println(
+                  Ansi.AUTO.string(
+                      "  @|faint Updated sail event helpers in "
+                          + name
+                          + " (installed files were stale or incomplete).|@"));
+            }
+          }
+        };
+    return new DispatchOperations(
+        shell,
+        file,
+        new SpecStore(db),
+        new ReviewStore(db),
+        new RunStore(db),
+        new FdeStore(db),
+        this::publishLifecycle,
+        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+        (project, config) -> "",
+        DispatchOperations.terminalLauncher(),
+        listener);
+  }
+
+  private void render(
+      DispatchOperations.AdhocSession session, List<String> command, String branchName) {
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("name", name);
+      map.put("mode", background ? "background" : "foreground");
+      map.put("task", task);
+      map.put("branch", branchName);
+      map.put("run_id", session.runId());
+      map.put("log_path", AgentUnit.forRun(session.runId()).logPath());
+      map.put("ssh_command", command == null ? "" : String.join(" ", command));
+      System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
+    if (dryRun) {
+      System.out.println("[dry-run] " + (command == null ? "" : String.join(" ", command)));
+      return;
+    }
+    if (background) {
+      Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
+      session
+          .watcher()
+          .ifPresent(
+              spawned ->
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|green ✓|@ "
+                              + GuardrailWatcher.describe(
+                                  spawned, WatcherSpawner.watchLogForRun(name, session.runId())))));
+      return;
+    }
+    if (session.exitCode() != null && session.exitCode() != 0) {
+      System.err.println(
+          Banner.errorLine("Agent session exited with code " + session.exitCode(), Ansi.AUTO));
+    }
+  }
+
+  /**
+   * Publishes a lifecycle {@link Event} to the running sail-api best-effort, so SSE subscribers see
+   * the session start regardless of surface; the control-plane database already holds the run, so
+   * an unreachable sail-api never fails the launch.
+   */
+  private void publishLifecycle(Event event) {
+    try {
+      if (eventPublisher == null) {
+        eventPublisher = SailEventPublisher.localDefault();
+      }
+      eventPublisher.publish(event);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    } catch (Exception e) {
+      if (!json) {
+        System.err.println(
+            Banner.errorLine(
+                "Could not publish "
+                    + event.type()
+                    + " event ("
+                    + e.getMessage()
+                    + "). sail-api may be unreachable; the launch itself is unaffected.",
+                Ansi.AUTO));
+      }
     }
   }
 
@@ -270,66 +428,6 @@ public final class RunCommand implements Runnable {
         + " done`. Then pick up the next pending spec and continue working.";
   }
 
-  private void launchBackground(
-      ShellExecutor shell,
-      SailYaml config,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      String branchName,
-      AgentCli agentCli,
-      String snapshotLabel)
-      throws Exception {
-    var agentSession = new AgentSession(shell);
-    agentSession.ensureDirectory(name);
-    agentSession.writeTaskFile(name, task);
-    agentSession.writeSession(name, task, Objects.requireNonNullElse(branchName, ""));
-
-    var sshCmd =
-        AgentSession.buildBackgroundLaunchCommand(
-            name, sshUser, workDir, fullPermissions, agentCli);
-
-    if (json) {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("name", name);
-      map.put("mode", "background");
-      map.put("task", task);
-      map.put("branch", branchName);
-      map.put("log_path", AgentSession.logPath());
-      map.put("ssh_command", String.join(" ", sshCmd));
-      System.out.println(YamlUtil.dumpJson(map));
-      return;
-    }
-
-    System.out.println(Ansi.AUTO.string("  @|bold Launching agent in background...|@"));
-    if (dryRun) {
-      System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
-    }
-    System.out.println();
-
-    if (dryRun) {
-      System.out.println("[dry-run] " + String.join(" ", sshCmd));
-    } else {
-      var pb = new ProcessBuilder(sshCmd);
-      pb.inheritIO();
-      var process = pb.start();
-      var exitCode = process.waitFor();
-      if (exitCode != 0) {
-        System.err.println(
-            Banner.errorLine("Background launch exited with code " + exitCode, Ansi.AUTO));
-        if (snapshotLabel != null) {
-          autoRollback(shell, snapshotLabel, exitCode);
-        }
-      }
-    }
-
-    Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
-
-    if (!dryRun) {
-      GuardrailWatcher.launch(name, file, config, shell);
-    }
-  }
-
   private void autoRollback(ShellExecutor shell, String snapshotLabel, int exitCode) {
     try {
       var rollbackMap = new LinkedHashMap<String, Object>();
@@ -347,48 +445,6 @@ public final class RunCommand implements Runnable {
     } catch (Exception rollbackEx) {
       System.err.println(
           Banner.errorLine("Auto-rollback failed: " + rollbackEx.getMessage(), Ansi.AUTO));
-    }
-  }
-
-  private void launchForegroundTask(
-      ShellExecutor shell,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli)
-      throws Exception {
-    var agentSession = new AgentSession(shell);
-    agentSession.ensureDirectory(name);
-    agentSession.writeTaskFile(name, task);
-
-    var sshCmd =
-        AgentSession.buildForegroundTaskCommand(name, sshUser, workDir, fullPermissions, agentCli);
-
-    if (json) {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("name", name);
-      map.put("mode", "foreground");
-      map.put("task", task);
-      map.put("ssh_command", String.join(" ", sshCmd));
-      System.out.println(YamlUtil.dumpJson(map));
-      return;
-    }
-
-    System.out.println(Ansi.AUTO.string("  @|bold Launching agent with task...|@"));
-    System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
-    System.out.println();
-
-    if (dryRun) {
-      System.out.println("[dry-run] " + String.join(" ", sshCmd));
-    } else {
-      var pb = new ProcessBuilder(sshCmd);
-      pb.inheritIO();
-      var process = pb.start();
-      var exitCode = process.waitFor();
-      if (exitCode != 0) {
-        System.err.println(
-            Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
-      }
     }
   }
 

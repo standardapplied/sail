@@ -126,17 +126,11 @@ public final class AgentReporter {
   }
 
   /**
-   * The identity to probe for live session state: a run's recorded unit, or the ad-hoc identity.
+   * The identity to probe for live session state: the run's recorded unit, with a foreground run's
+   * blank unit still probing through the run-scoped pid file.
    */
   private static AgentUnit unitOf(RunStore.RunRow session) {
-    if (session == null) {
-      return AgentUnit.BUILD;
-    }
-    if (session.unit() == null || session.unit().isBlank()) {
-      throw new IllegalStateException(
-          "Build run " + session.id() + " has no unit; run 'sail migrate' to repair its data.");
-    }
-    return AgentUnit.recorded(session.id(), session.unit());
+    return AgentUnit.recorded(session.id(), Objects.toString(session.unit(), ""));
   }
 
   /**
@@ -154,7 +148,7 @@ public final class AgentReporter {
       throws IOException, InterruptedException, TimeoutException {
 
     var agentSession = new AgentSession(shell);
-    var info = agentSession.queryStatus(containerName, unitOf(session));
+    var info = session == null ? null : agentSession.queryStatus(containerName, unitOf(session));
     var running = info != null && info.running();
     var startedAt =
         session != null && session.startedAt() != null

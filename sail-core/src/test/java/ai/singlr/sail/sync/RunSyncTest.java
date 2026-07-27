@@ -116,7 +116,8 @@ class RunSyncTest {
         "codex",
         "feat/auth",
         "review it",
-        "/home/dev/.sail/runs/" + id + "/review.log");
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
 
     sync(node);
     sync(other);

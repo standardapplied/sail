@@ -101,11 +101,20 @@ class SlackReactorTest {
   }
 
   @Test
-  void filterAcceptsAllNotifiableTypes() {
+  void filterAcceptsAllNotifiableTypesForASpecScopedEvent() {
     var filter = reactor(new RecordingPoster()).filter();
     for (var type : SlackReactor.NOTIFIABLE_TYPES) {
-      assertTrue(filter.test(Event.of("p", null, type, "a", "h")), "should accept " + type);
+      assertTrue(filter.test(Event.of("p", "auth", type, "a", "h")), "should accept " + type);
     }
+  }
+
+  @Test
+  void filterRejectsSpecLessEventsSoAdhocRunsNeverPost() {
+    var filter = reactor(new RecordingPoster()).filter();
+    assertFalse(
+        filter.test(Event.of("p", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h")));
+    assertFalse(
+        filter.test(Event.of("p", "", Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h")));
   }
 
   @Test

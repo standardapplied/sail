@@ -11,20 +11,19 @@ import ai.singlr.sail.common.Ids;
  * The identity of a headless agent run inside a container: the systemd unit that owns it and the
  * files carrying its pid, streamed log, session metadata, and task/prompt.
  *
- * <p>A dispatched build run gets a <em>per-run</em> identity via {@link #forRun}: unit {@code
- * sail-agent-<runId>} with every file under {@code ~/.sail/runs/<runId>/}, so concurrent dispatches
- * in one container never collide on a unit name or clobber each other's session state. The run
- * records the unit it was launched with as part of its aggregate; later consumers (stop, probe,
- * reconciler, watcher) rebuild the identity from that record via {@link #recorded} instead of
- * re-deriving the name, so the derivation rule can change without stranding a run that is already
- * executing.
+ * <p>Every agent session — dispatched or ad-hoc — gets a <em>per-run</em> identity via {@link
+ * #forRun}: unit {@code sail-agent-<runId>} with every file under {@code ~/.sail/runs/<runId>/}, so
+ * concurrent executions in one container never collide on a unit name or clobber each other's
+ * session state. The run records the unit it was launched with as part of its aggregate; later
+ * consumers (stop, probe, reconciler, watcher) rebuild the identity from that record via {@link
+ * #recorded} instead of re-deriving the name, so the derivation rule can change without stranding a
+ * run that is already executing.
  *
- * <p>{@link #BUILD} remains the fixed identity of the ad-hoc lane — {@code sail agent start} and
- * other engineer-initiated sessions that mint no run. A review gets a <em>per-review</em> identity
- * via {@link #forReview}: the pipeline executes each spec's review on its own virtual thread, so
- * concurrently completed specs review concurrently, and a shared prompt or log would
- * cross-contaminate them. The reviewer and its fix agent share the review's own {@code review.log},
- * so one attempt's whole review↔fix negotiation still lands in one live-followable file.
+ * <p>A review gets a <em>per-review</em> identity via {@link #forReview}: the pipeline executes
+ * each spec's review on its own virtual thread, so concurrently completed specs review
+ * concurrently, and a shared prompt or log would cross-contaminate them. The reviewer and its fix
+ * agent share the review's own {@code review.log}, so one attempt's whole review↔fix negotiation
+ * still lands in one live-followable file.
  *
  * <p>The paths are the single source of truth for where an agent run lives on disk; {@link
  * AgentSession} and the watcher read them from here rather than hardcoding their own copies.
@@ -40,20 +39,11 @@ public record AgentUnit(
   /** Prefix of every run-scoped build unit: {@code sail-agent-<runId>}. */
   public static final String RUN_UNIT_PREFIX = "sail-agent-";
 
-  /** The ad-hoc (non-dispatch) build agent: one fixed unit and file set per container. */
-  public static final AgentUnit BUILD =
-      new AgentUnit(
-          "sail-agent",
-          DIR + "/agent.log",
-          DIR + "/agent.pid",
-          DIR + "/agent-session.json",
-          DIR + "/agent-task.txt");
-
   /**
-   * The review role's template identity: {@link #fromRole} and the log endpoints use its file names
-   * to derive run-scoped review paths, and {@code sail agent log --review} falls back to its fixed
-   * log when no review exists yet. Live reviews never run here — each executes under its own {@link
-   * #forReview} identity.
+   * The review role's template identity: {@link #logPathForRole} and the log endpoints use its file
+   * names to derive run-scoped review paths, and {@code sail agent log --review} falls back to its
+   * fixed log when no review exists yet. Live reviews never run here — each executes under its own
+   * {@link #forReview} identity.
    */
   public static final AgentUnit REVIEW =
       new AgentUnit(
@@ -125,17 +115,20 @@ public record AgentUnit(
   }
 
   /**
-   * Resolves the log-selecting role name — {@code build} or {@code review}, the API/CLI equivalent
-   * of {@code --review} — to its unit, so the log endpoints share one mapping instead of hardcoding
-   * a second path. Throws {@link IllegalArgumentException} for any other value.
+   * Resolves a run row's recorded role to its run-scoped log path — {@code agent.log} for the build
+   * and ad-hoc session roles, {@code review.log} for reviews — so the log endpoints share one
+   * mapping instead of hardcoding a second path. The path derives from the canonical run id, never
+   * a persisted path: run rows replicate over sync, so a stored path is untrusted input that must
+   * never select a file. Throws {@link IllegalArgumentException} for any other role.
    */
-  public static AgentUnit fromRole(String role) {
+  public static String logPathForRole(String role, String runId) {
+    var id = Ids.requireUuid(runId);
     return switch (role) {
-      case "build" -> BUILD;
-      case "review" -> REVIEW;
+      case "build", "adhoc" -> runDir(id) + "/agent.log";
+      case "review" -> REVIEW.runLogPath(id);
       default ->
           throw new IllegalArgumentException(
-              "Unknown role: " + role + " (expected build or review)");
+              "Unknown role: " + role + " (expected build, adhoc, or review)");
     };
   }
 }

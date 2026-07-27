@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -444,9 +443,6 @@ public final class SailOperations implements Operations {
               notRunning.runId(), false, notRunning.reason(), null, notRunning.specCancelled());
       case StopOperations.AlreadyTerminal terminal ->
           new StopRunResponse(terminal.runId(), false, terminal.reason(), null, false);
-      case StopOperations.NotActive notActive ->
-          new StopRunResponse(
-              notActive.runId(), false, notActive.reason(), notActive.livePid(), false);
     };
   }
 
@@ -475,11 +471,16 @@ public final class SailOperations implements Operations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    if (RunPolicy.access(actor, run.id(), run.specId(), specAssignee(run.specId()))
+    if (RunPolicy.access(actor, run.id(), StopOperations.specIdOf(run), runOwner(run))
         instanceof AccessDecision.Refused refused) {
       return Result.failure(refused.code(), refused.message(), refused.fix());
     }
     return served.apply(run);
+  }
+
+  /** The identity that owns a run: its spec's assignee, or the launching node for ad-hoc runs. */
+  private String runOwner(RunStore.RunRow run) {
+    return Strings.isBlank(run.specId()) ? run.node() : specAssignee(run.specId());
   }
 
   /**
@@ -661,11 +662,10 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * The agent status of a project that may now host several concurrent runs: every local {@code
-   * running} run is probed on its own recorded unit and listed, with the newest one filling the
-   * single-session fields so the common one-run case reads exactly as before. A project with no
-   * running run rows falls back to the fixed ad-hoc session probe, which also covers {@code sail
-   * agent start} sessions that mint no run.
+   * The agent status of a project that may host several concurrent runs: every local {@code
+   * running} session run — dispatched or ad-hoc — is probed on its own recorded identity and
+   * listed, with the newest one filling the single-session fields so the common one-run case reads
+   * exactly as before. No run rows means no session: every agent session is a run.
    */
   private AgentStatusResponse agentStatusValue(String project, String localHandle) {
     projects.requireExists(project);
@@ -675,12 +675,11 @@ public final class SailOperations implements Operations {
             ? List.<RunStore.RunRow>of()
             : runStore.listForProject(project).stream()
                 .filter(DispatchOperations::ownsLiveAgent)
-                .filter(RunStore.RunRow::buildRole)
+                .filter(RunStore.RunRow::sessionRole)
                 .filter(run -> ownsRun(run.node(), localHandle))
                 .toList();
     if (running.isEmpty()) {
-      var info = querySession(agentSession, project, AgentUnit.BUILD);
-      return agentStatusResponse(project, info, List.of());
+      return agentStatusResponse(project, null, List.of());
     }
     var runs =
         running.stream()
@@ -730,7 +729,7 @@ public final class SailOperations implements Operations {
     if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
-    var logPath = AgentUnit.fromRole(run.role()).runLogPath(Ids.requireUuid(run.id()));
+    var logPath = AgentUnit.logPathForRole(run.role(), run.id());
     var cmd =
         ContainerExec.asDevUser(
             run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));

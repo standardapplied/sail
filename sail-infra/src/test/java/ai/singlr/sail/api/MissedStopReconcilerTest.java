@@ -151,7 +151,7 @@ class MissedStopReconcilerTest {
     createPendingSpec("auth");
     runningSession("auth");
 
-    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var released = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(1, released);
     assertEquals(
@@ -169,7 +169,7 @@ class MissedStopReconcilerTest {
     createSpec("auth", SpecStatus.DONE);
     runningSession("auth");
 
-    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+    var released = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
     assertEquals(1, released);
     assertEquals(
@@ -254,6 +254,137 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aStrandedReservationWithALiveAgentIsNeverReleased() {
+    createSpec("auth", SpecStatus.DONE);
+    runningSession("auth");
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    assertEquals(
+        "running",
+        sessionStore.listForSpec("auth").getFirst().status(),
+        "a reservation is never freed under an agent whose identity still probes live");
+  }
+
+  @Test
+  void releasesADeadAdhocRunPastGrace() {
+    var runId = adhocSession(77);
+
+    var released = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, released);
+    assertEquals("stopped", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void aLiveAdhocRunKeepsItsReservation() {
+    var runId = adhocSession(77);
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void anAdhocRunWithNoRecordedPidIsLeftToItsLauncherOrTheOperatorStop() {
+    var runId = adhocSession(null);
+    var probe = new CountingProbe(false);
+
+    var released = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    assertEquals(0, probe.calls.get());
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void anUnprobeableAdhocRunIsLeftAlone() {
+    var runId = adhocSession(77);
+    MissedStopReconciler.UnitProbe failing =
+        (project, id, unit) -> {
+          throw new IOException("container unreachable");
+        };
+
+    var released = reconciler(failing, PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void aFreshAdhocRunInsideTheLaunchGraceIsNeverProbed() {
+    var runId = adhocSession(77);
+    var probe = new CountingProbe(false);
+
+    var released = reconciler(probe, Instant::now).sweep();
+
+    assertEquals(0, released);
+    assertEquals(0, probe.calls.get());
+    assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
+  void aReleaseThatLosesToTheWatcherCompletionNeverOverwritesTheExit() {
+    var runId = adhocSession(77);
+    MissedStopReconciler.UnitProbe completingProbe =
+        (project, id, unit) -> {
+          sessionStore.transition(runId, "running", "completed", 0);
+          return false;
+        };
+
+    var released = reconciler(completingProbe, PAST_GRACE).sweep();
+
+    assertEquals(0, released);
+    var run = sessionStore.findById(runId).orElseThrow();
+    assertEquals("completed", run.status());
+    assertEquals(0, run.exitCode());
+  }
+
+  @Test
+  void anInterruptedAdhocStopIsFinalizedOnceItsUnitIsGone() throws Exception {
+    var runId = adhocSession(77);
+    sessionStore.transition(runId, "running", "stopping");
+    var latch = new CountDownLatch(1);
+    var cancels = captureCancels(latch);
+
+    var finalized = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, finalized);
+    assertEquals("stopped", sessionStore.findById(runId).orElseThrow().status());
+    BusTesting.awaitDelivery(latch);
+    assertEquals(1, cancels.size());
+    assertNull(cancels.peek().spec());
+    assertEquals(runId, cancels.peek().data().get(Event.WellKnownData.RUN_ID));
+  }
+
+  @Test
+  void aBlankUnitStoppingClaimStillProbesThroughItsPidFile() {
+    var runId = DateTimeUtils.newId().toString();
+    sessionStore.reserveDispatch(
+        runId,
+        "test-project",
+        "",
+        "node-a",
+        "adhoc",
+        List.of(),
+        "claude-code",
+        null,
+        "task",
+        "/home/dev/.sail/runs/" + runId + "/agent.log",
+        "");
+    sessionStore.transition(runId, "running", "stopping");
+    var probe = new CountingProbe(false);
+
+    var finalized = reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(1, finalized);
+    assertEquals("", probe.lastUnit);
+    assertEquals("stopped", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  @Test
   void keepsARunningReservationForAnInProgressSpec() {
     createInProgressSpec("auth");
     runningSession("auth");
@@ -284,6 +415,26 @@ class MissedStopReconcilerTest {
   private String finishedSession(String specId, String status, Integer exitCode) {
     var id = runningSession(specId);
     sessionStore.complete(id, status, exitCode);
+    return id;
+  }
+
+  private String adhocSession(Integer pid) {
+    var id = DateTimeUtils.newId().toString();
+    sessionStore.reserveDispatch(
+        id,
+        "test-project",
+        "",
+        "node-a",
+        "adhoc",
+        List.of(),
+        "claude-code",
+        null,
+        "task",
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
+    if (pid != null) {
+      sessionStore.updateProcess(id, pid, null);
+    }
     return id;
   }
 
@@ -586,7 +737,7 @@ class MissedStopReconcilerTest {
   void aRunReconciledThisSweepIsNotAlsoReleasedAsStranded() {
     createSpec("auth", SpecStatus.AWAITING_MERGE);
     runningSession("auth");
-    var rec = reconciler(new CountingProbe(true), PAST_GRACE);
+    var rec = reconciler(new CountingProbe(false), PAST_GRACE);
 
     assertEquals(
         0,
