@@ -237,7 +237,10 @@ public final class StopOperations {
    * own recorded unit, claim the stop (spec cancelled, run {@code stopping}, one transaction),
    * halt, and finalize the claim once the kill is verified. A run already holding a claim is an
    * interrupted stop and resumes instead. Every no-op branch is structured and write-free except
-   * the stranded rescues, which record intent without a kill.
+   * the stranded rescues, which record intent without a kill. A dead probe over a run that never
+   * persisted a pid and never completed is the pre-launch preparation window, not a stranded run —
+   * releasing its reservation there would let the imminent launch escape the container-isolation
+   * invariant, so the stop conflicts instead of rescuing.
    */
   private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var spec = specOf(run);
@@ -262,6 +265,12 @@ public final class StopOperations {
     var unit = runUnit(run);
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
+      if (run.pid() == null && run.completedAt() == null) {
+        throw new ApiException(
+            ErrorCode.CONFLICT,
+            "Run " + run.id() + " is still preparing to launch.",
+            "Retry the stop after launch preparation resolves.");
+      }
       if (dryRun) {
         return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
       }

@@ -550,6 +550,25 @@ class StopOperationsTest {
   }
 
   @Test
+  void aStopDuringLaunchPreparationConflictsInsteadOfReleasingTheReservation() throws Exception {
+    var ops =
+        stopOps(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            failingHalter(),
+            StopOperations.Listener.NONE);
+    seedAdhocRun(null, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
   void aMemberMayStopTheAdhocRunTheirOwnBoxLaunched() throws Exception {
     var shell = liveAgentShell();
     var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
