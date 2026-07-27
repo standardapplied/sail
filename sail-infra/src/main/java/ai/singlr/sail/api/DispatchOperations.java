@@ -78,6 +78,19 @@ public final class DispatchOperations {
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher) {}
 
+  /**
+   * Container preparation that must not run until the whole-container reservation is won — the
+   * pre-launch snapshot and the work-branch checkout. A refused reservation means another agent
+   * owns the container, so no workspace mutation may precede it; a preparation failure is a launch
+   * failure and releases the reservation through the same path.
+   */
+  @FunctionalInterface
+  public interface AdhocPreparer {
+    AdhocPreparer NONE = () -> {};
+
+    void prepare() throws Exception;
+  }
+
   /** What a dispatch produced. */
   public sealed interface Outcome permits NoSpecs, Dispatched {}
 
@@ -356,10 +369,16 @@ public final class DispatchOperations {
    * atomic mechanism. Background launches get the same run-addressed guardrail watcher as
    * dispatches. No spec means no policy: unlike dispatch, a blank node handle is allowed — the
    * reservation is stamped with whatever identity the box has, exactly like the run rows it gates
-   * against. A dry run mints the id and announces the launch command but writes and executes
-   * nothing.
+   * against. The {@code preparer} runs strictly after the reservation is won and before anything is
+   * staged or launched, so a refused launch leaves the workspace untouched. A dry run mints the id
+   * and announces the launch command but reserves, prepares, writes, and executes nothing.
    */
   public AdhocSession startAdhoc(String project, AdhocRequest request, String localHandle) {
+    return startAdhoc(project, request, localHandle, AdhocPreparer.NONE);
+  }
+
+  public AdhocSession startAdhoc(
+      String project, AdhocRequest request, String localHandle, AdhocPreparer preparer) {
     var loaded = projects.loadRunning(project);
     var config = loaded.config();
     var agentType =
@@ -389,6 +408,7 @@ public final class DispatchOperations {
     reserveAdhocRun(
         runId, project, localHandle, agentType, request.branch(), request.task(), unit, background);
     try {
+      prepare(preparer);
       var launch =
           launchSession(
               project,
@@ -419,6 +439,15 @@ public final class DispatchOperations {
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit, background);
       throw e;
+    }
+  }
+
+  private static void prepare(AdhocPreparer preparer) {
+    try {
+      preparer.prepare();
+    } catch (Exception e) {
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED, "Failed to prepare the agent session.", e);
     }
   }
 

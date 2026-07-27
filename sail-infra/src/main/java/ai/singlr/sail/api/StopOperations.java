@@ -44,12 +44,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
  * still-{@code running} run released as {@code stopped}, in one transaction). Every run — build or
  * ad-hoc, background or foreground — owns its run-scoped unit and pid file, so a stop can only ever
- * signal the process the addressed run launched (the residual risk is in-container pid reuse
- * against a stale pid file, not cross-run identity theft, and the verified halt re-probes before
- * anything is finalized). A run that is no longer its spec's latest attempt is never a lever to
- * cancel newer work (a terminal one is {@link AlreadyTerminal}; a live or dead one is halted or
- * released without touching the spec), and a second stop of the same run is idempotent by
- * construction, returning {@link AlreadyTerminal} without signalling anything.
+ * signal the process the addressed run launched: the run-scoped file rules out cross-run identity
+ * theft, and a run that persisted its agent pid is additionally guarded against in-container pid
+ * reuse — a stale file naming a live replacement pid refuses with a conflict instead of authorizing
+ * a kill, and the verified halt re-probes before anything is finalized. A run that is no longer its
+ * spec's latest attempt is never a lever to cancel newer work (a terminal one is {@link
+ * AlreadyTerminal}; a live or dead one is halted or released without touching the spec), and a
+ * second stop of the same run is idempotent by construction, returning {@link AlreadyTerminal}
+ * without signalling anything.
  */
 public final class StopOperations {
 
@@ -264,6 +266,7 @@ public final class StopOperations {
       }
       return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec, actor), true);
     }
+    requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
       return new Stopped(run.id(), run.specId(), info.pid(), previewCancel(run, spec));
@@ -313,6 +316,7 @@ public final class StopOperations {
       }
       return new NotRunning(run.id(), specIdOf(run), false, true);
     }
+    requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
       return new Stopped(run.id(), specIdOf(run), info.pid(), false);
@@ -391,6 +395,28 @@ public final class StopOperations {
             specStore.compareAndSetStatus(spec.id(), SpecStatus.CANCELLED, spec.status());
           }
         });
+  }
+
+  /**
+   * A run that persisted its agent pid only ever signals that pid. The run-scoped pid file rules
+   * out cross-run confusion, but not in-container pid reuse after the original process exits — a
+   * stale file naming a live replacement pid must never authorize a kill. A run with no persisted
+   * pid (a session whose launch never resolved one) has no fingerprint to compare, so the file's
+   * run-scoped identity is the only — and sufficient — authority.
+   */
+  private static void requirePidOwnership(RunStore.RunRow run, int livePid) {
+    if (run.pid() != null && run.pid() != livePid) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run "
+              + run.id()
+              + " recorded PID "
+              + run.pid()
+              + " but its pid file names live PID "
+              + livePid
+              + "; refusing to signal a process the run does not own.",
+          "Reconcile the stale run before retrying the stop.");
+    }
   }
 
   /**

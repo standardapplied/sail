@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -275,6 +276,68 @@ class AdhocDispatchTest {
     assertTrue(
         runStore.runningForProjectOnNode("acme", HANDLE).isEmpty(),
         "a launch that never produced an agent frees the container");
+  }
+
+  @Test
+  void thePreparerRunsOnlyOnceTheReservationIsWon() throws Exception {
+    var ops = operations(liveAgentShell());
+    var reservedAtPrepare = new AtomicBoolean();
+
+    ops.startAdhoc(
+        "acme",
+        background("task"),
+        HANDLE,
+        () -> reservedAtPrepare.set(runStore.runningForProjectOnNode("acme", HANDLE).isPresent()));
+
+    assertTrue(reservedAtPrepare.get(), "preparation must see the reservation already held");
+  }
+
+  @Test
+  void aRefusedReservationNeverRunsThePreparer() throws Exception {
+    var ops = operations(liveAgentShell());
+    ops.startAdhoc("acme", background("one"), HANDLE);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startAdhoc(
+                    "acme",
+                    background("two"),
+                    HANDLE,
+                    () -> {
+                      throw new AssertionError("a refused reservation must not prepare");
+                    }));
+
+    assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refusal.failure().errorCode());
+  }
+
+  @Test
+  void aFailedPreparationReleasesTheReservationWithoutLaunching() throws Exception {
+    var shell = new StubShell().on("incus list ^acme$", RUNNING_JSON);
+    var ops =
+        operations(
+            shell,
+            command -> {
+              throw new AssertionError("a failed preparation must not launch");
+            },
+            true);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startAdhoc(
+                    "acme",
+                    background("task"),
+                    HANDLE,
+                    () -> {
+                      throw new IOException("git checkout failed");
+                    }));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
+    assertEquals("failed", runStore.listForProject("acme").getFirst().status());
+    assertTrue(runStore.runningForProjectOnNode("acme", HANDLE).isEmpty());
   }
 
   @Test

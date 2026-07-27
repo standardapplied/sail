@@ -6,10 +6,13 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import java.io.ByteArrayOutputStream;
@@ -161,6 +164,20 @@ class RunCommandTest {
     assertTrue(task.contains("(id: auth)"));
     assertTrue(task.contains("Implement the login flow."));
     assertTrue(task.contains("sail spec status acme auth done"));
+  }
+
+  @Test
+  void rollbackIsReservedForLaunchFailuresThatLeftNoActiveRun() {
+    var launchFailed = new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "launch failed");
+    var alreadyRunning = new ApiException(ErrorCode.AGENT_ALREADY_RUNNING, "container busy");
+
+    assertTrue(RunCommand.rollbackSafe(launchFailed, false));
+    assertFalse(
+        RunCommand.rollbackSafe(launchFailed, true),
+        "a live run must never have the container restored underneath it");
+    assertFalse(
+        RunCommand.rollbackSafe(alreadyRunning, false),
+        "a reservation refusal must not disturb the existing owner");
   }
 
   @Test

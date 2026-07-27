@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -215,27 +216,10 @@ public final class RunCommand implements Runnable {
 
     var label = SnapshotManager.defaultLabel();
     var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
+    var branchName = branchName(config, label);
 
-    if (snapshotTaken) {
-      var snapMgr = new SnapshotManager(shell);
-      SnapshotDecision.create(System.out, snapMgr, name, label, json);
-    }
-
-    String branchName = null;
-    if (config.agent() != null && config.agent().autoBranch()) {
-      var prefix = config.agent().branchPrefix() != null ? config.agent().branchPrefix() : "sail/";
-      validateSafePath(prefix, "branch_prefix");
-      branchName = prefix + label;
-      System.out.println(Ansi.AUTO.string("  @|bold Creating branch:|@ " + branchName + "..."));
-      var branchCmd =
-          ContainerExec.asDevUser(
-              name, List.of("git", "-C", workDir, "checkout", "-b", branchName));
-      var result = shell.exec(branchCmd);
-      if (!result.ok()) {
-        throw new IOException("Failed to create branch '" + branchName + "': " + result.stderr());
-      }
-      System.out.println(Ansi.AUTO.string("  @|green \u2713|@ Branch " + branchName));
-      System.out.println();
+    if (task == null) {
+      prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
     if (!json && agentCli == AgentCli.CLAUDE_CODE) {
@@ -251,24 +235,60 @@ public final class RunCommand implements Runnable {
       System.out.println();
     }
 
-    var snapshotLabel = snapshotTaken ? label : null;
-
     if (task != null) {
-      launchTaskSession(shell, branchName, snapshotLabel);
+      launchTaskSession(shell, workDir, branchName, snapshotTaken, label);
     } else {
       launchInteractive(sshUser, workDir, fullPermissions, agentCli);
     }
+  }
+
+  private String branchName(SailYaml config, String label) {
+    if (config.agent() == null || !config.agent().autoBranch()) {
+      return null;
+    }
+    var prefix = Objects.requireNonNullElse(config.agent().branchPrefix(), "sail/");
+    validateSafePath(prefix, "branch_prefix");
+    return prefix + label;
+  }
+
+  /**
+   * The pre-launch container mutations — the snapshot and the work-branch checkout. The task lane
+   * runs this only through {@link DispatchOperations.AdhocPreparer}, strictly after the
+   * whole-container reservation is won, so a refused launch never disturbs the workspace of the
+   * agent that owns it; the interactive lane, which reserves nothing, prepares inline.
+   */
+  private void prepareContainer(
+      ShellExecutor shell, String workDir, boolean snapshotTaken, String label, String branchName)
+      throws Exception {
+    if (snapshotTaken) {
+      SnapshotDecision.create(System.out, new SnapshotManager(shell), name, label, json);
+    }
+    if (branchName == null) {
+      return;
+    }
+    System.out.println(Ansi.AUTO.string("  @|bold Creating branch:|@ " + branchName + "..."));
+    var branchCmd =
+        ContainerExec.asDevUser(name, List.of("git", "-C", workDir, "checkout", "-b", branchName));
+    var result = shell.exec(branchCmd);
+    if (!result.ok()) {
+      throw new IOException("Failed to create branch '" + branchName + "': " + result.stderr());
+    }
+    System.out.println(Ansi.AUTO.string("  @|green ✓|@ Branch " + branchName));
+    System.out.println();
   }
 
   /**
    * Launches the headless task session as a first-class ad-hoc run through the shared {@link
    * DispatchOperations} launch machinery: a minted run id, a whole-container reservation, a
    * run-scoped unit and log, and — in the background mode — the same run-addressed guardrail
-   * watcher a dispatch gets. {@code --json} describes the launch (the command and run-scoped paths)
-   * without executing it, exactly as before.
+   * watcher a dispatch gets. The snapshot and branch checkout ride the preparer, so they happen
+   * only once the reservation is won. {@code --json} and {@code --dry-run} describe the launch (the
+   * command and run-scoped paths) without reserving, preparing, or executing anything.
    */
-  private void launchTaskSession(ShellExecutor shell, String branchName, String snapshotLabel)
+  private void launchTaskSession(
+      ShellExecutor shell, String workDir, String branchName, boolean snapshotTaken, String label)
       throws Exception {
+    var snapshotLabel = snapshotTaken ? label : null;
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
@@ -278,9 +298,17 @@ public final class RunCommand implements Runnable {
           new DispatchOperations.AdhocRequest(task, branchName, path, background, describeOnly);
       DispatchOperations.AdhocSession session;
       try {
-        session = operations.startAdhoc(name, request, handle);
+        session =
+            operations.startAdhoc(
+                name,
+                request,
+                handle,
+                () -> prepareContainer(shell, workDir, snapshotTaken, label, branchName));
       } catch (ApiException e) {
-        if (background && snapshotLabel != null) {
+        if (background
+            && snapshotLabel != null
+            && rollbackSafe(
+                e, new RunStore(db).runningForProjectOnNode(name, handle).isPresent())) {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
@@ -290,6 +318,16 @@ public final class RunCommand implements Runnable {
       }
       render(session, launchCommand.get(), branchName);
     }
+  }
+
+  /**
+   * A snapshot restore is only safe when the refused launch left nothing behind: an actual launch
+   * failure with no run still active on this box. A reservation refusal means another agent owns
+   * the container — restoring would yank the workspace out from under it — and a post-launch
+   * supervision failure deliberately keeps the run reserved with a live agent underneath.
+   */
+  static boolean rollbackSafe(ApiException e, boolean activeSession) {
+    return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
   private DispatchOperations operations(

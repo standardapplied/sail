@@ -183,6 +183,40 @@ class StopOperationsTest {
   }
 
   @Test
+  void aStalePidFileNamingAReusedPidRefusesWithoutSignalling() throws Exception {
+    var ops = stopOps(liveAgentShell(999), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aResumedStopAppliesTheSamePidOwnershipGuard() throws Exception {
+    var ops = stopOps(liveAgentShell(999), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    interruptStop();
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals("stopping", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
   void aRunWithNoRecordedPidIsStillKilledThroughItsRunScopedPidFile() throws Exception {
     var shell = liveAgentShell();
     var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);

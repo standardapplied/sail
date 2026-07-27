@@ -1207,20 +1207,18 @@ class SailOperationsTest {
   }
 
   @Test
-  void stopRunHaltsWhateverItsOwnRunScopedPidFileRecords() throws Exception {
+  void stopRunRefusesAStalePidFileNamingAPidTheRunDoesNotOwn() throws Exception {
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "999")
-            .onSequence(
-                "kill -0 999", new ShellExec.Result(0, "", ""), new ShellExec.Result(1, "", ""))
+            .on("kill -0 999", "")
             .on("cat /home/dev/.sail/runs/" + R1 + "/agent-session.json", "{\"task\": \"other\"}");
     var operations = opsWithRun(shell);
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var error = operations.stopRun(R1, "node-a", ADMIN);
 
-    assertEquals(true, get(result, "stopped"), "the run-scoped pid file is the run's identity");
-    assertEquals(999, get(result, "pid"));
+    assertError(ErrorCode.CONFLICT, error);
   }
 
   @Test
