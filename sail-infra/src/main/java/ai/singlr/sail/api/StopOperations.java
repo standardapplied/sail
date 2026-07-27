@@ -46,12 +46,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ad-hoc, background or foreground — owns its run-scoped unit and pid file, so a stop can only ever
  * signal the process the addressed run launched: the run-scoped file rules out cross-run identity
  * theft, and a run that persisted its agent pid is additionally guarded against in-container pid
- * reuse — a stale file naming a live replacement pid refuses with a conflict instead of authorizing
- * a kill, and the verified halt re-probes before anything is finalized. A run that is no longer its
- * spec's latest attempt is never a lever to cancel newer work (a terminal one is {@link
- * AlreadyTerminal}; a live or dead one is halted or released without touching the spec), and a
- * second stop of the same run is idempotent by construction, returning {@link AlreadyTerminal}
- * without signalling anything.
+ * reuse — a stale file naming a different live pid, or the recorded pid itself reoccupied by a
+ * process whose {@code /proc} start-time fingerprint no longer matches the one persisted at launch,
+ * refuses with a conflict instead of authorizing a kill, and the verified halt re-probes before
+ * anything is finalized. A run that is no longer its spec's latest attempt is never a lever to
+ * cancel newer work (a terminal one is {@link AlreadyTerminal}; a live or dead one is halted or
+ * released without touching the spec), and a second stop of the same run is idempotent by
+ * construction, returning {@link AlreadyTerminal} without signalling anything.
  */
 public final class StopOperations {
 
@@ -398,14 +399,22 @@ public final class StopOperations {
   }
 
   /**
-   * A run that persisted its agent pid only ever signals that pid. The run-scoped pid file rules
-   * out cross-run confusion, but not in-container pid reuse after the original process exits — a
-   * stale file naming a live replacement pid must never authorize a kill. A run with no persisted
-   * pid (a session whose launch never resolved one) has no fingerprint to compare, so the file's
-   * run-scoped identity is the only — and sufficient — authority.
+   * A run that persisted its agent pid only ever signals that pid — and only while the pid still
+   * names the process the run launched. The run-scoped pid file rules out cross-run confusion, but
+   * not in-container pid reuse after the original process exits: a replacement process assigned the
+   * same numeric pid makes the stored pid, the stale file, and the live pid all agree, so equality
+   * alone proves nothing. The persisted {@code /proc} start-time fingerprint does: no two processes
+   * ever share a pid <em>and</em> a start time, so a live process whose fingerprint differs — or
+   * cannot be read — is a replacement and must never be signalled. A run with no persisted pid (a
+   * session whose launch never resolved one) has no identity to compare, so the file's run-scoped
+   * identity is the only — and sufficient — authority; a run persisted before fingerprints existed
+   * keeps the pid-equality guard alone.
    */
-  private static void requirePidOwnership(RunStore.RunRow run, int livePid) {
-    if (run.pid() != null && run.pid() != livePid) {
+  private void requirePidOwnership(RunStore.RunRow run, int livePid) {
+    if (run.pid() == null) {
+      return;
+    }
+    if (run.pid() != livePid) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Run "
@@ -416,6 +425,34 @@ public final class StopOperations {
               + livePid
               + "; refusing to signal a process the run does not own.",
           "Reconcile the stale run before retrying the stop.");
+    }
+    if (pidReused(run, livePid)) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run "
+              + run.id()
+              + "'s recorded PID "
+              + livePid
+              + " now names a different process (the PID was reused after the agent exited);"
+              + " refusing to signal a process the run does not own.",
+          "Reconcile the stale run before retrying the stop.");
+    }
+  }
+
+  /**
+   * Whether the live process at the run's pid is a later occupant rather than the process the run
+   * launched. No fingerprint on the run means nothing to compare; an unreadable live fingerprint
+   * reads as reused, because a kill must never proceed on an identity that cannot be verified.
+   */
+  private boolean pidReused(RunStore.RunRow run, int livePid) {
+    if (run.pidTicks() == null) {
+      return false;
+    }
+    try {
+      return !run.pidTicks()
+          .equals(new AgentSession(shell).readProcessStartTicks(run.project(), livePid));
+    } catch (Exception e) {
+      return true;
     }
   }
 

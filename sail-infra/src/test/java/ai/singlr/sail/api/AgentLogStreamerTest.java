@@ -59,7 +59,8 @@ class AgentLogStreamerTest {
         null,
         "t0",
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        null);
   }
 
   private static AgentLogStreamer streamer(

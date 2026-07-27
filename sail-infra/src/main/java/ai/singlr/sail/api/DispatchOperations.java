@@ -308,8 +308,7 @@ public final class DispatchOperations {
         agentType,
         branch,
         task,
-        unit,
-        background);
+        unit);
     try {
       var prepared =
           claimAndPrepare(
@@ -334,9 +333,8 @@ public final class DispatchOperations {
               unit,
               runId);
       var status = querySession(new AgentSession(shell), project, unit);
-      if (background) {
-        updateRunProcess(runId, status, launch.watcher());
-      } else {
+      updateRunProcess(runId, project, status, launch.watcher());
+      if (!background) {
         completeForegroundRun(runId, launch.exitCode());
       }
       if (status != null && status.running()) {
@@ -356,7 +354,7 @@ public final class DispatchOperations {
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit, background);
+      releaseIfAbsent(runId, project, unit);
       throw e;
     }
   }
@@ -405,8 +403,7 @@ public final class DispatchOperations {
               runId));
       return new AdhocSession(runId, null, null, Optional.empty());
     }
-    reserveAdhocRun(
-        runId, project, localHandle, agentType, request.branch(), request.task(), unit, background);
+    reserveAdhocRun(runId, project, localHandle, agentType, request.branch(), request.task(), unit);
     try {
       prepare(preparer);
       var launch =
@@ -426,9 +423,8 @@ public final class DispatchOperations {
               unit,
               runId);
       var status = querySession(new AgentSession(shell), project, unit);
-      if (background) {
-        updateRunProcess(runId, status, launch.watcher());
-      } else {
+      updateRunProcess(runId, project, status, launch.watcher());
+      if (!background) {
         completeForegroundRun(runId, launch.exitCode());
       }
       if (status != null && status.running()) {
@@ -437,7 +433,7 @@ public final class DispatchOperations {
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit, background);
+      releaseIfAbsent(runId, project, unit);
       throw e;
     }
   }
@@ -966,9 +962,10 @@ public final class DispatchOperations {
    * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
    * boxes that keep no run aggregate, which have nothing to reserve against.
    *
-   * <p>A foreground dispatch records a blank unit: it runs as a plain child process and creates no
-   * systemd unit, so the missed-stop reconciler must skip it rather than falsely stop the
-   * still-running agent. The foreground run completes when its blocking launcher returns.
+   * <p>A foreground dispatch records the same run-scoped unit name even though it launches no
+   * systemd service: the run's pid file carries the same identity, so stop, probe, and the
+   * missed-stop reconciler address a foreground session exactly like a background one. The
+   * foreground run completes when its blocking launcher returns.
    */
   private void reserveRun(
       String runId,
@@ -979,13 +976,11 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit,
-      boolean background) {
+      AgentUnit unit) {
     if (runStore == null) {
       return;
     }
-    reserve(
-        runId, project, specId, node, "build", repos, agentType, branch, task, unit, background);
+    reserve(runId, project, specId, node, "build", repos, agentType, branch, task, unit);
   }
 
   /**
@@ -1002,15 +997,13 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit,
-      boolean background) {
+      AgentUnit unit) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
-    reserve(
-        runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit, background);
+    reserve(runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit);
   }
 
   private void reserve(
@@ -1023,9 +1016,7 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit,
-      boolean background) {
-    var recordedUnit = background ? unit.unitName() : "";
+      AgentUnit unit) {
     Optional<DispatchGate.Conflict> conflict;
     try {
       conflict =
@@ -1040,7 +1031,7 @@ public final class DispatchOperations {
               branch,
               task,
               unit.logPath(),
-              recordedUnit);
+              unit.unitName());
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
@@ -1076,16 +1067,35 @@ public final class DispatchOperations {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
   }
 
-  /** Stamps the agent + watcher pids on a background run once launch has resolved them. */
+  /**
+   * Stamps the run's process identity once launch has resolved it: the agent pid, its {@code /proc}
+   * start-time fingerprint (live processes only — the fingerprint exists to prove a pid still names
+   * the process this run launched, so a foreground session that already exited records its pid
+   * without one), and the fallback watcher pid.
+   */
   private void updateRunProcess(
-      String runId, AgentSession.SessionInfo status, Optional<WatcherSpawner.Spawned> watcher) {
+      String runId,
+      String project,
+      AgentSession.SessionInfo status,
+      Optional<WatcherSpawner.Spawned> watcher) {
     Integer watcherPid =
         watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
             ? (int) fallback.pid()
             : null;
+    Integer pid = status != null ? status.pid() : null;
+    var pidTicks =
+        status != null && status.running() ? readStartTicks(project, status.pid()) : null;
     runBookkeeping(
         "update run process " + runId,
-        () -> runStore.updateProcess(runId, status != null ? status.pid() : null, watcherPid));
+        () -> runStore.updateProcess(runId, pid, pidTicks, watcherPid));
+  }
+
+  private Long readStartTicks(String project, int pid) {
+    try {
+      return new AgentSession(shell).readProcessStartTicks(project, pid);
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   /**
@@ -1118,22 +1128,23 @@ public final class DispatchOperations {
   }
 
   /**
-   * Releases the run's repo reservation on a launch failure only when the agent is proven absent. A
-   * failure before or during launch leaves no live unit, so the run is failed and its repo freed.
-   * But once a background systemd unit has started, a later failure (watcher spawn, status probe)
-   * leaves a live agent on its run-scoped unit; failing the run would free the repo under it and
-   * admit an overlapping dispatch. An unprobeable unit is treated as live for the same reason — the
-   * missed-stop reconciler releases a genuinely dead unit on its next pass. A foreground run
-   * creates no unit, so a foreground launch failure always frees the reservation.
+   * Releases the run's repo reservation on a launch failure only when the agent is proven absent —
+   * probed on the run's own identity (systemd unit and run-scoped pid file), so the check covers
+   * background and foreground launches alike. A failure before or during launch leaves no live
+   * process, so the run is failed and its repo freed. But once the agent process exists — a
+   * background unit that started, a foreground child whose blocking wait threw — a later failure
+   * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
+   * session. An unprobeable identity is treated as live for the same reason — the missed-stop
+   * reconciler releases a genuinely dead run on its next pass.
    */
-  private void releaseIfAbsent(String runId, String project, AgentUnit unit, boolean background) {
-    if (background && backgroundAgentLive(project, unit)) {
+  private void releaseIfAbsent(String runId, String project, AgentUnit unit) {
+    if (agentLive(project, unit)) {
       return;
     }
     failRun(runId);
   }
 
-  private boolean backgroundAgentLive(String project, AgentUnit unit) {
+  private boolean agentLive(String project, AgentUnit unit) {
     try {
       var status = new AgentSession(shell).queryStatus(project, unit);
       return status != null && status.running();

@@ -1420,7 +1420,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void aForegroundRunRemainsUnprobeableWhileItsLauncherOwnsCompletion() throws Exception {
+  void aForegroundRunRecordsItsDurableRunScopedIdentity() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var shell =
         shell()
@@ -1440,7 +1440,11 @@ class SailOperationsTest {
     dispatch(operations, "acme", request("auth", "foreground", false));
 
     var recorded = runs.get().listForProject("acme").getFirst();
-    assertEquals("", recorded.unit());
+    assertEquals(
+        "sail-agent-" + recorded.id(),
+        recorded.unit(),
+        "a foreground session records the same durable run-scoped identity as a background one");
+    assertEquals(123, recorded.pid(), "the session's pid is stamped from its run-scoped pid file");
   }
 
   @Test
@@ -1824,7 +1828,8 @@ class SailOperationsTest {
         unit,
         "t0",
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        null);
   }
 
   @Test

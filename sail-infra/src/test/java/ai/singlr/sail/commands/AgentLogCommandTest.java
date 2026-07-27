@@ -40,7 +40,8 @@ class AgentLogCommandTest {
         null,
         "t0",
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        null);
   }
 
   private static final String STREAM_EVENT =

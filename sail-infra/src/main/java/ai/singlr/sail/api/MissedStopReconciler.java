@@ -45,13 +45,14 @@ import java.util.function.Supplier;
  * session replays the stop with its recorded exit code — after probing its recorded unit, because
  * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
  * the replay). A running session past the launch grace period whose recorded run identity is
- * inactive or absent gets a synthesized stop. A running session with no recorded unit is skipped
- * because foreground launchers own their blocking process's completion. The synthesized stop
- * carries <em>no exit code</em>: the transient unit is garbage-collected on exit, so the real code
- * is unrecoverable, and the replay path makes the same choice for a terminal session that never
- * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
- * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
- * reconstructed, not observed.
+ * inactive or absent gets a synthesized stop. Every session — background or foreground — records
+ * its run-scoped identity, and the probe reads the pid file before the systemd unit, so foreground
+ * sessions reconcile the same way; only a legacy row with no recorded unit is skipped, because its
+ * blocking launcher owned its completion. The synthesized stop carries <em>no exit code</em>: the
+ * transient unit is garbage-collected on exit, so the real code is unrecoverable, and the replay
+ * path makes the same choice for a terminal session that never recorded one — the pipeline treats
+ * the absent code as not-a-failure and lets review judge the work. Every replayed stop carries
+ * {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -212,18 +213,18 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * Releases a reservation orphaned by a crash: a run committed {@code running} whose agent is
    * provably not coming — a dispatch whose spec never left {@code pending} (a crash between reserve
-   * and claim), or a spec-less ad-hoc session whose recorded process is dead (its watcher died with
-   * it, so no stop was ever synthesized). Only a run older than {@link #LAUNCH_GRACE} is touched,
-   * so a run still inside a healthy launch window is never disturbed, and a run whose recorded
-   * identity still probes <em>live</em> is always left alone — a reservation must never be freed
-   * under a working agent. A spec-less run with no recorded pid is also left alone: it is either
-   * still launching or a foreground session whose blocking launcher owns its completion, and an
-   * operator {@code sail agent stop} heals the crashed remainder. The release is the same {@code
-   * running → stopped} compare-and-set every finisher uses, so racing the watcher's own completion
-   * can never overwrite a recorded exit. Foreign runs are left to their executing box. A run whose
-   * spec was already handled earlier in this same sweep is skipped, so an async status flip caused
-   * by the sweep's own replayed stop can never make one pass both reconcile and release the one
-   * run.
+   * and claim), or a spec-less ad-hoc session whose recorded identity probes dead (its watcher died
+   * with it, or its foreground launcher crashed, so no stop was ever recorded). Only a run older
+   * than {@link #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never
+   * disturbed, and a run whose recorded identity still probes <em>live</em> is always left alone —
+   * a reservation must never be freed under a working agent. The probe reads the run-scoped pid
+   * file before the systemd unit, so it covers foreground sessions (which launch no service) and
+   * background sessions that crashed before their pid was persisted alike; an unprobeable run reads
+   * as alive. The release is the same {@code running → stopped} compare-and-set every finisher
+   * uses, so racing the watcher's own completion can never overwrite a recorded exit. Foreign runs
+   * are left to their executing box. A run whose spec was already handled earlier in this same
+   * sweep is skipped, so an async status flip caused by the sweep's own replayed stop can never
+   * make one pass both reconcile and release the one run.
    */
   int releaseStrandedReservations(Set<String> handledThisSweep) {
     var node = localHandle.get();
@@ -232,17 +233,10 @@ public final class MissedStopReconciler implements AutoCloseable {
     for (var run : sessionStore.running()) {
       if (handledThisSweep.contains(run.specId())
           || !SailOperations.ownsRun(run.node(), node)
-          || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)) {
+          || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
+          || specBeingWorked(run.specId())
+          || agentProbablyAlive(run)) {
         continue;
-      }
-      if (Strings.isBlank(run.specId())) {
-        if (run.pid() == null || agentProbablyAlive(run)) {
-          continue;
-        }
-      } else {
-        if (specBeingWorked(run.specId()) || agentProbablyAlive(run)) {
-          continue;
-        }
       }
       System.err.println(
           "  [reconcile] releasing stranded reservation "

@@ -141,10 +141,6 @@ public final class RunCommand implements Runnable {
       validateSafePath(path, "--path");
     }
 
-    if (!noRegen) {
-      regenContext(shell, config);
-    }
-
     launchAgent(shell, config);
   }
 
@@ -219,6 +215,9 @@ public final class RunCommand implements Runnable {
     var branchName = branchName(config, label);
 
     if (task == null) {
+      if (!noRegen) {
+        regenContext(shell, config);
+      }
       prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
@@ -236,7 +235,7 @@ public final class RunCommand implements Runnable {
     }
 
     if (task != null) {
-      launchTaskSession(shell, workDir, branchName, snapshotTaken, label);
+      launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label);
     } else {
       launchInteractive(sshUser, workDir, fullPermissions, agentCli);
     }
@@ -253,9 +252,11 @@ public final class RunCommand implements Runnable {
 
   /**
    * The pre-launch container mutations — the snapshot and the work-branch checkout. The task lane
-   * runs this only through {@link DispatchOperations.AdhocPreparer}, strictly after the
-   * whole-container reservation is won, so a refused launch never disturbs the workspace of the
-   * agent that owns it; the interactive lane, which reserves nothing, prepares inline.
+   * runs this (and the context regeneration, which overwrites the shared home-level agent context)
+   * only through {@link DispatchOperations.AdhocPreparer}, strictly after the whole-container
+   * reservation is won, so a refused launch never disturbs the workspace — or the lazily loaded
+   * instructions and skills — of the agent that owns it; the interactive lane, which reserves
+   * nothing, prepares inline.
    */
   private void prepareContainer(
       ShellExecutor shell, String workDir, boolean snapshotTaken, String label, String branchName)
@@ -281,12 +282,18 @@ public final class RunCommand implements Runnable {
    * Launches the headless task session as a first-class ad-hoc run through the shared {@link
    * DispatchOperations} launch machinery: a minted run id, a whole-container reservation, a
    * run-scoped unit and log, and — in the background mode — the same run-addressed guardrail
-   * watcher a dispatch gets. The snapshot and branch checkout ride the preparer, so they happen
-   * only once the reservation is won. {@code --json} and {@code --dry-run} describe the launch (the
-   * command and run-scoped paths) without reserving, preparing, or executing anything.
+   * watcher a dispatch gets. The context regeneration, snapshot, and branch checkout ride the
+   * preparer, so they happen only once the reservation is won. {@code --json} and {@code --dry-run}
+   * describe the launch (the command and run-scoped paths) without reserving, preparing, or
+   * executing anything.
    */
   private void launchTaskSession(
-      ShellExecutor shell, String workDir, String branchName, boolean snapshotTaken, String label)
+      ShellExecutor shell,
+      SailYaml config,
+      String workDir,
+      String branchName,
+      boolean snapshotTaken,
+      String label)
       throws Exception {
     var snapshotLabel = snapshotTaken ? label : null;
     var handle = Objects.toString(HostSync.handle(), "");
@@ -303,7 +310,12 @@ public final class RunCommand implements Runnable {
                 name,
                 request,
                 handle,
-                () -> prepareContainer(shell, workDir, snapshotTaken, label, branchName));
+                () -> {
+                  if (!noRegen) {
+                    regenContext(shell, config);
+                  }
+                  prepareContainer(shell, workDir, snapshotTaken, label, branchName);
+                });
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null

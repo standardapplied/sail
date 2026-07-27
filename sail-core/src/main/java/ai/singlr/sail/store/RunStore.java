@@ -71,7 +71,8 @@ public final class RunStore implements ConflictResolver {
       String unit,
       String startedAt,
       String completedAt,
-      List<String> repos) {
+      List<String> repos,
+      Long pidTicks) {
 
     /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
@@ -97,7 +98,7 @@ public final class RunStore implements ConflictResolver {
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
-          + " exit_code, log_path, unit, started_at, completed_at, repos";
+          + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -455,16 +456,20 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Stamps the agent and watcher pids on a run once launch has produced them. The run row is
-   * created before launch (so terminal hook events can find it), then updated here with the pids
-   * the launch resolved. Journals a revision so the pids replicate.
+   * Stamps the agent process identity and watcher pid on a run once launch has produced them. The
+   * run row is created before launch (so terminal hook events can find it), then updated here with
+   * what the launch resolved. {@code pidTicks} is the agent process's {@code /proc} start-time
+   * fingerprint — pids are reused by the kernel, so the pid alone can later name an unrelated
+   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches.
+   * Journals a revision so the identity replicates.
    */
-  public void updateProcess(String id, Integer pid, Integer watcherPid) {
+  public void updateProcess(String id, Integer pid, Long pidTicks, Integer watcherPid) {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE runs SET pid = ?, watcher_pid = ? WHERE id = ?",
+              "UPDATE runs SET pid = ?, pid_ticks = ?, watcher_pid = ? WHERE id = ?",
               pid != null ? pid.longValue() : null,
+              pidTicks,
               watcherPid != null ? watcherPid.longValue() : null,
               id);
           recordRevision(id, "local", false);
@@ -649,15 +654,15 @@ public final class RunStore implements ConflictResolver {
     db.execute(
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
-            status, exit_code, log_path, unit, started_at, completed_at, repos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
             watcher_pid = excluded.watcher_pid, status = excluded.status,
             exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
             started_at = excluded.started_at, completed_at = excluded.completed_at,
-            repos = excluded.repos""",
+            repos = excluded.repos, pid_ticks = excluded.pid_ticks""",
         row.id(),
         row.project(),
         row.specId(),
@@ -674,7 +679,8 @@ public final class RunStore implements ConflictResolver {
         row.unit(),
         Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
         row.completedAt(),
-        YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())));
+        YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())),
+        row.pidTicks());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -696,6 +702,7 @@ public final class RunStore implements ConflictResolver {
     map.put("started_at", run.startedAt());
     map.put("completed_at", run.completedAt());
     map.put("repos", Objects.requireNonNullElse(run.repos(), List.of()));
+    map.put("pid_ticks", run.pidTicks());
     return map;
   }
 
@@ -753,7 +760,8 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "unit"),
         text(snapshot, "started_at"),
         text(snapshot, "completed_at"),
-        stringList(snapshot, "repos"));
+        stringList(snapshot, "repos"),
+        longValue(snapshot, "pid_ticks"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -769,6 +777,10 @@ public final class RunStore implements ConflictResolver {
 
   private static Integer integer(Map<String, Object> map, String key) {
     return map.get(key) instanceof Number n ? n.intValue() : null;
+  }
+
+  private static Long longValue(Map<String, Object> map, String key) {
+    return map.get(key) instanceof Number n ? n.longValue() : null;
   }
 
   private String rawBaseRev(String id) {
@@ -801,6 +813,7 @@ public final class RunStore implements ConflictResolver {
         row.text(13),
         row.text(14),
         row.text(15),
-        YamlUtil.parseStringList(row.text(16)));
+        YamlUtil.parseStringList(row.text(16)),
+        row.isNull(17) ? null : row.integer(17));
   }
 }

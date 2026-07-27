@@ -167,6 +167,53 @@ public final class AgentSession {
   }
 
   /**
+   * Reads a container process's non-reusable start fingerprint: the {@code starttime} field of
+   * {@code /proc/<pid>/stat}, in clock ticks since boot. The kernel reuses numeric pids, so a pid
+   * alone can later name an unrelated process; two processes assigned the same pid can never share
+   * a start time, so a fingerprint persisted at launch distinguishes the process a run launched
+   * from any later occupant of its pid. Returns null when the process is gone or unreadable.
+   */
+  public Long readProcessStartTicks(String containerName, int pid)
+      throws IOException, InterruptedException, TimeoutException {
+    var cmd = ContainerExec.asDevUser(containerName, List.of("cat", "/proc/" + pid + "/stat"));
+    var result = shell.exec(cmd);
+    return result.ok() ? parseStartTicks(result.stdout()) : null;
+  }
+
+  /**
+   * Field 22 of the stat line, located after the last {@code ')'} because the comm field may itself
+   * contain spaces or parentheses.
+   */
+  static Long parseStartTicks(String stat) {
+    var close = stat.lastIndexOf(')');
+    if (close < 0) {
+      return null;
+    }
+    var fields = stat.substring(close + 1).trim().split("\\s+");
+    if (fields.length < 20) {
+      return null;
+    }
+    try {
+      return Long.parseLong(fields[19]);
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  /**
+   * Whether the unit is active in the container's user systemd manager. Unlike {@link #queryStatus}
+   * this never falls back to the run's pid file, so it distinguishes launch modes: a background
+   * session runs as its recorded unit, a foreground session only writes the pid file.
+   */
+  public boolean unitActive(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var cmd =
+        ContainerExec.asDevUser(
+            containerName, List.of("systemctl", "--user", "--quiet", "is-active", unit.service()));
+    return shell.exec(cmd).ok();
+  }
+
+  /**
    * Kills the given role's running agent inside the container. SIGTERM first, then SIGKILL. A
    * SIGKILL that fails against a still-live process throws instead of returning normally, so a
    * caller can never record a successful stop for an agent that survived the signal.

@@ -16,8 +16,21 @@ One identity model: every agent session is a run.
   `agent logs`, and `agent report` resolve ad-hoc sessions through their run rows like any
   dispatch. The `run_not_active` stop reason no longer occurs: run-scoped identities made
   the pid-identity-theft guards obsolete.
-- Foreground sessions write their pid to the run's pid file, so they are probeable and
-  stoppable through the same identity as background ones.
+- Foreground sessions write their pid to the run's pid file, record the same run-scoped
+  unit name on their run row, and persist their process identity, so they are probeable,
+  stoppable, and reconcilable through the same identity as background ones — a crashed
+  foreground launcher no longer strands its whole-container reservation, and a launch
+  failure never frees the reservation while the agent still probes live.
+- Runs persist the agent process's `/proc` start-time fingerprint at launch; a stop refuses
+  to signal a pid whose fingerprint no longer matches, so an in-container PID reused after
+  the agent exits can never be killed by a stale run.
+- The watcher re-armer walks live session runs (build and ad-hoc alike) instead of
+  in-progress specs, so a crashed watcher over an ad-hoc background session is replaced
+  within a pass; its probe is systemd-strict, so a foreground session is never armed with
+  guardrails it was not launched with.
+- `sail agent run` regenerates the shared home-level agent context only after the
+  whole-container reservation is won, so a refused launch leaves the running agent's
+  instructions and skills untouched.
 - Review runs record their real execution identity (`sail-review-<id>`) instead of a blank
   unit.
 - The missed-stop sweep releases a spec-less run only on probed evidence of death and never

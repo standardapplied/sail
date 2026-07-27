@@ -288,14 +288,27 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void anAdhocRunWithNoRecordedPidIsLeftToItsLauncherOrTheOperatorStop() {
+  void anAdhocRunWithNoRecordedPidIsStillProbedAndReleasedWhenDead() {
     var runId = adhocSession(null);
     var probe = new CountingProbe(false);
 
     var released = reconciler(probe, PAST_GRACE).sweep();
 
+    assertEquals(1, released);
+    assertEquals(1, probe.calls.get());
+    assertEquals(
+        "stopped",
+        sessionStore.findById(runId).orElseThrow().status(),
+        "a crashed launcher must not retain an empty-container reservation forever");
+  }
+
+  @Test
+  void aLiveAdhocRunWithNoRecordedPidKeepsItsReservation() {
+    var runId = adhocSession(null);
+
+    var released = reconciler(new CountingProbe(true), PAST_GRACE).sweep();
+
     assertEquals(0, released);
-    assertEquals(0, probe.calls.get());
     assertEquals("running", sessionStore.findById(runId).orElseThrow().status());
   }
 
@@ -433,7 +446,7 @@ class MissedStopReconcilerTest {
         "/home/dev/.sail/runs/" + id + "/agent.log",
         "sail-agent-" + id);
     if (pid != null) {
-      sessionStore.updateProcess(id, pid, null);
+      sessionStore.updateProcess(id, pid, null, null);
     }
     return id;
   }

@@ -588,7 +588,8 @@ public final class SchemaManager {
           "DROP TABLE runs",
           "ALTER TABLE runs_v4 RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "ALTER TABLE runs ADD COLUMN pid_ticks INTEGER");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

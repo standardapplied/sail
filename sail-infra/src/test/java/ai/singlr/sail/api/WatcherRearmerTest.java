@@ -11,16 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongPredicate;
 import java.util.function.Predicate;
@@ -43,14 +42,12 @@ class WatcherRearmerTest {
 
   @TempDir Path tempDir;
   private Sqlite db;
-  private SpecStore specStore;
   private RunStore sessionStore;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("rearm.db"));
     new SchemaManager(db).migrate();
-    specStore = new SpecStore(db);
     sessionStore = new RunStore(db);
   }
 
@@ -59,66 +56,46 @@ class WatcherRearmerTest {
     if (db != null) db.close();
   }
 
-  private void createInProgressSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "Test spec",
-            SpecStatus.IN_PROGRESS,
-            null,
-            "claude-code",
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+  private String runningSession(String specId, Integer watcherPid) {
+    return session(specId, "build", watcherPid, true);
   }
 
-  private String runningSession(String specId, Integer watcherPid) {
+  private String adhocSession(Integer watcherPid) {
+    return session("", "adhoc", watcherPid, true);
+  }
+
+  private String session(String specId, String role, Integer watcherPid, boolean withUnit) {
     var id = DateTimeUtils.newId().toString();
     return sessionStore.create(
         id,
         "test-project",
         specId,
         "node-a",
-        "build",
+        role,
         "claude-code",
         "feat/test",
         "task",
         1,
         watcherPid,
         "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+        withUnit ? "sail-agent-" + id : "");
   }
 
   private WatcherRearmer rearmer(
-      MissedStopReconciler.UnitProbe agentUnitProbe,
+      MissedStopReconciler.UnitProbe agentUnitActive,
       Predicate<String> watcherUnitActive,
       LongPredicate watcherAlive,
       WatcherRearmer.WatcherRelauncher relauncher) {
     return new WatcherRearmer(
-        specStore,
-        sessionStore,
-        agentUnitProbe,
-        watcherUnitActive,
-        watcherAlive,
-        () -> "node-a",
-        relauncher);
+        sessionStore, agentUnitActive, watcherUnitActive, watcherAlive, () -> "node-a", relauncher);
   }
 
   @Test
   void theProbeCoverageCheckAndRelaunchAllAddressTheRunItself() {
-    createInProgressSpec("auth");
     var runId = runningSession("auth", null);
-    var probes = new java.util.concurrent.ConcurrentLinkedQueue<String>();
-    var covered = new java.util.concurrent.ConcurrentLinkedQueue<String>();
-    var relaunched = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+    var probes = new ConcurrentLinkedQueue<String>();
+    var covered = new ConcurrentLinkedQueue<String>();
+    var relaunched = new ConcurrentLinkedQueue<String>();
 
     var rearmed =
         rearmer(
@@ -145,12 +122,10 @@ class WatcherRearmerTest {
 
   @Test
   void aForeignNodesRunIsNeverRearmedHere() {
-    createInProgressSpec("auth");
     runningSession("auth", 5678);
     var relaunches = new AtomicInteger();
     var rearmer =
         new WatcherRearmer(
-            specStore,
             sessionStore,
             (project, runId, unit) -> true,
             NO_UNIT,
@@ -167,7 +142,6 @@ class WatcherRearmerTest {
 
   @Test
   void rearmsAnUncoveredRunningAgentAsAUnit() {
-    createInProgressSpec("auth");
     runningSession("auth", 5678);
     var relaunches = new AtomicInteger();
 
@@ -187,8 +161,68 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void anActiveWatcherUnitCoversTheProjectWithoutConsultingPidOrAgentUnit() {
-    createInProgressSpec("auth");
+  void anUncoveredAdhocBackgroundSessionIsRearmedLikeABuildRun() {
+    var runId = adhocSession(5678);
+    var relaunched = new ConcurrentLinkedQueue<String>();
+
+    var rearmed =
+        rearmer(
+                (project, id, unit) -> true,
+                NO_UNIT,
+                DEAD,
+                run -> {
+                  relaunched.add(run.id());
+                  return Optional.of(LAUNCHED);
+                })
+            .rearm();
+
+    assertEquals(1, rearmed);
+    assertEquals(List.of(runId), List.copyOf(relaunched));
+  }
+
+  @Test
+  void aSessionWhoseUnitIsNotActiveInSystemdIsNeverArmed() {
+    runningSession("auth", null);
+    adhocSession(null);
+    var relaunches = new AtomicInteger();
+
+    var rearmed =
+        rearmer(
+                (project, runId, unit) -> false,
+                NO_UNIT,
+                DEAD,
+                run -> {
+                  relaunches.incrementAndGet();
+                  return Optional.of(LAUNCHED);
+                })
+            .rearm();
+
+    assertEquals(0, rearmed, "a foreground or exited session runs as no unit a watcher could own");
+    assertEquals(0, relaunches.get());
+  }
+
+  @Test
+  void aLegacyRowWithNoRecordedUnitHasNothingToSupervise() {
+    session("", "adhoc", null, false);
+    var probes = new AtomicInteger();
+
+    var rearmed =
+        rearmer(
+                (project, runId, unit) -> {
+                  probes.incrementAndGet();
+                  return true;
+                },
+                NO_UNIT,
+                DEAD,
+                run -> Optional.of(LAUNCHED))
+            .rearm();
+
+    assertEquals(0, rearmed);
+    assertEquals(0, probes.get());
+  }
+
+  @Test
+  void anActiveWatcherUnitCoversTheRunWithoutConsultingPidOrAgentUnit() {
     runningSession("auth", null);
     var probed = new AtomicInteger();
 
@@ -208,8 +242,7 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void aLiveRecordedWatcherPidCoversTheProject() {
-    createInProgressSpec("auth");
+  void aLiveRecordedWatcherPidCoversTheRun() {
     runningSession("auth", 5678);
     var relaunches = new AtomicInteger();
 
@@ -230,7 +263,6 @@ class WatcherRearmerTest {
 
   @Test
   void aSessionWithNoRecordedPidAndNoUnitIsRearmedBecauseDoublingIsUnrepresentable() {
-    createInProgressSpec("auth");
     runningSession("auth", null);
 
     var rearmed =
@@ -240,32 +272,9 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void anInactiveAgentUnitIsTheSweepsJobNotARearm() {
-    createInProgressSpec("auth");
-    runningSession("auth", 5678);
-    var relaunches = new AtomicInteger();
-
-    var rearmed =
-        rearmer(
-                (project, runId, unit) -> false,
-                NO_UNIT,
-                DEAD,
-                run -> {
-                  relaunches.incrementAndGet();
-                  return Optional.of(LAUNCHED);
-                })
-            .rearm();
-
-    assertEquals(0, rearmed);
-    assertEquals(0, relaunches.get());
-  }
-
-  @Test
-  void terminalSessionsAndSpecsWithoutSessionsAreIgnored() {
-    createInProgressSpec("finished");
+  void terminalSessionsAreIgnored() {
     var completed = runningSession("finished", 5678);
     sessionStore.complete(completed, "stopped", 0);
-    createInProgressSpec("bare");
 
     var rearmed =
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))
@@ -276,7 +285,6 @@ class WatcherRearmerTest {
 
   @Test
   void anEmptyRelaunchIsLoggedNotCounted() {
-    createInProgressSpec("auth");
     runningSession("auth", 5678);
 
     var rearmed =
@@ -286,10 +294,8 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void aFailingRelaunchIsLoggedAndDoesNotShadowOtherSpecs() {
-    createInProgressSpec("broken");
+  void aFailingRelaunchIsLoggedAndDoesNotShadowOtherRuns() {
     runningSession("broken", 1111);
-    createInProgressSpec("auth");
     runningSession("auth", 2222);
     var attempts = new AtomicInteger();
 
@@ -312,7 +318,6 @@ class WatcherRearmerTest {
 
   @Test
   void aStoreErrorIsSwallowedSoStartupIsNeverBlocked() {
-    createInProgressSpec("auth");
     runningSession("auth", 5678);
     var rearmer =
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED));
@@ -324,7 +329,6 @@ class WatcherRearmerTest {
 
   @Test
   void periodicRearmSchedulesRunsAndClosesWithoutStackingPasses() {
-    createInProgressSpec("auth");
     runningSession("auth", 5678);
     try (var rearmer =
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))) {

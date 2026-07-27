@@ -158,8 +158,64 @@ class AdhocDispatchTest {
     var run = runStore.findById(session.runId()).orElseThrow();
     assertEquals("failed", run.status());
     assertEquals(3, run.exitCode());
-    assertEquals("", run.unit(), "a foreground session owns no systemd unit");
+    assertEquals(
+        "sail-agent-" + session.runId(),
+        run.unit(),
+        "a foreground session records the same durable run-scoped identity as a background one");
     assertTrue(session.watcher().isEmpty());
+  }
+
+  @Test
+  void aForegroundLaunchFailureWithALiveAgentKeepsTheReservation() throws Exception {
+    var ops =
+        operations(
+            liveAgentShell(),
+            command -> {
+              throw new IOException("terminal wait interrupted");
+            },
+            true);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startAdhoc(
+                    "acme",
+                    new DispatchOperations.AdhocRequest("task", null, null, false, false),
+                    HANDLE));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
+    assertEquals("running", runStore.listForProject("acme").getFirst().status());
+    assertTrue(
+        runStore.runningForProjectOnNode("acme", HANDLE).isPresent(),
+        "a surviving foreground agent must keep the whole-container reservation");
+  }
+
+  @Test
+  void aForegroundLaunchFailureWithNoAgentReleasesTheReservation() throws Exception {
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("printf '%s'", "");
+    var ops =
+        operations(
+            shell,
+            command -> {
+              throw new IOException("spawn failed");
+            },
+            true);
+
+    assertThrows(
+        ApiException.class,
+        () ->
+            ops.startAdhoc(
+                "acme",
+                new DispatchOperations.AdhocRequest("task", null, null, false, false),
+                HANDLE));
+
+    assertEquals("failed", runStore.listForProject("acme").getFirst().status());
+    assertTrue(runStore.runningForProjectOnNode("acme", HANDLE).isEmpty());
   }
 
   @Test

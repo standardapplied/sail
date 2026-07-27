@@ -79,6 +79,23 @@ class RunStoreTest {
   }
 
   @Test
+  void updateProcessPersistsThePidFingerprintAndItReplicates() {
+    var id = newRun("backend", "auth");
+
+    store.updateProcess(id, 4321, 987654321L, 8765);
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals(4321, run.pid());
+    assertEquals(987654321L, run.pidTicks());
+    assertEquals(8765, run.watcherPid());
+    var snapshot = store.comparableSnapshot(id);
+    assertEquals(987654321L, snapshot.get("pid_ticks"), "the fingerprint replicates with the run");
+    var adopted = DateTimeUtils.newId().toString();
+    store.applyRevision(adopted, snapshot, "1-remote");
+    assertEquals(987654321L, store.findById(adopted).orElseThrow().pidTicks());
+  }
+
+  @Test
   void transitionCommitsOnlyFromTheExpectedStatus() {
     var id = newRun("backend", "auth");
 

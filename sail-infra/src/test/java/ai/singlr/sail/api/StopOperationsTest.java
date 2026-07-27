@@ -200,6 +200,60 @@ class StopOperationsTest {
   }
 
   @Test
+  void aReusedPidWithAMismatchedFingerprintRefusesWithoutSignalling() throws Exception {
+    var shell = liveAgentShell().on("cat /proc/123/stat", statLine(999));
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    runStore.updateProcess(R1, 123, 555L, null);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void anUnreadableLiveFingerprintRefusesRatherThanKillOnFaith() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    runStore.updateProcess(R1, 123, 555L, null);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+  }
+
+  @Test
+  void aMatchingFingerprintProvesOwnershipAndTheStopProceeds() throws Exception {
+    var shell = liveAgentShell().on("cat /proc/123/stat", statLine(555));
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    runStore.updateProcess(R1, 123, 555L, null);
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals(123, stopped.pid());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+  }
+
+  private static String statLine(long startTicks) {
+    return "123 (bash) S 1 123 123 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 " + startTicks + " 0 0";
+  }
+
+  @Test
   void aResumedStopAppliesTheSamePidOwnershipGuard() throws Exception {
     var ops = stopOps(liveAgentShell(999), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
@@ -1078,7 +1132,7 @@ class StopOperationsTest {
     runStore.reserveDispatch(
         R1, "acme", "", LOCAL_HANDLE, "adhoc", List.of(), "codex", null, "do it", RUN_LOG, unit);
     if (pid != null) {
-      runStore.updateProcess(R1, pid, null);
+      runStore.updateProcess(R1, pid, null, null);
     }
   }
 

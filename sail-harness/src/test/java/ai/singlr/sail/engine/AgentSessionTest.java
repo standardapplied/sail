@@ -103,6 +103,41 @@ class AgentSessionTest {
   }
 
   @Test
+  void parseStartTicksReadsField22AfterTheCommField() {
+    assertEquals(
+        12345L,
+        AgentSession.parseStartTicks(
+            "77 (my (weird) app) S 1 2 3 4 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 12345 100 5"));
+    assertNull(AgentSession.parseStartTicks("no stat line"));
+    assertNull(AgentSession.parseStartTicks("77 (short) S 1 2"));
+  }
+
+  @Test
+  void readProcessStartTicksReadsProcStatInTheContainer() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "cat /proc/123/stat",
+                "123 (bash) S 1 123 123 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 555 0 0");
+    var session = new AgentSession(shell);
+
+    assertEquals(555L, session.readProcessStartTicks("acme-health", 123));
+    assertNull(session.readProcessStartTicks("acme-health", 999));
+  }
+
+  @Test
+  void unitActiveAsksSystemdAndNeverTheFile() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("is-active " + RUN_UNIT.service());
+    var session = new AgentSession(shell);
+
+    assertTrue(session.unitActive("acme-health", RUN_UNIT));
+    assertTrue(
+        shell.invocations().getFirst().contains("systemctl --user --quiet is-active"),
+        shell.invocations().getFirst());
+    assertFalse(new AgentSession(new ScriptedShellExecutor()).unitActive("acme-health", RUN_UNIT));
+  }
+
+  @Test
   void queryStatusWhenStopped() throws Exception {
     var shell =
         new ScriptedShellExecutor()
