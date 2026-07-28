@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
@@ -214,8 +215,7 @@ class LocalApiSocketTest {
   private static String send(Path socketPath, String request) throws Exception {
     try (var channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
       channel.connect(UnixDomainSocketAddress.of(socketPath));
-      channel.write(ByteBuffer.wrap(request.getBytes(StandardCharsets.UTF_8)));
-      channel.shutdownOutput();
+      writeToleratingEarlyRefusal(channel, request);
       var out = new ByteArrayOutputStream();
       try (var in = Channels.newInputStream(channel)) {
         var buf = new byte[4096];
@@ -223,10 +223,22 @@ class LocalApiSocketTest {
         while ((n = in.read(buf)) > 0) {
           out.write(buf, 0, n);
         }
-      } catch (java.io.IOException ignored) {
-        // server may close before we finish reading short error responses
+      } catch (IOException serverClosedEarly) {
       }
       return out.toString(StandardCharsets.UTF_8);
+    }
+  }
+
+  /**
+   * Writes the request, tolerating the server refusing mid-write: a listener that answers 431 and
+   * closes while the client is still sending surfaces as EPIPE on macOS, and that early cut-off is
+   * exactly the behavior under test — the queued response is then read back as usual.
+   */
+  private static void writeToleratingEarlyRefusal(SocketChannel channel, String request) {
+    try {
+      channel.write(ByteBuffer.wrap(request.getBytes(StandardCharsets.UTF_8)));
+      channel.shutdownOutput();
+    } catch (IOException serverRefusedMidWrite) {
     }
   }
 }
