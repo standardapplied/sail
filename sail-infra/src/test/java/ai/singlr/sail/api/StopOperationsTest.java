@@ -200,6 +200,25 @@ class StopOperationsTest {
   }
 
   @Test
+  void anUnreadableFingerprintOnALivePidRefusesWithoutSignalling() throws Exception {
+    var shell =
+        liveAgentShell().throwOn("cat /proc/123/stat", new java.io.IOException("exec timed out"));
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    runStore.updateProcess(R1, 123, 555L, null);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
   void aReusedPidWithAMismatchedFingerprintRefusesWithoutSignalling() throws Exception {
     var shell = liveAgentShell().on("cat /proc/123/stat", statLine(999));
     var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
@@ -550,7 +569,7 @@ class StopOperationsTest {
   }
 
   @Test
-  void aStopDuringLaunchPreparationConflictsInsteadOfReleasingTheReservation() throws Exception {
+  void aStopDuringLaunchPreparationRecordsTheCancelAndTheLauncherMustYield() throws Exception {
     var ops =
         stopOps(
             shell().on("incus list ^acme$", RUNNING_JSON),
@@ -558,14 +577,17 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedAdhocRun(null, UNIT);
 
-    var refusal =
-        assertThrows(
-            ApiException.class,
-            () -> ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false));
+    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
 
-    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
-    assertEquals("running", runStore.findById(R1).orElseThrow().status());
-    assertTrue(events.isEmpty());
+    var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
+    assertTrue(notRunning.runReleased());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertFalse(
+        runStore.updateProcess(R1, 999, 1L, null),
+        "a launch that lost to the cancel must be refused its process stamp");
+
+    var second = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, false);
+    assertFalse(second.mutated(), "a repeated stop after the prep-window cancel writes nothing");
   }
 
   @Test
@@ -628,6 +650,19 @@ class StopOperationsTest {
     assertFalse(notRunning.specCancelled());
     assertFalse(notRunning.runReleased());
     assertFalse(notRunning.mutated());
+  }
+
+  @Test
+  void aDryRunOverALiveAdhocRunReportsANullSpecLikeTheRealStop() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedAdhocRun(123, UNIT);
+
+    var outcome = ops.stop(new StopOperations.ProjectTarget("acme"), ADMIN, LOCAL_HANDLE, true);
+
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertNull(stopped.specId(), "an ad-hoc dry run must normalize the blank spec id");
+    assertFalse(stopped.specCancelled());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 
   @Test

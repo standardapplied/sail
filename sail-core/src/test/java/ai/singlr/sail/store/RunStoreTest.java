@@ -79,10 +79,22 @@ class RunStoreTest {
   }
 
   @Test
+  void updateProcessRefusesToStampARunTheStopAlreadyClaimed() {
+    var id = newRun("backend", "auth");
+    assertTrue(store.transition(id, "running", "stopped"));
+
+    assertFalse(store.updateProcess(id, 4321, 987654321L, 8765));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("stopped", run.status());
+    assertNotEquals(4321, run.pid(), "a refused stamp must leave the row's identity untouched");
+  }
+
+  @Test
   void updateProcessPersistsThePidFingerprintAndItReplicates() {
     var id = newRun("backend", "auth");
 
-    store.updateProcess(id, 4321, 987654321L, 8765);
+    assertTrue(store.updateProcess(id, 4321, 987654321L, 8765));
 
     var run = store.findById(id).orElseThrow();
     assertEquals(4321, run.pid());

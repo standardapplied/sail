@@ -238,9 +238,10 @@ public final class StopOperations {
    * halt, and finalize the claim once the kill is verified. A run already holding a claim is an
    * interrupted stop and resumes instead. Every no-op branch is structured and write-free except
    * the stranded rescues, which record intent without a kill. A dead probe over a run that never
-   * persisted a pid and never completed is the pre-launch preparation window, not a stranded run —
-   * releasing its reservation there would let the imminent launch escape the container-isolation
-   * invariant, so the stop conflicts instead of rescuing.
+   * persisted a pid covers both a launch still preparing and a launch that died before stamping;
+   * recording terminal intent is safe in both, because the launcher's process stamp commits only
+   * while the run is still {@code running} — a launch that loses to this cancel discovers the loss
+   * at the stamp and tears its agent down rather than escaping the reservation.
    */
   private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var spec = specOf(run);
@@ -265,12 +266,6 @@ public final class StopOperations {
     var unit = runUnit(run);
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
-      if (run.pid() == null && run.completedAt() == null) {
-        throw new ApiException(
-            ErrorCode.CONFLICT,
-            "Run " + run.id() + " is still preparing to launch.",
-            "Retry the stop after launch preparation resolves.");
-      }
       if (dryRun) {
         return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
       }
@@ -279,7 +274,7 @@ public final class StopOperations {
     requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
-      return new Stopped(run.id(), run.specId(), info.pid(), previewCancel(run, spec));
+      return new Stopped(run.id(), specIdOf(run), info.pid(), previewCancel(run, spec));
     }
     return killVerified(run, spec, actor, unit, info.pid());
   }

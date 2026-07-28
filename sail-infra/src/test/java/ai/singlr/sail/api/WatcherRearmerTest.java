@@ -346,4 +346,38 @@ class WatcherRearmerTest {
     assertTrue(alive.test(ProcessHandle.current().pid()));
     assertFalse(alive.test(999_999_999L));
   }
+
+  @Test
+  void theProductionUnitProbeAnswersFromTheRunsRecordedUnit() throws Exception {
+    var liveRun = DateTimeUtils.newId().toString();
+    var goneRun = DateTimeUtils.newId().toString();
+    var probed = new java.util.ArrayList<String>();
+    var shell =
+        new ai.singlr.sail.engine.ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            var joined = String.join(" ", command);
+            probed.add(joined);
+            var active = joined.contains("is-active") && joined.contains(liveRun);
+            return new Result(active ? 0 : 1, "", "");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var probe = WatcherRearmer.systemdUnitActiveProbe(shell);
+
+    assertTrue(probe.active("acme", liveRun, "sail-agent-" + liveRun));
+    assertFalse(probe.active("acme", goneRun, "sail-agent-" + goneRun));
+    assertTrue(
+        probed.stream().allMatch(c -> c.contains("is-active")),
+        "the probe must consult systemd unit liveness, never the pid file");
+  }
 }

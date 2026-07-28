@@ -462,17 +462,28 @@ public final class RunStore implements ConflictResolver {
    * fingerprint — pids are reused by the kernel, so the pid alone can later name an unrelated
    * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches.
    * Journals a revision so the identity replicates.
+   *
+   * <p>Commits only while the run is still {@code running} and returns whether it did. A stop that
+   * lands during launch preparation records its terminal intent on the row; the launcher discovers
+   * that loss here and must tear down whatever it just started instead of letting an unrecorded
+   * agent escape the reservation. {@code BEGIN IMMEDIATE} closes the read-then-write window against
+   * the stop's own claim transaction.
    */
-  public void updateProcess(String id, Integer pid, Long pidTicks, Integer watcherPid) {
-    db.transaction(
+  public boolean updateProcess(String id, Integer pid, Long pidTicks, Integer watcherPid) {
+    return db.immediateTransaction(
         () -> {
           db.execute(
-              "UPDATE runs SET pid = ?, pid_ticks = ?, watcher_pid = ? WHERE id = ?",
+              "UPDATE runs SET pid = ?, pid_ticks = ?, watcher_pid = ? WHERE id = ?"
+                  + " AND status = 'running'",
               pid != null ? pid.longValue() : null,
               pidTicks,
               watcherPid != null ? watcherPid.longValue() : null,
               id);
+          if (db.changes() == 0) {
+            return false;
+          }
           recordRevision(id, "local", false);
+          return true;
         });
   }
 

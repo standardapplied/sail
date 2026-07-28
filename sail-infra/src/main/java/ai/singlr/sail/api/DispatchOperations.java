@@ -333,7 +333,9 @@ public final class DispatchOperations {
               unit,
               runId);
       var status = querySession(new AgentSession(shell), project, unit);
-      updateRunProcess(runId, project, status, launch.watcher());
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
       if (!background) {
         completeForegroundRun(runId, launch.exitCode());
       }
@@ -423,7 +425,9 @@ public final class DispatchOperations {
               unit,
               runId);
       var status = querySession(new AgentSession(shell), project, unit);
-      updateRunProcess(runId, project, status, launch.watcher());
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
       if (!background) {
         completeForegroundRun(runId, launch.exitCode());
       }
@@ -1072,12 +1076,20 @@ public final class DispatchOperations {
    * start-time fingerprint (live processes only — the fingerprint exists to prove a pid still names
    * the process this run launched, so a foreground session that already exited records its pid
    * without one), and the fallback watcher pid.
+   *
+   * <p>Returns whether the run still owned its launch: the stamp commits only on a {@code running}
+   * row, so a {@code false} means an operator's cancel claimed the run during preparation and the
+   * caller must tear down whatever it started. A store error stays best-effort bookkeeping (the
+   * launch proceeds); only the definitive lost-race answer aborts it.
    */
-  private void updateRunProcess(
+  private boolean updateRunProcess(
       String runId,
       String project,
       AgentSession.SessionInfo status,
       Optional<WatcherSpawner.Spawned> watcher) {
+    if (runStore == null) {
+      return true;
+    }
     Integer watcherPid =
         watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
             ? (int) fallback.pid()
@@ -1085,9 +1097,32 @@ public final class DispatchOperations {
     Integer pid = status != null ? status.pid() : null;
     var pidTicks =
         status != null && status.running() ? readStartTicks(project, status.pid()) : null;
-    runBookkeeping(
-        "update run process " + runId,
-        () -> runStore.updateProcess(runId, pid, pidTicks, watcherPid));
+    try {
+      return runStore.updateProcess(runId, pid, pidTicks, watcherPid);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [api] Warning: could not update run process " + runId + ": " + e.getMessage());
+      return true;
+    }
+  }
+
+  /**
+   * Tears down a launch whose run was cancelled during preparation: the operator's stop already
+   * recorded the terminal outcome, so the just-started agent must die rather than run unrecorded
+   * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
+   * halt that races the process's own exit is a no-op — and the conflict names what happened.
+   */
+  private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
+    try {
+      StopOperations.sessionHalter(shell).halt(project, unit);
+    } catch (Exception e) {
+      System.err.println(
+          "  [api] Warning: could not halt cancelled launch " + runId + ": " + e.getMessage());
+    }
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "Run " + runId + " was cancelled while its launch was preparing; the agent was torn down.",
+        "The cancel already recorded the run's outcome; no retry is needed.");
   }
 
   private Long readStartTicks(String project, int pid) {
@@ -1123,8 +1158,15 @@ public final class DispatchOperations {
   /**
    * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
    */
+  /**
+   * Fails a run on a launch error, but only if the run is still {@code running}: a stop that
+   * cancelled the run mid-launch, or a watcher that already recorded the real exit, owns the
+   * terminal record and must not be overwritten by the launch's cleanup.
+   */
   private void failRun(String runId) {
-    runBookkeeping("mark run failed " + runId, () -> runStore.complete(runId, "failed", null));
+    runBookkeeping(
+        "mark run failed " + runId,
+        () -> runStore.transition(runId, "running", "failed", (Integer) null));
   }
 
   /**
