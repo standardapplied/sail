@@ -106,6 +106,15 @@ public interface Operations {
   Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor);
 
+  /**
+   * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
+   * credential is unknown or its handle has left the roster. Serves the local socket's interactive
+   * lane; run credentials are resolved first and never reach this.
+   */
+  default Optional<Actor> boxActorForCredential(String credential) {
+    return Optional.empty();
+  }
+
   Result<SpecMessageResponse> postSpecMessage(
       String specId, SpecMessageRequest request, Actor actor, String author);
 

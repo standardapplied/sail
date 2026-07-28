@@ -1608,5 +1608,6 @@ class ApiRouterTest {
   @Test
   void operationsDefaultResolvesNoRunCredential() {
     assertTrue(new FakeOperations().runForCredential("sailrun_anything").isEmpty());
+    assertTrue(new FakeOperations().boxActorForCredential("sailbox_anything").isEmpty());
   }
 }

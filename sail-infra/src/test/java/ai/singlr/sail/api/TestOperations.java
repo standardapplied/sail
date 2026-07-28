@@ -16,6 +16,16 @@ class TestOperations implements Operations {
   static final String RUN_CREDENTIAL = "sailrun_test";
   static final String PRINCIPAL = "claude/abc123";
   static final String OWNER = "uday";
+  static final String BOX_CREDENTIAL = "sailbox_test";
+  static final String BOX_HANDLE = "uday";
+
+  @Override
+  public Optional<Actor> boxActorForCredential(String credential) {
+    if (!BOX_CREDENTIAL.equals(credential)) {
+      return Optional.empty();
+    }
+    return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
+  }
 
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {

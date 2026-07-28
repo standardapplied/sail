@@ -14,6 +14,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
@@ -1598,6 +1599,49 @@ class SailOperationsTest {
             "sail");
 
     assertTrue(result.isSuccess());
+  }
+
+  @Test
+  void boxCredentialResolvesToTheRosterFdeAndFailsClosed() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var fdeStore = new FdeStore(db);
+    fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
+    var boxStore = new BoxCredentialStore(db);
+    var operations =
+        new SailOperations(
+                shell(),
+                yaml.toString(),
+                new EventBus(),
+                null,
+                new SpecStore(db),
+                new ReviewStore(db),
+                new RunStore(db),
+                new ProjectStore(db),
+                SyncScheduler.disabled(),
+                fdeStore)
+            .useBoxCredentials(boxStore);
+
+    var credential = boxStore.replace("uday");
+    var actor = operations.boxActorForCredential(credential).orElseThrow();
+    assertEquals("uday", actor.handle());
+    assertEquals(Role.ADMIN, actor.role());
+    assertEquals(Actor.Lane.CLI, actor.lane());
+
+    assertTrue(operations.boxActorForCredential("sailbox_wrong").isEmpty());
+
+    var ghost = boxStore.replace("departed");
+    assertTrue(
+        operations.boxActorForCredential(ghost).isEmpty(),
+        "a handle absent from the roster must refuse");
+  }
+
+  @Test
+  void boxCredentialLaneFailsClosedWhenUnwired() {
+    assertTrue(
+        new SailOperations(shell(), "sail.yaml").boxActorForCredential("sailbox_x").isEmpty());
   }
 
   @Test

@@ -23,12 +23,15 @@ import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
+import ai.singlr.sail.engine.BoxCredentialFile;
+import ai.singlr.sail.engine.ContainerSetupSweep;
 import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -36,6 +39,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.EventStore;
@@ -54,6 +58,7 @@ import ai.singlr.sail.store.StuckSpecReconciler;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RelyingParty;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
@@ -173,6 +178,9 @@ public final class ServerStartCommand implements Runnable {
     var reviewStore = new ReviewStore(db);
     var runStore = new RunStore(db);
     var messageStore = new MessageStore(db);
+    var projectStore = new ProjectStore(db);
+    var boxCredentialStore = new BoxCredentialStore(db);
+    provisionBoxCredential(boxCredentialStore);
     var syncScheduler = NodeSync.scheduler(false);
     shutdown.register(syncScheduler);
     var operations =
@@ -184,10 +192,11 @@ public final class ServerStartCommand implements Runnable {
                 specStore,
                 reviewStore,
                 runStore,
-                new ProjectStore(db),
+                projectStore,
                 syncScheduler,
                 new FdeStore(db))
-            .useMessages(messageStore);
+            .useMessages(messageStore)
+            .useBoxCredentials(boxCredentialStore);
     var orphaned = reviewStore.failOrphanedRunning();
     var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
     if (orphanedRuns > 0) {
@@ -292,6 +301,15 @@ public final class ServerStartCommand implements Runnable {
                 "  @|green ✓|@ Replayed " + replayed + " agent stop(s) missed while offline"));
       }
       missedStops.start();
+      var refreshed =
+          ContainerSetupSweep.sweep(
+              new ShellExecutor(false),
+              projectStore.list().stream().map(ProjectStore.ProjectRow::name).toList());
+      if (refreshed > 0) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Refreshed sail helpers in " + refreshed + " running container(s)"));
+      }
       var rearmed = rearmer.rearm();
       rearmer.start();
       if (rearmed > 0) {
@@ -320,6 +338,32 @@ public final class ServerStartCommand implements Runnable {
       new CountDownLatch(1).await();
     } finally {
       shutdown.shutdown();
+    }
+  }
+
+  /**
+   * The eager half of credential enforcement: the ambient file every container reads through the
+   * shared socket mount must exist before the first interactive request, not after the next
+   * sail-launched session. Skipped with a loud note when the box has no sync handle — the socket
+   * then keeps refusing interactive callers, which is fail-closed, not broken.
+   */
+  private static void provisionBoxCredential(BoxCredentialStore store) {
+    var handle = NodeIdentity.handle();
+    if (Strings.isBlank(handle)) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ No sync handle configured — interactive container sessions get no"
+                  + " ambient credential ('sail host config set sync-handle <fde>' enables it)"));
+      return;
+    }
+    try {
+      if (BoxCredentialFile.ensure(store, handle, SailPaths.apiSocketHostDir())
+          == BoxCredentialFile.Outcome.PROVISIONED) {
+        System.out.println(
+            Ansi.AUTO.string("  @|green ✓|@ Box credential provisioned for '" + handle + "'"));
+      }
+    } catch (IOException e) {
+      System.err.println("Could not provision the box credential: " + e.getMessage());
     }
   }
 
