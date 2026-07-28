@@ -305,7 +305,7 @@ public final class DispatchOperations {
             project,
             nextSpec.id(),
             localHandle,
-            dispatchOwner(actor, localHandle),
+            dispatchOwner(localHandle),
             taskSpec.repos(),
             agentType,
             branch,
@@ -743,9 +743,14 @@ public final class DispatchOperations {
    */
   private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
 
-  /** The FDE a dispatched run acts for: the dispatching actor, or the box's own handle. */
-  private static String dispatchOwner(Actor actor, String localHandle) {
-    return Strings.isNotBlank(actor.handle()) ? actor.handle() : localHandle;
+  /**
+   * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
+   * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
+   * never becomes its authorization owner — the agent must act for the assignee whose spec it
+   * builds, not for whoever pressed the button.
+   */
+  private static String dispatchOwner(String localHandle) {
+    return localHandle;
   }
 
   private LaunchOutcome launchAgent(
@@ -828,7 +833,7 @@ public final class DispatchOperations {
               unit,
               runId,
               runCredential);
-      listener.launching(background, command);
+      listener.launching(background, redactCredential(command, runCredential));
       var exitCode = launcher.launch(command);
       if (background) {
         if (exitCode != 0) {
@@ -842,6 +847,21 @@ public final class DispatchOperations {
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
+  }
+
+  /**
+   * The command as listeners may see it: the plaintext run credential replaced with a marker.
+   * Listeners print launch commands to terminals and logs, and a leaked live credential
+   * authenticates spec and event writes until the run finishes — only the launcher ever receives
+   * the real value.
+   */
+  private static List<String> redactCredential(List<String> command, String runCredential) {
+    if (Strings.isBlank(runCredential)) {
+      return command;
+    }
+    return command.stream()
+        .map(argument -> argument.equals(runCredential) ? "<redacted>" : argument)
+        .toList();
   }
 
   private static List<String> launchCommand(

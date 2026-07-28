@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -29,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,6 +75,15 @@ class AdhocDispatchTest {
   private DispatchOperations operations(
       ShellExec shell, DispatchOperations.AgentLauncher launcher, boolean withRunStore)
       throws IOException {
+    return operations(shell, launcher, withRunStore, DispatchOperations.Listener.NONE);
+  }
+
+  private DispatchOperations operations(
+      ShellExec shell,
+      DispatchOperations.AgentLauncher launcher,
+      boolean withRunStore,
+      DispatchOperations.Listener listener)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
@@ -91,7 +102,7 @@ class AdhocDispatchTest {
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
         (project, config) -> "",
         launcher,
-        DispatchOperations.Listener.NONE);
+        listener);
   }
 
   private static StubShell liveAgentShell() {
@@ -126,6 +137,40 @@ class AdhocDispatchTest {
     assertEquals("fix the flaky test", run.task());
     assertNotNull(session.session());
     assertTrue(session.watcher().isPresent());
+  }
+
+  @Test
+  void listenersSeeTheLaunchCommandWithTheCredentialRedacted() throws Exception {
+    var launched = new AtomicReference<List<String>>();
+    var shown = new AtomicReference<List<String>>();
+    var listener =
+        new DispatchOperations.Listener() {
+          @Override
+          public void launching(boolean bg, List<String> command) {
+            shown.set(command);
+          }
+        };
+    var ops =
+        operations(
+            liveAgentShell(),
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            true,
+            listener);
+
+    ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var credential = launched.get().getLast();
+    assertTrue(credential.startsWith("sailrun_"), "the launcher receives the real credential");
+    assertTrue(
+        shown.get().contains("<redacted>"),
+        "the listener command carries the redaction marker in the credential's place");
+    assertFalse(
+        shown.get().contains(credential),
+        "presentation listeners print commands to terminals and logs; the plaintext credential"
+            + " must never reach them");
   }
 
   @Test

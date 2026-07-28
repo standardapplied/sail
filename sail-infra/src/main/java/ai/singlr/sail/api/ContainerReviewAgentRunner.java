@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.StreamJsonResult;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Runs a review or fix agent inside the project container, sharing the dispatch agent's command
@@ -32,7 +33,9 @@ import java.util.List;
  * a plain one are handled uniformly.
  *
  * <p>Run clean: no {@code SAIL_SPEC_ID} and no agent hooks, so the reviewer's own completion never
- * re-enters the pipeline (which would recurse forever).
+ * re-enters the pipeline (which would recurse forever). The run credential rides in as a positional
+ * shell argument — never interpolated into the script text — and lands in {@code
+ * SAIL_RUN_CREDENTIAL}, so the agent's spec commands authenticate as its review run's principal.
  */
 final class ContainerReviewAgentRunner implements ReviewAgentRunner {
 
@@ -58,7 +61,9 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
   }
 
   @Override
-  public String run(String project, String agent, String prompt, String reviewId) throws Exception {
+  public String run(
+      String project, String agent, String prompt, String reviewId, String runCredential)
+      throws Exception {
     var cli = AgentCli.fromYamlName(agent);
     var unit = AgentUnit.forReview(reviewId);
     session.ensureDirectory(project);
@@ -67,10 +72,21 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
     var startOffset = logSize(project, unit);
 
     var agentCmd = cli.headlessCommand(unit.taskPath(), true, null, null, null, true);
-    var command = "cd " + WORKSPACE + " && " + agentCmd + " >> " + unit.logPath() + " 2>&1";
+    var command =
+        "export SAIL_RUN_CREDENTIAL=\"$1\"; cd "
+            + WORKSPACE
+            + " && "
+            + agentCmd
+            + " >> "
+            + unit.logPath()
+            + " 2>&1";
     var result =
         shell.exec(
-            ContainerExec.asDevUser(project, List.of("bash", "-lc", command)), null, AGENT_TIMEOUT);
+            ContainerExec.asDevUser(
+                project,
+                List.of("bash", "-lc", command, "bash", Objects.toString(runCredential, ""))),
+            null,
+            AGENT_TIMEOUT);
     if (!result.ok()) {
       throw new ReviewAgentExecutionException(
           "Review agent '"

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -98,16 +99,45 @@ class LocalApiRouterTest {
                   }
                 },
                 latch));
-    var event = Event.of("light-grid", "oauth", "spec_dispatched", "claude-code", "host-01");
+    var event =
+        Event.of(
+            "light-grid",
+            "oauth",
+            Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
+            "claude-code",
+            "host-01",
+            Map.of("run_id", "run-victim", "source", "watcher", "exit_code", 0, "reason", "done"));
     var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
     assertEquals(202, response.status());
     assertTrue(((Long) response.body().get("id")) > 0);
     BusTesting.awaitDelivery(latch);
+    var stamped = seen.get();
     assertEquals(
         TestOperations.PRINCIPAL,
-        seen.get().agent(),
+        stamped.agent(),
         "the server stamps event authorship from the authenticated run, not the client body");
+    assertEquals("acme", stamped.project(), "the client-chosen project is overridden");
+    assertEquals("auth", stamped.spec(), "the client-chosen spec is overridden");
+    assertEquals(
+        "run-1",
+        stamped.data().get("run_id"),
+        "a terminal event can only address the authenticated run, never another one");
+    assertFalse(
+        stamped.data().containsKey("source"),
+        "the agent lane can never mark its own stop authoritative");
+    assertFalse(stamped.data().containsKey("exit_code"), "exit codes come from the watcher only");
+    assertEquals("done", stamped.data().get("reason"), "benign payload fields pass through");
     subscription.close();
+  }
+
+  @Test
+  void eventsRejectsTypesOutsideTheAgentLane() {
+    for (var type : List.of("spec_dispatched", "agent_cancelled", "spec_status_changed")) {
+      var event = Event.of("acme", "auth", type, "claude-code", "host-01");
+      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+      assertEquals(403, response.status(), type);
+      assertTrue(response.body().get("error").toString().contains(type), type);
+    }
   }
 
   @Test

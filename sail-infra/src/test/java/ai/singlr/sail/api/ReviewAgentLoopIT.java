@@ -102,7 +102,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var output =
         new ContainerReviewAgentRunner(shell)
             .run(
-                CONTAINER, "codex", prompt, ai.singlr.sail.common.DateTimeUtils.newId().toString());
+                CONTAINER,
+                "codex",
+                prompt,
+                ai.singlr.sail.common.DateTimeUtils.newId().toString(),
+                "sailrun_it");
 
     var parsed = FindingParser.parse(output);
     assertEquals(

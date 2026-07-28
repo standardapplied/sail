@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -133,7 +134,7 @@ class AgentPrincipalLifecycleTest {
     assertTrue(credential.get().startsWith("sailrun_"), "the launch env carries the credential");
 
     var run = runStore.findById(runId).orElseThrow();
-    var expectedHandle = "claude/" + runId.substring(runId.length() - 6);
+    var expectedHandle = "claude/" + runId;
     assertEquals(expectedHandle, run.principal());
     assertEquals(HANDLE, run.owner());
 
@@ -160,7 +161,7 @@ class AgentPrincipalLifecycleTest {
 
                   @Override
                   public java.util.function.Predicate<Event> filter() {
-                    return e -> "agent_progress".equals(e.type());
+                    return e -> Event.WellKnownTypes.AGENT_TOOL_FINISHED.equals(e.type());
                   }
 
                   @Override
@@ -183,7 +184,13 @@ class AgentPrincipalLifecycleTest {
         "the agent's spec update is attributed to its minted principal");
 
     var hookEvent =
-        Event.of("acme", "auth", "agent_progress", "claude-code", "acme", Map.of("run_id", runId));
+        Event.of(
+            "other-project",
+            "other-spec",
+            Event.WellKnownTypes.AGENT_TOOL_FINISHED,
+            "claude-code",
+            "acme",
+            Map.of("run_id", "some-other-run", "source", "watcher"));
     var published =
         router.handle(request("POST", "/v1/events", credential.get(), hookEvent.toJsonLine()));
     assertEquals(202, published.status());
@@ -192,6 +199,10 @@ class AgentPrincipalLifecycleTest {
     assertNotNull(stamped, "the published event reaches the bus");
     assertEquals(
         expectedHandle, stamped.agent(), "event authorship is the server-resolved principal");
+    assertEquals("acme", stamped.project(), "the event is scoped to the credential's project");
+    assertEquals("auth", stamped.spec(), "the event is scoped to the credential's spec");
+    assertEquals(runId, stamped.data().get("run_id"), "a forged run_id is overridden");
+    assertFalse(stamped.data().containsKey("source"), "the authoritative-stop marker is stripped");
 
     var stopOps =
         new StopOperations(
@@ -208,6 +219,89 @@ class AgentPrincipalLifecycleTest {
     var refused = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
     assertEquals(401, refused.status(), "a stopped run's credential is revoked");
     subscription.close();
+  }
+
+  @Test
+  void anAdminDispatchOnAnotherFdesBoxOwnsTheRunForTheAssigneeNotTheAdmin() throws Exception {
+    var yaml = tempDir.resolve("sail.yaml");
+    Files.writeString(yaml, YAML);
+    db = Sqlite.open(tempDir.resolve("admin-dispatch.db"));
+    new SchemaManager(db).migrate();
+    bus = new EventBus();
+    var specStore = new SpecStore(db);
+    var runStore = new RunStore(db);
+    var fdes = new FdeStore(db);
+    fdes.add(HANDLE, null, null, "member");
+    fdes.add("alice", null, null, "admin");
+    specStore.create(
+        new SpecStore.SpecRow(
+            "auth",
+            "acme",
+            "Add auth",
+            SpecStatus.PENDING,
+            HANDLE,
+            null,
+            null,
+            null,
+            null,
+            0,
+            HANDLE,
+            null,
+            null,
+            HANDLE,
+            List.of(),
+            List.of()));
+    specStore.setContent("auth", "Do auth", "");
+
+    var shell = new AgentShell(new AtomicBoolean(true));
+    var credential = new AtomicReference<String>();
+    var dispatchOps =
+        new DispatchOperations(
+            shell,
+            yaml.toString(),
+            specStore,
+            new ReviewStore(db),
+            runStore,
+            fdes,
+            bus::publish,
+            new WatcherSpawner(shell, (command, logPath) -> 4242L),
+            (project, config) -> "",
+            command -> {
+              credential.set(command.getLast());
+              return 0;
+            },
+            DispatchOperations.Listener.NONE);
+
+    var outcome =
+        dispatchOps.dispatch(
+            "acme",
+            new DispatchOperations.Request("auth", "background", false, null, false),
+            Actor.cliOperator("alice"),
+            HANDLE);
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
+
+    var run = runStore.findById(dispatched.runId()).orElseThrow();
+    assertEquals(
+        HANDLE,
+        run.owner(),
+        "the agent acts for the assignee whose spec it builds, never for the initiating admin");
+
+    var operations =
+        new SailOperations(
+            shell,
+            yaml.toString(),
+            (command, logPath) -> 4242L,
+            bus,
+            null,
+            specStore,
+            new ReviewStore(db),
+            runStore);
+    var router = new LocalApiRouter(bus, operations);
+    var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
+    assertEquals(
+        200,
+        updated.status(),
+        "the dispatched agent can mutate its own assigned spec because it acts for the assignee");
   }
 
   private static LocalApiRequest request(

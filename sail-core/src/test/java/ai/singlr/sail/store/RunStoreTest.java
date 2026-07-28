@@ -848,18 +848,18 @@ class RunStoreTest {
     var adhoc = DateTimeUtils.newId().toString();
     reserveAdhoc(adhoc, "node-a");
     var build = newRun("backend", "auth");
-    var review =
-        store.createReview(
-            DateTimeUtils.newId().toString(),
-            "backend",
-            "auth",
-            "node-a",
-            "node-a",
-            "codex",
-            "feat/x",
-            "review",
-            "/home/dev/.sail/runs/rev/review.log",
-            "sail-review-rev");
+    var review = DateTimeUtils.newId().toString();
+    store.createReview(
+        review,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "codex",
+        "feat/x",
+        "review",
+        "/home/dev/.sail/runs/rev/review.log",
+        "sail-review-rev");
 
     assertTrue(store.findById(adhoc).orElseThrow().sessionRole());
     assertTrue(store.findById(build).orElseThrow().sessionRole());
@@ -1076,7 +1076,7 @@ class RunStoreTest {
     var credential = reservedCredential(id, "auth", java.util.List.of("app"));
 
     var run = store.findById(id).orElseThrow();
-    assertEquals("claude/" + id.substring(id.length() - 6), run.principal());
+    assertEquals("claude/" + id, run.principal());
     assertEquals("uday", run.owner());
     assertTrue(credential.startsWith("sailrun_"));
     assertEquals(id, store.findByCredential(credential).orElseThrow().id());
@@ -1109,7 +1109,7 @@ class RunStoreTest {
     reserveAdhoc(id, "node-a");
 
     var run = store.findById(id).orElseThrow();
-    assertEquals("claude/" + id.substring(id.length() - 6), run.principal());
+    assertEquals("claude/" + id, run.principal());
     assertEquals("node-a", run.owner());
     assertEquals(1, credentialRows(id));
   }
@@ -1131,9 +1131,66 @@ class RunStoreTest {
         "sail-review-" + id);
 
     var run = store.findById(id).orElseThrow();
-    assertEquals("codex/review-" + id.substring(id.length() - 6), run.principal());
+    assertEquals("codex/review-" + id, run.principal());
     assertEquals("uday", run.owner());
     assertEquals(1, credentialRows(id));
+  }
+
+  @Test
+  void createReviewReturnsTheLiveCredentialOfItsRun() {
+    var id = DateTimeUtils.newId().toString();
+
+    var credential = createReview(id);
+
+    assertTrue(credential.startsWith("sailrun_"));
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+  }
+
+  @Test
+  void rotateCredentialRetiresTheOldPlaintextAndMintsAFreshOne() {
+    var id = DateTimeUtils.newId().toString();
+    var original = createReview(id);
+
+    var rotated = store.rotateCredential(id);
+
+    assertEquals(id, store.findByCredential(rotated).orElseThrow().id());
+    assertTrue(
+        store.findByCredential(original).isEmpty(),
+        "the previous invocation's credential is retired by the rotation");
+    assertEquals(1, credentialRows(id), "a run holds exactly one credential at a time");
+
+    assertTrue(store.transition(id, "running", "completed", 0));
+
+    assertTrue(store.findByCredential(rotated).isEmpty(), "the credential dies with the run");
+    assertEquals(0, credentialRows(id));
+  }
+
+  @Test
+  void rotateCredentialRefusesAMissingOrFinishedRun() {
+    assertThrows(IllegalStateException.class, () -> store.rotateCredential("ghost"));
+
+    var id = DateTimeUtils.newId().toString();
+    createReview(id);
+    assertTrue(store.transition(id, "running", "completed", 0));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.rotateCredential(id),
+        "a dead run's identity is never resurrected");
+  }
+
+  private String createReview(String id) {
+    return store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "uday",
+        "codex",
+        "feat/x",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
   }
 
   @Test
@@ -1215,7 +1272,7 @@ class RunStoreTest {
 
     var snapshot = store.comparableSnapshot(id);
 
-    assertEquals("claude/" + id.substring(id.length() - 6), snapshot.get("principal"));
+    assertEquals("claude/" + id, snapshot.get("principal"));
     assertEquals("uday", snapshot.get("owner"));
     assertFalse(
         snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");

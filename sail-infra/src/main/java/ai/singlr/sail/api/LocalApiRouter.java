@@ -11,6 +11,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
@@ -32,6 +33,15 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String SPECS = "/v1/specs";
   private static final String EVENTS = "/v1/events";
   private static final String WHOAMI = "/v1/whoami";
+
+  private static final Set<String> AGENT_EVENT_TYPES =
+      Set.of(
+          Event.WellKnownTypes.AGENT_SESSION_STARTED,
+          Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+          Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
+          Event.WellKnownTypes.AGENT_STOP_NUDGED,
+          Event.WellKnownTypes.AGENT_TOOL_STARTED,
+          Event.WellKnownTypes.AGENT_TOOL_FINISHED);
 
   private final EventBus bus;
   private final Operations operations;
@@ -99,6 +109,15 @@ final class LocalApiRouter implements LocalApiHandler {
     return new ApiResponse(200, body);
   }
 
+  /**
+   * The credential, not the client body, decides what an event is about: the published event's
+   * project, spec, run id, and authorship all come from the authenticated run, so a run can never
+   * address another run's lifecycle or another spec's pipeline. Only the agent-hook event types are
+   * accepted — operator, watcher, sync, and control-plane types carry authority this lane does not
+   * have — and the reserved authoritative-stop fields ({@code source}, {@code exit_code}, {@code
+   * watcher_pid}) are stripped, so an agent's own stop is never mistaken for the watcher's verified
+   * one.
+   */
   private ApiResponse events(LocalApiRequest request, RunStore.RunRow run) {
     if (!"POST".equals(request.method())) {
       return problem(405, "events accepts POST");
@@ -109,7 +128,27 @@ final class LocalApiRouter implements LocalApiHandler {
     } catch (RuntimeException malformed) {
       return problem(400, "malformed event");
     }
-    var stamped = bus.publish(event.withAgent(run.principal()));
+    if (!AGENT_EVENT_TYPES.contains(event.type())) {
+      return problem(
+          403, "Event type '" + event.type() + "' is not available to agent principals.");
+    }
+    var data = new LinkedHashMap<String, Object>(event.data());
+    data.put(Event.WellKnownData.RUN_ID, run.id());
+    data.remove(Event.WellKnownData.SOURCE);
+    data.remove(Event.WellKnownData.EXIT_CODE);
+    data.remove(Event.WellKnownData.WATCHER_PID);
+    var scoped =
+        new Event(
+            event.v(),
+            0L,
+            event.ts(),
+            run.project(),
+            run.specId(),
+            event.type(),
+            run.principal(),
+            run.project(),
+            data);
+    var stamped = bus.publish(scoped);
     return new ApiResponse(202, Map.of("id", stamped.id()));
   }
 

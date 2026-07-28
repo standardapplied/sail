@@ -134,7 +134,38 @@ public final class RunStore implements ConflictResolver {
       Integer watcherPid,
       String logPath,
       String unit) {
-    db.transaction(
+    createReturningCredential(
+        id,
+        project,
+        specId,
+        node,
+        owner,
+        role,
+        agent,
+        branch,
+        task,
+        pid,
+        watcherPid,
+        logPath,
+        unit);
+    return id;
+  }
+
+  private String createReturningCredential(
+      String id,
+      String project,
+      String specId,
+      String node,
+      String owner,
+      String role,
+      String agent,
+      String branch,
+      String task,
+      Integer pid,
+      Integer watcherPid,
+      String logPath,
+      String unit) {
+    return db.transaction(
         () -> {
           db.execute(
               """
@@ -156,10 +187,10 @@ public final class RunStore implements ConflictResolver {
               unit,
               principalHandle(agent, role, id),
               owner);
-          mintCredential(id);
+          var credential = mintCredential(id);
           recordRevision(id, "local", false);
+          return credential;
         });
-    return id;
   }
 
   /**
@@ -168,7 +199,9 @@ public final class RunStore implements ConflictResolver {
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
    * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the reviewed spec's assignee — the FDE the review principal acts for.
+   * is the reviewed spec's assignee — the FDE the review principal acts for. Returns the run's
+   * plaintext credential, surfaced exactly once so the launched review agent can actually act as
+   * the principal this row records; only the hash is at rest.
    */
   public String createReview(
       String reviewId,
@@ -181,9 +214,35 @@ public final class RunStore implements ConflictResolver {
       String task,
       String logPath,
       String unit) {
-    return create(
+    return createReturningCredential(
         reviewId, project, specId, node, owner, "review", agent, branch, task, null, null, logPath,
         unit);
+  }
+
+  /**
+   * Rotates the credential of a live run — the seam the review pipeline's fix lane uses to rejoin
+   * its review's identity after the reviewer invocation already created the run. The original
+   * plaintext is unrecoverable by design, so rejoining means a fresh credential; the run holds
+   * exactly one at a time (the schema enforces it), so rotation retires the previous invocation's
+   * credential in the same transaction. Fails loud on a missing or finished run — a dead run's
+   * identity is never resurrected.
+   */
+  public String rotateCredential(String id) {
+    return db.transaction(
+        () -> {
+          var run =
+              findById(id)
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "No run " + id + " to issue a credential for."));
+          if (!"running".equals(run.status())) {
+            throw new IllegalStateException(
+                "Run " + id + " is " + run.status() + "; only a running run can be credentialed.");
+          }
+          revokeCredential(id);
+          return mintCredential(id);
+        });
   }
 
   /**
@@ -309,15 +368,17 @@ public final class RunStore implements ConflictResolver {
 
   /**
    * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the run id's random tail, with review runs marked as such — {@code claude/a1b2c3}, {@code
-   * claude/review-a1b2c3}.
+   * the full run id, with review runs marked as such — {@code claude/<run-uuid>}, {@code
+   * claude/review-<run-uuid>}. The whole UUID, never a truncation: the handle is a security
+   * identity compared in ownership checks and audit rows, so it must be exactly as collision-proof
+   * as the run id itself.
    */
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
     var base = dash > 0 ? family.substring(0, dash) : family;
-    var tail = id.length() > 6 ? id.substring(id.length() - 6) : id;
-    return base + "/" + ("review".equals(role) ? "review-" + tail : tail);
+    var runId = Objects.requireNonNull(id, "run id");
+    return base + "/" + ("review".equals(role) ? "review-" + runId : runId);
   }
 
   private String mintCredential(String id) {

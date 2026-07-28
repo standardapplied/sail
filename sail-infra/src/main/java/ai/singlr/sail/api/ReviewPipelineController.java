@@ -411,8 +411,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
       var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories());
 
-      startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
-      var output = agentRunner.run(project, agent, prompt, stage.reviewId());
+      var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
+      var output = agentRunner.run(project, agent, prompt, stage.reviewId(), credential);
       var parseResult = FindingParser.parse(output);
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
         var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
@@ -525,8 +525,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     try {
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
-      startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
-      agentRunner.run(project, agent, fixTask, reviewId);
+      var credential =
+          startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
+      agentRunner.run(project, agent, fixTask, reviewId, credential);
       var rescued = agentRunner.ensureCommitted(project, spec.get().repos(), spec.get().branch());
       if (!rescued.isEmpty()) {
         publishGuardrail(
@@ -562,26 +563,37 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
             Map.of("reason", reason, "action", action)));
   }
 
-  private void startReviewRun(
+  /**
+   * Ensures the review run exists and returns a live plaintext credential for it — created with the
+   * row on the reviewer's first invocation, rotated when the fix lane rejoins the still-open
+   * negotiation (the original plaintext is hashed at rest and unrecoverable). Blank without a run
+   * store, launching the agent without an identity.
+   */
+  private String startReviewRun(
       String reviewId, String project, String specId, String agent, String branch, String task) {
-    if (runStore == null || runStore.findById(reviewId).isPresent()) {
-      return;
+    if (runStore == null) {
+      return "";
+    }
+    if (runStore.findById(reviewId).isPresent()) {
+      return runStore.rotateCredential(reviewId);
     }
     var unit = AgentUnit.forReview(reviewId);
     var owner =
         specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(localHandle.get());
-    runStore.createReview(
-        reviewId,
-        project,
-        specId,
-        localHandle.get(),
-        owner,
-        agent,
-        branch,
-        task,
-        unit.logPath(),
-        unit.unitName());
+    var credential =
+        runStore.createReview(
+            reviewId,
+            project,
+            specId,
+            localHandle.get(),
+            owner,
+            agent,
+            branch,
+            task,
+            unit.logPath(),
+            unit.unitName());
     syncTrigger.run();
+    return credential;
   }
 
   private void failReviewRun(String reviewId, Exception failure) {

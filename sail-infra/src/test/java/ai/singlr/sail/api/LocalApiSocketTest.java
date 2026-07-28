@@ -42,7 +42,9 @@ class LocalApiSocketTest {
   void postEventReturns202(@TempDir Path dir) throws Exception {
     try (var listener = socket(dir)) {
       listener.start();
-      var event = Event.of("light-grid", "oauth", "spec_dispatched", "sail", "host-01");
+      var event =
+          Event.of(
+              "light-grid", "oauth", Event.WellKnownTypes.AGENT_SESSION_STARTED, "sail", "host-01");
       var response = send(listener.socketPath(), post("/v1/events", event.toJsonLine()));
       assertTrue(response.startsWith("HTTP/1.1 202 Accepted"), response);
       assertEquals(1, listener.acceptedCount());

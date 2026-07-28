@@ -21,6 +21,7 @@ class ContainerReviewAgentRunnerTest {
   private static final String REVIEW_ID = "0197a2f0-0000-7000-8000-0000000000aa";
   private static final String OTHER_REVIEW_ID = "0197a2f0-0000-7000-8000-0000000000bb";
   private static final String REVIEW_DIR = "/home/dev/.sail/runs/" + REVIEW_ID;
+  private static final String CREDENTIAL = "sailrun_review_cred";
 
   private static ContainerReviewAgentRunner runner(ShellExec shell) {
     return new ContainerReviewAgentRunner(shell, new AgentSession(shell));
@@ -32,14 +33,15 @@ class ContainerReviewAgentRunnerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("tail -c", "{\"type\":\"result\",\"result\":\"FINDINGS\"}");
 
-    assertEquals("FINDINGS", runner(shell).run("acme", "codex", "review please", REVIEW_ID));
+    assertEquals(
+        "FINDINGS", runner(shell).run("acme", "codex", "review please", REVIEW_ID, CREDENTIAL));
   }
 
   @Test
   void runsTheStreamingAgentCleanAndAppendsToItsOwnReviewLog() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
 
-    runner(shell).run("acme", "claude-code", "p", REVIEW_ID);
+    runner(shell).run("acme", "claude-code", "p", REVIEW_ID, CREDENTIAL);
 
     var exec =
         shell.invocations().stream()
@@ -59,11 +61,31 @@ class ContainerReviewAgentRunnerTest {
   }
 
   @Test
+  void injectsTheRunCredentialPositionallyNeverInterpolatedIntoTheScript() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
+
+    runner(shell).run("acme", "codex", "p", REVIEW_ID, CREDENTIAL);
+
+    var exec =
+        shell.invocations().stream()
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(
+        exec.contains("export SAIL_RUN_CREDENTIAL=\"$1\""),
+        "the script reads the credential from its positional argument");
+    assertTrue(exec.contains(CREDENTIAL), "the credential travels as the argument itself");
+    assertFalse(
+        exec.contains("SAIL_RUN_CREDENTIAL=" + CREDENTIAL),
+        "the plaintext is never interpolated into the script text");
+  }
+
+  @Test
   void concurrentReviewsNeverShareAPromptOrLogPath() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
 
-    runner(shell).run("acme", "codex", "review a", REVIEW_ID);
-    runner(shell).run("acme", "codex", "review b", OTHER_REVIEW_ID);
+    runner(shell).run("acme", "codex", "review a", REVIEW_ID, CREDENTIAL);
+    runner(shell).run("acme", "codex", "review b", OTHER_REVIEW_ID, CREDENTIAL);
 
     var joined = String.join("\n", shell.invocations());
     assertTrue(joined.contains(REVIEW_DIR + "/review.log"));
@@ -160,7 +182,7 @@ class ContainerReviewAgentRunnerTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> runner(shell).run("acme", "codex", "p", "../../etc/passwd"));
+        () -> runner(shell).run("acme", "codex", "p", "../../etc/passwd", CREDENTIAL));
     assertEquals(0, shell.invocations().size());
   }
 
@@ -173,7 +195,7 @@ class ContainerReviewAgentRunnerTest {
 
     assertEquals(
         "CURRENT",
-        runner(shell).run("acme", "codex", "re-review", REVIEW_ID),
+        runner(shell).run("acme", "codex", "re-review", REVIEW_ID, CREDENTIAL),
         "reads from the byte after the accumulated negotiation, not the whole appended log");
   }
 
@@ -184,7 +206,8 @@ class ContainerReviewAgentRunnerTest {
             .onFail(">> " + REVIEW_DIR + "/review.log", "boom");
 
     var ex =
-        assertThrows(Exception.class, () -> runner(shell).run("acme", "codex", "p", REVIEW_ID));
+        assertThrows(
+            Exception.class, () -> runner(shell).run("acme", "codex", "p", REVIEW_ID, CREDENTIAL));
     assertTrue(ex.getMessage().contains("boom"), ex.getMessage());
     assertEquals(1, ((ReviewAgentExecutionException) ex).exitCode());
   }
@@ -194,6 +217,6 @@ class ContainerReviewAgentRunnerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("tail -c", "gone");
 
-    assertEquals("", runner(shell).run("acme", "codex", "p", REVIEW_ID));
+    assertEquals("", runner(shell).run("acme", "codex", "p", REVIEW_ID, CREDENTIAL));
   }
 }
