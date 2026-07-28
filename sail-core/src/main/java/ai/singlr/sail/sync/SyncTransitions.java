@@ -13,11 +13,11 @@ import java.util.Objects;
 
 /**
  * Pure detection of real state transitions between two comparable snapshots of a synced entity.
- * Compares only what narration cares about — the {@code status} of a spec, run, or review, and for
- * the review aggregate each stage's status — so a re-applied identical revision, a timestamp churn,
- * or a metadata-only edit yields nothing. A deletion (null after-state) also yields nothing: a
- * tombstone has no lifecycle to narrate. No I/O and no store access; the {@link SyncRpcServer}
- * feeds it the snapshots it already holds around a commit.
+ * Compares only what narration cares about — the {@code status} of a spec, run, or review, each
+ * review stage's status, and the creation of an append-only message — so a re-applied identical
+ * revision, a timestamp churn, or a metadata-only edit yields nothing. A deletion (null
+ * after-state) also yields nothing: a tombstone has no lifecycle to narrate. No I/O and no store
+ * access; the {@link SyncRpcServer} feeds it the snapshots it already holds around a commit.
  */
 public final class SyncTransitions {
 
@@ -31,6 +31,10 @@ public final class SyncTransitions {
     return switch (entityType) {
       case "spec", "run" -> statusChange(entityType, entityId, before, after);
       case "review" -> reviewChanges(entityId, before, after);
+      case "message" ->
+          before == null
+              ? List.of(new SyncTransition("message", entityId, null, "posted", after))
+              : List.of();
       default -> List.of();
     };
   }

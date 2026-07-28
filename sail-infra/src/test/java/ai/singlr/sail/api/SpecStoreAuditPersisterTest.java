@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.EventStore;
@@ -44,9 +45,19 @@ class SpecStoreAuditPersisterTest {
   }
 
   @Test
-  void filterAcceptsAllEvents() {
+  void filterPersistsRecordsAndTelemetryButRejectsEphemeralEvents() {
     var event = Event.of("proj", "spec-1", "test_type", "sail", "host");
     assertTrue(persister.filter().test(event));
+    assertTrue(
+        persister
+            .filter()
+            .test(
+                Event.of(
+                    "proj", "spec-1", Event.WellKnownTypes.AGENT_TOOL_STARTED, "sail", "host")));
+    assertFalse(
+        persister
+            .filter()
+            .test(Event.of("proj", "spec-1", Event.WellKnownTypes.HEARTBEAT, "sail", "host")));
   }
 
   @Test

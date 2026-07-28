@@ -183,6 +183,44 @@ class SyncTransitionEventsTest {
     assertTrue(map(new SyncTransition("run", "r1", "running", "completed", snapshot)).isEmpty());
   }
 
+  @Test
+  void aPostedMessageBecomesASpecMessageEvent() {
+    var snapshot =
+        Map.<String, Object>of(
+            "spec_id", "auth", "author", "ada", "body", "  Progress\n\nupdate  ");
+
+    var events = map(new SyncTransition("message", "m1", null, "posted", snapshot));
+
+    assertEquals(1, events.size());
+    var event = events.getFirst();
+    assertEquals(Event.WellKnownTypes.SPEC_MESSAGE_POSTED, event.type());
+    assertEquals("proj", event.project());
+    assertEquals("auth", event.spec());
+    assertEquals("ada", event.agent());
+    assertEquals("main", event.host());
+    assertEquals("m1", event.data().get("message_id"));
+    assertEquals("Progress update", event.data().get("preview"));
+    assertEquals(Event.WellKnownData.SOURCE_SYNC, event.data().get(Event.WellKnownData.SOURCE));
+  }
+
+  @Test
+  void aMessageForAnUnknownSpecIsSilent() {
+    var snapshot =
+        Map.<String, Object>of("spec_id", "ghost", "author", "ada", "body", "Progress update");
+
+    assertTrue(map(new SyncTransition("message", "m1", null, "posted", snapshot)).isEmpty());
+  }
+
+  @Test
+  void aMessagePreviewIsLimitedByCodePoints() {
+    var body = "🚢".repeat(161);
+    var snapshot = Map.<String, Object>of("spec_id", "auth", "author", "ada", "body", body);
+
+    var event = map(new SyncTransition("message", "m1", null, "posted", snapshot)).getFirst();
+
+    assertEquals("🚢".repeat(160), event.data().get("preview"));
+  }
+
   private static Map<String, Object> review(String status, String error) {
     var map = new LinkedHashMap<String, Object>();
     map.put("spec_id", "auth");

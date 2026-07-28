@@ -55,6 +55,9 @@ public final class ApiRouter implements HttpHandler {
   private static final String APPROVE = "approve";
   private static final String DISMISS = "dismiss";
   private static final String FOLLOWUP = "followup";
+  private static final String MESSAGES = "messages";
+  private static final int DEFAULT_MESSAGES = 50;
+  private static final int MAX_MESSAGES = 100;
   private static final int DEFAULT_TAIL = 200;
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
@@ -379,6 +382,34 @@ public final class ApiRouter implements HttpHandler {
                 FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))
                     .withCreatedBy(actor(exchange))));
       }
+      if (MESSAGES.equals(sub)) {
+        return switch (request.method()) {
+          case GET -> {
+            var params = QueryParameters.from(request.uri()).values();
+            yield ApiResponse.from(
+                operations.specMessages(
+                    specId,
+                    params.get("before"),
+                    clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
+          }
+          case POST -> {
+            var principal = actorOf(exchange);
+            if (principal.handle() == null) {
+              throw new ApiException(
+                  ErrorCode.FORBIDDEN,
+                  "Spec messages require an FDE-bound credential so authorship can be"
+                      + " synchronized.");
+            }
+            yield ApiResponse.fromCreated(
+                operations.postSpecMessage(
+                    specId,
+                    SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
+                    principal,
+                    principal.handle()));
+          }
+          default -> throw methodNotAllowed();
+        };
+      }
     }
     throw notFound();
   }
@@ -541,6 +572,17 @@ public final class ApiRouter implements HttpHandler {
     }
     var name = exchange.getAttribute("token.name");
     return name == null ? null : name.toString();
+  }
+
+  private static int clampedLimit(String value, int fallback, int maximum) {
+    if (Strings.isBlank(value)) {
+      return fallback;
+    }
+    try {
+      return Math.clamp(Integer.parseInt(value), 1, maximum);
+    } catch (NumberFormatException e) {
+      throw new ApiException(ErrorCode.BAD_REQUEST, "limit must be an integer");
+    }
   }
 
   private static ApiException methodNotAllowed() {

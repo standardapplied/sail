@@ -86,6 +86,10 @@ public final class RemoteMainReplica implements MainReplica {
   private SyncWire.Fetched fetched() {
     if (fetched == null) {
       var response = Rpc.exchange(in, out, new SyncWire.Fetch(entityType));
+      if (response instanceof SyncWire.Failed failed) {
+        throw new SyncTransportException(
+            "Main refused entity type '" + entityType + "': " + failed.message());
+      }
       if (!(response instanceof SyncWire.Fetched f)) {
         throw new SyncTransportException("Expected a fetch response, got: " + response);
       }

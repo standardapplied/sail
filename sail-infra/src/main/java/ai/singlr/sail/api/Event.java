@@ -43,6 +43,12 @@ public record Event(
     String host,
     Map<String, Object> data) {
 
+  public enum RetentionClass {
+    RECORD,
+    TELEMETRY,
+    EPHEMERAL
+  }
+
   /** Current schema version. */
   public static final int CURRENT_VERSION = 1;
 
@@ -87,6 +93,9 @@ public record Event(
     public static final String PROJECT_STARTED = "project_started";
     public static final String PROJECT_STOPPED = "project_stopped";
     public static final String BOARD_UPDATED = "board_updated";
+    public static final String SPEC_MESSAGE_POSTED = "spec_message_posted";
+    public static final String AGENT_PRESENCE = "agent_presence";
+    public static final String HEARTBEAT = "heartbeat";
 
     /** A spec left in_progress/review past the reconciler threshold — surfaced for triage. */
     public static final String SPEC_STRANDED = "spec_stranded";
@@ -96,6 +105,14 @@ public record Event(
      * exit code in {@code data.exit_code} so the failure can be triaged.
      */
     public static final String AGENT_FAILED = "agent_failed";
+
+    public static RetentionClass retentionClass(String type) {
+      return switch (type) {
+        case AGENT_TOOL_STARTED, AGENT_TOOL_FINISHED, AGENT_LOG_CHUNK -> RetentionClass.TELEMETRY;
+        case AGENT_PRESENCE, HEARTBEAT -> RetentionClass.EPHEMERAL;
+        default -> RetentionClass.RECORD;
+      };
+    }
 
     private WellKnownTypes() {}
   }

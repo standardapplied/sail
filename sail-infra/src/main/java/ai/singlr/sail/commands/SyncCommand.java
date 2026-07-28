@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -29,6 +30,7 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.FileReplica;
+import ai.singlr.sail.sync.MessageReplica;
 import ai.singlr.sail.sync.ProjectReplica;
 import ai.singlr.sail.sync.ReviewReplica;
 import ai.singlr.sail.sync.RunReplica;
@@ -135,6 +137,7 @@ public final class SyncCommand implements Callable<Integer> {
         new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
         new RunReplica(host, handle, new RunStore(db), changeLog, conflicts, syncState),
         new ReviewReplica(host, new ReviewStore(db), changeLog, conflicts, syncState),
+        new MessageReplica(host, new MessageStore(db), changeLog, conflicts, syncState),
         new FdeStore(db),
         fileStore,
         projectStore);
@@ -146,6 +149,7 @@ public final class SyncCommand implements Callable<Integer> {
       ProjectReplica project,
       RunReplica run,
       ReviewReplica review,
+      MessageReplica message,
       FdeStore fdes,
       FileStore files,
       ProjectStore projects) {}
@@ -225,6 +229,7 @@ public final class SyncCommand implements Callable<Integer> {
       var projectReport = new SyncEngine().reconcile(boxes.project(), session.replica("project"));
       var runReport = new SyncEngine().reconcile(boxes.run(), session.replica("run"));
       var reviewReport = new SyncEngine().reconcile(boxes.review(), session.replica("review"));
+      var messageReport = new SyncEngine().reconcile(boxes.message(), session.replica("message"));
       var rejected = applyFdes(boxes.fdes(), session.fetchFdes());
       if (!rejected.isEmpty()) {
         System.err.println(
@@ -239,8 +244,10 @@ public final class SyncCommand implements Callable<Integer> {
       materializeProjects(boxes.projects());
       reconcileLiveResources(boxes.projects(), projectReport);
       return combine(
-          combine(combine(combine(specReport, fileReport), projectReport), runReport),
-          reviewReport);
+          combine(
+              combine(combine(combine(specReport, fileReport), projectReport), runReport),
+              reviewReport),
+          messageReport);
     }
   }
 

@@ -222,6 +222,28 @@ class EventTest {
   }
 
   @Test
+  void wellKnownTypesHaveEnforcedRetentionClasses() {
+    assertEquals(
+        Event.RetentionClass.RECORD,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.SPEC_MESSAGE_POSTED));
+    assertEquals(
+        Event.RetentionClass.TELEMETRY,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_TOOL_STARTED));
+    assertEquals(
+        Event.RetentionClass.TELEMETRY,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_TOOL_FINISHED));
+    assertEquals(
+        Event.RetentionClass.TELEMETRY,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_LOG_CHUNK));
+    assertEquals(
+        Event.RetentionClass.EPHEMERAL,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_PRESENCE));
+    assertEquals(
+        Event.RetentionClass.EPHEMERAL,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.HEARTBEAT));
+  }
+
+  @Test
   void sailAgentConstant() {
     assertEquals("sail", Event.SAIL_AGENT);
   }

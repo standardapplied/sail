@@ -15,12 +15,15 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +48,8 @@ class ApiSpecCommandsTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     var tokenStore = new TokenStore(db);
-    token = tokenStore.create("test", "admin").token();
+    var fde = new FdeStore(db).add("test", "Test", "test@example.com", "admin");
+    token = tokenStore.create("test", "admin", fde.id(), null).token();
     var specStore = new SpecStore(db);
     var eventStore = new EventStore(db);
     var bus = new EventBus();
@@ -53,7 +57,8 @@ class ApiSpecCommandsTest {
     reviewStore = new ReviewStore(db);
     var operations =
         new SailOperations(
-            new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore);
+                new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore)
+            .useMessages(new MessageStore(db));
     server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
     server.start();
   }
@@ -187,6 +192,34 @@ class ApiSpecCommandsTest {
     var output = run("show", "payment", "--json");
     assertTrue(output.contains("\"id\": \"payment\""));
     assertTrue(output.contains("\"title\": \"Payment integration\""));
+  }
+
+  @Test
+  void commentAndCommentsRoundTripAsJson() {
+    run("create", "--id", "room", "--title", "Room");
+
+    var posted = run("comment", "room", "--body", "Progress update");
+    assertTrue(posted.contains("\"author\": \"test\""));
+    assertTrue(posted.contains("\"body\": \"Progress update\""));
+
+    var listed = run("comments", "room");
+    assertTrue(listed.contains("\"messages\""));
+    assertTrue(listed.contains("\"body\": \"Progress update\""));
+  }
+
+  @Test
+  void commentReadsBodyFromStdin() {
+    run("create", "--id", "stdin-room", "--title", "Room");
+    var original = System.in;
+    try {
+      System.setIn(
+          new ByteArrayInputStream("Question from stdin".getBytes(StandardCharsets.UTF_8)));
+      assertTrue(
+          run("comment", "stdin-room", "--body", "-")
+              .contains("\"body\": \"Question from stdin\""));
+    } finally {
+      System.setIn(original);
+    }
   }
 
   @Test

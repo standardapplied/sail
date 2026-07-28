@@ -41,6 +41,9 @@ public final class SpecCliHelper {
   /** Fixed-string marker proving the installed script presents the run credential. */
   public static final String CREDENTIAL_MARKER = "SAIL_RUN_CREDENTIAL";
 
+  /** Fixed-string marker proving the installed script has the conversation commands. */
+  public static final String MESSAGES_MARKER = "spec comment";
+
   private static final String SCRIPT =
       """
       #!/usr/bin/env bash
@@ -103,6 +106,8 @@ public final class SpecCliHelper {
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
         spec update <id> [--status S] [--title T] [--assignee H] [--force] [...]  (alias: edit)
         spec content <id> --body-file F [--plan-file F]   revise the body
+        spec comment <id> --body <text>|- [--reply-to <message-id>]
+        spec comments <id> [--before <message-id>] [--limit N]
         spec archive <id>
         spec whoami                        show this run's principal identity
       USAGE
@@ -132,6 +137,33 @@ public final class SpecCliHelper {
           id="$1"; shift
           collect_fields "$@"
           api -X PUT "${FIELDS[@]}" "$BASE/$id/content";;
+        comment)
+          [ $# -ge 3 ] || die "comment needs a spec id and --body <text>|-"
+          id="$1"; shift
+          [ "$1" = "--body" ] || die "comment needs --body <text>|-"
+          body="$2"; shift 2
+          if [ "$body" = "-" ]; then
+            FIELDS=(--data-urlencode "body@-")
+          else
+            FIELDS=(--data-urlencode "body=$body")
+          fi
+          if [ $# -gt 0 ]; then
+            [ "$1" = "--reply-to" ] && [ $# -eq 2 ] || die "comment accepts only --reply-to <message-id>"
+            FIELDS+=(--data-urlencode "reply_to=$2")
+          fi
+          api -X POST "${FIELDS[@]}" "$BASE/$id/messages";;
+        comments)
+          [ $# -ge 1 ] || die "comments needs a spec id"
+          id="$1"; shift
+          FIELDS=()
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --before) FIELDS+=(--data-urlencode "before=$2"); shift 2;;
+              --limit) FIELDS+=(--data-urlencode "limit=$2"); shift 2;;
+              *) die "unknown option: $1";;
+            esac
+          done
+          api -G "${FIELDS[@]}" "$BASE/$id/messages";;
         archive)
           [ $# -ge 1 ] || die "archive needs a spec id"
           api -X PUT --data-urlencode "status=archived" "$BASE/$1";;

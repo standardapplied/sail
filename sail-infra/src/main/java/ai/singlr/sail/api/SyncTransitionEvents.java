@@ -44,6 +44,7 @@ public final class SyncTransitionEvents {
       case "run" -> runEvents(transition, host);
       case "review" -> reviewEvents(transition, projectOfSpec, host);
       case "review_stage" -> stageEvents(transition, projectOfSpec, host);
+      case "message" -> messageEvents(transition, projectOfSpec, host);
       default -> List.of();
     };
   }
@@ -193,6 +194,24 @@ public final class SyncTransitionEvents {
     };
   }
 
+  private static List<Event> messageEvents(
+      SyncTransition transition, Function<String, String> projectOfSpec, String host) {
+    var located = locate(transition, projectOfSpec);
+    var author = text(transition.snapshot(), "author");
+    var body = text(transition.snapshot(), "body");
+    if (located == null || author == null || body == null || !"posted".equals(transition.to())) {
+      return List.of();
+    }
+    return List.of(
+        event(
+            located.project(),
+            located.specId(),
+            Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+            author,
+            host,
+            Map.of("message_id", transition.entityId(), "preview", preview(body))));
+  }
+
   /** A review-side transition addressed to its spec and project, or null when unresolvable. */
   private record Located(String project, String specId) {
     Event event(String type, Map<String, Object> data, String host) {
@@ -241,5 +260,12 @@ public final class SyncTransitionEvents {
   private static String text(Map<String, Object> map, String key) {
     var value = map.get(key);
     return value == null ? null : value.toString();
+  }
+
+  private static String preview(String body) {
+    var normalized = body.replaceAll("\\s+", " ").strip();
+    return normalized.codePointCount(0, normalized.length()) <= 160
+        ? normalized
+        : normalized.substring(0, normalized.offsetByCodePoints(0, 160));
   }
 }

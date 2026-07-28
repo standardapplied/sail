@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -1563,6 +1564,38 @@ class SailOperationsTest {
             new FdeStore(db));
 
     var result = operations.runs("acme", null);
+
+    assertTrue(result.isSuccess());
+  }
+
+  @Test
+  void serverStartConstructorWiresTheMessageLane() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var specStore = new SpecStore(db);
+    seedSpec(specStore, "auth", "Add auth", "pending", List.of(), "Do auth");
+    var operations =
+        new SailOperations(
+                shell(),
+                yaml.toString(),
+                new EventBus(),
+                null,
+                specStore,
+                new ReviewStore(db),
+                new RunStore(db),
+                new ProjectStore(db),
+                SyncScheduler.disabled(),
+                new FdeStore(db))
+            .useMessages(new MessageStore(db));
+
+    var result =
+        operations.postSpecMessage(
+            "auth",
+            new SpecMessageRequest("Ready", null),
+            new Actor("sail", Role.ADMIN, Actor.Lane.API),
+            "sail");
 
     assertTrue(result.isSuccess());
   }

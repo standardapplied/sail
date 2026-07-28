@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.store.MessageStore;
+import java.util.List;
 
 /**
  * Builds the task prompt handed to an agent when a spec is dispatched. Shared by the CLI dispatch
@@ -17,6 +19,11 @@ public final class AgentTaskPrompt {
 
   /** Renders the dispatch prompt for {@code spec}, appending the spec description/body. */
   public static String build(Spec spec, String description) {
+    return build(spec, description, List.of());
+  }
+
+  public static String build(
+      Spec spec, String description, List<MessageStore.MessageRow> messages) {
     var targetRepos =
         spec.repos().isEmpty()
             ? ""
@@ -41,8 +48,20 @@ public final class AgentTaskPrompt {
         + targetModel
         + targetReasoning
         + "\n"
+        + conversation(messages)
         + description
         + autonomousProtocol(spec);
+  }
+
+  private static String conversation(List<MessageStore.MessageRow> messages) {
+    if (messages.isEmpty()) {
+      return "";
+    }
+    return "## Conversation on this spec\n\n"
+        + PromptConversation.renderNewest(
+            messages,
+            message ->
+                message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n");
   }
 
   /**
@@ -63,6 +82,9 @@ public final class AgentTaskPrompt {
         Execute without waiting for confirmation: plan, implement, test, commit. When complete, run
         the full local verification the project uses (including any coverage or lint gates), commit
         with a clear message, push the branch, and open a pull request.
+
+        Post progress, questions, and your final summary to this spec's room with
+        `spec comment <id> --body <text>` (or `--body -` for stdin).
 
         The spec is not complete until CI is green: after opening the pull request, watch its
         checks with the CLI of the forge hosting the repo (e.g. `gh pr checks <number> --watch`

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -791,6 +792,53 @@ record GlobalSpecContentResponse(String specId, String body, String plan) implem
     m.put("body", body);
     m.put("plan", plan);
     return m;
+  }
+}
+
+record SpecMessageRequest(String body, String replyTo) {
+  static SpecMessageRequest fromMap(Map<String, Object> map) {
+    return new SpecMessageRequest(
+        map.get("body") == null ? null : map.get("body").toString(),
+        map.get("reply_to") == null ? null : map.get("reply_to").toString());
+  }
+}
+
+record SpecMessageView(
+    String id, String specId, String author, String body, String replyTo, String createdAt)
+    implements Mappable {
+  static SpecMessageView from(MessageStore.MessageRow row) {
+    return new SpecMessageView(
+        row.id(), row.specId(), row.author(), row.body(), row.replyTo(), row.createdAt());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("id", id);
+    map.put("spec_id", specId);
+    map.put("author", author);
+    map.put("body", body);
+    if (replyTo != null) map.put("reply_to", replyTo);
+    map.put("created_at", createdAt);
+    return map;
+  }
+}
+
+record SpecMessageResponse(SpecMessageView message) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    return Map.of("message", message.toMap());
+  }
+}
+
+record SpecMessagesResponse(String specId, List<SpecMessageView> messages) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("spec_id", specId);
+    map.put("messages", messages);
+    map.put("total", messages.size());
+    return map;
   }
 }
 

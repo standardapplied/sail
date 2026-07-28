@@ -89,7 +89,19 @@ public final class SchemaManager {
               credential_hash TEXT NOT NULL UNIQUE,
               created_at TEXT NOT NULL,
               expires_at TEXT
-          )""");
+          )""",
+          """
+          CREATE TABLE spec_messages (
+              id TEXT PRIMARY KEY,
+              spec_id TEXT NOT NULL,
+              author TEXT NOT NULL,
+              body TEXT NOT NULL,
+              reply_to TEXT REFERENCES spec_messages(id),
+              created_at TEXT NOT NULL,
+              rev TEXT NOT NULL,
+              base_rev TEXT
+          )""",
+          "CREATE INDEX idx_spec_messages_page ON spec_messages(spec_id, id DESC)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

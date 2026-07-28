@@ -11,6 +11,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -68,16 +69,17 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       var bus = new EventBus();
       var operations =
           new SailOperations(
-              new ShellExecutor(false),
-              "sail.yaml",
-              bus,
-              null,
-              specStore,
-              null,
-              runStore,
-              null,
-              ai.singlr.sail.api.SyncScheduler.disabled(),
-              null);
+                  new ShellExecutor(false),
+                  "sail.yaml",
+                  bus,
+                  null,
+                  specStore,
+                  null,
+                  runStore,
+                  null,
+                  ai.singlr.sail.api.SyncScheduler.disabled(),
+                  null)
+              .useMessages(new MessageStore(db));
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
@@ -121,6 +123,49 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
         assertTrue(
             response.stdout().contains(SPEC_ID),
             "the seeded spec must round-trip back through the socket: " + response.stdout());
+
+        var posted =
+            exec(
+                CONTAINER,
+                List.of(
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--fail-with-body",
+                    "--unix-socket",
+                    CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-H",
+                    "Authorization: Bearer " + credential,
+                    "-X",
+                    "POST",
+                    "--data-urlencode",
+                    "body=mid-run progress from inside the container",
+                    "http://sail/v1/specs/" + SPEC_ID + "/messages"));
+        assertTrue(
+            posted.ok(),
+            "the in-container agent could not post to the spec's room: "
+                + posted.stdout()
+                + posted.stderr());
+        assertTrue(
+            posted.stdout().contains("claude/"),
+            "a posted message must be attributed to the run principal: " + posted.stdout());
+
+        var room =
+            exec(
+                CONTAINER,
+                List.of(
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--fail-with-body",
+                    "--unix-socket",
+                    CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-H",
+                    "Authorization: Bearer " + credential,
+                    "http://sail/v1/specs/" + SPEC_ID + "/messages"));
+        assertTrue(
+            room.stdout().contains("mid-run progress from inside the container"),
+            "the posted message must read back through the socket: " + room.stdout());
       }
     } finally {
       deleteContainerQuietly(CONTAINER);

@@ -7,9 +7,11 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -175,5 +177,24 @@ class EventStoreTest {
     assertNull(events.getFirst().project());
     assertNull(events.getFirst().specId());
     assertNull(events.getFirst().agent());
+  }
+
+  @Test
+  void pruneBeforeDeletesOnlyMatchingOldTypesAcrossBatches() {
+    for (var i = 0; i < 5; i++) {
+      store.insert(event("telemetry", "p", null));
+    }
+    store.insert(event("record", "p", null));
+    store.insert(
+        new EventStore.EventRow(
+            0, "2099-01-01T00:00:00Z", "telemetry", "p", null, "sail", "h", "{}"));
+
+    assertEquals(5, store.pruneBefore("2026-06-01T00:00:00Z", Set.of("telemetry"), 2));
+    assertEquals(2, store.recent(10).size());
+    assertTrue(store.recent(10).stream().anyMatch(row -> row.type().equals("record")));
+    assertEquals(0, store.pruneBefore("2099-12-01T00:00:00Z", Set.of(), 2));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> store.pruneBefore("2099-12-01T00:00:00Z", Set.of("telemetry"), 0));
   }
 }

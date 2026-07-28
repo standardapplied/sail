@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -256,6 +257,13 @@ class ReviewPipelineControllerTest {
         review.isPresent(), "a spec clobbered to review out of band must still get its review");
     assertEquals("passed", review.get().status());
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void messageStoreWiringIsFluent() {
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+
+    assertEquals(ctrl, ctrl.useMessages(new MessageStore(db)));
   }
 
   @Test
