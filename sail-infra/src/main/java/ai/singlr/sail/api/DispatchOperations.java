@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
@@ -310,7 +311,8 @@ public final class DispatchOperations {
             agentType,
             branch,
             task,
-            unit);
+            unit,
+            loaded.config());
     try {
       var prepared =
           claimAndPrepare(
@@ -411,7 +413,7 @@ public final class DispatchOperations {
     }
     var credential =
         reserveAdhocRun(
-            runId, project, localHandle, agentType, request.branch(), request.task(), unit);
+            runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
     try {
       prepare(preparer);
       var launch =
@@ -1020,12 +1022,13 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      SailYaml config) {
     if (runStore == null) {
       return null;
     }
     return reserve(
-        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit);
+        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
   }
 
   /**
@@ -1042,14 +1045,15 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      SailYaml config) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
     return reserve(
-        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit);
+        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit, config);
   }
 
   private String reserve(
@@ -1063,7 +1067,8 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      SailYaml config) {
     RunStore.Reservation reservation;
     try {
       reservation =
@@ -1079,7 +1084,8 @@ public final class DispatchOperations {
               branch,
               task,
               unit.logPath(),
-              unit.unitName());
+              unit.unitName(),
+              configuredMaxDuration(config));
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
@@ -1088,6 +1094,19 @@ public final class DispatchOperations {
     }
     pruneRuns(project);
     return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  /**
+   * The run's configured hard lifetime, bounding its credential: {@code guardrails.max_duration},
+   * or null when unset — an unbounded run's credential is revoked by its verified finishers, never
+   * by a clock that could expire mid-work.
+   */
+  private static Duration configuredMaxDuration(SailYaml config) {
+    var agent = config.agent();
+    if (agent == null || agent.guardrails() == null) {
+      return null;
+    }
+    return Guardrails.parseDuration(agent.guardrails().maxDuration());
   }
 
   private void pruneRuns(String project) {

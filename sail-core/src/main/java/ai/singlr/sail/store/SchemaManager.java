@@ -88,7 +88,7 @@ public final class SchemaManager {
               run_id TEXT PRIMARY KEY,
               credential_hash TEXT NOT NULL UNIQUE,
               created_at TEXT NOT NULL,
-              expires_at TEXT NOT NULL
+              expires_at TEXT
           )""");
 
   /** The schema version this binary converges every database to. */

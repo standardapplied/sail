@@ -15,7 +15,10 @@ import java.util.concurrent.TimeoutException;
  * sail-launched agent sessions. Claude Code runs the hooks of a matcher group in parallel, so
  * gating and lifecycle publishing must live in one script: on each stop attempt the gate decides
  * first, then publishes {@code agent_session_stopped} (allow) or {@code agent_stop_nudged} (block)
- * through {@link SailEventHelper} — the pipeline never sees a stop that did not happen.
+ * through {@link SailEventHelper} — the pipeline never sees a stop that did not happen. The
+ * terminal publish is best-effort and advisory only: the agent lane refuses terminal session types
+ * (a run must never mark itself finished and release its reservation), so run completion comes
+ * solely from the watcher's verified exit, with the missed-stop reconciler as the rescue lane.
  *
  * <p>Only build-role sessions are gated: they carry a non-blank {@code SAIL_RUN_ID}. Review
  * sessions load no settings file at all, and ad-hoc {@code sail agent start} or engineer sessions

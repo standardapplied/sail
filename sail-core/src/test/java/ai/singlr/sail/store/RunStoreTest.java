@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -1205,6 +1207,58 @@ class RunStoreTest {
     store.transition(id, "running", "completed", 0);
 
     assertTrue(store.findByCredential(credential).isEmpty(), "a finished run's credential is dead");
+  }
+
+  @Test
+  void aCredentialWithoutAConfiguredHardStopNeverExpires() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var nullExpiryRows =
+        db.queryOne(
+                "SELECT COUNT(*) FROM run_credentials WHERE run_id = ? AND expires_at IS NULL",
+                row -> row.integer(0),
+                id)
+            .orElseThrow();
+
+    assertEquals(1L, nullExpiryRows, "no expiry at rest");
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+  }
+
+  @Test
+  void credentialExpiryCoversTheConfiguredHardStopPlusGrace() {
+    var id = DateTimeUtils.newId().toString();
+    var maxDuration = Duration.ofHours(169);
+
+    var reservation =
+        store.reserveDispatch(
+            id,
+            "backend",
+            "auth",
+            "node-a",
+            "uday",
+            "build",
+            java.util.List.of("app"),
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id,
+            maxDuration);
+    var credential = ((RunStore.Reservation.Reserved) reservation).credential();
+
+    var row =
+        db.queryOne(
+                "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
+                r -> new String[] {r.text(0), r.text(1)},
+                id)
+            .orElseThrow();
+    var expected = Instant.parse(row[0]).plus(maxDuration).plus(RunStore.CREDENTIAL_GRACE);
+    assertEquals(
+        expected,
+        Instant.parse(row[1]),
+        "the credential outlives the run's configured hard stop by exactly the grace window");
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
   }
 
   @Test

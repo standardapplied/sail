@@ -30,12 +30,13 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the installed stop gate end-to-end in a real container against a live sail-api socket,
  * on both hook lanes: a dispatched-looking session with a dirty worktree is blocked exactly once
- * (block JSON on stdout), the second stop passes, and the event log shows {@code agent_stop_nudged}
- * followed by {@code agent_session_stopped} — never a stop that did not happen. The Claude lane
- * retries with the marker-file loop guard; the Codex lane feeds the payload shape captured from a
- * live headless {@code codex exec} run (codex-cli 0.144.0), where the retry carries {@code
- * stop_hook_active: true}. One gate script serves both, and the sail-owned codex {@code hooks.json}
- * must wire it.
+ * (block JSON on stdout), the second stop passes, and the event log shows only {@code
+ * agent_stop_nudged} — the gate's best-effort terminal publish is refused on the agent lane, since
+ * a run must never mark itself finished; terminal lifecycle comes solely from the watcher's
+ * verified exit. The Claude lane retries with the marker-file loop guard; the Codex lane feeds the
+ * payload shape captured from a live headless {@code codex exec} run (codex-cli 0.144.0), where the
+ * retry carries {@code stop_hook_active: true}. One gate script serves both, and the sail-owned
+ * codex {@code hooks.json} must wire it.
  */
 class StopGateIT extends AbstractIncusIT {
 
@@ -44,7 +45,7 @@ class StopGateIT extends AbstractIncusIT {
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   @Test
-  void aDirtySessionIsNudgedOnceAndTheEventLogShowsNudgedThenStopped() throws Exception {
+  void aDirtySessionIsNudgedOnceAndTerminalEventsNeverTraverseTheAgentLane() throws Exception {
     ensureIncusOrSkip();
 
     var socketDir = Files.createTempDirectory("sail-it-stop-gate-socket");
@@ -144,12 +145,12 @@ class StopGateIT extends AbstractIncusIT {
             second.stdout().isBlank(),
             "the second stop always wins, dirty or not: " + second.stdout());
 
-        awaitEvents(received, 2);
+        awaitEvents(received, 1);
         assertEquals(
-            List.of(
-                Event.WellKnownTypes.AGENT_STOP_NUDGED, Event.WellKnownTypes.AGENT_SESSION_STOPPED),
+            List.of(Event.WellKnownTypes.AGENT_STOP_NUDGED),
             received.stream().map(Event::type).toList(),
-            "one nudge, then a real stop, in that order — and no stop for the blocked attempt");
+            "one nudge and nothing else — the allowed stop's terminal publish is refused on the"
+                + " agent lane, so a run can never mark itself finished");
         var reason = Objects.toString(received.get(0).data().get("reason"), "");
         assertTrue(reason.contains("proj"), "the nudge event must carry the reason: " + reason);
         assertEquals("run-1", received.get(0).data().get(Event.WellKnownData.RUN_ID));
@@ -175,19 +176,16 @@ class StopGateIT extends AbstractIncusIT {
             codexSecond.stdout().isBlank(),
             "the retry carries stop_hook_active=true and must pass: " + codexSecond.stdout());
 
-        awaitEvents(received, 4);
+        awaitEvents(received, 2);
         assertEquals(
-            List.of(
-                Event.WellKnownTypes.AGENT_STOP_NUDGED,
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-                Event.WellKnownTypes.AGENT_STOP_NUDGED,
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED),
+            List.of(Event.WellKnownTypes.AGENT_STOP_NUDGED, Event.WellKnownTypes.AGENT_STOP_NUDGED),
             received.stream().map(Event::type).toList(),
-            "the codex lane must show the same nudged-then-stopped sequence");
+            "the codex lane must show the same nudge-only sequence; terminal lifecycle comes"
+                + " solely from the watcher's verified exit");
         assertEquals(
-            "codex/run-2", received.get(2).agent(), "the nudge is attributed to the codex run");
-        assertEquals("run-2", received.get(2).data().get(Event.WellKnownData.RUN_ID));
-        var codexReason = Objects.toString(received.get(2).data().get("reason"), "");
+            "codex/run-2", received.get(1).agent(), "the nudge is attributed to the codex run");
+        assertEquals("run-2", received.get(1).data().get(Event.WellKnownData.RUN_ID));
+        var codexReason = Objects.toString(received.get(1).data().get("reason"), "");
         assertTrue(
             codexReason.contains("proj"),
             "the codex nudge must carry the same reason text: " + codexReason);

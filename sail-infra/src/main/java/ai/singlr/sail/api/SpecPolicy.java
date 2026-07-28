@@ -47,7 +47,9 @@ public final class SpecPolicy {
   /**
    * Decides whether {@code actor} may set spec {@code specId}'s assignee to {@code
    * requestedAssignee}. Reassignment is an admin act; the one member-allowed case is claiming a
-   * spec that is currently unassigned for oneself.
+   * spec that is currently unassigned for oneself. An agent principal claims for the FDE it acts
+   * for, never for its ephemeral run-scoped handle — dispatch locality matches the assignee against
+   * the node's FDE handle, so a run-principal assignee would leave the spec undispatchable.
    */
   public static AccessDecision reassign(
       Actor actor, String specId, String currentAssignee, String requestedAssignee) {
@@ -57,9 +59,10 @@ public final class SpecPolicy {
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
+    var claimant = actor.agentLane() ? actor.owner() : actor.handle();
     if (Strings.isBlank(currentAssignee)
-        && Strings.isNotBlank(requestedAssignee)
-        && requestedAssignee.equals(actor.handle())) {
+        && Strings.isNotBlank(claimant)
+        && claimant.equals(requestedAssignee)) {
       return AccessDecision.allowed();
     }
     return AccessDecision.refused(

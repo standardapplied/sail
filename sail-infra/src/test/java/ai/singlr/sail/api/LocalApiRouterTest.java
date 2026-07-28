@@ -103,7 +103,7 @@ class LocalApiRouterTest {
         Event.of(
             "light-grid",
             "oauth",
-            Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
+            Event.WellKnownTypes.AGENT_TOOL_FINISHED,
             "claude-code",
             "host-01",
             Map.of("run_id", "run-victim", "source", "watcher", "exit_code", 0, "reason", "done"));
@@ -121,7 +121,7 @@ class LocalApiRouterTest {
     assertEquals(
         "run-1",
         stamped.data().get("run_id"),
-        "a terminal event can only address the authenticated run, never another one");
+        "an event can only address the authenticated run, never another one");
     assertFalse(
         stamped.data().containsKey("source"),
         "the agent lane can never mark its own stop authoritative");
@@ -137,6 +137,22 @@ class LocalApiRouterTest {
       var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
       assertEquals(403, response.status(), type);
       assertTrue(response.body().get("error").toString().contains(type), type);
+    }
+  }
+
+  @Test
+  void eventsRejectsTerminalSessionTypesSoARunCannotFinishItself() {
+    for (var type :
+        List.of(
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            Event.WellKnownTypes.AGENT_SESSION_COMPLETED)) {
+      var event =
+          Event.of("acme", "auth", type, "claude-code", "host-01", Map.of("run_id", "run-1"));
+      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+      assertEquals(
+          403,
+          response.status(),
+          type + " must come from the watcher's verified exit, never the live agent");
     }
   }
 

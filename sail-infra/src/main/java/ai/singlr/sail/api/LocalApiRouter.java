@@ -37,8 +37,6 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final Set<String> AGENT_EVENT_TYPES =
       Set.of(
           Event.WellKnownTypes.AGENT_SESSION_STARTED,
-          Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-          Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
           Event.WellKnownTypes.AGENT_STOP_NUDGED,
           Event.WellKnownTypes.AGENT_TOOL_STARTED,
           Event.WellKnownTypes.AGENT_TOOL_FINISHED);
@@ -112,11 +110,14 @@ final class LocalApiRouter implements LocalApiHandler {
   /**
    * The credential, not the client body, decides what an event is about: the published event's
    * project, spec, run id, and authorship all come from the authenticated run, so a run can never
-   * address another run's lifecycle or another spec's pipeline. Only the agent-hook event types are
-   * accepted — operator, watcher, sync, and control-plane types carry authority this lane does not
-   * have — and the reserved authoritative-stop fields ({@code source}, {@code exit_code}, {@code
-   * watcher_pid}) are stripped, so an agent's own stop is never mistaken for the watcher's verified
-   * one.
+   * address another run's lifecycle or another spec's pipeline. Only the non-terminal agent-hook
+   * event types are accepted: operator, watcher, sync, and control-plane types carry authority this
+   * lane does not have, and the terminal session types ({@code agent_session_stopped}, {@code
+   * agent_session_completed}) are watcher-and-reconciler-only — they complete the run, revoke its
+   * credential, and release its repo reservation, so accepting them here would let a still-running
+   * agent finish itself and admit an overlapping dispatch beside its live process. The reserved
+   * authoritative-stop fields ({@code source}, {@code exit_code}, {@code watcher_pid}) are stripped
+   * as well, so nothing an agent publishes can impersonate the watcher's verified exit.
    */
   private ApiResponse events(LocalApiRequest request, RunStore.RunRow run) {
     if (!"POST".equals(request.method())) {

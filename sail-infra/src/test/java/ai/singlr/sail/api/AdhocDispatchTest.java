@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,8 +85,18 @@ class AdhocDispatchTest {
       boolean withRunStore,
       DispatchOperations.Listener listener)
       throws IOException {
+    return operations(shell, launcher, withRunStore, listener, YAML);
+  }
+
+  private DispatchOperations operations(
+      ShellExec shell,
+      DispatchOperations.AgentLauncher launcher,
+      boolean withRunStore,
+      DispatchOperations.Listener listener,
+      String yamlContent)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, YAML);
+    Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
@@ -137,6 +148,56 @@ class AdhocDispatchTest {
     assertEquals("fix the flaky test", run.task());
     assertNotNull(session.session());
     assertTrue(session.watcher().isPresent());
+  }
+
+  @Test
+  void aGuardrailedLaunchBoundsItsCredentialToTheHardStopPlusGrace() throws Exception {
+    var guardrailed =
+        """
+        name: acme
+        ssh:
+          user: dev
+        agent:
+          type: claude-code
+          guardrails:
+            max_duration: 169h
+        """;
+    var ops =
+        operations(
+            liveAgentShell(), command -> 0, true, DispatchOperations.Listener.NONE, guardrailed);
+
+    var session = ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var row =
+        db.queryOne(
+                "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
+                r -> new String[] {r.text(0), r.text(1)},
+                session.runId())
+            .orElseThrow();
+    var expected =
+        Instant.parse(row[0]).plus(Duration.ofHours(169)).plus(RunStore.CREDENTIAL_GRACE);
+    assertEquals(
+        expected,
+        Instant.parse(row[1]),
+        "the credential covers the configured hard stop however long, plus the finisher grace");
+  }
+
+  @Test
+  void anUnguardrailedLaunchMintsACredentialWithNoExpiry() throws Exception {
+    var ops = operations(liveAgentShell());
+
+    var session = ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var nullExpiryRows =
+        db.queryOne(
+                "SELECT COUNT(*) FROM run_credentials WHERE run_id = ? AND expires_at IS NULL",
+                r -> r.integer(0),
+                session.runId())
+            .orElseThrow();
+    assertEquals(
+        1L,
+        nullExpiryRows,
+        "with no configured hard stop only a verified finisher revokes the credential");
   }
 
   @Test

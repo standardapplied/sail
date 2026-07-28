@@ -82,13 +82,17 @@ class ExpiredRowSweeperTest {
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES ('r-dead', 'h2', 't0', ?)",
         Instant.now().minus(Duration.ofHours(1)).toString());
+    db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES ('r-unbounded', 'h3', 't0', NULL)");
 
     var removed = ExpiredRowSweeper.sweep(db);
 
     assertEquals(1, removed);
     assertEquals(
-        1L,
-        db.queryOne("SELECT COUNT(*) FROM run_credentials", row -> row.integer(0)).orElseThrow());
+        2L,
+        db.queryOne("SELECT COUNT(*) FROM run_credentials", row -> row.integer(0)).orElseThrow(),
+        "a no-expiry credential is revoked by its run's finishers, never by the sweep");
   }
 
   @Test

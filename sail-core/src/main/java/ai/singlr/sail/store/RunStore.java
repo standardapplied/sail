@@ -187,7 +187,7 @@ public final class RunStore implements ConflictResolver {
               unit,
               principalHandle(agent, role, id),
               owner);
-          var credential = mintCredential(id);
+          var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
           return credential;
         });
@@ -241,7 +241,7 @@ public final class RunStore implements ConflictResolver {
                 "Run " + id + " is " + run.status() + "; only a running run can be credentialed.");
           }
           revokeCredential(id);
-          return mintCredential(id);
+          return mintCredential(id, null);
         });
   }
 
@@ -267,7 +267,10 @@ public final class RunStore implements ConflictResolver {
    * nothing. Returns the blocking conflict, or the reserved run's credential. A run mid-stop
    * ({@code stopping}) still occupies its repos — its agent is not verified dead until the claim is
    * finalized — so it conflicts exactly like a running one. Any database failure propagates — a
-   * dispatch must never launch without the row every later overlap check depends on.
+   * dispatch must never launch without the row every later overlap check depends on. {@code
+   * maxDuration} is the run's configured hard stop ({@code guardrails.max_duration}): the
+   * credential expires that long plus {@link #CREDENTIAL_GRACE} after minting, and a null means no
+   * hard stop, so the credential lives until a verified finisher revokes it.
    */
   public Reservation reserveDispatch(
       String id,
@@ -282,6 +285,24 @@ public final class RunStore implements ConflictResolver {
       String task,
       String logPath,
       String unit) {
+    return reserveDispatch(
+        id, project, specId, node, owner, role, repos, agent, branch, task, logPath, unit, null);
+  }
+
+  public Reservation reserveDispatch(
+      String id,
+      String project,
+      String specId,
+      String node,
+      String owner,
+      String role,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit,
+      Duration maxDuration) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
     return db.immediateTransaction(
         () -> {
@@ -323,7 +344,7 @@ public final class RunStore implements ConflictResolver {
               YamlUtil.dumpJson(reserved),
               principalHandle(agent, role, id),
               owner);
-          var credential = mintCredential(id);
+          var credential = mintCredential(id, maxDuration);
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
         });
@@ -334,12 +355,13 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Backstop lifetime of a run credential. Revocation on every run finisher is the real terminator
-   * — this only bounds a credential whose run's finishers all failed to fire, and the expired-row
-   * sweep collects such stragglers. Far above any real run's duration, so a live run never loses
-   * its credential mid-flight.
+   * Headroom a credential keeps past its run's configured hard stop, covering the watcher's kill
+   * and the missed-stop reconciler's sweep. Revocation on every run finisher is the real terminator
+   * — the expiry only bounds a credential whose run's finishers all failed to fire, and the
+   * expired-row sweep collects such stragglers. A run with no configured hard stop mints a
+   * credential with no expiry, so a legitimately long-lived agent never loses access mid-run.
    */
-  static final Duration CREDENTIAL_TTL = Duration.ofDays(7);
+  public static final Duration CREDENTIAL_GRACE = Duration.ofHours(1);
 
   /**
    * Resolves a live run credential to its run row: unknown, revoked, or expired credentials resolve
@@ -359,7 +381,8 @@ public final class RunStore implements ConflictResolver {
     if (match.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(match.get()[1]).isBefore(DateTimeUtils.now())) {
+    var expiresAt = match.get()[1];
+    if (expiresAt != null && Instant.parse(expiresAt).isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM run_credentials WHERE credential_hash = ?", hash);
       return Optional.empty();
     }
@@ -381,18 +404,20 @@ public final class RunStore implements ConflictResolver {
     return base + "/" + ("review".equals(role) ? "review-" + runId : runId);
   }
 
-  private String mintCredential(String id) {
+  private String mintCredential(String id, Duration maxDuration) {
     var bytes = new byte[32];
     new SecureRandom().nextBytes(bytes);
     var credential = "sailrun_" + HexFormat.of().formatHex(bytes);
     var now = DateTimeUtils.now();
+    var expiresAt =
+        maxDuration == null ? null : now.plus(maxDuration).plus(CREDENTIAL_GRACE).toString();
     db.execute(
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?)",
         id,
         TokenStore.sha256(credential),
         now.toString(),
-        now.plus(CREDENTIAL_TTL).toString());
+        expiresAt);
     return credential;
   }
 

@@ -152,4 +152,33 @@ class SpecPolicyTest {
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.code());
   }
+
+  @Test
+  void agentPrincipalClaimsAnUnassignedSpecForItsOwningFde() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    assertAllowed(SpecPolicy.reassign(agent, SPEC, null, "raj"));
+    assertAllowed(SpecPolicy.reassign(agent, SPEC, "", "raj"));
+  }
+
+  @Test
+  void agentPrincipalCannotClaimForItsEphemeralRunHandle() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    var r = refused(SpecPolicy.reassign(agent, SPEC, null, "claude/a1b2c3"));
+
+    assertEquals(
+        ErrorCode.FORBIDDEN_ADMIN_ONLY,
+        r.code(),
+        "a run-scoped principal must never enter the assignee field");
+  }
+
+  @Test
+  void agentPrincipalCannotClaimForAThirdFde() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    var r = refused(SpecPolicy.reassign(agent, SPEC, null, "sumesh"));
+
+    assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
+  }
 }
