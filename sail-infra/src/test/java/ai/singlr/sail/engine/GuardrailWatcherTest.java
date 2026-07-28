@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Path;
@@ -41,10 +40,5 @@ class GuardrailWatcherTest {
         "Guardrail watcher started (pid 4242, detached process — no systemd available, log:"
             + " /tmp/watch.log)",
         line);
-  }
-
-  @Test
-  void launchIsANoOpWithoutAnAgentBlock() {
-    assertDoesNotThrow(() -> GuardrailWatcher.launch("acme", "sail.yaml", null, null));
   }
 }

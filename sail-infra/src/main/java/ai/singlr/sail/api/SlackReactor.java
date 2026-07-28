@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.SlackClient;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.store.SlackThreadStore;
@@ -95,7 +96,7 @@ public final class SlackReactor implements EventSubscriber {
 
   @Override
   public Predicate<Event> filter() {
-    return e -> NOTIFIABLE_TYPES.contains(e.type());
+    return e -> NOTIFIABLE_TYPES.contains(e.type()) && Strings.isNotBlank(e.spec());
   }
 
   @Override

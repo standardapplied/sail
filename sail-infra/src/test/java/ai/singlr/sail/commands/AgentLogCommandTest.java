@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -39,7 +40,8 @@ class AgentLogCommandTest {
         null,
         "t0",
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        null);
   }
 
   private static final String STREAM_EVENT =
@@ -59,18 +61,6 @@ class AgentLogCommandTest {
   }
 
   @Test
-  void reviewFlagSelectsTheReviewLogOtherwiseTheBuildLog() {
-    assertEquals(
-        "/home/dev/.sail/agent.log",
-        AgentLogCommand.logPathFor(false),
-        "default follows the coder's build log");
-    assertEquals(
-        "/home/dev/.sail/review.log",
-        AgentLogCommand.logPathFor(true),
-        "--review follows the reviewer/fix negotiation log");
-  }
-
-  @Test
   void buildLogFollowsTheLatestRunsRunScopedLog() {
     assertEquals(
         "/home/dev/.sail/runs/r1/agent.log",
@@ -79,13 +69,15 @@ class AgentLogCommandTest {
   }
 
   @Test
-  void buildLogFallsBackToTheSharedLogWhenNoRunExists() {
-    assertEquals("/home/dev/.sail/agent.log", AgentLogCommand.logPathFrom(Optional.empty()));
+  void noRunRowMeansNoBuildLog() {
+    assertNull(
+        AgentLogCommand.logPathFrom(Optional.empty()),
+        "every session is a run, so without a run there is no log to fall back to");
   }
 
   @Test
-  void buildLogFallsBackToTheSharedLogWhenTheRunHasNoLogPath() {
-    assertEquals("/home/dev/.sail/agent.log", AgentLogCommand.logPathFrom(Optional.of(run(""))));
+  void aRunWithoutARecordedLogPathMeansNoBuildLog() {
+    assertNull(AgentLogCommand.logPathFrom(Optional.of(run(""))));
   }
 
   @Test

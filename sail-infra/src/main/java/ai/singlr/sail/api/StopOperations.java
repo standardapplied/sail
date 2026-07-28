@@ -42,12 +42,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
- * still-{@code running} run released as {@code stopped}, in one transaction). A pid mismatch is a
- * structured no-op — stopping a stale run id can never kill a different, newer run — a run that is
- * no longer its spec's latest attempt is never a lever to cancel newer work (a terminal one is
- * {@link AlreadyTerminal}; a live or dead one is halted or released without touching the spec), and
- * a second stop of the same run is idempotent by construction, returning {@link AlreadyTerminal}
- * without signalling anything.
+ * still-{@code running} run released as {@code stopped}, in one transaction). Every run — build or
+ * ad-hoc, background or foreground — owns its run-scoped unit and pid file, so a stop can only ever
+ * signal the process the addressed run launched: the run-scoped file rules out cross-run identity
+ * theft, and a run that persisted its agent pid is additionally guarded against in-container pid
+ * reuse — a stale file naming a different live pid, or the recorded pid itself reoccupied by a
+ * process whose {@code /proc} start-time fingerprint no longer matches the one persisted at launch,
+ * refuses with a conflict instead of authorizing a kill, and the verified halt re-probes before
+ * anything is finalized. A run that is no longer its spec's latest attempt is never a lever to
+ * cancel newer work (a terminal one is {@link AlreadyTerminal}; a live or dead one is halted or
+ * released without touching the spec), and a second stop of the same run is idempotent by
+ * construction, returning {@link AlreadyTerminal} without signalling anything.
  */
 public final class StopOperations {
 
@@ -64,14 +69,13 @@ public final class StopOperations {
   public record ProjectTarget(String project) implements Target {}
 
   /** What a stop produced; each lane renders it without duplicating any decision. */
-  public sealed interface Outcome permits Stopped, NotRunning, AlreadyTerminal, NotActive {
+  public sealed interface Outcome permits Stopped, NotRunning, AlreadyTerminal {
     /** Whether this stop wrote anything — a halted agent, a cancelled spec, a released run. */
     default boolean mutated() {
       return switch (this) {
         case Stopped ignored -> true;
         case NotRunning notRunning -> notRunning.specCancelled() || notRunning.runReleased();
         case AlreadyTerminal ignored -> false;
-        case NotActive ignored -> false;
       };
     }
 
@@ -85,15 +89,15 @@ public final class StopOperations {
         case NotRunning notRunning ->
             notRunning.runReleased() ? "no_agent_running" : "run_not_running";
         case AlreadyTerminal ignored -> "run_not_running";
-        case NotActive ignored -> "run_not_active";
       };
     }
   }
 
   /**
-   * The live agent was halted after its terminal intent was recorded. {@code runId} and {@code
-   * specId} are null for an ad-hoc session that minted no run; {@code specCancelled} reports
-   * whether the spec moved to {@link SpecStatus#CANCELLED}.
+   * The live agent was halted after its terminal intent was recorded. {@code runId} always names
+   * the stopped run — an ad-hoc session is a run like any other; {@code specId} is null for a run
+   * that works no spec; {@code specCancelled} reports whether the spec moved to {@link
+   * SpecStatus#CANCELLED}.
    */
   public record Stopped(String runId, String specId, Integer pid, boolean specCancelled)
       implements Outcome {}
@@ -110,12 +114,6 @@ public final class StopOperations {
   /** The run and its spec are already terminal — a repeated stop, a pure no-op. */
   public record AlreadyTerminal(String runId, String specId, String runStatus) implements Outcome {}
 
-  /**
-   * The live agent on the run's unit is not this run's process ({@code livePid} differs from the
-   * run's recorded pid), so nothing was killed and nothing was written.
-   */
-  public record NotActive(String runId, String specId, Integer livePid) implements Outcome {}
-
   /** How the kill runs — the only side effect that differs from a store write. */
   @FunctionalInterface
   public interface AgentHalter {
@@ -129,22 +127,16 @@ public final class StopOperations {
   }
 
   /**
-   * Resolves the session shown by CLI status/config views: the active build run's own unit first,
-   * then the independent ad-hoc unit.
+   * Resolves the session shown by CLI status/config views: the active session run's (build or
+   * ad-hoc) own recorded identity, or null when the project has no active run on this box.
    */
   public static AgentSession.SessionInfo resolveSession(
       ShellExec shell, RunStore runs, String project, String localHandle) throws Exception {
-    var session = new AgentSession(shell);
-    AgentSession.SessionInfo runInfo = null;
     var run = runs.runningForProjectOnNode(project, localHandle).orElse(null);
-    if (run != null) {
-      runInfo = session.queryStatus(project, runUnit(run));
-      if (runInfo != null && runInfo.running()) {
-        return runInfo;
-      }
+    if (run == null) {
+      return null;
     }
-    var adHoc = session.queryStatus(project, AgentUnit.BUILD);
-    return adHoc != null || runInfo == null ? adHoc : runInfo;
+    return new AgentSession(shell).queryStatus(project, runUnit(run));
   }
 
   /**
@@ -209,7 +201,7 @@ public final class StopOperations {
           "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
           "Stop it from " + node + "'s box.");
     }
-    if (!run.buildRole()) {
+    if (!run.sessionRole()) {
       throw new ApiException(
           ErrorCode.INVALID_ROLE,
           "Run "
@@ -226,27 +218,18 @@ public final class StopOperations {
   }
 
   /**
-   * A project-targeted stop resolves the active run row first, but a stale row must not mask the
-   * separate fixed ad-hoc session: a dispatched agent that died without completing its row leaves a
-   * {@code running} row behind while a later {@code sail agent start} session is the live process
-   * the operator means to stop. When the resolved run turns out dead ({@link NotRunning}), the
-   * stranded rescue still happens and the ad-hoc identity is probed and stopped as well.
+   * A project-targeted stop resolves the newest active session run — build or ad-hoc, the two are
+   * mutually exclusive by reservation — and applies the one resolved-run procedure. A project with
+   * no active run on this box has nothing to stop.
    */
   private Outcome stopProject(String project, Actor actor, String localHandle, boolean dryRun) {
     projects.requireExists(project);
     var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
     if (run == null) {
-      return stopAdHoc(project, dryRun);
+      return new NotRunning(null, null, false, false);
     }
     authorize(actor, run);
-    var resolved = stopResolved(run, actor, dryRun);
-    if (!(resolved instanceof NotRunning stranded)) {
-      return resolved;
-    }
-    if (stopAdHoc(project, dryRun) instanceof Stopped stopped) {
-      return new Stopped(null, stranded.specId(), stopped.pid(), stranded.specCancelled());
-    }
-    return stranded;
+    return stopResolved(run, actor, dryRun);
   }
 
   /**
@@ -254,7 +237,11 @@ public final class StopOperations {
    * own recorded unit, claim the stop (spec cancelled, run {@code stopping}, one transaction),
    * halt, and finalize the claim once the kill is verified. A run already holding a claim is an
    * interrupted stop and resumes instead. Every no-op branch is structured and write-free except
-   * the stranded rescues, which record intent without a kill.
+   * the stranded rescues, which record intent without a kill. A dead probe over a run that never
+   * persisted a pid covers both a launch still preparing and a launch that died before stamping;
+   * recording terminal intent is safe in both, because the launcher's process stamp commits only
+   * while the run is still {@code running} — a launch that loses to this cancel discovers the loss
+   * at the stamp and tears its agent down rather than escaping the reservation.
    */
   private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
     var spec = specOf(run);
@@ -263,7 +250,7 @@ public final class StopOperations {
     }
     if (!"running".equals(run.status())) {
       if (!cancelable(spec)) {
-        return new AlreadyTerminal(run.id(), run.specId(), run.status());
+        return new AlreadyTerminal(run.id(), specIdOf(run), run.status());
       }
       if (dryRun) {
         return isCurrentAttempt(run)
@@ -280,16 +267,14 @@ public final class StopOperations {
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
       if (dryRun) {
-        return new NotRunning(run.id(), run.specId(), previewCancel(run, spec), true);
+        return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
       }
-      return new NotRunning(run.id(), run.specId(), recordIntent(run, spec, actor), true);
+      return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec, actor), true);
     }
-    if (run.pid() == null || info.pid() != run.pid()) {
-      return new NotActive(run.id(), run.specId(), info.pid());
-    }
+    requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
-      return new Stopped(run.id(), run.specId(), info.pid(), previewCancel(run, spec));
+      return new Stopped(run.id(), specIdOf(run), info.pid(), previewCancel(run, spec));
     }
     return killVerified(run, spec, actor, unit, info.pid());
   }
@@ -315,7 +300,7 @@ public final class StopOperations {
       throw failure;
     }
     finishStop(run, actor);
-    return new Stopped(run.id(), run.specId(), pid, cancelled);
+    return new Stopped(run.id(), specIdOf(run), pid, cancelled);
   }
 
   /**
@@ -334,19 +319,17 @@ public final class StopOperations {
       if (!dryRun) {
         finishStop(run, actor);
       }
-      return new NotRunning(run.id(), run.specId(), false, true);
+      return new NotRunning(run.id(), specIdOf(run), false, true);
     }
-    if (run.pid() == null || info.pid() != run.pid()) {
-      return new NotActive(run.id(), run.specId(), info.pid());
-    }
+    requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
-      return new Stopped(run.id(), run.specId(), info.pid(), false);
+      return new Stopped(run.id(), specIdOf(run), info.pid(), false);
     }
     halt(run.project(), unit);
     verifyHalted(run.project(), unit);
     finishStop(run, actor);
-    return new Stopped(run.id(), run.specId(), info.pid(), false);
+    return new Stopped(run.id(), specIdOf(run), info.pid(), false);
   }
 
   /**
@@ -420,6 +403,64 @@ public final class StopOperations {
   }
 
   /**
+   * A run that persisted its agent pid only ever signals that pid — and only while the pid still
+   * names the process the run launched. The run-scoped pid file rules out cross-run confusion, but
+   * not in-container pid reuse after the original process exits: a replacement process assigned the
+   * same numeric pid makes the stored pid, the stale file, and the live pid all agree, so equality
+   * alone proves nothing. The persisted {@code /proc} start-time fingerprint does: no two processes
+   * ever share a pid <em>and</em> a start time, so a live process whose fingerprint differs — or
+   * cannot be read — is a replacement and must never be signalled. A run with no persisted pid (a
+   * session whose launch never resolved one) has no identity to compare, so the file's run-scoped
+   * identity is the only — and sufficient — authority; a run persisted before fingerprints existed
+   * keeps the pid-equality guard alone.
+   */
+  private void requirePidOwnership(RunStore.RunRow run, int livePid) {
+    if (run.pid() == null) {
+      return;
+    }
+    if (run.pid() != livePid) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run "
+              + run.id()
+              + " recorded PID "
+              + run.pid()
+              + " but its pid file names live PID "
+              + livePid
+              + "; refusing to signal a process the run does not own.",
+          "Reconcile the stale run before retrying the stop.");
+    }
+    if (pidReused(run, livePid)) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Run "
+              + run.id()
+              + "'s recorded PID "
+              + livePid
+              + " now names a different process (the PID was reused after the agent exited);"
+              + " refusing to signal a process the run does not own.",
+          "Reconcile the stale run before retrying the stop.");
+    }
+  }
+
+  /**
+   * Whether the live process at the run's pid is a later occupant rather than the process the run
+   * launched. No fingerprint on the run means nothing to compare; an unreadable live fingerprint
+   * reads as reused, because a kill must never proceed on an identity that cannot be verified.
+   */
+  private boolean pidReused(RunStore.RunRow run, int livePid) {
+    if (run.pidTicks() == null) {
+      return false;
+    }
+    try {
+      return !run.pidTicks()
+          .equals(new AgentSession(shell).readProcessStartTicks(run.project(), livePid));
+    } catch (Exception e) {
+      return true;
+    }
+  }
+
+  /**
    * A verified halt leaves no live process on the addressed unit. Rejecting <em>any</em> running
    * result — not only the original pid — keeps a replacement process (a unit restart, a pid reused
    * mid-halt) from being mistaken for a successful termination.
@@ -471,26 +512,6 @@ public final class StopOperations {
   }
 
   /**
-   * The ad-hoc fallback for a project with no active run row: a {@code sail agent start} session
-   * owns no run and no spec, so there is no intent to record — the verified kill is the whole stop,
-   * and nothing exists for the reaper or the pipeline to resume. Verified matters here too: the
-   * halter is a no-op when the pid file is missing while the probe can still see the live process
-   * through systemd, and only a re-probe keeps that state from being reported stopped.
-   */
-  private Outcome stopAdHoc(String project, boolean dryRun) {
-    var info = probe(project, AgentUnit.BUILD);
-    if (info == null || !info.running()) {
-      return new NotRunning(null, null, false, false);
-    }
-    listener.halting(project, AgentUnit.BUILD.unitName(), info.pid());
-    if (!dryRun) {
-      halt(project, AgentUnit.BUILD);
-      verifyHalted(project, AgentUnit.BUILD);
-    }
-    return new Stopped(null, null, info.pid(), false);
-  }
-
-  /**
    * Records the operator's terminal intent for a run with no live process to kill: the spec (when
    * still {@code in_progress}/{@code review}) moves to {@link SpecStatus#CANCELLED} and the run is
    * released as {@code stopped} with no exit code — in one transaction when both apply, so a
@@ -526,11 +547,16 @@ public final class StopOperations {
     data.put(Event.WellKnownData.RUN_ID, run.id());
     return Event.of(
         run.project(),
-        run.specId(),
+        specIdOf(run),
         Event.WellKnownTypes.AGENT_CANCELLED,
         agent,
         HostInfo.hostname(),
         data);
+  }
+
+  /** The run's spec id with the blank ad-hoc form normalized to null: no spec means no spec. */
+  static String specIdOf(RunStore.RunRow run) {
+    return Strings.isBlank(run.specId()) ? null : run.specId();
   }
 
   private SpecStore.SpecRow specOf(RunStore.RunRow run) {
@@ -546,23 +572,24 @@ public final class StopOperations {
   }
 
   private void authorize(Actor actor, RunStore.RunRow run) {
-    var assignee =
+    var owner =
         Strings.isBlank(run.specId())
-            ? null
+            ? run.node()
             : specStore.findById(run.specId()).map(SpecStore.SpecRow::assignee).orElse(null);
-    if (RunPolicy.access(actor, run.id(), run.specId(), assignee)
+    if (RunPolicy.access(actor, run.id(), specIdOf(run), owner)
         instanceof AccessDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }
   }
 
-  /** The systemd/file identity of a build run, rebuilt from the unit name recorded at launch. */
+  /**
+   * The systemd/file identity of a session run, rebuilt from the unit name recorded at launch. A
+   * foreground run records no unit — it is a blocking child process, not a service — but its
+   * run-scoped pid file carries the same identity, so probing and killing work through the file
+   * side while the systemd side simply reports nothing.
+   */
   static AgentUnit runUnit(RunStore.RunRow run) {
-    if (Strings.isBlank(run.unit())) {
-      throw new IllegalStateException(
-          "Build run " + run.id() + " has no unit; run 'sail migrate' to repair its data.");
-    }
-    return AgentUnit.recorded(run.id(), run.unit());
+    return AgentUnit.recorded(run.id(), Objects.toString(run.unit(), ""));
   }
 
   private AgentSession.SessionInfo probe(String project, AgentUnit unit) {

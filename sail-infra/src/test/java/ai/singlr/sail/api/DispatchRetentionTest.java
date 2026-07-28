@@ -52,6 +52,7 @@ class DispatchRetentionTest {
         "sail-agent-r",
         null,
         null,
-        List.of());
+        List.of(),
+        null);
   }
 }

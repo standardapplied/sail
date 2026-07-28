@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -80,6 +81,10 @@ public final class AgentLogCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
 
     var logPath = resolveLogPath(name, review);
+    if (logPath == null) {
+      printNoLog();
+      return;
+    }
 
     if (follow) {
       var tailCmd = ContainerExec.asDevUser(name, List.of("tail", "-f", logPath));
@@ -105,19 +110,7 @@ public final class AgentLogCommand implements Runnable {
       var result = shell.exec(cmd);
       if (!result.ok()) {
         if (result.stderr().contains("No such file")) {
-          if (json) {
-            var map = new LinkedHashMap<String, Object>();
-            map.put("name", name);
-            map.put("lines", List.of());
-            map.put("error", "No agent log found");
-            System.out.println(YamlUtil.dumpJson(map));
-            return;
-          }
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|faint No agent log found. Launch an agent with: sail agent start "
-                      + name
-                      + " --task \"...\" --background|@"));
+          printNoLog();
           return;
         }
         throw new IOException("Failed to read agent log: " + result.stderr());
@@ -137,53 +130,66 @@ public final class AgentLogCommand implements Runnable {
   }
 
   /**
-   * The log file to tail. With {@code --review}, the latest review's own negotiation log ({@code
-   * ~/.sail/runs/<reviewId>/review.log}) — each review owns its files so concurrent pipelines never
-   * interleave, which means there is no live shared review log to follow. Otherwise the latest
-   * build run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}) — since dispatch moved off
-   * the shared {@code agent.log}, tailing the shared file would show nothing for a dispatched run.
-   * Falls back to the fixed shared path when no run or review row exists (a manual {@code sail
-   * agent start}, or a pre-upgrade review) or the control-plane database cannot be read.
+   * The log file to tail, or null when the project has no session to show. With {@code --review},
+   * the latest review's own negotiation log ({@code ~/.sail/runs/<reviewId>/review.log}) — each
+   * review owns its files so concurrent pipelines never interleave — resolved through the latest
+   * <em>build</em> run, since only a spec's dispatch has reviews. Otherwise the latest session
+   * run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}), dispatched and ad-hoc alike:
+   * every agent session is a run, so no run row means no log.
    */
   private String resolveLogPath(String project, boolean review) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var latestRun = new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle());
+      var runs = new RunStore(db);
       if (review) {
-        return reviewLogPathFrom(latestRun, new ReviewStore(db));
+        return reviewLogPathFrom(latestBuildRun(runs, project), new ReviewStore(db));
       }
-      return logPathFrom(latestRun);
+      return logPathFrom(runs.latestForProjectOnNode(project, NodeIdentity.handle()));
     } catch (RuntimeException e) {
-      return logPathFor(review);
+      return null;
     }
   }
 
-  /** The latest local run's run-scoped log path, or the shared build log when there is none. */
+  private static Optional<RunStore.RunRow> latestBuildRun(RunStore runs, String project) {
+    return runs.listForProject(project).stream()
+        .filter(RunStore.RunRow::buildRole)
+        .filter(
+            run ->
+                Objects.toString(run.node(), "")
+                    .equals(Objects.toString(NodeIdentity.handle(), "")))
+        .findFirst();
+  }
+
+  /** The latest local session run's run-scoped log path, or null when there is none. */
   static String logPathFrom(Optional<RunStore.RunRow> latestRun) {
-    return latestRun
-        .map(RunStore.RunRow::logPath)
-        .filter(Strings::isNotBlank)
-        .orElseGet(() -> logPathFor(false));
+    return latestRun.map(RunStore.RunRow::logPath).filter(Strings::isNotBlank).orElse(null);
   }
 
   /**
-   * The latest run's spec's latest review log, per-review under the review's own directory, or the
-   * fixed foreground-review log when the current dispatch attempt has no review yet. Foreground
-   * review identity intentionally remains shared until the ad-hoc run-scoping work lands.
+   * The latest build run's spec's latest review log, per-review under the review's own directory,
+   * or the fixed foreground-review log when the current dispatch attempt has no review yet.
    */
   static String reviewLogPathFrom(Optional<RunStore.RunRow> latestRun, ReviewStore reviews) {
     return latestRun
         .map(RunStore.RunRow::specId)
         .flatMap(reviews::latestReviewForSpec)
         .map(review -> AgentUnit.forReview(review.id()).logPath())
-        .orElseGet(() -> logPathFor(true));
+        .orElseGet(AgentUnit.REVIEW::logPath);
   }
 
-  /**
-   * The static log path for a unit: the reviewer/fix negotiation ({@code review.log}) with {@code
-   * --review}, else the coder's shared build log ({@code agent.log}).
-   */
-  static String logPathFor(boolean review) {
-    return (review ? AgentUnit.REVIEW : AgentUnit.BUILD).logPath();
+  private void printNoLog() {
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("name", name);
+      map.put("lines", List.of());
+      map.put("error", "No agent log found");
+      System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|faint No agent log found. Launch an agent with: sail agent run "
+                + name
+                + " --task \"...\" --background|@"));
   }
 
   /**

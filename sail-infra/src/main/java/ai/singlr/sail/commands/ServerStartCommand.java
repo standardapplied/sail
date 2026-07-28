@@ -261,9 +261,8 @@ public final class ServerStartCommand implements Runnable {
     var watcherSpawner = new WatcherSpawner(reconcileShell, null);
     var rearmer =
         new WatcherRearmer(
-            specStore,
             runStore,
-            unitProbe,
+            WatcherRearmer.systemdUnitActiveProbe(reconcileShell),
             watcherSpawner::watcherProcessRunningForRun,
             WatcherRearmer.livingProcess(),
             NodeIdentity::handle,

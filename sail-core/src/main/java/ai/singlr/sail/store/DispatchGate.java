@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -49,11 +50,20 @@ public final class DispatchGate {
     return running.stream()
         .map(
             run ->
-                run.specId().equals(targetSpecId)
+                sameSpec(run.specId(), targetSpecId)
                     ? Optional.of(new Conflict(run, List.of()))
                     : conflictWith(targetRepos, run))
         .flatMap(Optional::stream)
         .findFirst();
+  }
+
+  /**
+   * Whether the running run works the very spec being dispatched. A blank id names no spec — an
+   * ad-hoc session or a legacy row — so two blank ids are never "the same spec"; their conflict is
+   * decided by the repo overlap rule alone (which an empty repo set makes total anyway).
+   */
+  private static boolean sameSpec(String runSpecId, String targetSpecId) {
+    return runSpecId != null && !runSpecId.isBlank() && Objects.equals(runSpecId, targetSpecId);
   }
 
   private static Optional<Conflict> conflictWith(List<String> targetRepos, RunningRun run) {

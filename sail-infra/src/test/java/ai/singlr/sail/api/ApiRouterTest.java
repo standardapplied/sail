@@ -926,7 +926,8 @@ class ApiRouterTest {
             null,
             "t0",
             "t1",
-            java.util.List.of());
+            java.util.List.of(),
+            null);
     var view = RunView.from(row);
     assertEquals("s1", view.id());
     assertEquals("node-a", view.node());

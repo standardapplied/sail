@@ -56,12 +56,10 @@ import picocli.CommandLine.Spec;
  * only its remaining budget. Supervision is on by default (see {@code Guardrails.defaults()});
  * sail.yaml overrides every threshold and the action.
  *
- * <p>A dispatched run's watcher is run-addressed: {@code --run} names the run whose agent it
- * supervises and {@code --unit} the systemd unit that run was launched as (recorded on the run,
- * never re-derived here). Progress events then reset the stall timer only when they carry this
- * run's id, so a concurrent run's tool calls in the same container never keep a hung agent alive.
- * Without {@code --run} the watcher supervises the fixed ad-hoc identity, the {@code sail agent
- * start} lane.
+ * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises and
+ * {@code --unit} the systemd unit that run was launched as (recorded on the run, never re-derived
+ * here). Progress events reset the stall timer only when they carry this run's id, so a concurrent
+ * run's tool calls in the same container never keep a hung agent alive.
  */
 @Command(
     name = "watch",
@@ -84,7 +82,8 @@ public final class AgentWatchCommand implements Runnable {
 
   @Option(
       names = "--run",
-      description = "Run id of the dispatched agent to supervise (default: the ad-hoc session).")
+      required = true,
+      description = "Run id of the agent session to supervise.")
   private String runId;
 
   @Option(
@@ -122,13 +121,10 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   /**
-   * The identity this watcher supervises: the recorded unit of {@code --run} (derived only when a
-   * caller omitted {@code --unit}), or the fixed ad-hoc identity when no run was named.
+   * The identity this watcher supervises: the recorded unit of {@code --run}, derived only when a
+   * caller omitted {@code --unit}.
    */
   private AgentUnit resolveUnit() {
-    if (Strings.isBlank(runId)) {
-      return AgentUnit.BUILD;
-    }
     return Strings.isBlank(unitName)
         ? AgentUnit.forRun(runId)
         : AgentUnit.recorded(runId, unitName);
@@ -337,15 +333,11 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   /**
-   * Whether an event belongs to the watched run. A run-addressed watcher accepts only events
-   * stamped with its run id — the in-container hooks send {@code SAIL_RUN_ID} on every heartbeat —
-   * so a concurrent run's tool calls never reset this run's stall timer. A project-scoped (ad-hoc)
-   * watcher accepts everything, the prior behavior.
+   * Whether an event belongs to the watched run. The watcher accepts only events stamped with its
+   * run id — the in-container hooks send {@code SAIL_RUN_ID} on every heartbeat — so a concurrent
+   * run's tool calls never reset this run's stall timer.
    */
   static boolean matchesRun(Event event, String watchedRunId) {
-    if (Strings.isBlank(watchedRunId)) {
-      return true;
-    }
     return watchedRunId.equals(
         Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null));
   }
@@ -435,20 +427,22 @@ public final class AgentWatchCommand implements Runnable {
     if (publisher == null) {
       return;
     }
-    if (Strings.isBlank(exit.specId())) {
+    if (Strings.isBlank(exit.specId()) && Strings.isBlank(exit.runId())) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint [watch] no spec id for "
+              "  @|faint [watch] no spec or run id recovered for "
                   + project
-                  + "; ad-hoc session, no stop published|@"));
+                  + "; no stop published|@"));
       return;
     }
     try {
       publisher.publish(syntheticStop(project, exit));
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint [watch] published stop for spec "
-                  + exit.specId()
+              "  @|faint [watch] published stop for "
+                  + (Strings.isBlank(exit.specId())
+                      ? "run " + exit.runId()
+                      : "spec " + exit.specId())
                   + " (exit "
                   + exit.exitCode()
                   + ")|@"));
@@ -473,7 +467,7 @@ public final class AgentWatchCommand implements Runnable {
     }
     return Event.of(
         project,
-        exit.specId(),
+        Strings.isBlank(exit.specId()) ? null : exit.specId(),
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         agent,
         HostInfo.hostname(),

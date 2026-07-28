@@ -370,9 +370,11 @@ their repo sets overlap. The overlap gate is an atomic reservation: one `BEGIN I
 SQLite transaction checks every running local run and inserts the new run with its reserved
 repos, so concurrent dispatches — even a CLI and the server in separate processes — can never
 both claim the same repo, and a reservation failure aborts the dispatch before any spec is
-claimed or branch checked out. An ad-hoc `sail agent start` session mints no run row, so
-dispatch probes the fixed `sail-agent` identity and refuses while one is live: a row-less
-agent may touch any repo, and whole-container is the only safe reading. Coverage is probed rather than bookkept, per run, and the periodic
+claimed or branch checked out. An ad-hoc `sail agent run --task` session is a run like any
+other: it mints a `role='adhoc'` row with no spec and an empty repo set — the
+whole-container reservation — through the same transaction, so ad-hoc and dispatched agents
+exclude each other atomically and are stopped, listed, and reconciled by the same run-scoped
+machinery. Coverage is probed rather than bookkept, per run, and the periodic
 re-armer — whose coverage probe is process-level, seeing units in
 any user's systemd scope and plain fallback processes alike — relaunches unit-or-nothing for
 any running agent nothing covers, resuming the original deadline rather than granting a

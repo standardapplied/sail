@@ -5,18 +5,26 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
-import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import java.nio.file.Files;
+import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -24,6 +32,11 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
+/**
+ * Runs the entropy-sweep prompt as a foreground ad-hoc session through the shared {@link
+ * DispatchOperations} launch machinery, so a sweep is a first-class run — reserved, recorded, and
+ * mutually exclusive with any dispatched agent in the container.
+ */
 @Command(
     name = "sweep",
     description = "Run an entropy sweep to clean up codebase drift and inconsistencies.",
@@ -86,64 +99,78 @@ public final class AgentSweepCommand implements Runnable {
 
     ContainerStateGuard.requireRunning(state, name);
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    SailYaml config = null;
-    if (Files.exists(singYamlPath)) {
-      config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var handle = Objects.toString(HostSync.handle(), "");
+    var describeOnly = json || dryRun;
+    var launchCommand = new AtomicReference<List<String>>();
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      var operations = operations(shell, launchCommand, db);
+      var request =
+          new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
+      DispatchOperations.AdhocSession session;
+      try {
+        session = operations.startAdhoc(name, request, handle);
+      } catch (ApiException e) {
+        var action = e.failure().action();
+        throw new IllegalStateException(
+            Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action, e);
+      }
+      render(session, launchCommand.get());
     }
+  }
 
-    var sshUser = config != null ? config.sshUser() : "dev";
-    var workDir = "/home/" + sshUser + "/workspace";
-    var agentType =
-        config != null && config.agent() != null ? config.agent().type() : "claude-code";
-    var agentCli = AgentCli.fromYamlName(agentType);
-    var fullPermissions =
-        config != null
-            && config.agent() != null
-            && config.agent().config() != null
-            && "full".equals(config.agent().config().get("permissions"));
+  private DispatchOperations operations(
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand, Sqlite db) {
+    var listener =
+        new DispatchOperations.Listener() {
+          @Override
+          public void launching(boolean bg, List<String> command) {
+            launchCommand.set(command);
+            if (json) {
+              return;
+            }
+            if (!dryRun) {
+              Banner.printBranding(System.out, Ansi.AUTO);
+            }
+            System.out.println();
+            System.out.println(Ansi.AUTO.string("  @|bold Launching entropy sweep...|@"));
+            System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", command) + "|@"));
+            System.out.println();
+          }
+        };
+    return new DispatchOperations(
+        shell,
+        file,
+        new SpecStore(db),
+        new ReviewStore(db),
+        new RunStore(db),
+        new FdeStore(db),
+        event -> {},
+        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+        (project, config) -> "",
+        DispatchOperations.terminalLauncher(),
+        listener);
+  }
 
-    var agentSession = new AgentSession(shell);
-    agentSession.ensureDirectory(name);
-    agentSession.writeTaskFile(name, SWEEP_PROMPT);
-
-    var sshCmd =
-        AgentSession.buildForegroundTaskCommand(name, sshUser, workDir, fullPermissions, agentCli);
-
+  private void render(DispatchOperations.AdhocSession session, List<String> command) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("action", "sweep");
-      map.put("agent", agentType);
-      map.put("ssh_command", String.join(" ", sshCmd));
+      map.put("run_id", session.runId());
+      map.put("ssh_command", command == null ? "" : String.join(" ", command));
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
-
-    if (!dryRun) {
-      Banner.printBranding(System.out, Ansi.AUTO);
-    }
-    System.out.println();
-    System.out.println(
-        Ansi.AUTO.string("  @|bold Launching entropy sweep with " + agentType + "...|@"));
-    System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", sshCmd) + "|@"));
-    System.out.println();
-
     if (dryRun) {
-      System.out.println("[dry-run] " + String.join(" ", sshCmd));
-    } else {
-      var pb = new ProcessBuilder(sshCmd);
-      pb.inheritIO();
-      var process = pb.start();
-      var exitCode = process.waitFor();
-      if (exitCode != 0) {
-        System.err.println(
-            Banner.errorLine("Sweep session exited with code " + exitCode, Ansi.AUTO));
-      } else {
-        System.out.println(Ansi.AUTO.string("  @|bold,green \u2713 Entropy sweep complete.|@"));
-        System.out.println(
-            Ansi.AUTO.string("  @|faint Report at:|@ /home/" + sshUser + "/sweep-report.md"));
-      }
+      System.out.println("[dry-run] " + (command == null ? "" : String.join(" ", command)));
+      return;
     }
+    if (session.exitCode() != null && session.exitCode() != 0) {
+      System.err.println(
+          Banner.errorLine("Sweep session exited with code " + session.exitCode(), Ansi.AUTO));
+      return;
+    }
+    System.out.println(Ansi.AUTO.string("  @|bold,green ✓ Entropy sweep complete.|@"));
+    System.out.println(Ansi.AUTO.string("  @|faint Report at:|@ ~/sweep-report.md"));
   }
 }

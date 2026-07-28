@@ -23,8 +23,6 @@ import java.util.concurrent.TimeoutException;
 public final class AgentSession {
 
   private static final String SAIL_DIR = "/home/dev/.sail";
-  private static final String LOG_FILE = AgentUnit.BUILD.logPath();
-  private static final String TASK_FILE = AgentUnit.BUILD.taskPath();
 
   private final ShellExec shell;
 
@@ -63,18 +61,11 @@ public final class AgentSession {
   }
 
   /**
-   * Writes the task text to a file inside the container. Uses printf with a positional argument to
-   * avoid heredoc injection (content containing the delimiter could escape the heredoc).
-   */
-  public void writeTaskFile(String containerName, String task)
-      throws IOException, InterruptedException, TimeoutException {
-    writeTaskFile(containerName, task, AgentUnit.BUILD);
-  }
-
-  /**
-   * Writes the task/prompt file for the given role's unit (build task or review prompt). Creates
-   * the file's parent directory first: a run-scoped unit lives under {@code ~/.sail/runs/<runId>/},
-   * which does not exist yet when dispatch stages the task before launch.
+   * Writes the task/prompt file for the given role's unit (build task or review prompt). Uses
+   * printf with a positional argument to avoid heredoc injection (content containing the delimiter
+   * could escape the heredoc). Creates the file's parent directory first: a run-scoped unit lives
+   * under {@code ~/.sail/runs/<runId>/}, which does not exist yet when the launcher stages the task
+   * before launch.
    */
   public void writeTaskFile(String containerName, String task, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -94,59 +85,16 @@ public final class AgentSession {
     }
   }
 
-  /** Writes session metadata JSON inside the container for an ad-hoc (non-spec) launch. */
-  public void writeSession(String containerName, String task, String branch)
-      throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, "", "");
-  }
-
   /**
-   * Writes session metadata JSON inside the container. The {@code specId} and {@code agentType} are
-   * the durable record of which spec this dispatch is for: the systemd unit's environment carries
-   * them too, but a successfully-exited transient unit is garbage-collected within seconds, taking
-   * its environment with it. The watcher therefore recovers them from this file when the unit is
-   * already gone, so a clean agent exit still produces a spec-attributed stop signal.
+   * Writes session metadata JSON for the given role's unit (its own session file and log path). The
+   * {@code specId}, {@code agentType}, and {@code runId} are the durable record of what this launch
+   * executes: the systemd unit's environment carries them too, but a successfully-exited transient
+   * unit is garbage-collected within seconds, taking its environment with it. The watcher therefore
+   * recovers them from this file when the unit is already gone, so a clean agent exit still
+   * produces a run-addressed stop signal. {@code repos} is the spec's resolved repo set (empty for
+   * an ad-hoc session), so the stop gate can scope its readiness checks to exactly the repos a
+   * dispatch works in rather than every repo in the shared container.
    */
-  public void writeSession(
-      String containerName, String task, String branch, String specId, String agentType)
-      throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, "", List.of(), AgentUnit.BUILD);
-  }
-
-  /**
-   * Writes session metadata carrying the run id, so the watcher can recover it from the durable
-   * file when the transient unit's environment is already gone and address its synthesized stop at
-   * the exact run.
-   */
-  public void writeSession(
-      String containerName,
-      String task,
-      String branch,
-      String specId,
-      String agentType,
-      String runId)
-      throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, runId, List.of(), AgentUnit.BUILD);
-  }
-
-  /**
-   * Writes session metadata carrying the run id and the spec's resolved repos, so the stop gate can
-   * scope its readiness checks to exactly the repos this dispatch works in rather than every repo
-   * in the shared container.
-   */
-  public void writeSession(
-      String containerName,
-      String task,
-      String branch,
-      String specId,
-      String agentType,
-      String runId,
-      List<String> repos)
-      throws IOException, InterruptedException, TimeoutException {
-    writeSession(containerName, task, branch, specId, agentType, runId, repos, AgentUnit.BUILD);
-  }
-
-  /** Writes session metadata for the given role's unit (its own session file and log path). */
   public void writeSession(
       String containerName,
       String task,
@@ -181,12 +129,6 @@ public final class AgentSession {
     if (!result.ok()) {
       throw new IOException("Failed to write session metadata: " + result.stderr());
     }
-  }
-
-  /** Queries the current agent session status. Returns null if no session exists. */
-  public SessionInfo queryStatus(String containerName)
-      throws IOException, InterruptedException, TimeoutException {
-    return queryStatus(containerName, AgentUnit.BUILD);
   }
 
   /** Queries the given role's session status. Returns null if no session exists for it. */
@@ -224,10 +166,51 @@ public final class AgentSession {
     return new SessionInfo(alive, pid, task, startedAt, branch, unit.logPath());
   }
 
-  /** Kills a running agent process inside the container. SIGTERM first, then SIGKILL. */
-  public void killAgent(String containerName)
+  /**
+   * Reads a container process's non-reusable start fingerprint: the {@code starttime} field of
+   * {@code /proc/<pid>/stat}, in clock ticks since boot. The kernel reuses numeric pids, so a pid
+   * alone can later name an unrelated process; two processes assigned the same pid can never share
+   * a start time, so a fingerprint persisted at launch distinguishes the process a run launched
+   * from any later occupant of its pid. Returns null when the process is gone or unreadable.
+   */
+  public Long readProcessStartTicks(String containerName, int pid)
       throws IOException, InterruptedException, TimeoutException {
-    killAgent(containerName, AgentUnit.BUILD);
+    var cmd = ContainerExec.asDevUser(containerName, List.of("cat", "/proc/" + pid + "/stat"));
+    var result = shell.exec(cmd);
+    return result.ok() ? parseStartTicks(result.stdout()) : null;
+  }
+
+  /**
+   * Field 22 of the stat line, located after the last {@code ')'} because the comm field may itself
+   * contain spaces or parentheses.
+   */
+  static Long parseStartTicks(String stat) {
+    var close = stat.lastIndexOf(')');
+    if (close < 0) {
+      return null;
+    }
+    var fields = stat.substring(close + 1).trim().split("\\s+");
+    if (fields.length < 20) {
+      return null;
+    }
+    try {
+      return Long.parseLong(fields[19]);
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  /**
+   * Whether the unit is active in the container's user systemd manager. Unlike {@link #queryStatus}
+   * this never falls back to the run's pid file, so it distinguishes launch modes: a background
+   * session runs as its recorded unit, a foreground session only writes the pid file.
+   */
+  public boolean unitActive(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var cmd =
+        ContainerExec.asDevUser(
+            containerName, List.of("systemctl", "--user", "--quiet", "is-active", unit.service()));
+    return shell.exec(cmd).ok();
   }
 
   /**
@@ -272,22 +255,6 @@ public final class AgentSession {
     shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
   }
 
-  /**
-   * Builds an {@code incus exec} command for launching an agent in detached/background mode. The
-   * task is read from a file inside the container to avoid shell escaping issues.
-   *
-   * @param agentCli the agent CLI enum (determines headless command syntax)
-   */
-  public static List<String> buildBackgroundLaunchCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli) {
-    return buildBackgroundLaunchCommand(
-        containerName, sshUser, workDir, fullPermissions, agentCli, null, null, null, null);
-  }
-
   public static String launchWorkDir(String sshUser, List<SailYaml.Repo> targetRepos) {
     var workspace = "/home/" + sshUser + "/workspace";
     if (targetRepos.size() == 1) {
@@ -296,70 +263,18 @@ public final class AgentSession {
     return workspace;
   }
 
-  public static List<String> buildBackgroundLaunchCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli,
-      String model,
-      String reasoningEffort) {
-    return buildBackgroundLaunchCommand(
-        containerName,
-        sshUser,
-        workDir,
-        fullPermissions,
-        agentCli,
-        model,
-        reasoningEffort,
-        null,
-        null);
-  }
-
   /**
-   * Same as the simpler overload, with two extra inputs used to correlate hook events back to a
-   * specific spec dispatch:
-   *
-   * <ul>
-   *   <li>{@code specId} — flows into the spawned agent's environment as {@code SAIL_SPEC_ID}; an
-   *       empty or {@code null} value signals a non-spec ad-hoc launch, in which case the in-
-   *       container hook script no-ops instead of publishing events.
-   *   <li>{@code agentType} — flows in as {@code SAIL_AGENT}; defaults to the CLI's yaml name when
-   *       blank.
-   * </ul>
-   */
-  public static List<String> buildBackgroundLaunchCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli,
-      String model,
-      String reasoningEffort,
-      String specId,
-      String agentType) {
-    return buildBackgroundLaunchCommand(
-        containerName,
-        sshUser,
-        workDir,
-        fullPermissions,
-        agentCli,
-        model,
-        reasoningEffort,
-        specId,
-        agentType,
-        AgentUnit.BUILD.logPath(),
-        "");
-  }
-
-  /**
-   * As the other overload, launching under the run's own identity: unit {@code sail-agent-<runId>},
-   * stdout/stderr redirected to {@code logPath} ({@code ~/.sail/runs/<runId>/agent.log}), and
-   * pid/task files under the run directory — so concurrent dispatches never collide on a unit name
-   * or clobber a shared file, and a log address names exactly one execution. The log's parent
-   * directory is created before the redirect. {@code runId} flows in as {@code SAIL_RUN_ID} so the
-   * agent's hooks and the watcher can address terminal events at the exact run; blank means an
-   * ad-hoc launch on the fixed {@link AgentUnit#BUILD} identity.
+   * Builds the {@code incus exec} command launching a headless agent in detached/background mode
+   * under the run's own identity: unit {@code sail-agent-<runId>}, stdout/stderr redirected to
+   * {@code logPath} ({@code ~/.sail/runs/<runId>/agent.log}), and pid/task files under the run
+   * directory — so concurrent executions never collide on a unit name or clobber a shared file, and
+   * a log address names exactly one execution. The task is read from a file inside the container to
+   * avoid shell escaping issues, and the log's parent directory is created before the redirect.
+   * {@code specId} flows into the spawned agent's environment as {@code SAIL_SPEC_ID} (blank for an
+   * ad-hoc session, which makes the in-container hook script no-op); {@code agentType} flows in as
+   * {@code SAIL_AGENT}, defaulting to the CLI's yaml name when blank; {@code runId} flows in as
+   * {@code SAIL_RUN_ID} so the agent's hooks and the watcher can address terminal events at the
+   * exact run.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -375,8 +290,7 @@ public final class AgentSession {
       String runId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
-    var effectiveRunId = Objects.requireNonNullElse(runId, "");
-    var unit = effectiveRunId.isBlank() ? AgentUnit.BUILD : AgentUnit.forRun(effectiveRunId);
+    var unit = AgentUnit.forRun(runId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
         cli.headlessCommand(
@@ -419,79 +333,17 @@ public final class AgentSession {
             unit.pidPath(),
             effectiveSpec,
             effectiveAgent,
-            effectiveRunId));
+            runId));
   }
 
   /**
-   * Builds an {@code incus exec} command for launching an agent in interactive headless mode
-   * (foreground, with task). The task is read from a file to avoid escaping issues.
-   *
-   * @param agentCli the agent CLI enum (determines headless command syntax)
-   */
-  public static List<String> buildForegroundTaskCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli) {
-    return buildForegroundTaskCommand(
-        containerName, sshUser, workDir, fullPermissions, agentCli, null, null, null, null);
-  }
-
-  public static List<String> buildForegroundTaskCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli,
-      String model,
-      String reasoningEffort) {
-    return buildForegroundTaskCommand(
-        containerName,
-        sshUser,
-        workDir,
-        fullPermissions,
-        agentCli,
-        model,
-        reasoningEffort,
-        null,
-        null);
-  }
-
-  /**
-   * Same as the simpler overload, plus {@code specId} and {@code agentType} for hook attribution.
-   * See {@link #buildBackgroundLaunchCommand(String, String, String, boolean, AgentCli, String,
-   * String, String, String)}.
-   */
-  public static List<String> buildForegroundTaskCommand(
-      String containerName,
-      String sshUser,
-      String workDir,
-      boolean fullPermissions,
-      AgentCli agentCli,
-      String model,
-      String reasoningEffort,
-      String specId,
-      String agentType) {
-    var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
-    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
-    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
-    var agentCmd =
-        cli.headlessCommand(TASK_FILE, fullPermissions, model, reasoningEffort, settingsPath);
-    var effectiveSpec = Objects.requireNonNullElse(specId, "");
-    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
-    var script = "cd \"$1\" && SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" bash -l -c \"$2\"";
-    return ContainerExec.asDevUser(
-        containerName,
-        List.of(
-            "bash", "-l", "-c", script, "bash", workDir, agentCmd, effectiveSpec, effectiveAgent));
-  }
-
-  /**
-   * The dispatch foreground launcher: like the simpler overload but with {@code runId} carried in
-   * as {@code SAIL_RUN_ID} and the agent's stdout/stderr redirected to the run-scoped {@code
-   * logPath}, so a foreground dispatch's recorded log address names a file that actually holds its
-   * output and its terminal hook events can address the exact run.
+   * The foreground launcher: like {@link #buildBackgroundLaunchCommand} but blocking, with {@code
+   * runId} carried in as {@code SAIL_RUN_ID} and the agent's stdout/stderr redirected to the
+   * run-scoped {@code logPath}, so a foreground session's recorded log address names a file that
+   * actually holds its output and its terminal hook events can address the exact run. The wrapper
+   * writes its own pid to the run's pid file and {@code exec}s into the agent, so a foreground
+   * session — which owns no systemd unit — is still probeable and stoppable through the same
+   * run-scoped identity as a background one.
    */
   public static List<String> buildForegroundTaskCommand(
       String containerName,
@@ -507,16 +359,16 @@ public final class AgentSession {
       String runId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
-    var effectiveRunId = Objects.requireNonNullElse(runId, "");
-    var unit = effectiveRunId.isBlank() ? AgentUnit.BUILD : AgentUnit.forRun(effectiveRunId);
+    var unit = AgentUnit.forRun(runId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
         cli.headlessCommand(unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
-        "mkdir -p \"$(dirname \"$5\")\"; cd \"$1\" && "
-            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" bash -l -c \"$2\" > \"$5\" 2>&1";
+        "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
+            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
+            + " exec bash -l -c \"$2\" > \"$5\" 2>&1";
     return ContainerExec.asDevUser(
         containerName,
         List.of(
@@ -530,7 +382,8 @@ public final class AgentSession {
             effectiveSpec,
             effectiveAgent,
             logPath,
-            effectiveRunId));
+            runId,
+            unit.pidPath()));
   }
 
   private static void warnIfReasoningEffortDropped(
@@ -547,23 +400,12 @@ public final class AgentSession {
             + ". Only Codex honors reasoning_effort.");
   }
 
-  /** Returns the path to the agent log file inside the container. */
-  public static String logPath() {
-    return LOG_FILE;
-  }
-
   /**
-   * Reads the agent unit's terminal state from systemd in a single call: liveness, exit code, and
-   * the spec/agent it was launched for (parsed from the unit's recorded environment). Lets the
+   * Reads the given role's unit terminal state from systemd in a single call: liveness, exit code,
+   * and the spec/agent it was launched for (parsed from the unit's recorded environment). Lets the
    * watcher detect an exit and synthesize a reliable stop signal even when the agent's own hook
    * never fired.
    */
-  public ExitState queryExitStatus(String containerName)
-      throws IOException, InterruptedException, TimeoutException {
-    return queryExitStatus(containerName, AgentUnit.BUILD);
-  }
-
-  /** Reads the given role's unit terminal state from systemd (liveness, exit code, spec/agent). */
   public ExitState queryExitStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var cmd =

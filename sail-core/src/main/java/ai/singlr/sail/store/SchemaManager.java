@@ -553,7 +553,43 @@ public final class SchemaManager {
               SELECT token_hash, name, role, fde_id, created_at, last_used_at, expires_at
               FROM api_tokens""",
           "DROP TABLE api_tokens",
-          "ALTER TABLE api_tokens_v2 RENAME TO api_tokens");
+          "ALTER TABLE api_tokens_v2 RENAME TO api_tokens",
+          """
+          CREATE TABLE runs_v4 (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              exit_code INTEGER,
+              watcher_pid INTEGER,
+              node TEXT,
+              role TEXT NOT NULL DEFAULT 'build'
+                  CHECK (role IN ('build', 'adhoc', 'review')),
+              log_path TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              unit TEXT,
+              repos TEXT
+          )""",
+          """
+          INSERT INTO runs_v4 (id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos)
+              SELECT id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos FROM runs""",
+          "DROP TABLE runs",
+          "ALTER TABLE runs_v4 RENAME TO runs",
+          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "ALTER TABLE runs ADD COLUMN pid_ticks INTEGER");
 
   /**
    * The last schema version whose {@code specs.status} CHECK predates {@code awaiting_merge}. The

@@ -71,17 +71,34 @@ public final class RunStore implements ConflictResolver {
       String unit,
       String startedAt,
       String completedAt,
-      List<String> repos) {
+      List<String> repos,
+      Long pidTicks) {
 
-    /** Whether this row is a build attempt. */
+    /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
       return "build".equals(role);
     }
+
+    /** Whether this row is an ad-hoc session — an engineer-initiated run that works no spec. */
+    public boolean adhocRole() {
+      return "adhoc".equals(role);
+    }
+
+    /**
+     * Whether this row is an agent session an operator owns — a build attempt or an ad-hoc run — as
+     * opposed to a pipeline-driven review execution. Session rows are the ones the stop, status,
+     * and log lanes address.
+     */
+    public boolean sessionRole() {
+      return buildRole() || adhocRole();
+    }
   }
+
+  private static final String SESSION_ROLES = "role IN ('build', 'adhoc')";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
-          + " exit_code, log_path, unit, started_at, completed_at, repos";
+          + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -130,7 +147,9 @@ public final class RunStore implements ConflictResolver {
   /**
    * Records a review negotiation under the review UUID that owns its prompt, session, and log
    * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
-   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation.
+   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
+   * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
+   * of any run row is honest even though reviews execute as blocking foreground work.
    */
   public String createReview(
       String reviewId,
@@ -140,9 +159,10 @@ public final class RunStore implements ConflictResolver {
       String agent,
       String branch,
       String task,
-      String logPath) {
+      String logPath,
+      String unit) {
     return create(
-        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, "");
+        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, unit);
   }
 
   /**
@@ -162,6 +182,7 @@ public final class RunStore implements ConflictResolver {
       String project,
       String specId,
       String node,
+      String role,
       List<String> repos,
       String agent,
       String branch,
@@ -194,11 +215,12 @@ public final class RunStore implements ConflictResolver {
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, status,
                   started_at, log_path, unit, repos)
-              VALUES (?, ?, ?, ?, 'build', ?, ?, ?, 'running', ?, ?, ?, ?)""",
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)""",
               id,
               project,
               specId,
               node,
+              role,
               agent,
               branch,
               task,
@@ -216,18 +238,20 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The latest build run of {@code project} that executed on this box, or empty. Review runs remain
-   * in the aggregate but do not replace the build session used by agent status, log, and report
-   * commands. Ownership is by node: a box with a handle owns exactly the runs stamped with it; a
-   * box with no handle owns exactly its own blank-node runs and never a run adopted from another
-   * box via sync.
+   * The latest agent session (build or ad-hoc) of {@code project} that executed on this box, or
+   * empty. Review runs remain in the aggregate but do not replace the session used by agent status,
+   * log, and report commands. Ownership is by node: a box with a handle owns exactly the runs
+   * stamped with it; a box with no handle owns exactly its own blank-node runs and never a run
+   * adopted from another box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
-            + " AND role = 'build' ORDER BY started_at DESC"
+            + " AND "
+            + SESSION_ROLES
+            + " ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -235,17 +259,17 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The active build run of {@code project} that executed on this box, or empty. {@code stopping}
-   * counts as active: an interrupted stop's claim must stay addressable so a project-targeted stop
-   * retry resumes it instead of falling through to the ad-hoc identity. Node-scoped like {@link
-   * #latestForProjectOnNode}.
+   * The active agent session (build or ad-hoc) of {@code project} that executed on this box, or
+   * empty. {@code stopping} counts as active: an interrupted stop's claim must stay addressable so
+   * a project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-            + " AND IFNULL(node, '') = ? AND role = 'build'"
+            + " AND IFNULL(node, '') = ? AND "
+            + SESSION_ROLES
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,
@@ -253,24 +277,24 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Every build run holding an unfinished stop claim ({@code stopping}) — a stop that recorded its
-   * terminal intent but was interrupted before the halt was verified. The reconciler's
-   * interrupted-stop pass finalizes these once their unit is gone.
+   * Every agent session (build or ad-hoc) holding an unfinished stop claim ({@code stopping}) — a
+   * stop that recorded its terminal intent but was interrupted before the halt was verified. The
+   * reconciler's interrupted-stop pass finalizes these once their unit is gone.
    */
   public List<RunRow> stopping() {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND role = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND " + SESSION_ROLES,
         this::mapRow);
   }
 
   /**
-   * Every build run still in the {@code running} state, across all projects and nodes — the
-   * build-session reaper's full input. Review executions are foreground work owned and completed by
-   * the review controller, so the systemd reaper must not probe them as build units.
+   * Every agent session (build or ad-hoc) still in the {@code running} state, across all projects
+   * and nodes — the session reaper's full input. Review executions are foreground work owned and
+   * completed by the review controller, so the systemd reaper must not probe them as build units.
    */
   public List<RunRow> running() {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND role = 'build'",
+        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND " + SESSION_ROLES,
         this::mapRow);
   }
 
@@ -432,19 +456,34 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Stamps the agent and watcher pids on a run once launch has produced them. The run row is
-   * created before launch (so terminal hook events can find it), then updated here with the pids
-   * the launch resolved. Journals a revision so the pids replicate.
+   * Stamps the agent process identity and watcher pid on a run once launch has produced them. The
+   * run row is created before launch (so terminal hook events can find it), then updated here with
+   * what the launch resolved. {@code pidTicks} is the agent process's {@code /proc} start-time
+   * fingerprint — pids are reused by the kernel, so the pid alone can later name an unrelated
+   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches.
+   * Journals a revision so the identity replicates.
+   *
+   * <p>Commits only while the run is still {@code running} and returns whether it did. A stop that
+   * lands during launch preparation records its terminal intent on the row; the launcher discovers
+   * that loss here and must tear down whatever it just started instead of letting an unrecorded
+   * agent escape the reservation. {@code BEGIN IMMEDIATE} closes the read-then-write window against
+   * the stop's own claim transaction.
    */
-  public void updateProcess(String id, Integer pid, Integer watcherPid) {
-    db.transaction(
+  public boolean updateProcess(String id, Integer pid, Long pidTicks, Integer watcherPid) {
+    return db.immediateTransaction(
         () -> {
           db.execute(
-              "UPDATE runs SET pid = ?, watcher_pid = ? WHERE id = ?",
+              "UPDATE runs SET pid = ?, pid_ticks = ?, watcher_pid = ? WHERE id = ?"
+                  + " AND status = 'running'",
               pid != null ? pid.longValue() : null,
+              pidTicks,
               watcherPid != null ? watcherPid.longValue() : null,
               id);
+          if (db.changes() == 0) {
+            return false;
+          }
           recordRevision(id, "local", false);
+          return true;
         });
   }
 
@@ -626,15 +665,15 @@ public final class RunStore implements ConflictResolver {
     db.execute(
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
-            status, exit_code, log_path, unit, started_at, completed_at, repos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
             watcher_pid = excluded.watcher_pid, status = excluded.status,
             exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
             started_at = excluded.started_at, completed_at = excluded.completed_at,
-            repos = excluded.repos""",
+            repos = excluded.repos, pid_ticks = excluded.pid_ticks""",
         row.id(),
         row.project(),
         row.specId(),
@@ -651,7 +690,8 @@ public final class RunStore implements ConflictResolver {
         row.unit(),
         Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
         row.completedAt(),
-        YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())));
+        YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())),
+        row.pidTicks());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -673,6 +713,7 @@ public final class RunStore implements ConflictResolver {
     map.put("started_at", run.startedAt());
     map.put("completed_at", run.completedAt());
     map.put("repos", Objects.requireNonNullElse(run.repos(), List.of()));
+    map.put("pid_ticks", run.pidTicks());
     return map;
   }
 
@@ -730,7 +771,8 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "unit"),
         text(snapshot, "started_at"),
         text(snapshot, "completed_at"),
-        stringList(snapshot, "repos"));
+        stringList(snapshot, "repos"),
+        longValue(snapshot, "pid_ticks"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -746,6 +788,10 @@ public final class RunStore implements ConflictResolver {
 
   private static Integer integer(Map<String, Object> map, String key) {
     return map.get(key) instanceof Number n ? n.intValue() : null;
+  }
+
+  private static Long longValue(Map<String, Object> map, String key) {
+    return map.get(key) instanceof Number n ? n.longValue() : null;
   }
 
   private String rawBaseRev(String id) {
@@ -778,6 +824,7 @@ public final class RunStore implements ConflictResolver {
         row.text(13),
         row.text(14),
         row.text(15),
-        YamlUtil.parseStringList(row.text(16)));
+        YamlUtil.parseStringList(row.text(16)),
+        row.isNull(17) ? null : row.integer(17));
   }
 }

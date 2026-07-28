@@ -59,6 +59,38 @@ public final class DispatchOperations {
   public record Request(
       String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {}
 
+  /**
+   * One ad-hoc session launch — {@code sail agent run --task}. No spec, no policy: the operator
+   * supplies the task directly, and the session reserves the whole container. {@code branch} is the
+   * already-checked-out work branch (or null), {@code path} an optional workspace subdirectory.
+   */
+  public record AdhocRequest(
+      String task, String branch, String path, boolean background, boolean dryRun) {}
+
+  /**
+   * A launched ad-hoc session: its minted run id and, live launches only, the probed session,
+   * foreground exit code, and watcher. A dry run carries the run id it would have used and nothing
+   * else.
+   */
+  public record AdhocSession(
+      String runId,
+      AgentSession.SessionInfo session,
+      Integer exitCode,
+      Optional<WatcherSpawner.Spawned> watcher) {}
+
+  /**
+   * Container preparation that must not run until the whole-container reservation is won — the
+   * pre-launch snapshot and the work-branch checkout. A refused reservation means another agent
+   * owns the container, so no workspace mutation may precede it; a preparation failure is a launch
+   * failure and releases the reservation through the same path.
+   */
+  @FunctionalInterface
+  public interface AdhocPreparer {
+    AdhocPreparer NONE = () -> {};
+
+    void prepare() throws Exception;
+  }
+
   /** What a dispatch produced. */
   public sealed interface Outcome permits NoSpecs, Dispatched {}
 
@@ -276,8 +308,7 @@ public final class DispatchOperations {
         agentType,
         branch,
         task,
-        unit,
-        background);
+        unit);
     try {
       var prepared =
           claimAndPrepare(
@@ -302,9 +333,10 @@ public final class DispatchOperations {
               unit,
               runId);
       var status = querySession(new AgentSession(shell), project, unit);
-      if (background) {
-        updateRunProcess(runId, status, launch.watcher());
-      } else {
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
+      if (!background) {
         completeForegroundRun(runId, launch.exitCode());
       }
       if (status != null && status.running()) {
@@ -324,9 +356,110 @@ public final class DispatchOperations {
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit, background);
+      releaseIfAbsent(runId, project, unit);
       throw e;
     }
+  }
+
+  /**
+   * Launches one ad-hoc agent session — the {@code sail agent run --task} lane — as a first-class
+   * run: a minted run id, {@code role='adhoc'} with no spec, a run-scoped unit and file set, and a
+   * whole-container reservation through the same {@link RunStore#reserveDispatch} transaction that
+   * gates dispatches, so an ad-hoc session and a dispatched agent are mutually exclusive by the one
+   * atomic mechanism. Background launches get the same run-addressed guardrail watcher as
+   * dispatches. No spec means no policy: unlike dispatch, a blank node handle is allowed — the
+   * reservation is stamped with whatever identity the box has, exactly like the run rows it gates
+   * against. The {@code preparer} runs strictly after the reservation is won and before anything is
+   * staged or launched, so a refused launch leaves the workspace untouched. A dry run mints the id
+   * and announces the launch command but reserves, prepares, writes, and executes nothing.
+   */
+  public AdhocSession startAdhoc(String project, AdhocRequest request, String localHandle) {
+    return startAdhoc(project, request, localHandle, AdhocPreparer.NONE);
+  }
+
+  public AdhocSession startAdhoc(
+      String project, AdhocRequest request, String localHandle, AdhocPreparer preparer) {
+    var loaded = projects.loadRunning(project);
+    var config = loaded.config();
+    var agentType =
+        config.agent() != null ? config.agent().type() : AgentCli.CLAUDE_CODE.yamlName();
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    var background = request.background();
+    var workDir = adhocWorkDir(config, request.path());
+    var fullPermissions = adhocFullPermissions(config);
+    if (request.dryRun()) {
+      listener.launching(
+          background,
+          launchCommand(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              null,
+              null,
+              "",
+              agentType,
+              background,
+              unit,
+              runId));
+      return new AdhocSession(runId, null, null, Optional.empty());
+    }
+    reserveAdhocRun(runId, project, localHandle, agentType, request.branch(), request.task(), unit);
+    try {
+      prepare(preparer);
+      var launch =
+          launchSession(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              null,
+              null,
+              "",
+              agentType,
+              request.task(),
+              request.branch(),
+              List.of(),
+              background,
+              unit,
+              runId);
+      var status = querySession(new AgentSession(shell), project, unit);
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
+      if (!background) {
+        completeForegroundRun(runId, launch.exitCode());
+      }
+      if (status != null && status.running()) {
+        publishAgentSessionStarted(project, null, agentType, status.pid(), runId, launch.watcher());
+      }
+      return new AdhocSession(
+          runId, status, background ? null : launch.exitCode(), launch.watcher());
+    } catch (RuntimeException e) {
+      releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+  }
+
+  private static void prepare(AdhocPreparer preparer) {
+    try {
+      preparer.prepare();
+    } catch (Exception e) {
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED, "Failed to prepare the agent session.", e);
+    }
+  }
+
+  private static String adhocWorkDir(SailYaml config, String path) {
+    var workDir = "/home/" + config.sshUser() + "/workspace";
+    return Strings.isBlank(path) ? workDir : workDir + "/" + path;
+  }
+
+  private static boolean adhocFullPermissions(SailYaml config) {
+    return config.agent() != null
+        && config.agent().config() != null
+        && "full".equals(config.agent().config().get("permissions"));
   }
 
   /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
@@ -614,6 +747,44 @@ public final class DispatchOperations {
       String agentType,
       AgentUnit unit,
       String runId) {
+    return launchSession(
+        project,
+        config,
+        AgentSession.launchWorkDir(config.sshUser(), targetRepos),
+        true,
+        spec.model(),
+        spec.reasoningEffort(),
+        spec.id(),
+        agentType,
+        task,
+        branch,
+        targetRepos.stream().map(SailYaml.Repo::path).toList(),
+        background,
+        unit,
+        runId);
+  }
+
+  /**
+   * The one launch sequence both the dispatch and ad-hoc lanes execute: stage the run-scoped task
+   * and session files, build the launch command for the run's own unit, run it, and — background
+   * only — verify the launch and arm the run-addressed watcher. The lanes differ only in what they
+   * pass: a dispatch carries its spec's identity and model, an ad-hoc session a blank spec id.
+   */
+  private LaunchOutcome launchSession(
+      String project,
+      SailYaml config,
+      String workDir,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String task,
+      String branch,
+      List<String> repoPaths,
+      boolean background,
+      AgentUnit unit,
+      String runId) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -623,39 +794,24 @@ public final class DispatchOperations {
           project,
           task,
           Objects.requireNonNullElse(branch, ""),
-          spec.id(),
+          specId,
           agentType,
           runId,
-          targetRepos.stream().map(SailYaml.Repo::path).toList(),
+          repoPaths,
           unit);
-      var agentCli = AgentCli.fromYamlName(agentType);
-      var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var command =
-          background
-              ? AgentSession.buildBackgroundLaunchCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  unit.logPath(),
-                  runId)
-              : AgentSession.buildForegroundTaskCommand(
-                  project,
-                  config.sshUser(),
-                  workDir,
-                  true,
-                  agentCli,
-                  spec.model(),
-                  spec.reasoningEffort(),
-                  spec.id(),
-                  agentType,
-                  unit.logPath(),
-                  runId);
+          launchCommand(
+              project,
+              config,
+              workDir,
+              fullPermissions,
+              model,
+              reasoningEffort,
+              specId,
+              agentType,
+              background,
+              unit,
+              runId);
       listener.launching(background, command);
       var exitCode = launcher.launch(command);
       if (background) {
@@ -670,6 +826,46 @@ public final class DispatchOperations {
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
     }
+  }
+
+  private static List<String> launchCommand(
+      String project,
+      SailYaml config,
+      String workDir,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      boolean background,
+      AgentUnit unit,
+      String runId) {
+    var agentCli = AgentCli.fromYamlName(agentType);
+    return background
+        ? AgentSession.buildBackgroundLaunchCommand(
+            project,
+            config.sshUser(),
+            workDir,
+            fullPermissions,
+            agentCli,
+            model,
+            reasoningEffort,
+            specId,
+            agentType,
+            unit.logPath(),
+            runId)
+        : AgentSession.buildForegroundTaskCommand(
+            project,
+            config.sshUser(),
+            workDir,
+            fullPermissions,
+            agentCli,
+            model,
+            reasoningEffort,
+            specId,
+            agentType,
+            unit.logPath(),
+            runId);
   }
 
   /**
@@ -709,15 +905,21 @@ public final class DispatchOperations {
   }
 
   private static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
+    var run = conflict.run();
+    var occupied =
+        Strings.isBlank(run.specId())
+            ? "Ad-hoc agent run " + run.runId() + " is occupying this container"
+            : "Agent run "
+                + run.runId()
+                + " is already working spec '"
+                + run.specId()
+                + "' in "
+                + (conflict.overlap().isEmpty()
+                    ? "this container"
+                    : "repo(s) " + conflict.overlap());
     return new ApiException(
         ErrorCode.AGENT_ALREADY_RUNNING,
-        "Agent run "
-            + conflict.run().runId()
-            + " is already working spec '"
-            + conflict.run().specId()
-            + "' in "
-            + (conflict.overlap().isEmpty() ? "this container" : "repo(s) " + conflict.overlap())
-            + ".",
+        occupied + ".",
         "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
   }
 
@@ -764,9 +966,10 @@ public final class DispatchOperations {
    * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
    * boxes that keep no run aggregate, which have nothing to reserve against.
    *
-   * <p>A foreground dispatch records a blank unit: it runs as a plain child process and creates no
-   * systemd unit, so the missed-stop reconciler must skip it rather than falsely stop the
-   * still-running agent. The foreground run completes when its blocking launcher returns.
+   * <p>A foreground dispatch records the same run-scoped unit name even though it launches no
+   * systemd service: the run's pid file carries the same identity, so stop, probe, and the
+   * missed-stop reconciler address a foreground session exactly like a background one. The
+   * foreground run completes when its blocking launcher returns.
    */
   private void reserveRun(
       String runId,
@@ -777,12 +980,47 @@ public final class DispatchOperations {
       String agentType,
       String branch,
       String task,
-      AgentUnit unit,
-      boolean background) {
+      AgentUnit unit) {
     if (runStore == null) {
       return;
     }
-    var recordedUnit = background ? unit.unitName() : "";
+    reserve(runId, project, specId, node, "build", repos, agentType, branch, task, unit);
+  }
+
+  /**
+   * Reserves an ad-hoc session through the identical transaction: {@code role='adhoc'}, no spec,
+   * and an empty repo set — which the gate reads as the whole project, so the session excludes and
+   * is excluded by every dispatch atomically. Unlike dispatch, an absent run store is a refusal,
+   * not a skip: the reservation is the only thing standing between two agents in one container, and
+   * an ad-hoc session without a row would also be invisible to stop, status, and retention.
+   */
+  private void reserveAdhocRun(
+      String runId,
+      String project,
+      String node,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit) {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
+    }
+    reserve(runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit);
+  }
+
+  private void reserve(
+      String runId,
+      String project,
+      String specId,
+      String node,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit) {
     Optional<DispatchGate.Conflict> conflict;
     try {
       conflict =
@@ -791,12 +1029,13 @@ public final class DispatchOperations {
               project,
               specId,
               node,
+              role,
               repos,
               agentType,
               branch,
               task,
               unit.logPath(),
-              recordedUnit);
+              unit.unitName());
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
@@ -832,16 +1071,66 @@ public final class DispatchOperations {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
   }
 
-  /** Stamps the agent + watcher pids on a background run once launch has resolved them. */
-  private void updateRunProcess(
-      String runId, AgentSession.SessionInfo status, Optional<WatcherSpawner.Spawned> watcher) {
+  /**
+   * Stamps the run's process identity once launch has resolved it: the agent pid, its {@code /proc}
+   * start-time fingerprint (live processes only — the fingerprint exists to prove a pid still names
+   * the process this run launched, so a foreground session that already exited records its pid
+   * without one), and the fallback watcher pid.
+   *
+   * <p>Returns whether the run still owned its launch: the stamp commits only on a {@code running}
+   * row, so a {@code false} means an operator's cancel claimed the run during preparation and the
+   * caller must tear down whatever it started. A store error stays best-effort bookkeeping (the
+   * launch proceeds); only the definitive lost-race answer aborts it.
+   */
+  private boolean updateRunProcess(
+      String runId,
+      String project,
+      AgentSession.SessionInfo status,
+      Optional<WatcherSpawner.Spawned> watcher) {
+    if (runStore == null) {
+      return true;
+    }
     Integer watcherPid =
         watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
             ? (int) fallback.pid()
             : null;
-    runBookkeeping(
-        "update run process " + runId,
-        () -> runStore.updateProcess(runId, status != null ? status.pid() : null, watcherPid));
+    Integer pid = status != null ? status.pid() : null;
+    var pidTicks =
+        status != null && status.running() ? readStartTicks(project, status.pid()) : null;
+    try {
+      return runStore.updateProcess(runId, pid, pidTicks, watcherPid);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [api] Warning: could not update run process " + runId + ": " + e.getMessage());
+      return true;
+    }
+  }
+
+  /**
+   * Tears down a launch whose run was cancelled during preparation: the operator's stop already
+   * recorded the terminal outcome, so the just-started agent must die rather than run unrecorded
+   * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
+   * halt that races the process's own exit is a no-op — and the conflict names what happened.
+   */
+  private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
+    try {
+      StopOperations.sessionHalter(shell).halt(project, unit);
+    } catch (Exception e) {
+      System.err.println(
+          "  [api] Warning: could not halt cancelled launch " + runId + ": " + e.getMessage());
+    }
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "Run " + runId + " was cancelled while its launch was preparing; the agent was torn down.",
+        "The cancel already recorded the run's outcome; no retry is needed.");
+  }
+
+  private Long readStartTicks(String project, int pid) {
+    try {
+      return new AgentSession(shell).readProcessStartTicks(project, pid);
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   /**
@@ -869,27 +1158,35 @@ public final class DispatchOperations {
   /**
    * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
    */
+  /**
+   * Fails a run on a launch error, but only if the run is still {@code running}: a stop that
+   * cancelled the run mid-launch, or a watcher that already recorded the real exit, owns the
+   * terminal record and must not be overwritten by the launch's cleanup.
+   */
   private void failRun(String runId) {
-    runBookkeeping("mark run failed " + runId, () -> runStore.complete(runId, "failed", null));
+    runBookkeeping(
+        "mark run failed " + runId,
+        () -> runStore.transition(runId, "running", "failed", (Integer) null));
   }
 
   /**
-   * Releases the run's repo reservation on a launch failure only when the agent is proven absent. A
-   * failure before or during launch leaves no live unit, so the run is failed and its repo freed.
-   * But once a background systemd unit has started, a later failure (watcher spawn, status probe)
-   * leaves a live agent on its run-scoped unit; failing the run would free the repo under it and
-   * admit an overlapping dispatch. An unprobeable unit is treated as live for the same reason — the
-   * missed-stop reconciler releases a genuinely dead unit on its next pass. A foreground run
-   * creates no unit, so a foreground launch failure always frees the reservation.
+   * Releases the run's repo reservation on a launch failure only when the agent is proven absent —
+   * probed on the run's own identity (systemd unit and run-scoped pid file), so the check covers
+   * background and foreground launches alike. A failure before or during launch leaves no live
+   * process, so the run is failed and its repo freed. But once the agent process exists — a
+   * background unit that started, a foreground child whose blocking wait threw — a later failure
+   * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
+   * session. An unprobeable identity is treated as live for the same reason — the missed-stop
+   * reconciler releases a genuinely dead run on its next pass.
    */
-  private void releaseIfAbsent(String runId, String project, AgentUnit unit, boolean background) {
-    if (background && backgroundAgentLive(project, unit)) {
+  private void releaseIfAbsent(String runId, String project, AgentUnit unit) {
+    if (agentLive(project, unit)) {
       return;
     }
     failRun(runId);
   }
 
-  private boolean backgroundAgentLive(String project, AgentUnit unit) {
+  private boolean agentLive(String project, AgentUnit unit) {
     try {
       var status = new AgentSession(shell).queryStatus(project, unit);
       return status != null && status.running();

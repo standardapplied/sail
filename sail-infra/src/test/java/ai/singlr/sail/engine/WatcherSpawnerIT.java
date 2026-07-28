@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,7 +26,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class WatcherSpawnerIT {
 
-  private static final String PROJECT = "wsit-" + ProcessHandle.current().pid();
+  private static final String RUN_ID = UUID.randomUUID().toString();
+  private static final String UNIT = WatcherSpawner.unitNameForRun(RUN_ID);
 
   @TempDir Path tempDir;
 
@@ -34,8 +36,8 @@ class WatcherSpawnerIT {
 
   @AfterEach
   void tearDown() {
-    stopQuietly(List.of("systemctl", "--user", "stop", WatcherSpawner.unitName(PROJECT)));
-    stopQuietly(List.of("systemctl", "stop", WatcherSpawner.unitName(PROJECT)));
+    stopQuietly(List.of("systemctl", "--user", "stop", UNIT));
+    stopQuietly(List.of("systemctl", "stop", UNIT));
   }
 
   private void stopQuietly(List<String> command) {
@@ -63,16 +65,15 @@ class WatcherSpawnerIT {
     var log = tempDir.resolve("watch.log");
     var argv = List.of("sleep", "30");
 
-    var unitName = WatcherSpawner.unitName(PROJECT);
-    var spawned = spawner.spawnUnit(unitName, argv, log);
+    var spawned = spawner.spawnUnit(UNIT, argv, log);
 
     if (spawned.isPresent()) {
       assertFalse(spawned.get().adopted(), "first spawn must launch, not adopt");
-      assertTrue(unitActive(unitName), "unit must be active right after spawn");
+      assertTrue(unitActive(UNIT), "unit must be active right after spawn");
 
-      var second = spawner.spawnUnit(unitName, argv, log).orElseThrow();
+      var second = spawner.spawnUnit(UNIT, argv, log).orElseThrow();
       assertTrue(second.adopted(), "second spawn must adopt the active unit");
-      assertEquals(WatcherSpawner.unitName(PROJECT), second.name());
+      assertEquals(UNIT, second.name());
     } else {
       var pid = WatcherSpawner.spawnProcess(List.of("sleep", "30"), log);
       var handle = ProcessHandle.of(pid).orElseThrow();
@@ -84,16 +85,15 @@ class WatcherSpawnerIT {
   @Test
   void aStoppedUnitIsCollectedSoTheNameIsReusable() throws Exception {
     var log = tempDir.resolve("watch.log");
-    var unitName = WatcherSpawner.unitName(PROJECT);
-    var first = spawner.spawnUnit(unitName, List.of("sleep", "30"), log);
+    var first = spawner.spawnUnit(UNIT, List.of("sleep", "30"), log);
     if (first.isEmpty()) {
-      assertFalse(unitActive(unitName));
+      assertFalse(unitActive(UNIT));
       return;
     }
     tearDown();
 
-    assertFalse(unitActive(unitName), "stopped unit must not read as active");
-    var respawned = spawner.spawnUnit(unitName, List.of("sleep", "30"), log).orElseThrow();
+    assertFalse(unitActive(UNIT), "stopped unit must not read as active");
+    var respawned = spawner.spawnUnit(UNIT, List.of("sleep", "30"), log).orElseThrow();
     assertFalse(respawned.adopted(), "collected name must be reusable for a fresh launch");
   }
 }

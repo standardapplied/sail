@@ -541,6 +541,7 @@ class SailOperationsTest {
                     "acme",
                     "auth",
                     LOCAL_HANDLE,
+                    "build",
                     List.of("app"),
                     "claude-code",
                     "b1",
@@ -577,6 +578,7 @@ class SailOperationsTest {
                     "acme",
                     "auth",
                     LOCAL_HANDLE,
+                    "build",
                     List.of("app", "web"),
                     "claude-code",
                     "b1",
@@ -619,6 +621,7 @@ class SailOperationsTest {
                   "acme",
                   "auth",
                   LOCAL_HANDLE,
+                  "build",
                   List.of("app", "web"),
                   "claude-code",
                   "b1",
@@ -886,16 +889,16 @@ class SailOperationsTest {
   @Test
   void agentStatusReturnsRunningSessionDetails() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
                 .on("kill -0 123", "")
                 .on(
-                    "cat /home/dev/.sail/agent-session.json",
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
                     "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}"));
 
-    var result = operations.agentStatus("acme", LOCAL_HANDLE);
+    var result = operations.agentStatus("acme", "node-a");
 
     assertEquals(true, get(result, "agent_running"));
     assertEquals(123, get(result, "pid"));
@@ -905,12 +908,13 @@ class SailOperationsTest {
   @Test
   void agentStatusMapsQueryFailures() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .throwOn("cat /home/dev/.sail/agent.pid", new IOException("denied")));
+                .throwOn(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent.pid", new IOException("denied")));
 
-    var error = operations.agentStatus("acme", LOCAL_HANDLE);
+    var error = operations.agentStatus("acme", "node-a");
 
     assertError(ErrorCode.AGENT_STATUS_FAILED, error);
   }
@@ -1203,21 +1207,18 @@ class SailOperationsTest {
   }
 
   @Test
-  void stopRunDoesNotKillADifferentActiveRunOfTheSameProject() throws Exception {
-    var operations =
-        opsWithRun(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "999")
-                .on("kill -0 999", new ShellExec.Result(0, "", ""))
-                .on(
-                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
-                    "{\"task\": \"other\"}"));
+  void stopRunRefusesAStalePidFileNamingAPidTheRunDoesNotOwn() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "999")
+            .on("kill -0 999", "")
+            .on("cat /home/dev/.sail/runs/" + R1 + "/agent-session.json", "{\"task\": \"other\"}");
+    var operations = opsWithRun(shell);
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var error = operations.stopRun(R1, "node-a", ADMIN);
 
-    assertEquals(false, get(result, "stopped"), "the run's pid is 123; the live agent is 999");
-    assertEquals("run_not_active", get(result, "reason"));
+    assertError(ErrorCode.CONFLICT, error);
   }
 
   @Test
@@ -1269,7 +1270,8 @@ class SailOperationsTest {
                   "codex",
                   "feat/auth",
                   "review it",
-                  "/home/dev/.sail/runs/" + R3 + "/review.log");
+                  "/home/dev/.sail/runs/" + R3 + "/review.log",
+                  "sail-review-" + R3);
             });
 
     var result = operations.stopRun(R1, "node-a", ADMIN);
@@ -1341,24 +1343,50 @@ class SailOperationsTest {
   }
 
   @Test
-  void agentStatusFallsBackToTheAdHocSessionWhenNoRunIsRunning() throws Exception {
+  void agentStatusReportsNoSessionWhenNoRunIsRunning() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(), shell().on("incus list ^acme$", RUNNING_JSON), null, s2 -> {}, runs -> {});
+
+    var result = operations.agentStatus("acme", "node-a");
+
+    assertEquals(false, get(result, "agent_running"));
+    assertEquals(0, ((List<?>) get(result, "runs")).size());
+  }
+
+  @Test
+  void agentStatusListsAnAdhocRunLikeAnySession() throws Exception {
     var operations =
         operationsWithStores(
             baseYaml(),
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", "123")
+                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
                 .on("kill -0 123", "")
-                .on("cat /home/dev/.sail/agent-session.json", "{\"task\": \"ad hoc\"}"),
+                .on(
+                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                    "{\"task\": \"ad hoc\"}"),
             null,
             s2 -> {},
-            runs -> {});
+            runs ->
+                runs.reserveDispatch(
+                    R1,
+                    "acme",
+                    "",
+                    "node-a",
+                    "adhoc",
+                    List.of(),
+                    "claude-code",
+                    null,
+                    "ad hoc",
+                    RUN_LOG,
+                    "sail-agent-" + R1));
 
     var result = operations.agentStatus("acme", "node-a");
 
     assertEquals(true, get(result, "agent_running"));
     assertEquals("ad hoc", get(result, "task"));
-    assertEquals(0, ((List<?>) get(result, "runs")).size());
+    assertEquals(1, ((List<?>) get(result, "runs")).size());
   }
 
   @Test
@@ -1392,7 +1420,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void aForegroundRunRemainsUnprobeableWhileItsLauncherOwnsCompletion() throws Exception {
+  void aForegroundRunRecordsItsDurableRunScopedIdentity() throws Exception {
     var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
     var shell =
         shell()
@@ -1412,7 +1440,11 @@ class SailOperationsTest {
     dispatch(operations, "acme", request("auth", "foreground", false));
 
     var recorded = runs.get().listForProject("acme").getFirst();
-    assertEquals("", recorded.unit());
+    assertEquals(
+        "sail-agent-" + recorded.id(),
+        recorded.unit(),
+        "a foreground session records the same durable run-scoped identity as a background one");
+    assertEquals(123, recorded.pid(), "the session's pid is stamped from its run-scoped pid file");
   }
 
   @Test
@@ -1796,7 +1828,8 @@ class SailOperationsTest {
         unit,
         "t0",
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        null);
   }
 
   @Test
@@ -2145,10 +2178,10 @@ class SailOperationsTest {
   @Test
   void agentReportMapsReporterFailure() throws Exception {
     var operations =
-        operations(
+        opsWithRun(
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
-                .throwOn("cat /home/dev/.sail/agent.pid", new IOException("boom")));
+                .throwOn("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", new IOException("boom")));
 
     var error = operations.agentReport("acme", "node-a");
 
