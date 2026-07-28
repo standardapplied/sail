@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -70,6 +71,8 @@ class MessageSyncTest {
 
   @Test
   void messagesFromDifferentBoxesConvergeWithoutConflict() {
+    new FdeStore(main.db).add("node", null, null, "admin");
+    new FdeStore(main.db).add("other", null, null, "admin");
     var fromNode = node.messages.append("room", "node", "node message", null);
     var fromOther = other.messages.append("room", "other", "other message", null);
     var engine = new SyncEngine();
@@ -86,6 +89,7 @@ class MessageSyncTest {
 
   @Test
   void syncedMessagesCannotBeChangedOrDeleted() {
+    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);
     SyncPeer.with("node", () -> new SyncEngine().reconcile(node.replica, main.replica));
     var changed = new java.util.LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
@@ -117,7 +121,36 @@ class MessageSyncTest {
   }
 
   @Test
+  void authenticatedPeerCannotPostToForeignOrMissingSpec() {
+    main.db.execute("UPDATE specs SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SyncPeer.with(
+                "mallory",
+                () ->
+                    main.messages.commitRevision(
+                        "00000000-0000-7000-8000-000000000002",
+                        snapshot("mallory", "room"),
+                        null)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SyncPeer.with(
+                "mallory",
+                () ->
+                    main.messages.commitRevision(
+                        "00000000-0000-7000-8000-000000000003",
+                        snapshot("mallory", "missing"),
+                        null)));
+
+    assertTrue(main.messages.list("room", null, 10).isEmpty());
+  }
+
+  @Test
   void authenticatedPeerMayPostAsItsRunPrincipalOnlyOnThatRunsSpec() {
+    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
     main.db.execute(
         """
         INSERT INTO runs

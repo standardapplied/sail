@@ -201,15 +201,28 @@ public final class MessageStore {
     if (peer == null) {
       return false;
     }
-    if (peer.equals(author)) {
-      return true;
+    var ownsAuthor =
+        peer.equals(author)
+            || db.queryOne(
+                    "SELECT 1 FROM runs WHERE principal = ? AND owner = ? AND spec_id = ? LIMIT 1",
+                    row -> true,
+                    author,
+                    peer,
+                    specId)
+                .orElse(false);
+    if (!ownsAuthor) {
+      return false;
     }
     return db.queryOne(
-            "SELECT 1 FROM runs WHERE principal = ? AND owner = ? AND spec_id = ? LIMIT 1",
+            "SELECT 1 FROM specs s LEFT JOIN fdes f ON f.handle = ? "
+                + "WHERE s.id = ? AND (lower(coalesce(f.role, '')) = 'admin' "
+                + "OR s.assignee = ? OR "
+                + "(trim(coalesce(s.assignee, '')) = '' AND s.created_by = ?)) LIMIT 1",
             row -> true,
-            author,
             peer,
-            specId)
+            specId,
+            peer,
+            peer)
         .orElse(false);
   }
 

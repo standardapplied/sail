@@ -396,7 +396,7 @@ public final class ApiRouter implements HttpHandler {
               ApiResponse.fromCreated(
                   operations.postSpecMessage(
                       specId,
-                      SpecMessageRequest.fromMap(JsonBody.readMap(exchange)),
+                      SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
                       actorOf(exchange),
                       actor(exchange)));
           default -> throw methodNotAllowed();

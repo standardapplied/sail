@@ -798,6 +798,19 @@ class ApiRouterTest {
   }
 
   @Test
+  void specMessageAcceptsEscapedJsonBodyBelowTheMessageLimit() throws Exception {
+    var ops = new MessageActorProbe();
+    var body = "\"".repeat(34_000);
+    var json = "{\"body\":\"" + "\\\"".repeat(34_000) + "\"}";
+    try (var server = serverWith(ops, true)) {
+      var response = post(server, "/v1/specs/auth-flow/messages", "token", json);
+
+      assertEquals(201, response.statusCode());
+      assertEquals(body, ops.body);
+    }
+  }
+
+  @Test
   void globalSpecBoardReturns200() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/specs/board", "token");
@@ -1088,12 +1101,14 @@ class ApiRouterTest {
   private static final class MessageActorProbe extends FakeOperations {
     private Actor actor;
     private String author;
+    private String body;
 
     @Override
     public Result<SpecMessageResponse> postSpecMessage(
         String specId, SpecMessageRequest request, Actor actor, String author) {
       this.actor = actor;
       this.author = author;
+      this.body = request.body();
       return super.postSpecMessage(specId, request, actor, author);
     }
   }
