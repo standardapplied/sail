@@ -16,7 +16,8 @@ import java.util.Objects;
  * transition, the stage's map augmented with the review's {@code spec_id}), giving a consumer
  * everything it needs to narrate the transition without re-reading the store.
  *
- * @param entityType {@code spec}, {@code run}, {@code review}, or {@code review_stage}
+ * @param entityType {@code spec}, {@code run}, {@code review}, {@code review_stage}, or {@code
+ *     message}
  * @param entityId the entity's id ({@code review_stage} carries the stage's id)
  * @param from the prior status, or {@code null} when the entity is new to main
  * @param to the committed status

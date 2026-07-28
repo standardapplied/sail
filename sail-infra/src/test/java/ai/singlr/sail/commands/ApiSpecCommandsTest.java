@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -47,7 +48,8 @@ class ApiSpecCommandsTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     var tokenStore = new TokenStore(db);
-    token = tokenStore.create("test", "admin").token();
+    var fde = new FdeStore(db).add("test", "Test", "test@example.com", "admin");
+    token = tokenStore.create("test", "admin", fde.id(), null).token();
     var specStore = new SpecStore(db);
     var eventStore = new EventStore(db);
     var bus = new EventBus();

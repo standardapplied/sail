@@ -68,6 +68,30 @@ class SyncTransitionsTest {
   }
 
   @Test
+  void aNewMessageEmitsOnePostedTransition() {
+    var snapshot =
+        Map.<String, Object>of("spec_id", "auth", "author", "ada", "body", "Progress update");
+
+    var emitted = SyncTransitions.detect("message", "m1", null, snapshot);
+
+    assertEquals(1, emitted.size());
+    var transition = emitted.getFirst();
+    assertEquals("message", transition.entityType());
+    assertEquals("m1", transition.entityId());
+    assertNull(transition.from());
+    assertEquals("posted", transition.to());
+    assertEquals(snapshot, transition.snapshot());
+  }
+
+  @Test
+  void anExistingMessageEmitsNothing() {
+    var snapshot =
+        Map.<String, Object>of("spec_id", "auth", "author", "ada", "body", "Progress update");
+
+    assertTrue(SyncTransitions.detect("message", "m1", snapshot, snapshot).isEmpty());
+  }
+
+  @Test
   void aRunCompletingEmitsAnAgentStoppedTransition() {
     var running = Map.<String, Object>of("project", "proj", "status", "running");
     var completed =

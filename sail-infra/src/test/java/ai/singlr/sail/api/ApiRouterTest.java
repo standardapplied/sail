@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -773,7 +774,7 @@ class ApiRouterTest {
   @Test
   void specMessagesPostAndGetReturnJsonAndClampLimit() throws Exception {
     var ops = new MessageActorProbe();
-    try (var server = serverWith(ops, true)) {
+    try (var server = serverWithOwnedToken(ops, true)) {
       var posted =
           post(
               server,
@@ -782,9 +783,10 @@ class ApiRouterTest {
               "{\"body\":\"progress\",\"reply_to\":\"01900000-0000-7000-8000-000000000001\"}");
       assertEquals(201, posted.statusCode());
       assertTrue(posted.body().contains("\"body\": \"progress\""));
+      assertEquals("ada", ops.actor.handle());
       assertEquals(Role.ADMIN, ops.actor.role());
       assertEquals(Actor.Lane.API, ops.actor.lane());
-      assertEquals("admin", ops.author);
+      assertEquals("ada", ops.author);
 
       var listed = get(server, "/v1/specs/auth-flow/messages?limit=999", "token");
       assertEquals(200, listed.statusCode());
@@ -802,11 +804,24 @@ class ApiRouterTest {
     var ops = new MessageActorProbe();
     var body = "\"".repeat(34_000);
     var json = "{\"body\":\"" + "\\\"".repeat(34_000) + "\"}";
-    try (var server = serverWith(ops, true)) {
+    try (var server = serverWithOwnedToken(ops, true)) {
       var response = post(server, "/v1/specs/auth-flow/messages", "token", json);
 
       assertEquals(201, response.statusCode());
       assertEquals(body, ops.body);
+    }
+  }
+
+  @Test
+  void specMessagesRejectUnownedCredentialsBeforePosting() throws Exception {
+    var ops = new MessageActorProbe();
+    try (var server = serverWith(ops, true)) {
+      var response =
+          post(server, "/v1/specs/auth-flow/messages", "token", "{\"body\":\"progress\"}");
+
+      assertEquals(403, response.statusCode());
+      assertTrue(response.body().contains("FDE-bound credential"));
+      assertNull(ops.actor);
     }
   }
 
@@ -1122,8 +1137,23 @@ class ApiRouterTest {
   }
 
   private static SailApiServer serverWith(Operations ops, boolean autoStart) throws IOException {
-    var server =
-        new SailApiServer("127.0.0.1", 0, ops, new FixedTokenTestAuth("token"), null, null, null);
+    return serverWith(ops, autoStart, new FixedTokenTestAuth("token"));
+  }
+
+  private static SailApiServer serverWithOwnedToken(Operations ops, boolean autoStart)
+      throws IOException {
+    var delegate = new FixedTokenTestAuth("token");
+    ApiAuth auth =
+        exchange -> {
+          delegate.require(exchange);
+          exchange.setAttribute("token.fde", "ada");
+        };
+    return serverWith(ops, autoStart, auth);
+  }
+
+  private static SailApiServer serverWith(Operations ops, boolean autoStart, ApiAuth auth)
+      throws IOException {
+    var server = new SailApiServer("127.0.0.1", 0, ops, auth, null, null, null);
     if (autoStart) {
       server.start();
     }

@@ -392,13 +392,21 @@ public final class ApiRouter implements HttpHandler {
                     params.get("before"),
                     clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
           }
-          case POST ->
-              ApiResponse.fromCreated(
-                  operations.postSpecMessage(
-                      specId,
-                      SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
-                      actorOf(exchange),
-                      actor(exchange)));
+          case POST -> {
+            var principal = actorOf(exchange);
+            if (principal.handle() == null) {
+              throw new ApiException(
+                  ErrorCode.FORBIDDEN,
+                  "Spec messages require an FDE-bound credential so authorship can be"
+                      + " synchronized.");
+            }
+            yield ApiResponse.fromCreated(
+                operations.postSpecMessage(
+                    specId,
+                    SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
+                    principal,
+                    principal.handle()));
+          }
           default -> throw methodNotAllowed();
         };
       }
