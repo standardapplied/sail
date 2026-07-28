@@ -9,12 +9,11 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ContainerSetupSweep;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ResourceChecker;
-import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
@@ -54,7 +53,7 @@ public final class UpCommand implements Runnable {
 
     switch (state) {
       case ContainerState.Running r -> {
-        reconcileSetup(shell, name);
+        ContainerSetupSweep.reconcile(shell, name);
         if (json) {
           printJson("running", r.ipv4());
           return;
@@ -71,7 +70,7 @@ public final class UpCommand implements Runnable {
           System.out.println(Ansi.AUTO.string("  @|bold Starting|@ " + name + "..."));
         }
         mgr.start(name);
-        reconcileSetup(shell, name);
+        ContainerSetupSweep.reconcile(shell, name);
         var newState = mgr.queryState(name);
         var ip = newState instanceof ContainerState.Running r ? r.ipv4() : null;
         if (json) {
@@ -90,21 +89,6 @@ public final class UpCommand implements Runnable {
               "Project '" + name + "' does not exist. Run 'sail project create' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
-    }
-  }
-
-  /**
-   * Reconciles the sail-owned surface — the socket bind mount and the helper scripts — every time a
-   * project comes up or is confirmed up, so a container that slept through the server's boot sweep
-   * still converges the moment anyone reaches for it. Idempotent and best-effort: a wedged
-   * container is a warning, never a failed start.
-   */
-  static void reconcileSetup(ShellExec shell, String name) {
-    try {
-      ContainerSailSetup.ensureInstalled(shell, name);
-    } catch (Exception e) {
-      System.err.println(
-          "  [up] Warning: could not refresh the sail helpers in " + name + ": " + e.getMessage());
     }
   }
 

@@ -30,19 +30,28 @@ public final class ContainerSetupSweep {
       throws InterruptedException {
     var reconciled = 0;
     for (var container : running(shell, projects)) {
-      try {
-        ContainerSailSetup.ensureInstalled(shell, container);
+      if (reconcile(shell, container)) {
         reconciled++;
-      } catch (IOException | TimeoutException | RuntimeException e) {
-        System.err.println(
-            "sail setup sweep: could not refresh helpers in '"
-                + container
-                + "' ("
-                + e.getMessage()
-                + ").");
       }
     }
     return reconciled;
+  }
+
+  /**
+   * The single best-effort reconcile of one container: mount force-refresh plus marker-gated script
+   * rewrite, a warning instead of a failure when the container is wedged. Every automatic trigger —
+   * the boot sweep here, {@code sail up} — shares this one policy; callers that need the outcome or
+   * their own error handling call {@link ContainerSailSetup#ensureInstalled} directly.
+   */
+  public static boolean reconcile(ShellExec shell, String container) throws InterruptedException {
+    try {
+      ContainerSailSetup.ensureInstalled(shell, container);
+      return true;
+    } catch (IOException | TimeoutException | RuntimeException e) {
+      System.err.println(
+          "sail setup: could not refresh helpers in '" + container + "' (" + e.getMessage() + ").");
+      return false;
+    }
   }
 
   private static Collection<String> running(ShellExec shell, Collection<String> projects)
