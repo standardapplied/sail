@@ -88,7 +88,7 @@ class SyncRpcServerTest {
     var failure =
         assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("spec", null)));
 
-    assertTrue(failure.message().contains("0.14.0"));
+    assertTrue(failure.message().contains(SyncWire.V1_UPGRADE_FLOOR));
     assertTrue(failure.message().contains("sail upgrade"));
   }
 
@@ -109,7 +109,7 @@ class SyncRpcServerTest {
             response);
 
     var failure = assertInstanceOf(SyncWire.Failed.class, lastResponse(response));
-    assertTrue(failure.message().contains("0.14.0"));
+    assertTrue(failure.message().contains(SyncWire.V1_UPGRADE_FLOOR));
   }
 
   @Test

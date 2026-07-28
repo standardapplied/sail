@@ -13,8 +13,9 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Carries every pre-0.14 row to the v1 data floor exactly once. This migration remains in the
- * versioned chain so a box upgrading across 0.14 can reach the current schema; it is not a runtime
+ * Carries every pre-0.14 row to the v1 data floor exactly once. It remains registered past the v1
+ * schema baseline because its completion marker is the data-floor stamp, and because a 0.14 box
+ * whose repair was interrupted finishes it here after the schema on-ramp; it is not a runtime
  * compatibility path.
  */
 public final class LegacyDataMigration implements DataMigration {

@@ -8,7 +8,6 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,17 +20,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * The 0.14 data-floor repair running on a floor-schema database that the v1 on-ramp carries
+ * forward: unassigned specs, node-less runs, and unjournaled rows are exactly what an interrupted
+ * 0.14 'sail migrate' leaves behind.
+ */
 class LegacyDataMigrationTest {
 
   @TempDir Path tempDir;
-  private Path dbPath;
   private Sqlite db;
 
   @BeforeEach
   void setUp() {
-    dbPath = tempDir.resolve("legacy.db");
-    db = Sqlite.open(dbPath);
-    stageLegacySchema();
+    db = Sqlite.open(tempDir.resolve("legacy.db"));
+    FloorSchema.stage(db);
   }
 
   @AfterEach
@@ -71,21 +73,11 @@ class LegacyDataMigrationTest {
             "SELECT DISTINCT entity_type FROM change_log ORDER BY entity_type",
             row -> row.text(0)));
 
-    assertRoleConstraint();
-    assertProjectConstraint();
     db.execute("DELETE FROM fdes WHERE id = 'fde-1'");
     assertEquals(
         0L,
         db.queryOne(
                 "SELECT COUNT(*) FROM api_tokens WHERE token_hash = 'token-1'",
-                row -> row.integer(0))
-            .orElseThrow());
-    assertEquals(
-        0L,
-        db.queryOne(
-                """
-                SELECT COUNT(*) FROM api_tokens
-                WHERE token_hash = 'orphan-token' AND fde_id IS NULL""",
                 row -> row.integer(0))
             .orElseThrow());
 
@@ -120,7 +112,7 @@ class LegacyDataMigrationTest {
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
-        VALUES ('orphan', 'Orphan', 'pending', '2026-01-01', '2026-01-01', NULL)""");
+        VALUES ('orphan', 'Orphan', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
     var projects = projectRegistry("acme", "beta");
 
     var failure = assertThrows(IllegalStateException.class, () -> migrate(projects));
@@ -163,11 +155,11 @@ class LegacyDataMigrationTest {
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
-        VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
+        VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
     var legacyStore = new SpecStore(db);
     legacyStore.recordRevision("shared", "local", false);
     var legacyRev = legacyStore.latestRev("shared");
-    assertNull(legacyStore.comparableAtRev("shared", legacyRev).get("project"));
+    assertEquals("unassigned", legacyStore.comparableAtRev("shared", legacyRev).get("project"));
 
     migrate(projectRegistry("acme"));
 
@@ -175,7 +167,7 @@ class LegacyDataMigrationTest {
     var migratedRev = migratedStore.latestRev("shared");
     assertNotEquals(legacyRev, migratedRev);
     assertEquals("acme", migratedStore.comparableAtRev("shared", migratedRev).get("project"));
-    assertNull(migratedStore.comparableAtRev("shared", legacyRev).get("project"));
+    assertEquals("unassigned", migratedStore.comparableAtRev("shared", legacyRev).get("project"));
     assertEquals(
         List.of("local", "migration"),
         new ChangeLog(db).history("spec", "shared").stream().map(ChangeLog.Entry::origin).toList());
@@ -186,19 +178,18 @@ class LegacyDataMigrationTest {
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
-        VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
+        VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
     var projects = projectRegistry("acme");
     migrate(projects);
     var firstRev = new SpecStore(db).latestRev("shared");
 
-    var otherPath = tempDir.resolve("other.db");
-    stageLegacySchema(Sqlite.open(otherPath));
-    try (var other = Sqlite.open(otherPath)) {
+    try (var other = Sqlite.open(tempDir.resolve("other.db"))) {
+      FloorSchema.stage(other);
       other.execute(
           """
           INSERT INTO specs (id, title, status, created_at, updated_at, project)
-          VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', NULL)""");
-      new SchemaManager(other).migrateAll();
+          VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
+      new SchemaManager(other).migrate();
       new DataMigrator(other, List.of(new LegacyDataMigration(() -> "node-b")))
           .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
 
@@ -207,7 +198,7 @@ class LegacyDataMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate(ProjectRegistry projects) {
-    new SchemaManager(db).migrateAll();
+    new SchemaManager(db).migrate();
     return new DataMigrator(db, List.of(new LegacyDataMigration(() -> "node-a")))
         .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
   }
@@ -216,7 +207,7 @@ class LegacyDataMigrationTest {
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
-        VALUES ('legacy-spec', 'Legacy', 'in_progress', '2026-01-01', '2026-01-01', NULL)""");
+        VALUES ('legacy-spec', 'Legacy', 'in_progress', '2026-01-01', '2026-01-01', 'unassigned')""");
     db.execute(
         """
         INSERT INTO projects (name, definition, created_at, updated_at)
@@ -231,7 +222,7 @@ class LegacyDataMigrationTest {
             (id, project, spec_id, agent, status, started_at, node, role, unit)
         VALUES
             ('legacy-build', 'acme', 'legacy-spec', 'codex', 'running', '2026-01-01',
-                NULL, NULL, ''),
+                NULL, 'build', ''),
             ('review-run', 'acme', 'legacy-spec', 'codex', 'running', '2026-01-01',
                 NULL, 'review', '')""");
     db.execute(
@@ -241,37 +232,7 @@ class LegacyDataMigrationTest {
     db.execute(
         """
         INSERT INTO api_tokens (token_hash, name, role, fde_id, created_at)
-        VALUES
-            ('token-1', 'legacy', 'member', 'fde-1', '2026-01-01'),
-            ('orphan-token', 'orphan', 'member', 'missing', '2026-01-01')""");
-  }
-
-  private void assertRoleConstraint() {
-    var notNull =
-        db.queryOne(
-                "SELECT \"notnull\" FROM pragma_table_info('runs') WHERE name = 'role'",
-                row -> row.integer(0))
-            .orElseThrow();
-    assertEquals(1L, notNull);
-    assertThrows(
-        SqliteException.class,
-        () ->
-            db.execute(
-                """
-                INSERT INTO runs (id, project, agent, status, started_at, role)
-                VALUES ('bad-role', 'acme', 'codex', 'running', '2026-01-01', 'other')"""));
-  }
-
-  private void assertProjectConstraint() {
-    var notNull =
-        db.queryOne(
-                "SELECT \"notnull\" FROM pragma_table_info('specs') WHERE name = 'project'",
-                row -> row.integer(0))
-            .orElseThrow();
-    assertEquals(1L, notNull);
-    assertThrows(
-        SqliteException.class,
-        () -> db.execute("UPDATE specs SET project = NULL WHERE id = 'legacy-spec'"));
+        VALUES ('token-1', 'legacy', 'member', 'fde-1', '2026-01-01')""");
   }
 
   private long changeLogCount() {
@@ -290,45 +251,5 @@ class LegacyDataMigrationTest {
               + "\nimage: ubuntu/24.04\nresources: { cpu: 2, memory: 4GB, disk: 20GB }\n");
     }
     return ProjectRegistry.loadFromDisk(projectsDir);
-  }
-
-  private void stageLegacySchema() {
-    stageLegacySchema(db);
-    db = Sqlite.open(dbPath);
-  }
-
-  private static void stageLegacySchema(Sqlite legacy) {
-    new SchemaManager(legacy).migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
-    relaxColumn(legacy, "runs", "role TEXT NOT NULL DEFAULT 'build'", "role TEXT DEFAULT 'build'");
-    relaxColumn(
-        legacy,
-        "specs",
-        "project TEXT NOT NULL DEFAULT 'unassigned'",
-        "project TEXT DEFAULT 'unassigned'");
-    legacy.close();
-  }
-
-  private static void relaxColumn(Sqlite legacy, String table, String strict, String relaxed) {
-    var ddl =
-        legacy
-            .queryOne(
-                "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
-                row -> row.text(0),
-                table)
-            .orElseThrow();
-    if (!ddl.contains(strict)) {
-      throw new IllegalStateException(
-          "Legacy staging expected '" + strict + "' in the " + table + " DDL: " + ddl);
-    }
-    var legacyDdl =
-        ddl.replace(strict, relaxed)
-            .replace("CREATE TABLE \"" + table + "\"", "CREATE TABLE " + table + "_legacy")
-            .replace("CREATE TABLE " + table + " ", "CREATE TABLE " + table + "_legacy ");
-    legacy.execute("PRAGMA foreign_keys = OFF");
-    legacy.execute(legacyDdl);
-    legacy.execute("INSERT INTO " + table + "_legacy SELECT * FROM " + table);
-    legacy.execute("DROP TABLE " + table);
-    legacy.execute("ALTER TABLE " + table + "_legacy RENAME TO " + table);
-    legacy.execute("PRAGMA foreign_keys = ON");
   }
 }
