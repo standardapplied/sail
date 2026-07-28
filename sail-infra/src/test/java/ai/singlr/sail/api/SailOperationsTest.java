@@ -1578,17 +1578,17 @@ class SailOperationsTest {
     seedSpec(specStore, "auth", "Add auth", "pending", List.of(), "Do auth");
     var operations =
         new SailOperations(
-            shell(),
-            yaml.toString(),
-            new EventBus(),
-            null,
-            specStore,
-            new ReviewStore(db),
-            new RunStore(db),
-            new MessageStore(db),
-            new ProjectStore(db),
-            SyncScheduler.disabled(),
-            new FdeStore(db));
+                shell(),
+                yaml.toString(),
+                new EventBus(),
+                null,
+                specStore,
+                new ReviewStore(db),
+                new RunStore(db),
+                new ProjectStore(db),
+                SyncScheduler.disabled(),
+                new FdeStore(db))
+            .useMessages(new MessageStore(db));
 
     var result =
         operations.postSpecMessage(

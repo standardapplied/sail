@@ -16,9 +16,11 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,13 +45,13 @@ class SpecMessageOperationsTest {
     bus = new EventBus();
     operations =
         new SailOperations(
-            new ShellExecutor(false),
-            "sail.yaml",
-            bus,
-            null,
-            new SpecStore(db),
-            new ReviewStore(db),
-            new MessageStore(db));
+                new ShellExecutor(false),
+                "sail.yaml",
+                bus,
+                null,
+                new SpecStore(db),
+                new ReviewStore(db))
+            .useMessages(new MessageStore(db));
   }
 
   @AfterEach
@@ -71,7 +73,7 @@ class SpecMessageOperationsTest {
               }
 
               @Override
-              public java.util.function.Predicate<Event> filter() {
+              public Predicate<Event> filter() {
                 return ignored -> true;
               }
 
@@ -167,7 +169,7 @@ class SpecMessageOperationsTest {
         new SpecMessageView("id", "room", "ada", "body", null, "2026-07-28T00:00:00Z");
     assertFalse(withoutReply.toMap().containsKey("reply_to"));
     assertTrue(new SpecMessageResponse(view).toMap().containsKey("message"));
-    assertEquals(1, new SpecMessagesResponse("room", java.util.List.of(view)).toMap().get("total"));
+    assertEquals(1, new SpecMessagesResponse("room", List.of(view)).toMap().get("total"));
   }
 
   private static Actor member(String handle) {

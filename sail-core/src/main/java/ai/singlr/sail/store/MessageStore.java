@@ -11,6 +11,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -103,7 +104,7 @@ public final class MessageStore {
                 before,
                 limit);
     var oldest = new ArrayList<>(newest);
-    java.util.Collections.reverse(oldest);
+    Collections.reverse(oldest);
     return List.copyOf(oldest);
   }
 

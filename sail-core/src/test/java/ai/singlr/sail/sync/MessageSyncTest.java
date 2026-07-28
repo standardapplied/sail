@@ -18,6 +18,7 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,7 +93,7 @@ class MessageSyncTest {
     main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);
     SyncPeer.with("node", () -> new SyncEngine().reconcile(node.replica, main.replica));
-    var changed = new java.util.LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
+    var changed = new LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
     changed.put("body", "changed");
 
     assertThrows(

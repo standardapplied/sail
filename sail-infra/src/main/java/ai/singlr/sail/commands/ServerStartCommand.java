@@ -177,17 +177,17 @@ public final class ServerStartCommand implements Runnable {
     shutdown.register(syncScheduler);
     var operations =
         new SailOperations(
-            new ShellExecutor(false),
-            SailPaths.PROJECT_DESCRIPTOR,
-            bus,
-            persister,
-            specStore,
-            reviewStore,
-            runStore,
-            messageStore,
-            new ProjectStore(db),
-            syncScheduler,
-            new FdeStore(db));
+                new ShellExecutor(false),
+                SailPaths.PROJECT_DESCRIPTOR,
+                bus,
+                persister,
+                specStore,
+                reviewStore,
+                runStore,
+                new ProjectStore(db),
+                syncScheduler,
+                new FdeStore(db))
+            .useMessages(messageStore);
     var orphaned = reviewStore.failOrphanedRunning();
     var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
     if (orphanedRuns > 0) {

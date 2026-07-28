@@ -94,19 +94,6 @@ public final class SailOperations implements Operations {
         reviewStore);
   }
 
-  public SailOperations(
-      ShellExec shell,
-      String file,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      SpecStore specStore,
-      ReviewStore reviewStore,
-      MessageStore messageStore) {
-    this(shell, file, eventBus, auditSubscriber, specStore, reviewStore);
-    this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
-    this.dispatchOps.useMessages(messageStore);
-  }
-
   /** Construct with database-backed spec store (no review store). */
   public SailOperations(
       ShellExec shell,
@@ -173,31 +160,11 @@ public final class SailOperations implements Operations {
         fdeStore);
   }
 
-  public SailOperations(
-      ShellExec shell,
-      String file,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      SpecStore specStore,
-      ReviewStore reviewStore,
-      RunStore runStore,
-      MessageStore messageStore,
-      ProjectStore projectStore,
-      SyncScheduler syncScheduler,
-      FdeStore fdeStore) {
-    this(
-        shell,
-        file,
-        eventBus,
-        auditSubscriber,
-        specStore,
-        reviewStore,
-        runStore,
-        projectStore,
-        syncScheduler,
-        fdeStore);
+  /** Wires the message store into the operations and dispatch lanes; returns {@code this}. */
+  public SailOperations useMessages(MessageStore messageStore) {
     this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
     this.dispatchOps.useMessages(messageStore);
+    return this;
   }
 
   SailOperations(

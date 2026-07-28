@@ -24,6 +24,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -239,6 +240,7 @@ public final class Fleet implements AutoCloseable {
     private final RunStore runs;
     private final ReviewStore reviews;
     private final FdeStore fdes;
+    private final MessageStore messages;
 
     private Box(String handle, boolean main, Path home, Path bin, Path descriptor, Sqlite db)
         throws Exception {
@@ -253,6 +255,7 @@ public final class Fleet implements AutoCloseable {
       runs = new RunStore(db);
       reviews = new ReviewStore(db);
       fdes = new FdeStore(db);
+      messages = new MessageStore(db);
       fdes.add(handle, handle, handle + "@example.dev", "admin");
       bus = new EventBus();
       reviewsController =
@@ -290,18 +293,19 @@ public final class Fleet implements AutoCloseable {
               StopOperations.Listener.NONE);
       operations =
           new SailOperations(
-              shell,
-              descriptor.toString(),
-              (command, log) -> 4242L,
-              bus,
-              null,
-              specs,
-              reviews,
-              runs,
-              projects,
-              ai.singlr.sail.engine.ConnectEnvironment::detect,
-              SyncScheduler.disabled(),
-              fdes);
+                  shell,
+                  descriptor.toString(),
+                  (command, log) -> 4242L,
+                  bus,
+                  null,
+                  specs,
+                  reviews,
+                  runs,
+                  projects,
+                  ai.singlr.sail.engine.ConnectEnvironment::detect,
+                  SyncScheduler.disabled(),
+                  fdes)
+              .useMessages(messages);
       slack = new CapturingPoster();
       var syncConfig =
           main
@@ -409,6 +413,18 @@ public final class Fleet implements AutoCloseable {
                   0));
       reviewsController.onEvent(event);
       bus.publish(event);
+    }
+
+    public SpecMessageView postMessage(String specId, String body) {
+      return operations
+          .postSpecMessage(
+              specId, new SpecMessageRequest(body, null), Actor.cliOperator(handle), handle)
+          .orThrow()
+          .message();
+    }
+
+    public List<SpecMessageView> listMessages(String specId) {
+      return operations.specMessages(specId, null, 50).orThrow().messages();
     }
 
     public void assertSpecStatus(String id, SpecStatus status) {

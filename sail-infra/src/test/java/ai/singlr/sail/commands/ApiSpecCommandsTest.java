@@ -57,13 +57,8 @@ class ApiSpecCommandsTest {
     reviewStore = new ReviewStore(db);
     var operations =
         new SailOperations(
-            new ShellExecutor(false),
-            "sail.yaml",
-            bus,
-            persister,
-            specStore,
-            reviewStore,
-            new MessageStore(db));
+                new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore)
+            .useMessages(new MessageStore(db));
     server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
     server.start();
   }

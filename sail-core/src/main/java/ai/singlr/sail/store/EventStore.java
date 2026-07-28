@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -103,12 +105,12 @@ public final class EventStore {
     if (batchSize <= 0) {
       throw new IllegalArgumentException("batchSize must be positive");
     }
-    var placeholders = String.join(", ", java.util.Collections.nCopies(types.size(), "?"));
+    var placeholders = String.join(", ", Collections.nCopies(types.size(), "?"));
     var sql =
         "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE timestamp < ? AND type IN ("
             + placeholders
             + ") ORDER BY id LIMIT ?)";
-    var parameters = new java.util.ArrayList<Object>();
+    var parameters = new ArrayList<Object>();
     parameters.add(before);
     parameters.addAll(types);
     parameters.add((long) batchSize);
