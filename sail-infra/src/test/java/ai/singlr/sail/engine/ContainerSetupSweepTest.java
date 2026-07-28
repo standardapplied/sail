@@ -39,6 +39,30 @@ class ContainerSetupSweepTest {
   }
 
   @Test
+  void reconcileRefreshesTheMountAndProbesTheHelperMarkers() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertTrue(ContainerSetupSweep.reconcile(shell, "acme"));
+
+    var commands = String.join("\n", shell.invocations());
+    assertTrue(
+        commands.contains("config device"),
+        "reconcile must force-refresh the socket bind mount: " + commands);
+    assertTrue(
+        commands.contains("grep -qsF"),
+        "reconcile must probe the helper scripts' staleness markers: " + commands);
+  }
+
+  @Test
+  void reconcileIsBestEffortAndNeverThrowsForAWedgedContainer() throws Exception {
+    var wedged =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("device add acme", "container wedged");
+
+    assertFalse(ContainerSetupSweep.reconcile(wedged, "acme"));
+  }
+
+  @Test
   void sweepSurvivesAFailingContainerAndAnUnlistableDaemon() throws Exception {
     var failing =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
