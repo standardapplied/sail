@@ -1098,7 +1098,7 @@ public final class SailOperations implements Operations {
 
   @Override
   public Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, String author) {
+      String specId, SpecMessageRequest request, Actor actor, String author) {
     return safeWrite(
         () -> {
           var store = requireMessageStore();
@@ -1109,6 +1109,7 @@ public final class SailOperations implements Operations {
                       () ->
                           new ApiException(
                               ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          SpecPolicy.mutate(actor, spec.id(), spec.assignee(), spec.createdBy()).enforce();
           MessageStore.MessageRow row;
           try {
             row = store.append(specId, author, request.body(), request.replyTo());

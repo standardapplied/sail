@@ -185,11 +185,32 @@ public final class MessageStore {
           var json = YamlUtil.dumpJson(snapshot);
           var rev = Revisions.next(null, json);
           var row = fromSnapshot(id, snapshot);
+          var peer = SyncPeer.current();
+          if (!mayPostAs(peer, row.author(), row.specId())) {
+            throw new IllegalArgumentException(
+                "sync principal '" + peer + "' may not post as '" + row.author() + "'");
+          }
           requireReplyTarget(row);
           write(row, rev, null);
           changeLog.append(ENTITY, id, rev, row.author(), "sync", false, json);
           return new PushOutcome.Accepted(rev);
         });
+  }
+
+  private boolean mayPostAs(String peer, String author, String specId) {
+    if (peer == null) {
+      return false;
+    }
+    if (peer.equals(author)) {
+      return true;
+    }
+    return db.queryOne(
+            "SELECT 1 FROM runs WHERE principal = ? AND owner = ? AND spec_id = ? LIMIT 1",
+            row -> true,
+            author,
+            peer,
+            specId)
+        .orElse(false);
   }
 
   private void write(MessageRow row, String rev, String baseRev) {

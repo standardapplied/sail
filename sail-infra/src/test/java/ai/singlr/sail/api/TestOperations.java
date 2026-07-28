@@ -314,7 +314,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, String author) {
+      String specId, SpecMessageRequest request, Actor actor, String author) {
     return Result.success(
         new SpecMessageResponse(
             SpecMessageView.from(

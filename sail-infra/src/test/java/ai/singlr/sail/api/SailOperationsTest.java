@@ -1590,7 +1590,12 @@ class SailOperationsTest {
             SyncScheduler.disabled(),
             new FdeStore(db));
 
-    var result = operations.postSpecMessage("auth", new SpecMessageRequest("Ready", null), "sail");
+    var result =
+        operations.postSpecMessage(
+            "auth",
+            new SpecMessageRequest("Ready", null),
+            new Actor("sail", Role.ADMIN, Actor.Lane.API),
+            "sail");
 
     assertTrue(result.isSuccess());
   }

@@ -57,12 +57,11 @@ public final class AgentTaskPrompt {
     if (messages.isEmpty()) {
       return "";
     }
-    var room = new StringBuilder("## Conversation on this spec\n\n");
-    for (var message : messages) {
-      room.append(message.author()).append(" (").append(message.createdAt()).append("):\n");
-      room.append(message.body()).append("\n\n");
-    }
-    return room.toString();
+    return "## Conversation on this spec\n\n"
+        + PromptConversation.renderNewest(
+            messages,
+            message ->
+                message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n");
   }
 
   /**

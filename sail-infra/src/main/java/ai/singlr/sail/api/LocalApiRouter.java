@@ -204,6 +204,7 @@ final class LocalApiRouter implements LocalApiHandler {
             operations.postSpecMessage(
                 id,
                 new SpecMessageRequest(form.get("body"), form.get("reply_to")),
+                actorFrom(run),
                 run.principal()));
       }
       default -> problem(405, "messages accepts GET or POST");

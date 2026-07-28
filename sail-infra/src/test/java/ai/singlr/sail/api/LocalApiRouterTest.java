@@ -285,6 +285,9 @@ class LocalApiRouterTest {
     assertEquals(201, posted.status());
     assertEquals("Progress update", ops.lastMessage.body());
     assertEquals(TestOperations.PRINCIPAL, ops.lastMessageAuthor);
+    assertEquals(TestOperations.PRINCIPAL, ops.lastActor.handle());
+    assertEquals(TestOperations.OWNER, ops.lastActor.owner());
+    assertTrue(ops.lastActor.agentLane());
 
     assertEquals(
         200,
@@ -394,10 +397,11 @@ class LocalApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postSpecMessage(
-        String specId, SpecMessageRequest request, String author) {
+        String specId, SpecMessageRequest request, Actor actor, String author) {
       lastMessage = request;
       lastMessageAuthor = author;
-      return super.postSpecMessage(specId, request, author);
+      lastActor = actor;
+      return super.postSpecMessage(specId, request, actor, author);
     }
 
     @Override

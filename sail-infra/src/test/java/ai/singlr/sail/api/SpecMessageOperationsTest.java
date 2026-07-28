@@ -37,8 +37,9 @@ class SpecMessageOperationsTest {
     new SchemaManager(db).migrate();
     db.execute(
         """
-        INSERT INTO specs (id, title, project, created_at, updated_at)
-        VALUES ('room', 'Room', 'acme', 'now', 'now')""");
+        INSERT INTO specs
+            (id, title, project, assignee, created_by, created_at, updated_at)
+        VALUES ('room', 'Room', 'acme', 'ada', 'ada', 'now', 'now')""");
     bus = new EventBus();
     operations =
         new SailOperations(
@@ -83,7 +84,8 @@ class SpecMessageOperationsTest {
 
     var posted =
         operations
-            .postSpecMessage("room", new SpecMessageRequest("Progress\n  update", null), "ada")
+            .postSpecMessage(
+                "room", new SpecMessageRequest("Progress\n  update", null), member("ada"), "ada")
             .orThrow();
 
     assertEquals("ada", posted.message().author());
@@ -104,13 +106,13 @@ class SpecMessageOperationsTest {
     assertEquals(
         ErrorCode.SPEC_NOT_FOUND,
         operations
-            .postSpecMessage("missing", new SpecMessageRequest("body", null), "ada")
+            .postSpecMessage("missing", new SpecMessageRequest("body", null), member("ada"), "ada")
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
         operations
-            .postSpecMessage("room", new SpecMessageRequest(" ", null), "ada")
+            .postSpecMessage("room", new SpecMessageRequest(" ", null), member("ada"), "ada")
             .asFailure()
             .errorCode());
     assertEquals(
@@ -121,8 +123,33 @@ class SpecMessageOperationsTest {
         operations.specMessages("missing", null, 50).asFailure().errorCode());
 
     var longMessage = "x".repeat(200);
-    operations.postSpecMessage("room", new SpecMessageRequest(longMessage, null), "ada").orThrow();
+    operations
+        .postSpecMessage("room", new SpecMessageRequest(longMessage, null), member("ada"), "ada")
+        .orThrow();
     assertEquals(1, operations.specMessages("room", null, 50).orThrow().messages().size());
+  }
+
+  @Test
+  void onlyTheSpecOwnerOrAnAdminCanPost() {
+    var refused =
+        operations
+            .postSpecMessage(
+                "room",
+                new SpecMessageRequest("foreign instruction", null),
+                member("mallory"),
+                "mallory")
+            .asFailure();
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.errorCode());
+    assertTrue(operations.specMessages("room", null, 50).orThrow().messages().isEmpty());
+
+    var agent = Actor.agentPrincipal("codex/run-1", "ada");
+    var posted =
+        operations
+            .postSpecMessage(
+                "room", new SpecMessageRequest("owner update", null), agent, agent.handle())
+            .orThrow();
+    assertEquals(agent.handle(), posted.message().author());
   }
 
   @Test
@@ -141,5 +168,9 @@ class SpecMessageOperationsTest {
     assertFalse(withoutReply.toMap().containsKey("reply_to"));
     assertTrue(new SpecMessageResponse(view).toMap().containsKey("message"));
     assertEquals(1, new SpecMessagesResponse("room", java.util.List.of(view)).toMap().get("total"));
+  }
+
+  private static Actor member(String handle) {
+    return new Actor(handle, Role.MEMBER, Actor.Lane.API);
   }
 }

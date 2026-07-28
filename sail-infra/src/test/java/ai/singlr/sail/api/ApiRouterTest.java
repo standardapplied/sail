@@ -772,7 +772,8 @@ class ApiRouterTest {
 
   @Test
   void specMessagesPostAndGetReturnJsonAndClampLimit() throws Exception {
-    try (var server = server()) {
+    var ops = new MessageActorProbe();
+    try (var server = serverWith(ops, true)) {
       var posted =
           post(
               server,
@@ -781,6 +782,9 @@ class ApiRouterTest {
               "{\"body\":\"progress\",\"reply_to\":\"01900000-0000-7000-8000-000000000001\"}");
       assertEquals(201, posted.statusCode());
       assertTrue(posted.body().contains("\"body\": \"progress\""));
+      assertEquals(Role.ADMIN, ops.actor.role());
+      assertEquals(Actor.Lane.API, ops.actor.lane());
+      assertEquals("admin", ops.author);
 
       var listed = get(server, "/v1/specs/auth-flow/messages?limit=999", "token");
       assertEquals(200, listed.statusCode());
@@ -1078,6 +1082,19 @@ class ApiRouterTest {
         ai.singlr.sail.store.SpecStore.SpecFilter filter) {
       sawNoSync = SyncControl.noSync();
       return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+    }
+  }
+
+  private static final class MessageActorProbe extends FakeOperations {
+    private Actor actor;
+    private String author;
+
+    @Override
+    public Result<SpecMessageResponse> postSpecMessage(
+        String specId, SpecMessageRequest request, Actor actor, String author) {
+      this.actor = actor;
+      this.author = author;
+      return super.postSpecMessage(specId, request, actor, author);
     }
   }
 
@@ -1435,8 +1452,8 @@ class ApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postSpecMessage(
-        String specId, SpecMessageRequest request, String author) {
-      return new TestOperations().postSpecMessage(specId, request, author);
+        String specId, SpecMessageRequest request, Actor actor, String author) {
+      return new TestOperations().postSpecMessage(specId, request, actor, author);
     }
 
     @Override

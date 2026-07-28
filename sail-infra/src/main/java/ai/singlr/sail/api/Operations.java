@@ -107,7 +107,7 @@ public interface Operations {
       String specId, SpecContentRequest request, Actor actor);
 
   Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, String author);
+      String specId, SpecMessageRequest request, Actor actor, String author);
 
   Result<SpecMessagesResponse> specMessages(String specId, String before, int limit);
 
