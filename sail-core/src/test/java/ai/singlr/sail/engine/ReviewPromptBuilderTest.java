@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -73,5 +74,24 @@ class ReviewPromptBuilderTest {
         prompt.contains("If that branch no longer exists"),
         "a deleted work branch must not send the reviewer hunting: " + prompt);
     assertTrue(prompt.contains("ignore any other repositories"), prompt);
+  }
+
+  @Test
+  void placesConversationBeforeReviewInstructions() {
+    var message =
+        new MessageStore.MessageRow(
+            "01900000-0000-7000-8000-000000000001",
+            "auth",
+            "ada",
+            "The token decision is intentional",
+            null,
+            "2026-07-28T00:00:00Z",
+            "1-a",
+            null);
+
+    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(message));
+
+    assertTrue(prompt.startsWith("Conversation on this spec:"));
+    assertTrue(prompt.indexOf("token decision") < prompt.indexOf("Review the changes"));
   }
 }

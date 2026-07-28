@@ -242,6 +242,8 @@ public final class AgentContextGenerator {
 
         ### Working with specs
         - `spec board` — kanban summary; `spec list [--status pending] [--assignee me]`
+        - `spec comment <id> --body <text>|-` — post progress, a question, or a final summary;
+          `spec comments <id>` — read the room
         - `spec show <id>` — metadata, dependencies, and the full body
         - `spec create --id <id> --title "<title>" --body-file <file>` — create one; add
           `--depends-on a,b`, `--repos api,web`, `--agent codex|claude-code`, `--model <id>`,

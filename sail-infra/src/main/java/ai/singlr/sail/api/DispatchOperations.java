@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -194,6 +195,7 @@ public final class DispatchOperations {
   private final ReviewStore reviewStore;
   private final RunStore runStore;
   private final FdeStore fdeStore;
+  private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
   private final Snapshotter snapshotter;
@@ -233,6 +235,11 @@ public final class DispatchOperations {
     this.listener = Objects.requireNonNull(listener, "listener");
   }
 
+  public DispatchOperations useMessages(MessageStore messages) {
+    this.messageStore = Objects.requireNonNull(messages, "messages");
+    return this;
+  }
+
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
    * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
@@ -268,7 +275,12 @@ public final class DispatchOperations {
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
     var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-    var task = AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody);
+    var room =
+        messageStore == null
+            ? List.<MessageStore.MessageRow>of()
+            : messageStore.list(nextSpec.id(), null, 20);
+    var task =
+        AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
 
     if (request.dryRun()) {

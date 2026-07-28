@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 
 /**
@@ -22,11 +23,20 @@ public final class ReviewPromptBuilder {
    *     repos, and a wrong name sends the reviewer into an unrelated codebase)
    */
   public static String build(String branch, List<String> repos, List<String> categories) {
+    return build(branch, repos, categories, List.of());
+  }
+
+  public static String build(
+      String branch,
+      List<String> repos,
+      List<String> categories,
+      List<MessageStore.MessageRow> messages) {
     var categoryList =
         categories.isEmpty() ? "any relevant category" : String.join(", ", categories);
     var repoList = repos.isEmpty() ? "the repository in the workspace" : String.join(", ", repos);
 
-    return """
+    return conversation(messages)
+        + """
         Review the changes on branch %s in the following repository director%s inside this
         workspace: %s. Review only those checkouts — ignore any other repositories present.
         If that branch no longer exists, review the spec's changes as merged on the default
@@ -55,6 +65,17 @@ public final class ReviewPromptBuilder {
 
         Begin your response with ```json and end with ```.
         """
-        .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList);
+            .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList);
+  }
+
+  private static String conversation(List<MessageStore.MessageRow> messages) {
+    if (messages.isEmpty()) {
+      return "";
+    }
+    var room = new StringBuilder("Conversation on this spec:\n\n");
+    for (var message : messages) {
+      room.append(message.author()).append(": ").append(message.body()).append("\n\n");
+    }
+    return room.toString();
   }
 }

@@ -52,6 +52,21 @@ class RemoteMainReplicaTest {
   }
 
   @Test
+  void anOlderMainLoudlyNamesTheUnknownEntityType() {
+    var replica =
+        new RemoteMainReplica(
+            new StringReader(
+                SyncWire.encode(new SyncWire.Failed("Unknown entity type: message")) + "\n"),
+            new StringWriter(),
+            "message");
+
+    var failure = assertThrows(SyncTransportException.class, replica::entityIds);
+
+    assertTrue(failure.getMessage().contains("message"));
+    assertTrue(failure.getMessage().contains("Unknown entity type"));
+  }
+
+  @Test
   void aPreFloorMainIsRefusedBeforeItsDataIsRead() {
     var legacy = new SyncWire.Fetched("old-main", 1, Map.of(), null);
     var replica = replica(SyncWire.encode(legacy));

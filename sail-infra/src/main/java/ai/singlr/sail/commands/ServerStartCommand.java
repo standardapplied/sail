@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
+import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RunTracker;
@@ -40,6 +41,7 @@ import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ExpiredRowSweeper;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -170,6 +172,7 @@ public final class ServerStartCommand implements Runnable {
     var persister = new SpecStoreAuditPersister(eventStore);
     var reviewStore = new ReviewStore(db);
     var runStore = new RunStore(db);
+    var messageStore = new MessageStore(db);
     var syncScheduler = NodeSync.scheduler(false);
     shutdown.register(syncScheduler);
     var operations =
@@ -181,6 +184,7 @@ public final class ServerStartCommand implements Runnable {
             specStore,
             reviewStore,
             runStore,
+            messageStore,
             new ProjectStore(db),
             syncScheduler,
             new FdeStore(db));
@@ -198,14 +202,15 @@ public final class ServerStartCommand implements Runnable {
     }
     var reviewController =
         ReviewWiring.controller(
-            specStore,
-            reviewStore,
-            bus,
-            ServerStartCommand::loadProjectYaml,
-            new ShellExecutor(false),
-            syncScheduler::afterWrite,
-            runStore,
-            NodeIdentity::handle);
+                specStore,
+                reviewStore,
+                bus,
+                ServerStartCommand::loadProjectYaml,
+                new ShellExecutor(false),
+                syncScheduler::afterWrite,
+                runStore,
+                NodeIdentity::handle)
+            .useMessages(messageStore);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
     if (narratesSlack(HostSync.config())) {
       bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
@@ -243,6 +248,7 @@ public final class ServerStartCommand implements Runnable {
             specStore,
             reviewController);
     var sweeper = new ExpiredRowSweeper(dbPath);
+    var eventSweeper = new EventRetentionSweeper(eventStore);
     var reconciler =
         new StuckSpecReconciler(
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
@@ -270,12 +276,14 @@ public final class ServerStartCommand implements Runnable {
     shutdown
         .register(server)
         .register(sweeper)
+        .register(eventSweeper)
         .register(reconciler)
         .register(missedStops)
         .register(rearmer);
     try {
       server.start();
       sweeper.start();
+      eventSweeper.start();
       reconciler.start();
       var replayed = missedStops.sweep();
       if (replayed > 0) {

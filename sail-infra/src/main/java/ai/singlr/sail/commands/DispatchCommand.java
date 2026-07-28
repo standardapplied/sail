@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -156,17 +157,18 @@ public final class DispatchCommand implements Runnable {
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener) {
     return new DispatchOperations(
-        shell,
-        file,
-        new SpecStore(db),
-        new ReviewStore(db),
-        new RunStore(db),
-        new FdeStore(db),
-        events,
-        watcherSpawner,
-        snapshotter,
-        launcher,
-        listener);
+            shell,
+            file,
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new FdeStore(db),
+            events,
+            watcherSpawner,
+            snapshotter,
+            launcher,
+            listener)
+        .useMessages(new MessageStore(db));
   }
 
   private DispatchOperations.Outcome dispatch(

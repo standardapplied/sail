@@ -15,7 +15,7 @@ import java.util.Objects;
 
 public final class JsonBody {
 
-  private static final int MAX_BYTES = 64 * 1024;
+  private static final int MAX_BYTES = 66 * 1024;
 
   private JsonBody() {}
 
@@ -54,7 +54,7 @@ public final class JsonBody {
     if (bytes.length > MAX_BYTES) {
       throw new ApiException(
           ErrorCode.REQUEST_TOO_LARGE,
-          "Request body exceeds 65536 bytes.",
+          "Request body exceeds 67584 bytes.",
           "Send a smaller JSON body.");
     }
     if (bytes.length == 0) {

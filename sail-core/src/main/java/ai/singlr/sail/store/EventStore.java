@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Persists events to SQLite. Replaces the file-based JSONL audit log with a queryable table. */
 public final class EventStore {
@@ -93,6 +94,38 @@ public final class EventStore {
       typeMap.put((String) row[0], (long) row[1]);
     }
     return Map.copyOf(typeMap);
+  }
+
+  public int pruneBefore(String before, Set<String> types, int batchSize) {
+    if (types.isEmpty()) {
+      return 0;
+    }
+    if (batchSize <= 0) {
+      throw new IllegalArgumentException("batchSize must be positive");
+    }
+    var placeholders = String.join(", ", java.util.Collections.nCopies(types.size(), "?"));
+    var sql =
+        "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE timestamp < ? AND type IN ("
+            + placeholders
+            + ") ORDER BY id LIMIT ?)";
+    var parameters = new java.util.ArrayList<Object>();
+    parameters.add(before);
+    parameters.addAll(types);
+    parameters.add((long) batchSize);
+    var total = 0;
+    while (true) {
+      var deleted =
+          db.transaction(
+              () -> {
+                db.execute(sql, parameters.toArray());
+                return db.changes();
+              });
+      total += deleted;
+      if (deleted < batchSize) {
+        return total;
+      }
+      Thread.yield();
+    }
   }
 
   private EventRow mapEvent(Sqlite.Row row) {

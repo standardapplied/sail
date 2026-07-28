@@ -175,10 +175,11 @@ final class LocalApiRouter implements LocalApiHandler {
     if (slash >= 0) {
       var id = tail.substring(0, slash);
       var sub = tail.substring(slash + 1);
-      if (!"content".equals(sub)) {
-        return problem(404, "No route for spec sub-resource " + sub);
-      }
-      return content(request, run, id);
+      return switch (sub) {
+        case "content" -> content(request, run, id);
+        case "messages" -> messages(request, run, id);
+        default -> problem(404, "No route for spec sub-resource " + sub);
+      };
     }
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpec(tail));
@@ -189,6 +190,35 @@ final class LocalApiRouter implements LocalApiHandler {
       case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, actorFrom(run)));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
+  }
+
+  private ApiResponse messages(LocalApiRequest request, RunStore.RunRow run, String id) {
+    return switch (request.method()) {
+      case "GET" ->
+          ApiResponse.from(
+              operations.specMessages(
+                  id, request.query().get("before"), clampedLimit(request.query().get("limit"))));
+      case "POST" -> {
+        var form = request.form();
+        yield ApiResponse.fromCreated(
+            operations.postSpecMessage(
+                id,
+                new SpecMessageRequest(form.get("body"), form.get("reply_to")),
+                run.principal()));
+      }
+      default -> problem(405, "messages accepts GET or POST");
+    };
+  }
+
+  private static int clampedLimit(String value) {
+    if (Strings.isBlank(value)) {
+      return 50;
+    }
+    try {
+      return Math.clamp(Integer.parseInt(value), 1, 100);
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException("limit must be an integer");
+    }
   }
 
   private ApiResponse content(LocalApiRequest request, RunStore.RunRow run, String id) {

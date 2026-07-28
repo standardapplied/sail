@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
@@ -309,6 +310,38 @@ class TestOperations implements Operations {
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor) {
     return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
+  }
+
+  @Override
+  public Result<SpecMessageResponse> postSpecMessage(
+      String specId, SpecMessageRequest request, String author) {
+    return Result.success(
+        new SpecMessageResponse(
+            SpecMessageView.from(
+                new MessageStore.MessageRow(
+                    "01900000-0000-7000-8000-000000000001",
+                    specId,
+                    author,
+                    request.body(),
+                    request.replyTo(),
+                    "2026-07-28T00:00:00Z",
+                    "1-a",
+                    null))));
+  }
+
+  @Override
+  public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+    return Result.success(
+        new SpecMessagesResponse(
+            specId,
+            List.of(
+                new SpecMessageView(
+                    "01900000-0000-7000-8000-000000000001",
+                    specId,
+                    PRINCIPAL,
+                    "hello",
+                    null,
+                    "2026-07-28T00:00:00Z"))));
   }
 
   @Override

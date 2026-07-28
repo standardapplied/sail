@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 public enum ErrorCode {
+  BAD_REQUEST(400),
   INVALID_REQUEST(422),
   INVALID_JSON(400),
   INVALID_MODE(422),

@@ -275,6 +275,38 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void postAndListMessagesUseTheRunPrincipalAndClampPages() {
+    var posted =
+        router.handle(
+            form(
+                "POST",
+                "/v1/specs/oauth/messages",
+                "body=Progress%20update&reply_to=01900000-0000-7000-8000-000000000001"));
+    assertEquals(201, posted.status());
+    assertEquals("Progress update", ops.lastMessage.body());
+    assertEquals(TestOperations.PRINCIPAL, ops.lastMessageAuthor);
+
+    assertEquals(
+        200,
+        router
+            .handle(
+                get(
+                    "/v1/specs/oauth/messages",
+                    Map.of("before", "01900000-0000-7000-8000-000000000001", "limit", "500")))
+            .status());
+    assertEquals(100, ops.lastMessageLimit);
+    assertEquals("01900000-0000-7000-8000-000000000001", ops.lastBefore);
+
+    router.handle(get("/v1/specs/oauth/messages", Map.of("limit", "0")));
+    assertEquals(1, ops.lastMessageLimit);
+    router.handle(get("/v1/specs/oauth/messages", Map.of()));
+    assertEquals(50, ops.lastMessageLimit);
+    assertEquals(
+        400, router.handle(get("/v1/specs/oauth/messages", Map.of("limit", "bad"))).status());
+    assertEquals(405, router.handle(form("DELETE", "/v1/specs/oauth/messages", "")).status());
+  }
+
+  @Test
   void unknownRouteAndUnknownSubResourceAre404() {
     assertEquals(404, router.handle(get("/v1/widgets", Map.of())).status());
     assertEquals(404, router.handle(get("/v1/specs/oauth/history", Map.of())).status());
@@ -297,6 +329,10 @@ class LocalApiRouterTest {
     private String lastShownId;
     private String lastDeletedId;
     private String lastContentId;
+    private SpecMessageRequest lastMessage;
+    private String lastMessageAuthor;
+    private String lastBefore;
+    private int lastMessageLimit;
 
     @Override
     public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
@@ -354,6 +390,21 @@ class LocalApiRouterTest {
     public Result<GlobalBoardResponse> globalBoard(String project) {
       lastBoardProject = project;
       return super.globalBoard(project);
+    }
+
+    @Override
+    public Result<SpecMessageResponse> postSpecMessage(
+        String specId, SpecMessageRequest request, String author) {
+      lastMessage = request;
+      lastMessageAuthor = author;
+      return super.postSpecMessage(specId, request, author);
+    }
+
+    @Override
+    public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+      lastBefore = before;
+      lastMessageLimit = limit;
+      return super.specMessages(specId, before, limit);
     }
   }
 }

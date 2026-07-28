@@ -98,6 +98,8 @@ class CommandTaxonomyTest {
             "board",
             "history",
             "restore",
+            "comment",
+            "comments",
             "dispatch"),
         spec.getSubcommands().keySet());
   }

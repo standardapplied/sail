@@ -14,6 +14,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -198,6 +199,27 @@ class DispatchCommandTest {
         prompt.contains("no Co-Authored-By trailers"),
         "generated work must not carry AI attribution");
     assertFalse(prompt.contains("handoff.md"), "no context-handoff cruft");
+    assertTrue(prompt.contains("spec comment <id> --body <text>"));
+  }
+
+  @Test
+  void buildTaskPromptPlacesTheRecentConversationBeforeTheBody() {
+    var spec = new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of(), null);
+    var message =
+        new MessageStore.MessageRow(
+            "01900000-0000-7000-8000-000000000001",
+            "oauth",
+            "ada",
+            "Use PKCE",
+            null,
+            "2026-07-28T00:00:00Z",
+            "1-a",
+            null);
+
+    var prompt = AgentTaskPrompt.build(spec, "Implement the flow", List.of(message));
+
+    assertTrue(prompt.contains("## Conversation on this spec"));
+    assertTrue(prompt.indexOf("Use PKCE") < prompt.indexOf("Implement the flow"));
   }
 
   @Test

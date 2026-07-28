@@ -96,6 +96,10 @@ public final class ContainerSailSetup {
                         + SpecCliHelper.CREDENTIAL_MARKER
                         + " "
                         + SpecCliHelper.SCRIPT_PATH
+                        + " && grep -qsF '"
+                        + SpecCliHelper.MESSAGES_MARKER
+                        + "' "
+                        + SpecCliHelper.SCRIPT_PATH
                         + " && test -f "
                         + SailStopGate.SCRIPT_PATH
                         + " && grep -qsF "

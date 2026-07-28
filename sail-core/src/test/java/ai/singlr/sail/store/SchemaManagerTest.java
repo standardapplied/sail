@@ -246,6 +246,7 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_events_timestamp"));
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
+    assertTrue(indexes.contains("idx_spec_messages_page"));
   }
 
   private void stageAtVersion(int version) {
@@ -291,6 +292,14 @@ class SchemaManagerTest {
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'run_credentials'",
                 r -> r.text(0))
             .contains("run_credentials"));
+    assertTrue(
+        db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'spec_messages'",
+                r -> r.text(0))
+            .contains("spec_messages"));
+    assertEquals(
+        "acme",
+        db.queryOne("SELECT project FROM runs WHERE id = 'r1'", r -> r.text(0)).orElseThrow());
   }
 
   @Test

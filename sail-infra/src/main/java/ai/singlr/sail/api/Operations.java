@@ -106,6 +106,11 @@ public interface Operations {
   Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor);
 
+  Result<SpecMessageResponse> postSpecMessage(
+      String specId, SpecMessageRequest request, String author);
+
+  Result<SpecMessagesResponse> specMessages(String specId, String before, int limit);
+
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(

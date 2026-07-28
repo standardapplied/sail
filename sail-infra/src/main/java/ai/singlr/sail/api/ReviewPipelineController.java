@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.FindingParser;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -69,6 +70,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private final Runnable syncTrigger;
   private final RunStore runStore;
   private final Supplier<String> localHandle;
+  private MessageStore messageStore;
   private final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight =
       new ConcurrentHashMap<>();
   private final ExecutorService pipelineExecutor;
@@ -154,6 +156,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     this.pipelineExecutor = pipelineExecutor;
     this.runStore = runStore;
     this.localHandle = runStore == null ? null : Objects.requireNonNull(localHandle, "localHandle");
+  }
+
+  public ReviewPipelineController useMessages(MessageStore messages) {
+    this.messageStore = Objects.requireNonNull(messages, "messages");
+    return this;
   }
 
   /**
@@ -409,7 +416,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
-      var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories());
+      var room =
+          messageStore == null
+              ? List.<MessageStore.MessageRow>of()
+              : messageStore.list(specId, null, 20);
+      var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), room);
 
       var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
       var output = agentRunner.run(project, agent, prompt, stage.reviewId(), credential);

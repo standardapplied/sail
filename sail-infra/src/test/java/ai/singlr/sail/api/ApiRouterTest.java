@@ -771,6 +771,29 @@ class ApiRouterTest {
   }
 
   @Test
+  void specMessagesPostAndGetReturnJsonAndClampLimit() throws Exception {
+    try (var server = server()) {
+      var posted =
+          post(
+              server,
+              "/v1/specs/auth-flow/messages",
+              "token",
+              "{\"body\":\"progress\",\"reply_to\":\"01900000-0000-7000-8000-000000000001\"}");
+      assertEquals(201, posted.statusCode());
+      assertTrue(posted.body().contains("\"body\": \"progress\""));
+
+      var listed = get(server, "/v1/specs/auth-flow/messages?limit=999", "token");
+      assertEquals(200, listed.statusCode());
+      assertTrue(listed.body().contains("\"messages\""));
+      assertEquals(200, get(server, "/v1/specs/auth-flow/messages?limit=0", "token").statusCode());
+      assertEquals(200, get(server, "/v1/specs/auth-flow/messages", "token").statusCode());
+      assertEquals(
+          400, get(server, "/v1/specs/auth-flow/messages?limit=bad", "token").statusCode());
+      assertEquals(405, put(server, "/v1/specs/auth-flow/messages", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
   void globalSpecBoardReturns200() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/specs/board", "token");
@@ -1408,6 +1431,17 @@ class ApiRouterTest {
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
         String specId, SpecContentRequest request, Actor actor) {
       return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
+    }
+
+    @Override
+    public Result<SpecMessageResponse> postSpecMessage(
+        String specId, SpecMessageRequest request, String author) {
+      return new TestOperations().postSpecMessage(specId, request, author);
+    }
+
+    @Override
+    public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+      return new TestOperations().specMessages(specId, before, limit);
     }
 
     @Override

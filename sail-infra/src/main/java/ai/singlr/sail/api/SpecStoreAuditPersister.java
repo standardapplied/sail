@@ -29,7 +29,8 @@ public final class SpecStoreAuditPersister implements EventSubscriber {
 
   @Override
   public Predicate<Event> filter() {
-    return EventSubscriber.all();
+    return event ->
+        Event.WellKnownTypes.retentionClass(event.type()) != Event.RetentionClass.EPHEMERAL;
   }
 
   @Override

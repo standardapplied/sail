@@ -16,11 +16,13 @@ import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -54,6 +56,7 @@ public final class SailOperations implements Operations {
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
+  private MessageStore messageStore;
 
   public SailOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -89,6 +92,19 @@ public final class SailOperations implements Operations {
         auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
         reviewStore);
+  }
+
+  public SailOperations(
+      ShellExec shell,
+      String file,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      MessageStore messageStore) {
+    this(shell, file, eventBus, auditSubscriber, specStore, reviewStore);
+    this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
+    this.dispatchOps.useMessages(messageStore);
   }
 
   /** Construct with database-backed spec store (no review store). */
@@ -155,6 +171,33 @@ public final class SailOperations implements Operations {
         ConnectEnvironment::detect,
         syncScheduler,
         fdeStore);
+  }
+
+  public SailOperations(
+      ShellExec shell,
+      String file,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      RunStore runStore,
+      MessageStore messageStore,
+      ProjectStore projectStore,
+      SyncScheduler syncScheduler,
+      FdeStore fdeStore) {
+    this(
+        shell,
+        file,
+        eventBus,
+        auditSubscriber,
+        specStore,
+        reviewStore,
+        runStore,
+        projectStore,
+        syncScheduler,
+        fdeStore);
+    this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
+    this.dispatchOps.useMessages(messageStore);
   }
 
   SailOperations(
@@ -1051,6 +1094,74 @@ public final class SailOperations implements Operations {
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor) {
     return safeWrite(() -> globalSpecOps.setContent(specId, request, actor));
+  }
+
+  @Override
+  public Result<SpecMessageResponse> postSpecMessage(
+      String specId, SpecMessageRequest request, String author) {
+    return safeWrite(
+        () -> {
+          var store = requireMessageStore();
+          var spec =
+              specStore
+                  .findById(specId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          MessageStore.MessageRow row;
+          try {
+            row = store.append(specId, author, request.body(), request.replyTo());
+          } catch (IllegalArgumentException invalid) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+          }
+          publishOnBus(
+              Event.of(
+                  spec.project(),
+                  specId,
+                  Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+                  author,
+                  HostInfo.hostname(),
+                  Map.of("message_id", row.id(), "preview", preview(row.body()))));
+          return new SpecMessageResponse(SpecMessageView.from(row));
+        });
+  }
+
+  @Override
+  public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+    return safeRead(
+        () -> {
+          if (specStore.findById(specId).isEmpty()) {
+            throw new ApiException(
+                ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
+          }
+          List<SpecMessageView> messages;
+          try {
+            messages =
+                requireMessageStore().list(specId, before, limit).stream()
+                    .map(SpecMessageView::from)
+                    .toList();
+          } catch (IllegalArgumentException invalid) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+          }
+          return new SpecMessagesResponse(specId, messages);
+        });
+  }
+
+  private MessageStore requireMessageStore() {
+    if (messageStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Message store not available. Start the server with 'sail server start'.");
+    }
+    return messageStore;
+  }
+
+  private static String preview(String body) {
+    var normalized = body.replaceAll("\\s+", " ").strip();
+    return normalized.codePointCount(0, normalized.length()) <= 160
+        ? normalized
+        : normalized.substring(0, normalized.offsetByCodePoints(0, 160));
   }
 
   @Override

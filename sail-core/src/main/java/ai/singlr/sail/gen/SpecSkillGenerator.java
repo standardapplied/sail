@@ -91,6 +91,9 @@ public final class SpecSkillGenerator {
         Run `spec board` for the kanban summary, or `spec list` for the full set (add
         `--status pending` or `--assignee me` to filter). Render the result as status columns:
 
+        Use `spec comment <id> --body <text>|-` to post progress, questions, and summaries in the
+        spec's conversation; use `spec comments <id>` to read it.
+
         ```
         ┌─────────────┬─────────────────┬──────────────┬────────────────────┬──────────────┐
         │ Pending (3)  │ In Progress (1) │ Review (0)   │ Awaiting Merge (1) │ Done (2)     │
