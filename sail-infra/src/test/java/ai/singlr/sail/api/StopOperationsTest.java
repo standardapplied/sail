@@ -1109,18 +1109,17 @@ class StopOperationsTest {
   }
 
   @Test
-  void sessionHalterKillsThroughTheAgentSession() throws Exception {
-    var shell =
-        shell()
-            .on("cat " + RUN_PID_FILE, "77")
-            .on("kill 77", "")
-            .on("sleep 3", "")
-            .on("kill -0 77", new ShellExec.Result(1, "", ""))
-            .on("rm -f " + RUN_PID_FILE, "");
+  void sessionHalterKillsTheWholeUnitCgroupThroughTheAgentSession() throws Exception {
+    var shell = shell().on("systemctl", "").on("sleep 3", "").on("rm -f " + RUN_PID_FILE, "");
 
     StopOperations.sessionHalter(shell).halt("acme", AgentUnit.forRun(R1));
 
-    assertTrue(shell.invocations().stream().anyMatch(cmd -> cmd.contains("kill 77")));
+    var service = AgentUnit.forRun(R1).service();
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(cmd -> cmd.contains("--kill-who=all --signal=SIGTERM " + service)),
+        "a unit-owning run is halted through its cgroup, never a bare pid");
+    assertTrue(shell.invocations().stream().noneMatch(cmd -> cmd.contains("kill 77")));
   }
 
   private StopOperations.AgentHalter killingHalter(FakeShell shell) {

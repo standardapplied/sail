@@ -218,7 +218,64 @@ public final class AgentSession {
    * SIGKILL that fails against a still-live process throws instead of returning normally, so a
    * caller can never record a successful stop for an agent that survived the signal.
    */
+  /**
+   * Halts a session. A run that owns a systemd unit is killed through the unit's whole cgroup —
+   * SIGTERM to every member, a grace period, then SIGKILL to every member — because the pid file
+   * names only the launch wrapper: signalling that single pid orphans the agent's children inside
+   * the still-active unit, which is exactly the incomplete halt the verified stop then correctly
+   * refuses. Only a unitless foreground session falls back to pid-file surgery, where the wrapper
+   * {@code exec}'d into the agent and the pid names the whole story.
+   */
   public void killAgent(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    if (!Strings.isBlank(unit.unitName())) {
+      killUnit(containerName, unit);
+      return;
+    }
+    killByPidFile(containerName, unit);
+  }
+
+  private void killUnit(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var service = unit.service();
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName,
+            List.of("systemctl", "--user", "kill", "--kill-who=all", "--signal=SIGTERM", service)));
+
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("sleep", "3")));
+
+    if (unitActive(containerName, unit)) {
+      var kill =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  containerName,
+                  List.of(
+                      "systemctl",
+                      "--user",
+                      "kill",
+                      "--kill-who=all",
+                      "--signal=SIGKILL",
+                      service)));
+      if (!kill.ok() && unitActive(containerName, unit)) {
+        throw new IOException(
+            "SIGKILL for unit "
+                + service
+                + " in "
+                + containerName
+                + " failed: "
+                + kill.stderr().trim()
+                + ". Check the unit in the container and retry the stop.");
+      }
+    }
+
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName, List.of("systemctl", "--user", "reset-failed", service)));
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
+  }
+
+  private void killByPidFile(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
     var pidResult = shell.exec(pidCmd);

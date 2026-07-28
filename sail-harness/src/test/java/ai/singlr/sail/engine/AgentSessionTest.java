@@ -221,48 +221,69 @@ class AgentSessionTest {
   }
 
   @Test
-  void killAgentSendsTermThenKill() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat " + RUN_UNIT.pidPath(), "9999\n");
+  void killAgentKillsTheWholeUnitCgroupNeverABarePid() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var session = new AgentSession(shell);
 
     session.killAgent("acme-health", RUN_UNIT);
 
     var cmds = shell.invocations();
-    assertTrue(cmds.stream().anyMatch(c -> c.contains("kill 9999")));
+    var service = RUN_UNIT.service();
+    assertTrue(
+        cmds.stream().anyMatch(c -> c.contains("--kill-who=all --signal=SIGTERM " + service)),
+        "TERM must address every member of the unit cgroup");
     assertTrue(cmds.stream().anyMatch(c -> c.contains("sleep 3")));
-    assertTrue(cmds.stream().anyMatch(c -> c.contains("kill -9 9999")));
+    assertTrue(
+        cmds.stream().anyMatch(c -> c.contains("--kill-who=all --signal=SIGKILL " + service)),
+        "a unit still active after the grace gets a cgroup-wide SIGKILL");
     assertTrue(cmds.stream().anyMatch(c -> c.contains("rm -f " + RUN_UNIT.pidPath())));
+    assertTrue(
+        cmds.stream().noneMatch(c -> c.contains("kill 9999") || c.contains("kill -9 9999")),
+        "the pid file names only the launch wrapper; a bare pid kill orphans the agent's"
+            + " children inside the still-active unit");
   }
 
   @Test
-  void killAgentCleanTermination() throws Exception {
+  void killAgentSkipsSigkillWhenTheUnitDiesInTheGrace() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat " + RUN_UNIT.pidPath(), "9999\n")
-            .onFail("kill -0 9999", "No such process");
+            .onFail("is-active " + RUN_UNIT.service(), "");
     var session = new AgentSession(shell);
 
     session.killAgent("acme-health", RUN_UNIT);
 
     var cmds = shell.invocations();
-    assertFalse(cmds.stream().anyMatch(c -> c.contains("kill -9 9999")));
+    assertFalse(cmds.stream().anyMatch(c -> c.contains("--signal=SIGKILL")));
     assertTrue(cmds.stream().anyMatch(c -> c.contains("rm -f")));
+  }
+
+  @Test
+  void killAgentFallsBackToThePidFileOnlyForAUnitlessSession() throws Exception {
+    var foreground = AgentUnit.recorded(RUN_ID, "");
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("cat " + foreground.pidPath(), "9999\n");
+    var session = new AgentSession(shell);
+
+    session.killAgent("acme-health", foreground);
+
+    var cmds = shell.invocations();
+    assertTrue(cmds.stream().anyMatch(c -> c.contains("kill 9999")));
+    assertTrue(cmds.stream().anyMatch(c -> c.contains("kill -9 9999")));
+    assertTrue(cmds.stream().noneMatch(c -> c.contains("systemctl --user kill")));
   }
 
   @Test
   void killAgentThrowsWhenSigkillFailsOnALiveProcess() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat " + RUN_UNIT.pidPath(), "9999\n")
-            .onFail("kill -9 9999", "Operation not permitted");
+            .onFail("--signal=SIGKILL " + RUN_UNIT.service(), "Operation not permitted");
     var session = new AgentSession(shell);
 
     var failure = assertThrows(IOException.class, () -> session.killAgent("acme-health", RUN_UNIT));
 
     assertTrue(failure.getMessage().contains("SIGKILL"));
-    assertTrue(failure.getMessage().contains("9999"));
+    assertTrue(failure.getMessage().contains(RUN_UNIT.service()));
     assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("rm -f")));
   }
 
@@ -285,12 +306,13 @@ class AgentSessionTest {
 
   @Test
   void killAgentIgnoresNonNumericPid() throws Exception {
+    var foreground = AgentUnit.recorded(RUN_ID, "");
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat " + RUN_UNIT.pidPath(), "; rm -rf /\n");
+            .onOk("cat " + foreground.pidPath(), "; rm -rf /\n");
     var session = new AgentSession(shell);
 
-    session.killAgent("acme-health", RUN_UNIT);
+    session.killAgent("acme-health", foreground);
 
     var cmds = shell.invocations();
     assertEquals(1, cmds.size());
@@ -299,10 +321,11 @@ class AgentSessionTest {
 
   @Test
   void killAgentNoPidFileIsNoOp() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("cat " + RUN_UNIT.pidPath(), "No such file");
+    var foreground = AgentUnit.recorded(RUN_ID, "");
+    var shell = new ScriptedShellExecutor().onFail("cat " + foreground.pidPath(), "No such file");
     var session = new AgentSession(shell);
 
-    session.killAgent("acme-health", RUN_UNIT);
+    session.killAgent("acme-health", foreground);
 
     assertEquals(1, shell.invocations().size());
   }
