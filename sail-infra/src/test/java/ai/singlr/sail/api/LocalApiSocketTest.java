@@ -75,6 +75,15 @@ class LocalApiSocketTest {
   }
 
   @Test
+  void missingCredentialReturns401(@TempDir Path dir) throws Exception {
+    try (var listener = socket(dir)) {
+      listener.start();
+      var response = send(listener.socketPath(), "GET /v1/specs HTTP/1.1\r\n\r\n");
+      assertTrue(response.startsWith("HTTP/1.1 401 Unauthorized"), response);
+    }
+  }
+
+  @Test
   void malformedRequestLineReturns400(@TempDir Path dir) throws Exception {
     try (var listener = socket(dir)) {
       listener.start();
@@ -120,22 +129,34 @@ class LocalApiSocketTest {
     assertFalse(Files.exists(listener.socketPath()));
   }
 
+  private static final String AUTH =
+      "Authorization: Bearer " + TestOperations.RUN_CREDENTIAL + "\r\n";
+
   private static String post(String path, String body) {
-    return "POST " + path + " HTTP/1.1\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
+    return "POST "
+        + path
+        + " HTTP/1.1\r\n"
+        + AUTH
+        + "Content-Length: "
+        + body.length()
+        + "\r\n\r\n"
+        + body;
   }
 
   private static String form(String method, String path, String body) {
     return method
         + " "
         + path
-        + " HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: "
+        + " HTTP/1.1\r\n"
+        + AUTH
+        + "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: "
         + body.length()
         + "\r\n\r\n"
         + body;
   }
 
   private static String get(String path) {
-    return "GET " + path + " HTTP/1.1\r\n\r\n";
+    return "GET " + path + " HTTP/1.1\r\n" + AUTH + "\r\n";
   }
 
   private static String send(Path socketPath, String request) throws Exception {

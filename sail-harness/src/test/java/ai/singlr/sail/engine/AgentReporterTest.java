@@ -46,6 +46,8 @@ class AgentReporterTest {
         startedAt,
         completedAt,
         List.of(),
+        null,
+        null,
         null);
   }
 

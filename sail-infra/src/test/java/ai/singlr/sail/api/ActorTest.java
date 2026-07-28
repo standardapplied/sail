@@ -48,4 +48,38 @@ class ActorTest {
 
     assertNull(actor.handle());
   }
+
+  @Test
+  void agentPrincipalIsMemberTierOnTheAgentLaneWithItsOwner() {
+    var actor = Actor.agentPrincipal("claude/a1b2c3", "uday");
+
+    assertEquals("claude/a1b2c3", actor.handle());
+    assertEquals("uday", actor.owner());
+    assertEquals(Role.MEMBER, actor.role());
+    assertEquals(Actor.Lane.AGENT, actor.lane());
+    assertTrue(actor.agentLane());
+    assertTrue(actor.canWrite());
+    assertFalse(actor.isAdmin());
+  }
+
+  @Test
+  void actsForMatchesTheHandleOrTheOwnerAndNothingElse() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "uday");
+    assertTrue(agent.actsFor("claude/a1b2c3"));
+    assertTrue(agent.actsFor("uday"));
+    assertFalse(agent.actsFor("sumesh"));
+    assertFalse(agent.actsFor(null));
+
+    var human = Actor.cliOperator("uday");
+    assertFalse(human.agentLane());
+    assertNull(human.owner());
+    assertTrue(human.actsFor("uday"));
+    assertFalse(human.actsFor("claude/a1b2c3"));
+  }
+
+  @Test
+  void machineTokenActsForNoOne() {
+    var machine = new Actor(null, Role.MEMBER, Actor.Lane.API);
+    assertFalse(machine.actsFor("uday"));
+  }
 }

@@ -274,7 +274,9 @@ public final class AgentSession {
    * ad-hoc session, which makes the in-container hook script no-op); {@code agentType} flows in as
    * {@code SAIL_AGENT}, defaulting to the CLI's yaml name when blank; {@code runId} flows in as
    * {@code SAIL_RUN_ID} so the agent's hooks and the watcher can address terminal events at the
-   * exact run.
+   * exact run; {@code runCredential} flows in as {@code SAIL_RUN_CREDENTIAL}, the credential the
+   * in-container helpers present to the local API so every request resolves to this run's minted
+   * principal.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -287,7 +289,8 @@ public final class AgentSession {
       String specId,
       String agentType,
       String logPath,
-      String runId) {
+      String runId,
+      String runCredential) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
@@ -304,7 +307,7 @@ public final class AgentSession {
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_CREDENTIAL=$9" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
@@ -333,7 +336,8 @@ public final class AgentSession {
             unit.pidPath(),
             effectiveSpec,
             effectiveAgent,
-            runId));
+            runId,
+            Objects.toString(runCredential, "")));
   }
 
   /**
@@ -356,7 +360,8 @@ public final class AgentSession {
       String specId,
       String agentType,
       String logPath,
-      String runId) {
+      String runId,
+      String runCredential) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
@@ -368,6 +373,7 @@ public final class AgentSession {
     var script =
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
+            + " SAIL_RUN_CREDENTIAL=\"$8\""
             + " exec bash -l -c \"$2\" > \"$5\" 2>&1";
     return ContainerExec.asDevUser(
         containerName,
@@ -383,7 +389,8 @@ public final class AgentSession {
             effectiveAgent,
             logPath,
             runId,
-            unit.pidPath()));
+            unit.pidPath(),
+            Objects.toString(runCredential, "")));
   }
 
   private static void warnIfReasoningEffortDropped(

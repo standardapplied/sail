@@ -380,6 +380,7 @@ class MissedStopReconcilerTest {
         "test-project",
         "",
         "node-a",
+        "node-a",
         "adhoc",
         List.of(),
         "claude-code",
@@ -438,6 +439,7 @@ class MissedStopReconcilerTest {
         "test-project",
         "",
         "node-a",
+        "node-a",
         "adhoc",
         List.of(),
         "claude-code",
@@ -457,6 +459,7 @@ class MissedStopReconcilerTest {
         id,
         "test-project",
         specId,
+        "node-a",
         "node-a",
         "build",
         "claude-code",
@@ -1322,5 +1325,51 @@ class MissedStopReconcilerTest {
     assertNull(event.data().get("exit_code"));
     assertEquals("reconcile", event.data().get("source"));
     assertEquals("run-7", event.data().get("run_id"));
+  }
+
+  private RunStore.Reservation.Reserved reservedAdhoc(String id) {
+    return (RunStore.Reservation.Reserved)
+        sessionStore.reserveDispatch(
+            id,
+            "test-project",
+            "",
+            "node-a",
+            "node-a",
+            "adhoc",
+            List.of(),
+            "claude-code",
+            null,
+            "task",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id);
+  }
+
+  @Test
+  void aStrandedReleaseRevokesTheRunCredential() {
+    var id = DateTimeUtils.newId().toString();
+    var reservation = reservedAdhoc(id);
+
+    var released = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, released);
+    assertEquals("stopped", sessionStore.findById(id).orElseThrow().status());
+    assertTrue(
+        sessionStore.findByCredential(reservation.credential()).isEmpty(),
+        "releasing a stranded reservation revokes the run credential");
+  }
+
+  @Test
+  void anInterruptedStopFinalizationRevokesTheRunCredential() {
+    var id = DateTimeUtils.newId().toString();
+    var reservation = reservedAdhoc(id);
+    sessionStore.transition(id, "running", "stopping");
+
+    var finalized = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
+
+    assertEquals(1, finalized);
+    assertEquals("stopped", sessionStore.findById(id).orElseThrow().status());
+    assertTrue(
+        sessionStore.findByCredential(reservation.credential()).isEmpty(),
+        "finalizing an interrupted stop revokes the run credential");
   }
 }

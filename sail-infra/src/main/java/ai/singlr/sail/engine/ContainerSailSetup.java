@@ -88,6 +88,14 @@ public final class ContainerSailSetup {
                         + SailEventHelper.REASON_MARKER
                         + " "
                         + SailEventHelper.SCRIPT_PATH
+                        + " && grep -qsF "
+                        + SailEventHelper.CREDENTIAL_MARKER
+                        + " "
+                        + SailEventHelper.SCRIPT_PATH
+                        + " && grep -qsF "
+                        + SpecCliHelper.CREDENTIAL_MARKER
+                        + " "
+                        + SpecCliHelper.SCRIPT_PATH
                         + " && test -f "
                         + SailStopGate.SCRIPT_PATH
                         + " && grep -qsF "

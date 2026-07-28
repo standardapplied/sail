@@ -40,7 +40,8 @@ class AgentSessionTest {
         specId,
         agentType,
         RUN_UNIT.logPath(),
-        RUN_ID);
+        RUN_ID,
+        "cred-0");
   }
 
   private static List<String> foreground(
@@ -61,7 +62,8 @@ class AgentSessionTest {
         specId,
         agentType,
         RUN_UNIT.logPath(),
-        RUN_ID);
+        RUN_ID,
+        "cred-0");
   }
 
   @Test
@@ -316,7 +318,7 @@ class AgentSessionTest {
     assertTrue(
         joined.contains(
             "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\""
-                + " --setenv \"SAIL_RUN_ID=$8\" --unit "
+                + " --setenv \"SAIL_RUN_ID=$8\" --setenv \"SAIL_RUN_CREDENTIAL=$9\" --unit "
                 + RUN_UNIT.unitName()));
     assertTrue(joined.contains("claude --print"));
     assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
@@ -376,7 +378,8 @@ class AgentSessionTest {
         "spec-1",
         "claude-code",
         unit.logPath(),
-        runId);
+        runId,
+        "cred-0");
   }
 
   @Test
@@ -398,7 +401,7 @@ class AgentSessionTest {
 
     assertEquals(
         RUN_UNIT.pidPath(),
-        cmd.getLast(),
+        cmd.get(cmd.size() - 2),
         "the wrapper's pid lands in the run's pid file so a foreground session stays probeable"
             + " and stoppable");
     var script = cmd.get(cmd.indexOf("-c") + 1);
@@ -421,7 +424,8 @@ class AgentSessionTest {
                 null,
                 null,
                 RUN_UNIT.logPath(),
-                ""));
+                "",
+                "cred-0"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -436,7 +440,8 @@ class AgentSessionTest {
                 null,
                 null,
                 RUN_UNIT.logPath(),
-                "../escape"));
+                "../escape",
+                "cred-0"));
   }
 
   @Test
@@ -500,12 +505,14 @@ class AgentSessionTest {
   void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
     var cmd = background(false, AgentCli.CLAUDE_CODE, null, null, null, null);
 
-    var specId = cmd.get(cmd.size() - 3);
-    var agent = cmd.get(cmd.size() - 2);
-    var runId = cmd.getLast();
+    var specId = cmd.get(cmd.size() - 4);
+    var agent = cmd.get(cmd.size() - 3);
+    var runId = cmd.get(cmd.size() - 2);
+    var credential = cmd.getLast();
     assertEquals("", specId, "ad-hoc launches pass empty specId so the in-container hook no-ops");
     assertEquals("claude-code", agent, "agent type defaults to CLI yamlName when blank");
     assertEquals(RUN_ID, runId, "an ad-hoc launch is still a run, so SAIL_RUN_ID carries its id");
+    assertEquals("cred-0", credential, "the run credential rides in as SAIL_RUN_CREDENTIAL");
   }
 
   @Test
@@ -665,7 +672,8 @@ class AgentSessionTest {
             null,
             null,
             RUN_UNIT.logPath(),
-            RUN_ID);
+            RUN_ID,
+            "cred-0");
 
     var script = cmd.get(cmd.indexOf("-lc") + 1);
     assertTrue(script.contains("systemd-run"));
@@ -691,7 +699,8 @@ class AgentSessionTest {
             null,
             null,
             RUN_UNIT.logPath(),
-            RUN_ID);
+            RUN_ID,
+            "cred-0");
 
     var script = cmd.get(cmd.indexOf("-c") + 1);
     assertTrue(script.contains("cd \"$1\""));
@@ -713,9 +722,10 @@ class AgentSessionTest {
     assertEquals(
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
+            + " SAIL_RUN_CREDENTIAL=\"$8\""
             + " exec bash -l -c \"$2\" > \"$5\" 2>&1",
         script);
-    assertEquals(RUN_UNIT.pidPath(), cmd.getLast());
+    assertEquals(RUN_UNIT.pidPath(), cmd.get(cmd.size() - 2));
   }
 
   @Test

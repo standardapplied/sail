@@ -68,6 +68,7 @@ class RunTrackerTest {
         project,
         specId,
         "node-a",
+        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -84,6 +85,7 @@ class RunTrackerTest {
         id,
         project,
         specId,
+        node,
         node,
         "build",
         "claude-code",
@@ -363,5 +365,32 @@ class RunTrackerTest {
 
       assertEquals(5, runStore.findById(id).orElseThrow().exitCode());
     }
+  }
+
+  @Test
+  void anAuthoritativeStopRevokesTheRunCredential() {
+    var id = DateTimeUtils.newId().toString();
+    var reservation =
+        (RunStore.Reservation.Reserved)
+            runStore.reserveDispatch(
+                id,
+                "backend",
+                "auth",
+                "node-a",
+                "node-a",
+                "build",
+                java.util.List.of(),
+                "claude-code",
+                "feat/x",
+                "do it",
+                "/home/dev/.sail/runs/" + id + "/agent.log",
+                "sail-agent-" + id);
+
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    assertEquals("stopped", runStore.findById(id).orElseThrow().status());
+    assertTrue(
+        runStore.findByCredential(reservation.credential()).isEmpty(),
+        "the watcher's authoritative stop kills the run credential");
   }
 }

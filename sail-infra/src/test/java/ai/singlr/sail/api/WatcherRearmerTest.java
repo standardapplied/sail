@@ -71,6 +71,7 @@ class WatcherRearmerTest {
         "test-project",
         specId,
         "node-a",
+        "node-a",
         role,
         "claude-code",
         "feat/test",

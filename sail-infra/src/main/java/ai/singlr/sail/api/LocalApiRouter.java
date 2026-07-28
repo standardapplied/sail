@@ -6,27 +6,32 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
- * publishing (the in-container event helper) and global spec CRUD (the in-container {@code spec}
- * CLI an agent uses). Spec calls go through the very same {@link Operations} the TCP API uses, so a
- * spec an agent creates over the socket is indistinguishable from one the engineer creates with
- * {@code sail spec} — one database, one source of truth.
+ * publishing (the in-container event helper), global spec CRUD (the in-container {@code spec} CLI
+ * an agent uses), and {@code whoami}. Spec calls go through the very same {@link Operations} the
+ * TCP API uses, so a spec an agent creates over the socket is indistinguishable from one the
+ * engineer creates with {@code sail spec} — one database, one source of truth.
  *
- * <p>Trust here is the socket itself: an Incus container that can write the bind-mounted socket is
- * trusted, so requests carry no bearer token (the same model the event listener has always used).
- * Authorship is taken from the {@code actor} form field, defaulting to {@code agent}; cross-project
- * spoofing from inside a container is out of scope because an FDE already owns their own container.
+ * <p>The socket is the transport, not the identity: every request must present the run credential
+ * minted with its run's reservation ({@code Authorization: Bearer}, carried into the container as
+ * {@code SAIL_RUN_CREDENTIAL}). The credential resolves to the run's agent principal — handle plus
+ * owning FDE — which becomes the {@link Actor} and the attribution on every write; a missing,
+ * revoked, or expired credential fails loud with 401 and never falls back to a client-chosen actor.
+ * The principal is member-tier on this surface — spec and event writes gated by {@link SpecPolicy}
+ * through its owner — and the dispatch/stop routes do not exist here at all.
  */
 final class LocalApiRouter implements LocalApiHandler {
 
   private static final String SPECS = "/v1/specs";
   private static final String EVENTS = "/v1/events";
-  private static final String DEFAULT_ACTOR = "agent";
+  private static final String WHOAMI = "/v1/whoami";
 
   private final EventBus bus;
   private final Operations operations;
@@ -49,23 +54,52 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   private ApiResponse route(LocalApiRequest request) {
+    var run = operations.runForCredential(request.bearer()).orElse(null);
+    if (run == null) {
+      return problem(
+          401,
+          "Missing or unknown run credential. Requests on this socket must present the"
+              + " SAIL_RUN_CREDENTIAL of a live run as a bearer token; a finished run's"
+              + " credential is revoked.");
+    }
     var path = request.path();
+    if (WHOAMI.equals(path)) {
+      return whoami(request, run);
+    }
     if (EVENTS.equals(path)) {
-      return events(request);
+      return events(request, run);
     }
     if (SPECS.equals(path)) {
-      return specsCollection(request);
+      return specsCollection(request, run);
     }
     if ((SPECS + "/board").equals(path)) {
       return board(request);
     }
     if (path.startsWith(SPECS + "/")) {
-      return specItem(request, path.substring((SPECS + "/").length()));
+      return specItem(request, run, path.substring((SPECS + "/").length()));
     }
     return problem(404, "No route for " + path);
   }
 
-  private ApiResponse events(LocalApiRequest request) {
+  /**
+   * Reflects the authenticated run's principal: the minted handle, the FDE it acts for, and the
+   * fixed tier of the agent lane.
+   */
+  private static ApiResponse whoami(LocalApiRequest request, RunStore.RunRow run) {
+    if (!"GET".equals(request.method())) {
+      return problem(405, "whoami accepts GET");
+    }
+    var body = new LinkedHashMap<String, Object>();
+    body.put("handle", run.principal());
+    body.put("owner", run.owner());
+    body.put("role", Role.MEMBER.name().toLowerCase());
+    body.put("lane", Actor.Lane.AGENT.name().toLowerCase());
+    body.put("run_id", run.id());
+    body.put("project", run.project());
+    return new ApiResponse(200, body);
+  }
+
+  private ApiResponse events(LocalApiRequest request, RunStore.RunRow run) {
     if (!"POST".equals(request.method())) {
       return problem(405, "events accepts POST");
     }
@@ -75,15 +109,16 @@ final class LocalApiRouter implements LocalApiHandler {
     } catch (RuntimeException malformed) {
       return problem(400, "malformed event");
     }
-    var stamped = bus.publish(event);
+    var stamped = bus.publish(event.withAgent(run.principal()));
     return new ApiResponse(202, Map.of("id", stamped.id()));
   }
 
-  private ApiResponse specsCollection(LocalApiRequest request) {
+  private ApiResponse specsCollection(LocalApiRequest request, RunStore.RunRow run) {
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecs(filterFrom(request.query())));
       case "POST" ->
-          ApiResponse.fromCreated(operations.createGlobalSpec(createFrom(request.form())));
+          ApiResponse.fromCreated(
+              operations.createGlobalSpec(createFrom(request.form(), run.principal())));
       default -> problem(405, "specs accepts GET or POST");
     };
   }
@@ -95,7 +130,7 @@ final class LocalApiRouter implements LocalApiHandler {
     return ApiResponse.from(operations.globalBoard(request.query().get("project")));
   }
 
-  private ApiResponse specItem(LocalApiRequest request, String tail) {
+  private ApiResponse specItem(LocalApiRequest request, RunStore.RunRow run, String tail) {
     var slash = tail.indexOf('/');
     if (slash >= 0) {
       var id = tail.substring(0, slash);
@@ -103,28 +138,27 @@ final class LocalApiRouter implements LocalApiHandler {
       if (!"content".equals(sub)) {
         return problem(404, "No route for spec sub-resource " + sub);
       }
-      return content(request, id);
+      return content(request, run, id);
     }
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpec(tail));
       case "PUT" ->
           ApiResponse.from(
-              operations.updateGlobalSpec(tail, updateFrom(request.form()), actorFrom(request)));
-      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, actorFrom(request)));
+              operations.updateGlobalSpec(
+                  tail, updateFrom(request.form(), run.principal()), actorFrom(run)));
+      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, actorFrom(run)));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
   }
 
-  private ApiResponse content(LocalApiRequest request, String id) {
+  private ApiResponse content(LocalApiRequest request, RunStore.RunRow run, String id) {
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecContent(id));
       case "PUT" -> {
         var form = request.form();
         yield ApiResponse.from(
             operations.setGlobalSpecContent(
-                id,
-                new SpecContentRequest(form.get("body"), form.get("plan")),
-                actorFrom(request)));
+                id, new SpecContentRequest(form.get("body"), form.get("plan")), actorFrom(run)));
       }
       default -> problem(405, "content accepts GET or PUT");
     };
@@ -139,7 +173,7 @@ final class LocalApiRouter implements LocalApiHandler {
         query.get("search"));
   }
 
-  private static SpecCreateRequest createFrom(Map<String, String> form) {
+  private static SpecCreateRequest createFrom(Map<String, String> form, String principal) {
     return new SpecCreateRequest(
             form.get("id"),
             form.get("project"),
@@ -156,10 +190,10 @@ final class LocalApiRouter implements LocalApiHandler {
             form.get("body"),
             form.get("plan"),
             null)
-        .withCreatedBy(actorOf(form));
+        .withCreatedBy(principal);
   }
 
-  private static SpecUpdateRequest updateFrom(Map<String, String> form) {
+  private static SpecUpdateRequest updateFrom(Map<String, String> form, String principal) {
     return new SpecUpdateRequest(
             form.get("project"),
             form.get("title"),
@@ -174,23 +208,16 @@ final class LocalApiRouter implements LocalApiHandler {
             form.containsKey("repos") ? csv(form.get("repos")) : null,
             null,
             Boolean.parseBoolean(form.get("force")))
-        .withUpdatedBy(actorOf(form));
-  }
-
-  private static String actorOf(Map<String, String> form) {
-    var actor = form.get("actor");
-    return Strings.isBlank(actor) ? DEFAULT_ACTOR : actor;
+        .withUpdatedBy(principal);
   }
 
   /**
-   * The resource-scoped {@link Actor} for a socket request. The Unix socket is the trust boundary —
-   * an Incus container that can write it is trusted — so the in-container {@code spec} CLI operates
-   * with effective admin authority over its own box, the same authority {@code sail spec dispatch}
-   * has locally. Every spec mutation still flows through the aggregate policy seam, so the lane
-   * cannot diverge from the API's matrix; admin simply passes every gate.
+   * The resource-scoped {@link Actor} for the authenticated run: its principal handle, member tier,
+   * and the FDE it acts for — so every spec mutation flows through the same {@link SpecPolicy}
+   * matrix as the API lane, passing exactly where its owner would.
    */
-  private static Actor actorFrom(LocalApiRequest request) {
-    return Actor.cliOperator(actorOf(request.form()));
+  private static Actor actorFrom(RunStore.RunRow run) {
+    return Actor.agentPrincipal(run.principal(), run.owner());
   }
 
   private static List<String> csv(String value) {

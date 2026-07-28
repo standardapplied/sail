@@ -568,11 +568,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       return;
     }
     var unit = AgentUnit.forReview(reviewId);
+    var owner =
+        specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(localHandle.get());
     runStore.createReview(
         reviewId,
         project,
         specId,
         localHandle.get(),
+        owner,
         agent,
         branch,
         task,

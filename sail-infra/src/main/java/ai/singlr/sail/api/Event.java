@@ -182,6 +182,14 @@ public record Event(
         CURRENT_VERSION, 0L, DateTimeUtils.now(), project, spec, type, agent, host, data);
   }
 
+  /**
+   * Returns a copy of this event attributed to {@code principal} — the server-side stamp the local
+   * API lane applies so authorship comes from the authenticated run, never from the client body.
+   */
+  public Event withAgent(String principal) {
+    return new Event(v, id, ts, project, spec, type, principal, host, data);
+  }
+
   /** Returns a copy of this event with the given bus-assigned id. */
   public Event withId(long stampedId) {
     if (stampedId <= 0) {

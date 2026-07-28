@@ -72,6 +72,28 @@ public final class SchemaManager {
   /** The v1 baseline version: the floor plus the on-ramp it is structurally equivalent to. */
   static final int V1_VERSION = FLOOR_VERSION + ON_RAMP.size() + 1;
 
+  /**
+   * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
+   * versions continuing from {@value #V1_VERSION}. Never reorder, edit, or remove an entry; each
+   * addition ships with a test that migrates a seeded database and asserts the data survived. The
+   * {@code run_credentials} table is local-only secret material (per-run credential hashes) — it
+   * must never join a sync snapshot.
+   */
+  static final List<String> MIGRATIONS =
+      List.of(
+          "ALTER TABLE runs ADD COLUMN principal TEXT",
+          "ALTER TABLE runs ADD COLUMN owner TEXT",
+          """
+          CREATE TABLE run_credentials (
+              run_id TEXT PRIMARY KEY,
+              credential_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL,
+              expires_at TEXT NOT NULL
+          )""");
+
+  /** The schema version this binary converges every database to. */
+  static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
+
   private static final String SCHEMA_VERSION_TABLE =
       """
       CREATE TABLE IF NOT EXISTS schema_version (
@@ -383,49 +405,70 @@ public final class SchemaManager {
   }
 
   /**
-   * Converges the schema to the v1 baseline. A fresh database gets the baseline directly; a
-   * database at or past the 0.14 floor rides the on-ramp remainder to the baseline (a released
-   * 0.14.x database replays the never-released post-floor migrations; a development box mid-ramp
-   * resumes where its version left off); a database below the floor raises {@link
-   * PreFloorException} with the remedy, because this release no longer carries the pre-1.0
-   * migration chain; a database above the v1 baseline raises {@link IllegalStateException}, because
-   * an older binary must not operate on a schema it does not understand. Idempotent: re-running on
-   * a current database is a no-op.
+   * Converges the schema to this binary's current version. A fresh database gets the v1 baseline
+   * plus the post-baseline chain directly; a database at or past the 0.14 floor rides the on-ramp
+   * remainder to the baseline (a released 0.14.x database replays the never-released post-floor
+   * migrations; a development box mid-ramp resumes where its version left off) and then the
+   * post-baseline chain, applied incrementally from its recorded version; a database below the
+   * floor raises {@link PreFloorException} with the remedy, because this release no longer carries
+   * the pre-1.0 migration chain; a database newer than this binary raises {@link
+   * IllegalStateException}, because an older binary must not operate on a schema it does not
+   * understand. Idempotent: re-running on a current database is a no-op.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     var current = currentVersion();
-    if (current > V1_VERSION) {
+    if (current > CURRENT_VERSION) {
       throw new IllegalStateException(
           "Database schema v"
               + current
               + " is newer than this Sail binary supports (v"
-              + V1_VERSION
+              + CURRENT_VERSION
               + "). Upgrade Sail before opening this database.");
     }
-    if (current == V1_VERSION) {
+    if (current == CURRENT_VERSION) {
       return;
     }
     if (current == 0) {
       db.transaction(
           () -> {
             BASELINE.forEach(db::execute);
-            stamp();
+            MIGRATIONS.forEach(db::execute);
+            stamp(CURRENT_VERSION);
           });
       return;
     }
-    if (current >= FLOOR_VERSION) {
-      onRampFrom(current);
-      return;
+    if (current < FLOOR_VERSION) {
+      throw new PreFloorException(
+          "This database is schema v"
+              + current
+              + ", below the v1 schema floor (schema v"
+              + FLOOR_VERSION
+              + "), and this release does not carry pre-floor migrations."
+              + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
+              + " retry.");
     }
-    throw new PreFloorException(
-        "This database is schema v"
-            + current
-            + ", below the v1 schema floor (schema v"
-            + FLOOR_VERSION
-            + "), and this release does not carry pre-floor migrations."
-            + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
-            + " retry.");
+    if (current < V1_VERSION) {
+      onRampFrom(current);
+    }
+    postBaselineFrom(currentVersion());
+  }
+
+  /**
+   * Applies the post-baseline remainder incrementally: each migration commits with its own version
+   * stamp, so an interruption resumes exactly where it left off and a database written by an older
+   * 1.x binary replays only the entries it has not seen.
+   */
+  private void postBaselineFrom(int current) {
+    for (var next = current + 1; next <= CURRENT_VERSION; next++) {
+      var version = next;
+      var statement = MIGRATIONS.get(version - V1_VERSION - 1);
+      db.transaction(
+          () -> {
+            db.execute(statement);
+            stamp(version);
+          });
+    }
   }
 
   /**
@@ -441,7 +484,7 @@ public final class SchemaManager {
       db.transaction(
           () -> {
             ON_RAMP.subList(current - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
-            stamp();
+            stamp(V1_VERSION);
           });
       requireForeignKeysIntact();
     } finally {
@@ -458,9 +501,9 @@ public final class SchemaManager {
     }
   }
 
-  private void stamp() {
+  private void stamp(int version) {
     db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))", V1_VERSION);
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))", version);
   }
 
   /**

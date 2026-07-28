@@ -84,7 +84,8 @@ class SyncSchemaConvergenceTest {
     var path = stagedAtFloor("floor");
 
     try (var converged = SyncDatabase.converge(path, "box")) {
-      assertEquals(SchemaManager.V1_VERSION, new SchemaManager(converged.db()).currentVersion());
+      assertEquals(
+          SchemaManager.CURRENT_VERSION, new SchemaManager(converged.db()).currentVersion());
     }
   }
 

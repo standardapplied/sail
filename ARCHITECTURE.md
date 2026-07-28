@@ -334,18 +334,22 @@ scope per-user (`systemctl --user` with linger). It opens the control-plane SQLi
 runs registered migrations, ensures an admin token, and serves the REST API and the SSE
 event stream (`/v1/events/stream`) on loopback, the passkey endpoints when configured, and
 a Unix-socket listener so project containers publish events and drive `spec` over the
-bind-mounted socket with no TCP and no token. Every box runs it, and it is what lets an
-engineer dispatch agents locally.
+bind-mounted socket with no TCP. Requests on that socket authenticate with the per-run
+credential minted at dispatch (`SAIL_RUN_CREDENTIAL`), which resolves to the run's agent
+principal; a missing or revoked credential is refused with 401. Every box runs it, and it
+is what lets an engineer dispatch agents locally.
 
 **Dispatch and agent execution** (`DispatchCommand` plus `sail-harness`): autonomous
 dispatch reads the next ready spec from the database, honoring `depends_on` and assignee,
 marks it `in_progress`, snapshots the container for rollback, creates the work branch, and
-launches the agent headless under `systemd-run --user` with `SAIL_SPEC_ID` and `SAIL_AGENT`
-in its environment so in-container hooks correlate events back to the spec. The agent's
+launches the agent headless under `systemd-run --user` with `SAIL_SPEC_ID`, `SAIL_AGENT`,
+`SAIL_RUN_ID`, and the run's `SAIL_RUN_CREDENTIAL` in its environment so in-container hooks
+correlate events back to the spec and authenticate as the run's principal. The agent's
 output streams to the log live (Claude Code via `--output-format stream-json`), which also
 feeds the watcher's liveness signal. Agents inside the container manage specs through a
 dependency-free `spec` shell script that talks to `sail-api` over the bind-mounted Unix
-socket, needing no `sail` binary, token, or files. `sail spec dispatch --restart` re-runs a
+socket, needing no `sail` binary or files — it presents the run credential on every
+request, so every write is attributed to the run's minted principal. `sail spec dispatch --restart` re-runs a
 spec whose status is no longer pending, resetting it to pending and recording the restart as
 a lifecycle event.
 
@@ -491,6 +495,15 @@ these roles distinct is what lets the synced catalog stay identity-free.
   unknown or blank role fails safe to viewer. Attribution (`created_by`, `updated_by`,
   `decided_by`) is stamped server-side from the validated token's FDE, never from client
   input.
+- **Agent principals.** Every run — dispatch, ad-hoc, review — mints an agent principal
+  inside its reservation transaction: a handle (`claude/a1b2c3`) plus the FDE it acts for,
+  stamped on the run row (they replicate with the run), and an opaque run credential hashed
+  at rest in the local-only `run_credentials` table. The credential authenticates the
+  in-container lane; every run finisher revokes it and the expired-row sweep collects
+  stragglers. Agent principals are member-tier on the spec/event surface — never admin —
+  and the dispatch and stop routes refuse the agent lane outright. Agent-ness is a
+  relationship, not a type: the owner link is attribution and policy tiering, never a
+  separate authorization system.
 - **Tokens.** Host-local bearer tokens are SHA-256 hashed at rest, returned in plaintext
   once, and stored `0600` under a `0700` `~/.sail`. They carry a 90-day default expiry, where
   a null TTL means never-expires and is kept only for break-glass and bootstrap, and an

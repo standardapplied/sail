@@ -5,9 +5,20 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.Optional;
 
 public interface Operations {
+
+  /**
+   * Resolves a run credential — the bearer the in-container agent lane presents over the local
+   * socket — to its live run row. Empty for an unknown, revoked, or expired credential, and on
+   * boxes that keep no run aggregate.
+   */
+  default Optional<RunStore.RunRow> runForCredential(String credential) {
+    return Optional.empty();
+  }
 
   Result<ReviewListResponse> reviewsForSpec(String specId);
 

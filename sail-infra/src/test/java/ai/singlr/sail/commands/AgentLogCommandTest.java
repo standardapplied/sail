@@ -41,6 +41,8 @@ class AgentLogCommandTest {
         "t0",
         null,
         java.util.List.of(),
+        null,
+        null,
         null);
   }
 

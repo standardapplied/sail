@@ -386,6 +386,11 @@ public final class SailOperations implements Operations {
   }
 
   @Override
+  public Optional<RunStore.RunRow> runForCredential(String credential) {
+    return runStore == null ? Optional.empty() : runStore.findByCredential(credential);
+  }
+
+  @Override
   public Result<RunListResponse> runs(String project, String spec) {
     return safe(
         () -> {

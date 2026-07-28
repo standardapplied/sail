@@ -135,4 +135,21 @@ class SpecPolicyTest {
     var r = refused(SpecPolicy.reassign(member(null), SPEC, null, "raj"));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
+
+  @Test
+  void agentPrincipalMayMutateItsOwnersSpec() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    assertAllowed(SpecPolicy.mutate(agent, SPEC, "raj", "someone"));
+    assertAllowed(SpecPolicy.mutate(agent, SPEC, null, "raj"));
+  }
+
+  @Test
+  void agentPrincipalMayNotMutateAnotherFdesSpec() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    var refusal = refused(SpecPolicy.mutate(agent, SPEC, "sumesh", "sumesh"));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.code());
+  }
 }

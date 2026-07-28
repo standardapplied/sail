@@ -9,6 +9,10 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,6 +57,11 @@ public final class RunStore implements ConflictResolver {
    * lookup through its spec, so the overlap gate reads a value that existed before the spec was
    * even claimed. Empty means the run works the whole container; a run recorded before repos were
    * persisted also reads as empty, which the gate treats identically (the safe reading).
+   *
+   * <p>{@code principal} is the run's minted agent-principal handle (e.g. {@code claude/a1b2c3})
+   * and {@code owner} the FDE it acts for. Both are attribution stamped at creation and replicate
+   * with the run; the run's credential lives in the local-only {@code run_credentials} table and
+   * never joins a snapshot. A row that outlives its credential keeps the handle for history.
    */
   public record RunRow(
       String id,
@@ -72,7 +81,9 @@ public final class RunStore implements ConflictResolver {
       String startedAt,
       String completedAt,
       List<String> repos,
-      Long pidTicks) {
+      Long pidTicks,
+      String principal,
+      String owner) {
 
     /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
@@ -98,19 +109,23 @@ public final class RunStore implements ConflictResolver {
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
-          + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks";
+          + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
+          + " principal, owner";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
    * replicates. The id is minted by the launcher (a UUIDv7) so the run-scoped log directory is
-   * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch.
+   * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch;
+   * {@code owner} is the FDE the run's agent principal acts for. The principal handle and the run's
+   * credential are minted inside the same transaction as the row, so a run and its identity are
+   * atomic. Returns the id.
    */
-  /** Records a run with the run-scoped process identity assigned at launch. */
   public String create(
       String id,
       String project,
       String specId,
       String node,
+      String owner,
       String role,
       String agent,
       String branch,
@@ -124,8 +139,8 @@ public final class RunStore implements ConflictResolver {
           db.execute(
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
-                  watcher_pid, status, started_at, log_path, unit)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)""",
+                  watcher_pid, status, started_at, log_path, unit, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
@@ -138,7 +153,10 @@ public final class RunStore implements ConflictResolver {
               watcherPid != null ? watcherPid.longValue() : null,
               DateTimeUtils.now().toString(),
               logPath,
-              unit);
+              unit,
+              principalHandle(agent, role, id),
+              owner);
+          mintCredential(id);
           recordRevision(id, "local", false);
         });
     return id;
@@ -149,20 +167,33 @@ public final class RunStore implements ConflictResolver {
    * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
-   * of any run row is honest even though reviews execute as blocking foreground work.
+   * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
+   * is the reviewed spec's assignee — the FDE the review principal acts for.
    */
   public String createReview(
       String reviewId,
       String project,
       String specId,
       String node,
+      String owner,
       String agent,
       String branch,
       String task,
       String logPath,
       String unit) {
     return create(
-        reviewId, project, specId, node, "review", agent, branch, task, null, null, logPath, unit);
+        reviewId, project, specId, node, owner, "review", agent, branch, task, null, null, logPath,
+        unit);
+  }
+
+  /**
+   * What a dispatch reservation produced: the reserved run's plaintext credential (returned exactly
+   * once, hashed at rest), or the blocking conflict.
+   */
+  public sealed interface Reservation {
+    record Reserved(String credential) implements Reservation {}
+
+    record Conflicted(DispatchGate.Conflict conflict) implements Reservation {}
   }
 
   /**
@@ -171,17 +202,20 @@ public final class RunStore implements ConflictResolver {
    * {@code running} run — with its reserved repos persisted — only when none conflicts. Taking the
    * write lock up front serializes concurrent dispatches, including a CLI dispatch in another
    * process against the same database file, so the second reservation always observes the first's
-   * row; a check-then-insert split across transactions could admit both into the same repo. Returns
-   * the blocking conflict, or empty when the run was reserved. A run mid-stop ({@code stopping})
-   * still occupies its repos — its agent is not verified dead until the claim is finalized — so it
-   * conflicts exactly like a running one. Any database failure propagates — a dispatch must never
-   * launch without the row every later overlap check depends on.
+   * row; a check-then-insert split across transactions could admit both into the same repo. The
+   * run's agent principal (handle, {@code owner}) and its credential are minted inside the same
+   * transaction, so a reserved run always carries an attributable identity and a refused one mints
+   * nothing. Returns the blocking conflict, or the reserved run's credential. A run mid-stop
+   * ({@code stopping}) still occupies its repos — its agent is not verified dead until the claim is
+   * finalized — so it conflicts exactly like a running one. Any database failure propagates — a
+   * dispatch must never launch without the row every later overlap check depends on.
    */
-  public Optional<DispatchGate.Conflict> reserveDispatch(
+  public Reservation reserveDispatch(
       String id,
       String project,
       String specId,
       String node,
+      String owner,
       String role,
       List<String> repos,
       String agent,
@@ -209,13 +243,13 @@ public final class RunStore implements ConflictResolver {
                       .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
                       .toList());
           if (conflict.isPresent()) {
-            return conflict;
+            return new Reservation.Conflicted(conflict.get());
           }
           db.execute(
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, status,
-                  started_at, log_path, unit, repos)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)""",
+                  started_at, log_path, unit, repos, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
@@ -227,14 +261,82 @@ public final class RunStore implements ConflictResolver {
               DateTimeUtils.now().toString(),
               logPath,
               unit,
-              YamlUtil.dumpJson(reserved));
+              YamlUtil.dumpJson(reserved),
+              principalHandle(agent, role, id),
+              owner);
+          var credential = mintCredential(id);
           recordRevision(id, "local", false);
-          return Optional.empty();
+          return new Reservation.Reserved(credential);
         });
   }
 
   public Optional<RunRow> findById(String id) {
     return db.queryOne("SELECT " + COLUMNS + " FROM runs WHERE id = ?", this::mapRow, id);
+  }
+
+  /**
+   * Backstop lifetime of a run credential. Revocation on every run finisher is the real terminator
+   * — this only bounds a credential whose run's finishers all failed to fire, and the expired-row
+   * sweep collects such stragglers. Far above any real run's duration, so a live run never loses
+   * its credential mid-flight.
+   */
+  static final Duration CREDENTIAL_TTL = Duration.ofDays(7);
+
+  /**
+   * Resolves a live run credential to its run row: unknown, revoked, or expired credentials resolve
+   * to empty, and an expired row is pruned on lookup like {@link TokenStore#validate}. The
+   * plaintext is hashed before comparison — only the hash is ever at rest.
+   */
+  public Optional<RunRow> findByCredential(String credential) {
+    if (Strings.isBlank(credential)) {
+      return Optional.empty();
+    }
+    var hash = TokenStore.sha256(credential);
+    var match =
+        db.queryOne(
+            "SELECT run_id, expires_at FROM run_credentials WHERE credential_hash = ?",
+            row -> new String[] {row.text(0), row.text(1)},
+            hash);
+    if (match.isEmpty()) {
+      return Optional.empty();
+    }
+    if (Instant.parse(match.get()[1]).isBefore(DateTimeUtils.now())) {
+      db.execute("DELETE FROM run_credentials WHERE credential_hash = ?", hash);
+      return Optional.empty();
+    }
+    return findById(match.get()[0]);
+  }
+
+  /**
+   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
+   * the run id's random tail, with review runs marked as such — {@code claude/a1b2c3}, {@code
+   * claude/review-a1b2c3}.
+   */
+  private static String principalHandle(String agent, String role, String id) {
+    var family = Objects.toString(agent, "");
+    var dash = family.indexOf('-');
+    var base = dash > 0 ? family.substring(0, dash) : family;
+    var tail = id.length() > 6 ? id.substring(id.length() - 6) : id;
+    return base + "/" + ("review".equals(role) ? "review-" + tail : tail);
+  }
+
+  private String mintCredential(String id) {
+    var bytes = new byte[32];
+    new SecureRandom().nextBytes(bytes);
+    var credential = "sailrun_" + HexFormat.of().formatHex(bytes);
+    var now = DateTimeUtils.now();
+    db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES (?, ?, ?, ?)",
+        id,
+        TokenStore.sha256(credential),
+        now.toString(),
+        now.plus(CREDENTIAL_TTL).toString());
+    return credential;
+  }
+
+  private void revokeCredential(String id) {
+    db.execute("DELETE FROM run_credentials WHERE run_id = ?", id);
   }
 
   /**
@@ -404,6 +506,9 @@ public final class RunStore implements ConflictResolver {
           if (db.changes() == 0) {
             return false;
           }
+          if (TERMINAL_STATUSES.contains(status)) {
+            revokeCredential(id);
+          }
           alongside.run();
           recordRevision(id, "local", false);
           return true;
@@ -451,6 +556,7 @@ public final class RunStore implements ConflictResolver {
               DateTimeUtils.now().toString(),
               exitCode != null ? exitCode.longValue() : null,
               id);
+          revokeCredential(id);
           recordRevision(id, "local", false);
         });
   }
@@ -568,6 +674,7 @@ public final class RunStore implements ConflictResolver {
               return new PushOutcome.Accepted(latestRev(id));
             }
             var rev = recordRevision(id, null, "sync", true, false);
+            revokeCredential(id);
             db.execute("DELETE FROM runs WHERE id = ?", id);
             return new PushOutcome.Accepted(rev);
           }
@@ -608,6 +715,7 @@ public final class RunStore implements ConflictResolver {
       return rev;
     }
     var rev = recordRevision(id, null, "sync", true, false);
+    revokeCredential(id);
     db.execute("DELETE FROM runs WHERE id = ?", id);
     return rev;
   }
@@ -618,6 +726,7 @@ public final class RunStore implements ConflictResolver {
         return latestRev(id);
       }
       var rev = recordRevision(id, null, "resolve", true, false);
+      revokeCredential(id);
       db.execute("DELETE FROM runs WHERE id = ?", id);
       return rev;
     }
@@ -631,6 +740,7 @@ public final class RunStore implements ConflictResolver {
       return;
     }
     recordRevision(id, rev, "sync", true, false);
+    revokeCredential(id);
     db.execute("DELETE FROM runs WHERE id = ?", id);
   }
 
@@ -665,15 +775,17 @@ public final class RunStore implements ConflictResolver {
     db.execute(
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
-            status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
+            principal, owner)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
             watcher_pid = excluded.watcher_pid, status = excluded.status,
             exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
             started_at = excluded.started_at, completed_at = excluded.completed_at,
-            repos = excluded.repos, pid_ticks = excluded.pid_ticks""",
+            repos = excluded.repos, pid_ticks = excluded.pid_ticks,
+            principal = excluded.principal, owner = excluded.owner""",
         row.id(),
         row.project(),
         row.specId(),
@@ -691,7 +803,9 @@ public final class RunStore implements ConflictResolver {
         Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
         row.completedAt(),
         YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())),
-        row.pidTicks());
+        row.pidTicks(),
+        row.principal(),
+        row.owner());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -714,6 +828,8 @@ public final class RunStore implements ConflictResolver {
     map.put("completed_at", run.completedAt());
     map.put("repos", Objects.requireNonNullElse(run.repos(), List.of()));
     map.put("pid_ticks", run.pidTicks());
+    map.put("principal", run.principal());
+    map.put("owner", run.owner());
     return map;
   }
 
@@ -772,7 +888,9 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "started_at"),
         text(snapshot, "completed_at"),
         stringList(snapshot, "repos"),
-        longValue(snapshot, "pid_ticks"));
+        longValue(snapshot, "pid_ticks"),
+        text(snapshot, "principal"),
+        text(snapshot, "owner"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -825,6 +943,8 @@ public final class RunStore implements ConflictResolver {
         row.text(14),
         row.text(15),
         YamlUtil.parseStringList(row.text(16)),
-        row.isNull(17) ? null : row.integer(17));
+        row.isNull(17) ? null : row.integer(17),
+        row.text(18),
+        row.text(19));
   }
 }

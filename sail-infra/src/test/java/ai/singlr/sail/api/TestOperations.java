@@ -5,10 +5,45 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
+import java.util.Optional;
 
 class TestOperations implements Operations {
+
+  static final String RUN_CREDENTIAL = "sailrun_test";
+  static final String PRINCIPAL = "claude/abc123";
+  static final String OWNER = "uday";
+
+  @Override
+  public Optional<RunStore.RunRow> runForCredential(String credential) {
+    if (!RUN_CREDENTIAL.equals(credential)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new RunStore.RunRow(
+            "run-1",
+            "acme",
+            "auth",
+            "node-a",
+            "build",
+            "claude-code",
+            "feat/auth",
+            "task",
+            null,
+            null,
+            "running",
+            null,
+            null,
+            null,
+            "t0",
+            null,
+            List.of(),
+            null,
+            PRINCIPAL,
+            OWNER));
+  }
 
   @Override
   public Result<HealthResponse> health() {
@@ -104,7 +139,9 @@ class TestOperations implements Operations {
                 "t0",
                 null,
                 null,
-                "/home/dev/.sail/runs/" + runId + "/agent.log")));
+                "/home/dev/.sail/runs/" + runId + "/agent.log",
+                null,
+                null)));
   }
 
   @Override

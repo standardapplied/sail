@@ -48,6 +48,7 @@ class RunStoreTest {
         project,
         specId,
         "node-a",
+        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -198,6 +199,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "claude-code",
         "feat/x",
         "review",
@@ -257,6 +259,7 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
+            "node-a",
             "codex",
             "feat/x",
             "review",
@@ -289,6 +292,7 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
+        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -323,6 +327,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -348,6 +353,7 @@ class RunStoreTest {
         id,
         "backend",
         null,
+        "node-a",
         "node-a",
         "build",
         "codex",
@@ -435,6 +441,7 @@ class RunStoreTest {
         project,
         specId,
         node,
+        node,
         "build",
         "claude-code",
         "feat/x",
@@ -465,6 +472,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "codex",
         "feat/x",
         "review it",
@@ -482,11 +490,21 @@ class RunStoreTest {
     var local = DateTimeUtils.newId().toString();
     var foreign = DateTimeUtils.newId().toString();
     store.createReview(
-        local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local, "sail-review-l");
+        local,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "codex",
+        "b",
+        "t",
+        "/runs/" + local,
+        "sail-review-l");
     store.createReview(
         foreign,
         "backend",
         "auth",
+        "node-b",
         "node-b",
         "codex",
         "b",
@@ -696,33 +714,44 @@ class RunStoreTest {
 
   private java.util.Optional<DispatchGate.Conflict> reserve(
       RunStore target, String id, String specId, String node, java.util.List<String> repos) {
-    return target.reserveDispatch(
-        id,
-        "backend",
-        specId,
-        node,
-        "build",
-        repos,
-        "claude-code",
-        "feat/x",
-        "do it",
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return conflictOf(
+        target.reserveDispatch(
+            id,
+            "backend",
+            specId,
+            node,
+            node,
+            "build",
+            repos,
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id));
+  }
+
+  private static java.util.Optional<DispatchGate.Conflict> conflictOf(
+      RunStore.Reservation reservation) {
+    return reservation instanceof RunStore.Reservation.Conflicted conflicted
+        ? java.util.Optional.of(conflicted.conflict())
+        : java.util.Optional.empty();
   }
 
   private java.util.Optional<DispatchGate.Conflict> reserveAdhoc(String id, String node) {
-    return store.reserveDispatch(
-        id,
-        "backend",
-        "",
-        node,
-        "adhoc",
-        java.util.List.of(),
-        "claude-code",
-        null,
-        "do it",
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return conflictOf(
+        store.reserveDispatch(
+            id,
+            "backend",
+            "",
+            node,
+            node,
+            "adhoc",
+            java.util.List.of(),
+            "claude-code",
+            null,
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id));
   }
 
   @Test
@@ -786,6 +815,7 @@ class RunStoreTest {
         "backend",
         null,
         "node-a",
+        "node-a",
         "build",
         "codex",
         null,
@@ -824,6 +854,7 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
+            "node-a",
             "codex",
             "feat/x",
             "review",
@@ -855,6 +886,7 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
+        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -1011,5 +1043,181 @@ class RunStoreTest {
         1,
         admitted.get(),
         "the BEGIN IMMEDIATE reservation must serialize dispatches across connections");
+  }
+
+  private String reservedCredential(String id, String specId, java.util.List<String> repos) {
+    var reservation =
+        store.reserveDispatch(
+            id,
+            "backend",
+            specId,
+            "node-a",
+            "uday",
+            "build",
+            repos,
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id);
+    return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  private long credentialRows(String id) {
+    return db.queryOne(
+            "SELECT COUNT(*) FROM run_credentials WHERE run_id = ?", row -> row.integer(0), id)
+        .orElseThrow();
+  }
+
+  @Test
+  void reserveDispatchMintsThePrincipalAndCredentialWithTheRow() {
+    var id = DateTimeUtils.newId().toString();
+
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("claude/" + id.substring(id.length() - 6), run.principal());
+    assertEquals("uday", run.owner());
+    assertTrue(credential.startsWith("sailrun_"));
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+    assertTrue(
+        db.queryOne(
+                    "SELECT credential_hash FROM run_credentials WHERE run_id = ?",
+                    row -> row.text(0),
+                    id)
+                .orElseThrow()
+                .length()
+            == 64,
+        "only the SHA-256 hash is at rest, never the plaintext");
+  }
+
+  @Test
+  void aRefusedReservationMintsNothing() {
+    reservedCredential(DateTimeUtils.newId().toString(), "auth", java.util.List.of("app"));
+    var second = DateTimeUtils.newId().toString();
+
+    var conflict = reserve(store, second, "billing", "node-a", java.util.List.of("app"));
+
+    assertTrue(conflict.isPresent());
+    assertEquals(0, credentialRows(second));
+  }
+
+  @Test
+  void anAdhocReservationMintsAPrincipalOwnedByTheLaunchingNode() {
+    var id = DateTimeUtils.newId().toString();
+
+    reserveAdhoc(id, "node-a");
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("claude/" + id.substring(id.length() - 6), run.principal());
+    assertEquals("node-a", run.owner());
+    assertEquals(1, credentialRows(id));
+  }
+
+  @Test
+  void createReviewMintsAReviewMarkedPrincipalOwnedByTheAssignee() {
+    var id = DateTimeUtils.newId().toString();
+
+    store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "uday",
+        "codex",
+        "feat/x",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("codex/review-" + id.substring(id.length() - 6), run.principal());
+    assertEquals("uday", run.owner());
+    assertEquals(1, credentialRows(id));
+  }
+
+  @Test
+  void findByCredentialRejectsBlankUnknownAndRevoked() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertTrue(store.findByCredential(null).isEmpty());
+    assertTrue(store.findByCredential("").isEmpty());
+    assertTrue(store.findByCredential("sailrun_wrong").isEmpty());
+
+    store.transition(id, "running", "completed", 0);
+
+    assertTrue(store.findByCredential(credential).isEmpty(), "a finished run's credential is dead");
+  }
+
+  @Test
+  void anExpiredCredentialIsRejectedAndPrunedOnLookup() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    db.execute(
+        "UPDATE run_credentials SET expires_at = ? WHERE run_id = ?", "2000-01-01T00:00:00Z", id);
+
+    assertTrue(store.findByCredential(credential).isEmpty());
+    assertEquals(0, credentialRows(id), "the expired row is pruned on lookup");
+  }
+
+  @Test
+  void everyTerminalTransitionRevokesTheCredential() {
+    for (var terminal : java.util.List.of("completed", "stopped", "failed")) {
+      var id = DateTimeUtils.newId().toString();
+      var credential = reservedCredential(id, "spec-" + terminal, java.util.List.of(terminal));
+
+      assertTrue(store.transition(id, "running", terminal));
+
+      assertTrue(store.findByCredential(credential).isEmpty(), terminal);
+      assertEquals(0, credentialRows(id), terminal);
+    }
+  }
+
+  @Test
+  void aStopClaimKeepsTheCredentialUntilTheVerifiedFinish() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertTrue(store.transition(id, "running", "stopping"));
+    assertTrue(
+        store.findByCredential(credential).isPresent(),
+        "mid-stop the agent may still be alive; only the verified finish revokes");
+
+    assertTrue(store.transition(id, "stopping", "stopped"));
+    assertTrue(store.findByCredential(credential).isEmpty());
+  }
+
+  @Test
+  void aLostTransitionRevokesNothing() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertFalse(store.transition(id, "stopping", "stopped"));
+
+    assertTrue(store.findByCredential(credential).isPresent());
+  }
+
+  @Test
+  void completeRevokesTheCredential() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    store.complete(id, "failed", 1);
+
+    assertTrue(store.findByCredential(credential).isEmpty());
+  }
+
+  @Test
+  void principalAndOwnerReplicateInTheComparableSnapshot() {
+    var id = DateTimeUtils.newId().toString();
+    reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var snapshot = store.comparableSnapshot(id);
+
+    assertEquals("claude/" + id.substring(id.length() - 6), snapshot.get("principal"));
+    assertEquals("uday", snapshot.get("owner"));
+    assertFalse(
+        snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");
   }
 }

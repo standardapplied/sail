@@ -34,6 +34,9 @@ public final class DispatchPolicy {
    * capability, then ownership — so the most fundamental precondition names the refusal.
    */
   public static DispatchDecision check(Actor actor, Spec spec, String localHandle) {
+    if (actor.agentLane()) {
+      return agentLaneForbidden("dispatch specs");
+    }
     if (Strings.isBlank(localHandle)) {
       return nodeHandleUnset();
     }
@@ -61,6 +64,17 @@ public final class DispatchPolicy {
               + " to dispatch it, or have an admin reassign it before dispatching.");
     }
     return new DispatchDecision.Allowed();
+  }
+
+  /**
+   * The agent-lane refusal: a run's principal is confined to the spec/event surface, so the
+   * dispatch and stop routes refuse it outright — server-side policy, rendered verbatim by clients.
+   */
+  static DispatchDecision.Refused agentLaneForbidden(String action) {
+    return new DispatchDecision.Refused(
+        ErrorCode.AGENT_LANE_FORBIDDEN,
+        "Agent principals cannot " + action + ".",
+        "Only an operator lane (CLI or API token) may do this.");
   }
 
   /** The rule-1 refusal: this box carries no sync-handle, so no spec has an execution node here. */

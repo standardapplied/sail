@@ -223,7 +223,8 @@ public final class LocalApiSocket implements AutoCloseable {
       }
       var method = parts[0].toUpperCase();
       var target = parts[1];
-      var contentLength = readContentLength(in);
+      var headers = readHeaders(in);
+      var contentLength = contentLength(headers);
       if (contentLength > MAX_BODY_BYTES) {
         badRequests.increment();
         writeStatus(out, 413, null);
@@ -243,7 +244,7 @@ public final class LocalApiSocket implements AutoCloseable {
           queryStart >= 0
               ? LocalApiRequest.decode(target.substring(queryStart + 1))
               : Map.<String, String>of();
-      var response = handler.handle(new LocalApiRequest(method, path, query, body));
+      var response = handler.handle(new LocalApiRequest(method, path, query, headers, body));
       writeResponse(out, response);
     } catch (IOException io) {
       // client disconnected mid-stream
@@ -252,25 +253,30 @@ public final class LocalApiSocket implements AutoCloseable {
     }
   }
 
-  private static int readContentLength(InputStream in) throws IOException {
-    var length = 0;
+  private static Map<String, String> readHeaders(InputStream in) throws IOException {
+    var headers = new LinkedHashMap<String, String>();
     while (true) {
       var line = readLine(in, MAX_HEADER_BYTES);
       if (line == null || line.isEmpty()) {
-        return length;
+        return headers;
       }
       var colon = line.indexOf(':');
       if (colon <= 0) {
         continue;
       }
-      if (!CONTENT_LENGTH.equals(line.substring(0, colon).toLowerCase())) {
-        continue;
-      }
-      try {
-        length = Integer.parseInt(line.substring(colon + 1).strip());
-      } catch (NumberFormatException ignored) {
-        length = -1;
-      }
+      headers.put(line.substring(0, colon).toLowerCase(), line.substring(colon + 1).strip());
+    }
+  }
+
+  private static int contentLength(Map<String, String> headers) {
+    var value = headers.get(CONTENT_LENGTH);
+    if (value == null) {
+      return 0;
+    }
+    try {
+      return Integer.parseInt(value);
+    } catch (NumberFormatException ignored) {
+      return -1;
     }
   }
 
@@ -336,6 +342,8 @@ public final class LocalApiSocket implements AutoCloseable {
       case 201 -> "Created";
       case 202 -> "Accepted";
       case 400 -> "Bad Request";
+      case 401 -> "Unauthorized";
+      case 403 -> "Forbidden";
       case 404 -> "Not Found";
       case 405 -> "Method Not Allowed";
       case 409 -> "Conflict";

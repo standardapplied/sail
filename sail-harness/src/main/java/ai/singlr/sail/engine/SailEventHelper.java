@@ -35,6 +35,9 @@ public final class SailEventHelper {
    */
   public static final String REASON_MARKER = "REASON=";
 
+  /** Fixed-string marker proving the installed script presents the run credential. */
+  public static final String CREDENTIAL_MARKER = "SAIL_RUN_CREDENTIAL";
+
   private static final String SCRIPT =
       """
       #!/usr/bin/env bash
@@ -45,7 +48,8 @@ public final class SailEventHelper {
       # Spec attribution flows in via SAIL_SPEC_ID env var (set by sail at launch);
       # absent or blank means an engineer-initiated session — skip silently so
       # ad-hoc 'claude' invocations never pollute the spec event bus.
-      # Filesystem permissions on the socket are the auth — no bearer token.
+      # The run credential (SAIL_RUN_CREDENTIAL, injected at launch) authenticates the
+      # request; the server stamps authorship from it, so the agent field here is advisory.
       set -eu
 
       EVENT_TYPE="${1:?event type required}"
@@ -56,6 +60,7 @@ public final class SailEventHelper {
       fi
       AGENT="${SAIL_AGENT:-claude-code}"
       RUN_ID="${SAIL_RUN_ID:-}"
+      CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
       PROJECT="$(hostname)"
       HOST="$(hostname)"
       TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -78,6 +83,7 @@ public final class SailEventHelper {
       curl --silent --max-time 5 \\
         --unix-socket "$SOCKET" \\
         -H 'Content-Type: application/json' \\
+        -H "Authorization: Bearer $CREDENTIAL" \\
         -X POST -d "$BODY" \\
         http://sail/v1/events >/dev/null 2>&1 || true
       """;

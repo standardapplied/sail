@@ -38,7 +38,7 @@ public final class SpecPolicy {
       return AccessDecision.allowed();
     }
     var owner = Strings.isNotBlank(assignee) ? assignee : createdBy;
-    if (Strings.isNotBlank(owner) && owner.equals(actor.handle())) {
+    if (Strings.isNotBlank(owner) && actor.actsFor(owner)) {
       return AccessDecision.allowed();
     }
     return notAssignee(specId, assignee, createdBy);

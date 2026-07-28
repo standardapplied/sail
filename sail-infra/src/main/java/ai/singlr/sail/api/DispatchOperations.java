@@ -299,16 +299,18 @@ public final class DispatchOperations {
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    reserveRun(
-        runId,
-        project,
-        nextSpec.id(),
-        localHandle,
-        taskSpec.repos(),
-        agentType,
-        branch,
-        task,
-        unit);
+    var credential =
+        reserveRun(
+            runId,
+            project,
+            nextSpec.id(),
+            localHandle,
+            dispatchOwner(actor, localHandle),
+            taskSpec.repos(),
+            agentType,
+            branch,
+            task,
+            unit);
     try {
       var prepared =
           claimAndPrepare(
@@ -331,7 +333,8 @@ public final class DispatchOperations {
               taskSpec,
               agentType,
               unit,
-              runId);
+              runId,
+              credential);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
         throw launchLostToCancel(runId, project, unit);
@@ -402,10 +405,13 @@ public final class DispatchOperations {
               agentType,
               background,
               unit,
-              runId));
+              runId,
+              null));
       return new AdhocSession(runId, null, null, Optional.empty());
     }
-    reserveAdhocRun(runId, project, localHandle, agentType, request.branch(), request.task(), unit);
+    var credential =
+        reserveAdhocRun(
+            runId, project, localHandle, agentType, request.branch(), request.task(), unit);
     try {
       prepare(preparer);
       var launch =
@@ -423,7 +429,8 @@ public final class DispatchOperations {
               List.of(),
               background,
               unit,
-              runId);
+              runId,
+              credential);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
         throw launchLostToCancel(runId, project, unit);
@@ -736,6 +743,11 @@ public final class DispatchOperations {
    */
   private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
 
+  /** The FDE a dispatched run acts for: the dispatching actor, or the box's own handle. */
+  private static String dispatchOwner(Actor actor, String localHandle) {
+    return Strings.isNotBlank(actor.handle()) ? actor.handle() : localHandle;
+  }
+
   private LaunchOutcome launchAgent(
       String project,
       SailYaml config,
@@ -746,7 +758,8 @@ public final class DispatchOperations {
       Spec spec,
       String agentType,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     return launchSession(
         project,
         config,
@@ -761,7 +774,8 @@ public final class DispatchOperations {
         targetRepos.stream().map(SailYaml.Repo::path).toList(),
         background,
         unit,
-        runId);
+        runId,
+        runCredential);
   }
 
   /**
@@ -784,7 +798,8 @@ public final class DispatchOperations {
       List<String> repoPaths,
       boolean background,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -811,7 +826,8 @@ public final class DispatchOperations {
               agentType,
               background,
               unit,
-              runId);
+              runId,
+              runCredential);
       listener.launching(background, command);
       var exitCode = launcher.launch(command);
       if (background) {
@@ -839,7 +855,8 @@ public final class DispatchOperations {
       String agentType,
       boolean background,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     var agentCli = AgentCli.fromYamlName(agentType);
     return background
         ? AgentSession.buildBackgroundLaunchCommand(
@@ -853,7 +870,8 @@ public final class DispatchOperations {
             specId,
             agentType,
             unit.logPath(),
-            runId)
+            runId,
+            runCredential)
         : AgentSession.buildForegroundTaskCommand(
             project,
             config.sshUser(),
@@ -865,7 +883,8 @@ public final class DispatchOperations {
             specId,
             agentType,
             unit.logPath(),
-            runId);
+            runId,
+            runCredential);
   }
 
   /**
@@ -971,20 +990,22 @@ public final class DispatchOperations {
    * missed-stop reconciler address a foreground session exactly like a background one. The
    * foreground run completes when its blocking launcher returns.
    */
-  private void reserveRun(
+  private String reserveRun(
       String runId,
       String project,
       String specId,
       String node,
+      String owner,
       List<String> repos,
       String agentType,
       String branch,
       String task,
       AgentUnit unit) {
     if (runStore == null) {
-      return;
+      return null;
     }
-    reserve(runId, project, specId, node, "build", repos, agentType, branch, task, unit);
+    return reserve(
+        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit);
   }
 
   /**
@@ -994,7 +1015,7 @@ public final class DispatchOperations {
    * not a skip: the reservation is the only thing standing between two agents in one container, and
    * an ad-hoc session without a row would also be invisible to stop, status, and retention.
    */
-  private void reserveAdhocRun(
+  private String reserveAdhocRun(
       String runId,
       String project,
       String node,
@@ -1007,28 +1028,31 @@ public final class DispatchOperations {
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
-    reserve(runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit);
+    return reserve(
+        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit);
   }
 
-  private void reserve(
+  private String reserve(
       String runId,
       String project,
       String specId,
       String node,
+      String owner,
       String role,
       List<String> repos,
       String agentType,
       String branch,
       String task,
       AgentUnit unit) {
-    Optional<DispatchGate.Conflict> conflict;
+    RunStore.Reservation reservation;
     try {
-      conflict =
+      reservation =
           runStore.reserveDispatch(
               runId,
               project,
               specId,
               node,
+              owner,
               role,
               repos,
               agentType,
@@ -1039,10 +1063,11 @@ public final class DispatchOperations {
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
-    if (conflict.isPresent()) {
-      throw overlapRefusal(conflict.get());
+    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
+      throw overlapRefusal(conflicted.conflict());
     }
     pruneRuns(project);
+    return ((RunStore.Reservation.Reserved) reservation).credential();
   }
 
   private void pruneRuns(String project) {

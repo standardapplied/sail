@@ -14,6 +14,7 @@ import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -55,11 +56,22 @@ class StopGateIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       specStore.create(seededSpec());
 
+      var runStore = new RunStore(db);
       var bus = new EventBus();
       var received = new CopyOnWriteArrayList<Event>();
       bus.subscribe(recorder(received));
       var operations =
-          new SailOperations(new ShellExecutor(false), "sail.yaml", bus, null, specStore);
+          new SailOperations(
+              new ShellExecutor(false),
+              "sail.yaml",
+              bus,
+              null,
+              specStore,
+              null,
+              runStore,
+              null,
+              ai.singlr.sail.api.SyncScheduler.disabled(),
+              null);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
@@ -116,7 +128,8 @@ class StopGateIT extends AbstractIncusIT {
                         + " git init -q -b main; echo wip > uncommitted.txt"));
         assertTrue(seed.ok(), "could not seed the dirty workspace repo: " + seed.stderr());
 
-        var first = stopAttempt();
+        var claudeCredential = reserve(runStore, "run-1", "claude-code");
+        var first = stopAttempt(claudeCredential);
         assertTrue(first.ok(), "the first stop attempt must exit 0: " + first.stderr());
         assertTrue(
             first.stdout().contains("\"decision\": \"block\""),
@@ -125,7 +138,7 @@ class StopGateIT extends AbstractIncusIT {
             first.stdout().contains("proj"),
             "the block reason must name the dirty repo: " + first.stdout());
 
-        var second = stopAttempt();
+        var second = stopAttempt(claudeCredential);
         assertTrue(second.ok(), "the second stop attempt must exit 0: " + second.stderr());
         assertTrue(
             second.stdout().isBlank(),
@@ -140,8 +153,14 @@ class StopGateIT extends AbstractIncusIT {
         var reason = Objects.toString(received.get(0).data().get("reason"), "");
         assertTrue(reason.contains("proj"), "the nudge event must carry the reason: " + reason);
         assertEquals("run-1", received.get(0).data().get(Event.WellKnownData.RUN_ID));
+        assertEquals(
+            "claude/run-1",
+            received.get(0).agent(),
+            "event authorship is the run's minted principal, resolved from the credential");
 
-        var codexFirst = codexStopAttempt(false);
+        assertTrue(runStore.transition("run-1", "running", "completed"));
+        var codexCredential = reserve(runStore, "run-2", "codex");
+        var codexFirst = codexStopAttempt(codexCredential, false);
         assertTrue(codexFirst.ok(), "the first codex stop must exit 0: " + codexFirst.stderr());
         assertTrue(
             codexFirst.stdout().contains("\"decision\": \"block\""),
@@ -150,7 +169,7 @@ class StopGateIT extends AbstractIncusIT {
             codexFirst.stdout().contains("proj"),
             "the codex block reason must name the dirty repo: " + codexFirst.stdout());
 
-        var codexSecond = codexStopAttempt(true);
+        var codexSecond = codexStopAttempt(codexCredential, true);
         assertTrue(codexSecond.ok(), "the codex retry must exit 0: " + codexSecond.stderr());
         assertTrue(
             codexSecond.stdout().isBlank(),
@@ -165,7 +184,8 @@ class StopGateIT extends AbstractIncusIT {
                 Event.WellKnownTypes.AGENT_SESSION_STOPPED),
             received.stream().map(Event::type).toList(),
             "the codex lane must show the same nudged-then-stopped sequence");
-        assertEquals("codex", received.get(2).agent(), "the nudge must be attributed to codex");
+        assertEquals(
+            "codex/run-2", received.get(2).agent(), "the nudge is attributed to the codex run");
         assertEquals("run-2", received.get(2).data().get(Event.WellKnownData.RUN_ID));
         var codexReason = Objects.toString(received.get(2).data().get("reason"), "");
         assertTrue(
@@ -179,7 +199,16 @@ class StopGateIT extends AbstractIncusIT {
     }
   }
 
-  private ShellExec.Result stopAttempt() throws Exception {
+  private static String reserve(RunStore runStore, String runId, String agent) {
+    var reservation =
+        (RunStore.Reservation.Reserved)
+            runStore.reserveDispatch(
+                runId, CONTAINER, SPEC_ID, "it", "it", "build", List.of(), agent, null, "probe",
+                null, "");
+    return reservation.credential();
+  }
+
+  private ShellExec.Result stopAttempt(String credential) throws Exception {
     return exec(
         CONTAINER,
         List.of(
@@ -189,11 +218,14 @@ class StopGateIT extends AbstractIncusIT {
             "-c",
             "printf '{}' | SAIL_SPEC_ID="
                 + SPEC_ID
-                + " SAIL_RUN_ID=run-1 SAIL_AGENT=claude-code "
+                + " SAIL_RUN_ID=run-1 SAIL_AGENT=claude-code SAIL_RUN_CREDENTIAL="
+                + credential
+                + " "
                 + SailStopGate.SCRIPT_PATH));
   }
 
-  private ShellExec.Result codexStopAttempt(boolean stopHookActive) throws Exception {
+  private ShellExec.Result codexStopAttempt(String credential, boolean stopHookActive)
+      throws Exception {
     var payload =
         "{\"session_id\":\"s\",\"turn_id\":\"t\",\"transcript_path\":null,"
             + "\"cwd\":\"/home/dev/workspace\",\"hook_event_name\":\"Stop\","
@@ -212,7 +244,9 @@ class StopGateIT extends AbstractIncusIT {
                 + payload
                 + "' | SAIL_SPEC_ID="
                 + SPEC_ID
-                + " SAIL_RUN_ID=run-2 SAIL_AGENT=codex "
+                + " SAIL_RUN_ID=run-2 SAIL_AGENT=codex SAIL_RUN_CREDENTIAL="
+                + credential
+                + " "
                 + SailStopGate.SCRIPT_PATH));
   }
 

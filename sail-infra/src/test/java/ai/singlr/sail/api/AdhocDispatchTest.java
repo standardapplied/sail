@@ -251,6 +251,7 @@ class AdhocDispatchTest {
         "acme",
         "auth",
         HANDLE,
+        HANDLE,
         "build",
         List.of("app"),
         "claude-code",
@@ -394,6 +395,10 @@ class AdhocDispatchTest {
     assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
     assertEquals("failed", runStore.listForProject("acme").getFirst().status());
     assertTrue(runStore.runningForProjectOnNode("acme", HANDLE).isEmpty());
+    assertEquals(
+        0L,
+        db.queryOne("SELECT COUNT(*) FROM run_credentials", row -> row.integer(0)).orElseThrow(),
+        "failing the run on a launch failure revokes its credential");
   }
 
   @Test

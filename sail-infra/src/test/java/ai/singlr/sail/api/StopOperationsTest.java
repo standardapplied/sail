@@ -408,7 +408,19 @@ class StopOperationsTest {
     var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     runStore.create(
-        R1, "acme", "auth", null, "build", "codex", "feat/auth", "do it", 123, null, RUN_LOG, UNIT);
+        R1,
+        "acme",
+        "auth",
+        null,
+        null,
+        "build",
+        "codex",
+        "feat/auth",
+        "do it",
+        123,
+        null,
+        RUN_LOG,
+        UNIT);
 
     var refusal =
         assertThrows(
@@ -471,6 +483,7 @@ class StopOperationsTest {
         R1,
         "acme",
         null,
+        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1184,7 +1197,18 @@ class StopOperationsTest {
 
   private void seedAdhocRun(Integer pid, String unit) {
     runStore.reserveDispatch(
-        R1, "acme", "", LOCAL_HANDLE, "adhoc", List.of(), "codex", null, "do it", RUN_LOG, unit);
+        R1,
+        "acme",
+        "",
+        LOCAL_HANDLE,
+        LOCAL_HANDLE,
+        "adhoc",
+        List.of(),
+        "codex",
+        null,
+        "do it",
+        RUN_LOG,
+        unit);
     if (pid != null) {
       runStore.updateProcess(R1, pid, null, null);
     }
@@ -1195,6 +1219,7 @@ class StopOperationsTest {
         R1,
         "acme",
         "auth",
+        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1212,6 +1237,7 @@ class StopOperationsTest {
         "acme",
         "auth",
         LOCAL_HANDLE,
+        LOCAL_HANDLE,
         "codex",
         "feat/auth",
         "review",
@@ -1224,6 +1250,7 @@ class StopOperationsTest {
         R2,
         "acme",
         "auth",
+        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1305,5 +1332,74 @@ class StopOperationsTest {
     List<String> invocations() {
       return List.copyOf(invocations);
     }
+  }
+
+  private String seedRunWithCredential(Integer pid, String unit) {
+    var reservation =
+        (RunStore.Reservation.Reserved)
+            runStore.reserveDispatch(
+                R1,
+                "acme",
+                "auth",
+                LOCAL_HANDLE,
+                LOCAL_HANDLE,
+                "build",
+                List.of(),
+                "codex",
+                "feat/auth",
+                "do it",
+                RUN_LOG,
+                unit);
+    if (pid != null) {
+      runStore.updateProcess(R1, pid, null, null);
+    }
+    return reservation.credential();
+  }
+
+  @Test
+  void aVerifiedStopRevokesTheRunCredential() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    var credential = seedRunWithCredential(123, UNIT);
+
+    ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertTrue(
+        runStore.findByCredential(credential).isEmpty(),
+        "the operator cancel's verified finish revokes the run credential");
+  }
+
+  @Test
+  void aDeadProbeRescueRevokesTheRunCredential() throws Exception {
+    var shell = shell().on("incus list ^acme$", RUNNING_JSON);
+    var ops = stopOps(shell, (project, unit) -> {}, StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    var credential = seedRunWithCredential(123, UNIT);
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertInstanceOf(StopOperations.NotRunning.class, outcome);
+    assertTrue(
+        runStore.findByCredential(credential).isEmpty(),
+        "recording terminal intent for a dead agent revokes the run credential");
+  }
+
+  @Test
+  void theAgentLaneIsRefusedOutrightOnStop() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var agent = Actor.agentPrincipal("claude/a1b2c3", LOCAL_HANDLE);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.stop(new StopOperations.RunTarget(R1), agent, LOCAL_HANDLE, false));
+
+    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 }

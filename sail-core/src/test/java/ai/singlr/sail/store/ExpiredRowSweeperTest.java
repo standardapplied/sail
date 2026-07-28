@@ -73,6 +73,25 @@ class ExpiredRowSweeperTest {
   }
 
   @Test
+  void collectsExpiredRunCredentialStragglersButKeepsLiveOnes() {
+    db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES ('r-live', 'h1', 't0', ?)",
+        Instant.now().plus(Duration.ofDays(1)).toString());
+    db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES ('r-dead', 'h2', 't0', ?)",
+        Instant.now().minus(Duration.ofHours(1)).toString());
+
+    var removed = ExpiredRowSweeper.sweep(db);
+
+    assertEquals(1, removed);
+    assertEquals(
+        1L,
+        db.queryOne("SELECT COUNT(*) FROM run_credentials", row -> row.integer(0)).orElseThrow());
+  }
+
+  @Test
   void anEmptyDatabaseSweepsNothing() {
     assertEquals(0, ExpiredRowSweeper.sweep(db));
   }
