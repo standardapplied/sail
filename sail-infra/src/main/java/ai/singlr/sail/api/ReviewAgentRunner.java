@@ -22,10 +22,14 @@ public interface ReviewAgentRunner {
    * @param prompt the review task prompt
    * @param reviewId the owning review; selects the review's own prompt and log files so pipelines
    *     running concurrently on the executor never share or truncate each other's state
+   * @param runCredential the review run's plaintext credential, injected as {@code
+   *     SAIL_RUN_CREDENTIAL} so the agent's spec and event writes authenticate as the principal
+   *     recorded on its run; blank launches the agent without an identity
    * @return the agent's raw stdout output
    * @throws Exception if the agent fails to start or exits with an error
    */
-  String run(String project, String agent, String prompt, String reviewId) throws Exception;
+  String run(String project, String agent, String prompt, String reviewId, String runCredential)
+      throws Exception;
 
   /**
    * Commits and pushes any work an agent left uncommitted on the spec's branch. The fix lane runs

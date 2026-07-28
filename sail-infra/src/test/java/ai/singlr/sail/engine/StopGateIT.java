@@ -14,6 +14,7 @@ import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -29,12 +30,13 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the installed stop gate end-to-end in a real container against a live sail-api socket,
  * on both hook lanes: a dispatched-looking session with a dirty worktree is blocked exactly once
- * (block JSON on stdout), the second stop passes, and the event log shows {@code agent_stop_nudged}
- * followed by {@code agent_session_stopped} — never a stop that did not happen. The Claude lane
- * retries with the marker-file loop guard; the Codex lane feeds the payload shape captured from a
- * live headless {@code codex exec} run (codex-cli 0.144.0), where the retry carries {@code
- * stop_hook_active: true}. One gate script serves both, and the sail-owned codex {@code hooks.json}
- * must wire it.
+ * (block JSON on stdout), the second stop passes, and the event log shows only {@code
+ * agent_stop_nudged} — the gate's best-effort terminal publish is refused on the agent lane, since
+ * a run must never mark itself finished; terminal lifecycle comes solely from the watcher's
+ * verified exit. The Claude lane retries with the marker-file loop guard; the Codex lane feeds the
+ * payload shape captured from a live headless {@code codex exec} run (codex-cli 0.144.0), where the
+ * retry carries {@code stop_hook_active: true}. One gate script serves both, and the sail-owned
+ * codex {@code hooks.json} must wire it.
  */
 class StopGateIT extends AbstractIncusIT {
 
@@ -43,7 +45,7 @@ class StopGateIT extends AbstractIncusIT {
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   @Test
-  void aDirtySessionIsNudgedOnceAndTheEventLogShowsNudgedThenStopped() throws Exception {
+  void aDirtySessionIsNudgedOnceAndTerminalEventsNeverTraverseTheAgentLane() throws Exception {
     ensureIncusOrSkip();
 
     var socketDir = Files.createTempDirectory("sail-it-stop-gate-socket");
@@ -55,15 +57,26 @@ class StopGateIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       specStore.create(seededSpec());
 
+      var runStore = new RunStore(db);
       var bus = new EventBus();
       var received = new CopyOnWriteArrayList<Event>();
       bus.subscribe(recorder(received));
       var operations =
-          new SailOperations(new ShellExecutor(false), "sail.yaml", bus, null, specStore);
+          new SailOperations(
+              new ShellExecutor(false),
+              "sail.yaml",
+              bus,
+              null,
+              specStore,
+              null,
+              runStore,
+              null,
+              ai.singlr.sail.api.SyncScheduler.disabled(),
+              null);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
-        launch(CONTAINER);
+        launchPrepared(CONTAINER);
         var dev =
             exec(
                 CONTAINER,
@@ -91,19 +104,6 @@ class StopGateIT extends AbstractIncusIT {
             codexHooks.ok(),
             "the installed codex hooks.json must wire the stop gate: " + codexHooks.stderr());
 
-        var prepare =
-            exec(
-                CONTAINER,
-                List.of(
-                    "bash",
-                    "-c",
-                    "set -e;"
-                        + " for i in $(seq 1 30); do"
-                        + " getent hosts archive.ubuntu.com >/dev/null 2>&1 && break; sleep 1; done;"
-                        + " apt-get update -qq;"
-                        + " apt-get install -y -qq curl git python3"));
-        assertTrue(prepare.ok(), "could not ready the container: " + prepare.stderr());
-
         var seed =
             exec(
                 CONTAINER,
@@ -116,7 +116,8 @@ class StopGateIT extends AbstractIncusIT {
                         + " git init -q -b main; echo wip > uncommitted.txt"));
         assertTrue(seed.ok(), "could not seed the dirty workspace repo: " + seed.stderr());
 
-        var first = stopAttempt();
+        var claudeCredential = reserve(runStore, "run-1", "claude-code");
+        var first = stopAttempt(claudeCredential);
         assertTrue(first.ok(), "the first stop attempt must exit 0: " + first.stderr());
         assertTrue(
             first.stdout().contains("\"decision\": \"block\""),
@@ -125,23 +126,29 @@ class StopGateIT extends AbstractIncusIT {
             first.stdout().contains("proj"),
             "the block reason must name the dirty repo: " + first.stdout());
 
-        var second = stopAttempt();
+        var second = stopAttempt(claudeCredential);
         assertTrue(second.ok(), "the second stop attempt must exit 0: " + second.stderr());
         assertTrue(
             second.stdout().isBlank(),
             "the second stop always wins, dirty or not: " + second.stdout());
 
-        awaitEvents(received, 2);
+        awaitEvents(received, 1);
         assertEquals(
-            List.of(
-                Event.WellKnownTypes.AGENT_STOP_NUDGED, Event.WellKnownTypes.AGENT_SESSION_STOPPED),
+            List.of(Event.WellKnownTypes.AGENT_STOP_NUDGED),
             received.stream().map(Event::type).toList(),
-            "one nudge, then a real stop, in that order — and no stop for the blocked attempt");
+            "one nudge and nothing else — the allowed stop's terminal publish is refused on the"
+                + " agent lane, so a run can never mark itself finished");
         var reason = Objects.toString(received.get(0).data().get("reason"), "");
         assertTrue(reason.contains("proj"), "the nudge event must carry the reason: " + reason);
         assertEquals("run-1", received.get(0).data().get(Event.WellKnownData.RUN_ID));
+        assertEquals(
+            "claude/run-1",
+            received.get(0).agent(),
+            "event authorship is the run's minted principal, resolved from the credential");
 
-        var codexFirst = codexStopAttempt(false);
+        assertTrue(runStore.transition("run-1", "running", "completed"));
+        var codexCredential = reserve(runStore, "run-2", "codex");
+        var codexFirst = codexStopAttempt(codexCredential, false);
         assertTrue(codexFirst.ok(), "the first codex stop must exit 0: " + codexFirst.stderr());
         assertTrue(
             codexFirst.stdout().contains("\"decision\": \"block\""),
@@ -150,24 +157,22 @@ class StopGateIT extends AbstractIncusIT {
             codexFirst.stdout().contains("proj"),
             "the codex block reason must name the dirty repo: " + codexFirst.stdout());
 
-        var codexSecond = codexStopAttempt(true);
+        var codexSecond = codexStopAttempt(codexCredential, true);
         assertTrue(codexSecond.ok(), "the codex retry must exit 0: " + codexSecond.stderr());
         assertTrue(
             codexSecond.stdout().isBlank(),
             "the retry carries stop_hook_active=true and must pass: " + codexSecond.stdout());
 
-        awaitEvents(received, 4);
+        awaitEvents(received, 2);
         assertEquals(
-            List.of(
-                Event.WellKnownTypes.AGENT_STOP_NUDGED,
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-                Event.WellKnownTypes.AGENT_STOP_NUDGED,
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED),
+            List.of(Event.WellKnownTypes.AGENT_STOP_NUDGED, Event.WellKnownTypes.AGENT_STOP_NUDGED),
             received.stream().map(Event::type).toList(),
-            "the codex lane must show the same nudged-then-stopped sequence");
-        assertEquals("codex", received.get(2).agent(), "the nudge must be attributed to codex");
-        assertEquals("run-2", received.get(2).data().get(Event.WellKnownData.RUN_ID));
-        var codexReason = Objects.toString(received.get(2).data().get("reason"), "");
+            "the codex lane must show the same nudge-only sequence; terminal lifecycle comes"
+                + " solely from the watcher's verified exit");
+        assertEquals(
+            "codex/run-2", received.get(1).agent(), "the nudge is attributed to the codex run");
+        assertEquals("run-2", received.get(1).data().get(Event.WellKnownData.RUN_ID));
+        var codexReason = Objects.toString(received.get(1).data().get("reason"), "");
         assertTrue(
             codexReason.contains("proj"),
             "the codex nudge must carry the same reason text: " + codexReason);
@@ -179,7 +184,16 @@ class StopGateIT extends AbstractIncusIT {
     }
   }
 
-  private ShellExec.Result stopAttempt() throws Exception {
+  private static String reserve(RunStore runStore, String runId, String agent) {
+    var reservation =
+        (RunStore.Reservation.Reserved)
+            runStore.reserveDispatch(
+                runId, CONTAINER, SPEC_ID, "it", "it", "build", List.of(), agent, null, "probe",
+                null, "");
+    return reservation.credential();
+  }
+
+  private ShellExec.Result stopAttempt(String credential) throws Exception {
     return exec(
         CONTAINER,
         List.of(
@@ -189,11 +203,14 @@ class StopGateIT extends AbstractIncusIT {
             "-c",
             "printf '{}' | SAIL_SPEC_ID="
                 + SPEC_ID
-                + " SAIL_RUN_ID=run-1 SAIL_AGENT=claude-code "
+                + " SAIL_RUN_ID=run-1 SAIL_AGENT=claude-code SAIL_RUN_CREDENTIAL="
+                + credential
+                + " "
                 + SailStopGate.SCRIPT_PATH));
   }
 
-  private ShellExec.Result codexStopAttempt(boolean stopHookActive) throws Exception {
+  private ShellExec.Result codexStopAttempt(String credential, boolean stopHookActive)
+      throws Exception {
     var payload =
         "{\"session_id\":\"s\",\"turn_id\":\"t\",\"transcript_path\":null,"
             + "\"cwd\":\"/home/dev/workspace\",\"hook_event_name\":\"Stop\","
@@ -212,7 +229,9 @@ class StopGateIT extends AbstractIncusIT {
                 + payload
                 + "' | SAIL_SPEC_ID="
                 + SPEC_ID
-                + " SAIL_RUN_ID=run-2 SAIL_AGENT=codex "
+                + " SAIL_RUN_ID=run-2 SAIL_AGENT=codex SAIL_RUN_CREDENTIAL="
+                + credential
+                + " "
                 + SailStopGate.SCRIPT_PATH));
   }
 

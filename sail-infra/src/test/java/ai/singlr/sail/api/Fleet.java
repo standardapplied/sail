@@ -261,7 +261,7 @@ public final class Fleet implements AutoCloseable {
               reviews,
               project -> REVIEW,
               project -> "codex",
-              (project, agent, prompt, reviewId) -> "[]",
+              (project, agent, prompt, reviewId, credential) -> "[]",
               bus,
               () -> {},
               new DirectExecutorService());

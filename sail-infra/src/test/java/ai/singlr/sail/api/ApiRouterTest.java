@@ -927,7 +927,9 @@ class ApiRouterTest {
             "t0",
             "t1",
             java.util.List.of(),
-            null);
+            null,
+            "claude/abc123",
+            "uday");
     var view = RunView.from(row);
     assertEquals("s1", view.id());
     assertEquals("node-a", view.node());
@@ -1235,6 +1237,8 @@ class ApiRouterTest {
                   "t0",
                   null,
                   null,
+                  null,
+                  null,
                   null)));
     }
 
@@ -1313,7 +1317,7 @@ class ApiRouterTest {
               null,
               null,
               0,
-              new RunSummary("run-1", "node-a", "running", null)));
+              new RunSummary("run-1", "node-a", "running", null, null, null)));
     }
 
     @Override
@@ -1503,5 +1507,10 @@ class ApiRouterTest {
     public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       throw new IllegalStateException("boom");
     }
+  }
+
+  @Test
+  void operationsDefaultResolvesNoRunCredential() {
+    assertTrue(new FakeOperations().runForCredential("sailrun_anything").isEmpty());
   }
 }

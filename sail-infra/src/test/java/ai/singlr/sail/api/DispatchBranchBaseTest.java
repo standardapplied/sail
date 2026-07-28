@@ -177,6 +177,12 @@ class DispatchBranchBaseTest {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
     private final List<String> executed = new ArrayList<>();
 
+    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    RecordingShell() {
+      on("incus config device add", "");
+      on("grep -qsF", "");
+    }
+
     RecordingShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
       return this;

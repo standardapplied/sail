@@ -20,6 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -42,7 +45,9 @@ class LocalApiSocketTest {
   void postEventReturns202(@TempDir Path dir) throws Exception {
     try (var listener = socket(dir)) {
       listener.start();
-      var event = Event.of("light-grid", "oauth", "spec_dispatched", "sail", "host-01");
+      var event =
+          Event.of(
+              "light-grid", "oauth", Event.WellKnownTypes.AGENT_SESSION_STARTED, "sail", "host-01");
       var response = send(listener.socketPath(), post("/v1/events", event.toJsonLine()));
       assertTrue(response.startsWith("HTTP/1.1 202 Accepted"), response);
       assertEquals(1, listener.acceptedCount());
@@ -75,12 +80,68 @@ class LocalApiSocketTest {
   }
 
   @Test
+  void missingCredentialReturns401(@TempDir Path dir) throws Exception {
+    try (var listener = socket(dir)) {
+      listener.start();
+      var response = send(listener.socketPath(), "GET /v1/specs HTTP/1.1\r\n\r\n");
+      assertTrue(response.startsWith("HTTP/1.1 401 Unauthorized"), response);
+    }
+  }
+
+  @Test
   void malformedRequestLineReturns400(@TempDir Path dir) throws Exception {
     try (var listener = socket(dir)) {
       listener.start();
       var response = send(listener.socketPath(), "GET\r\n\r\n");
       assertTrue(response.startsWith("HTTP/1.1 400"));
       assertEquals(1, listener.badRequestCount());
+    }
+  }
+
+  @Test
+  void oversizedHeaderBlockReturns431(@TempDir Path dir) throws Exception {
+    try (var listener = socket(dir)) {
+      listener.start();
+      var flood = new StringBuilder("GET /v1/specs HTTP/1.1\r\n");
+      for (var i = 0; i < 300; i++) {
+        flood.append("x-flood-").append(i).append(": ").append("x".repeat(40)).append("\r\n");
+      }
+      flood.append(AUTH).append("\r\n");
+      var response = send(listener.socketPath(), flood.toString());
+      assertTrue(response.startsWith("HTTP/1.1 431"), response);
+      assertEquals(1, listener.badRequestCount());
+    }
+  }
+
+  @Test
+  void truncatedHeaderBlockReturns431(@TempDir Path dir) throws Exception {
+    try (var listener = socket(dir)) {
+      listener.start();
+      var response = send(listener.socketPath(), "GET /v1/specs HTTP/1.1\r\nx-partial: yes");
+      assertTrue(response.startsWith("HTTP/1.1 431"), response);
+      assertEquals(1, listener.badRequestCount());
+    }
+  }
+
+  @Test
+  void retainsOnlyTheConsumedHeaders(@TempDir Path dir) throws Exception {
+    var seen = new AtomicReference<Map<String, String>>();
+    try (var listener =
+        new LocalApiSocket(
+            request -> {
+              seen.set(request.headers());
+              return new ApiResponse(200, Map.of());
+            },
+            dir.resolve("api.sock"),
+            4)) {
+      listener.start();
+      var request =
+          "GET /v1/specs HTTP/1.1\r\nUser-Agent: sail-test\r\nX-Extra: 1\r\n"
+              + AUTH
+              + "Content-Length: 0\r\n\r\n";
+      var response = send(listener.socketPath(), request);
+      assertTrue(response.startsWith("HTTP/1.1 200"), response);
+      assertEquals(Set.of("authorization", "content-length"), seen.get().keySet());
     }
   }
 
@@ -120,22 +181,34 @@ class LocalApiSocketTest {
     assertFalse(Files.exists(listener.socketPath()));
   }
 
+  private static final String AUTH =
+      "Authorization: Bearer " + TestOperations.RUN_CREDENTIAL + "\r\n";
+
   private static String post(String path, String body) {
-    return "POST " + path + " HTTP/1.1\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
+    return "POST "
+        + path
+        + " HTTP/1.1\r\n"
+        + AUTH
+        + "Content-Length: "
+        + body.length()
+        + "\r\n\r\n"
+        + body;
   }
 
   private static String form(String method, String path, String body) {
     return method
         + " "
         + path
-        + " HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: "
+        + " HTTP/1.1\r\n"
+        + AUTH
+        + "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: "
         + body.length()
         + "\r\n\r\n"
         + body;
   }
 
   private static String get(String path) {
-    return "GET " + path + " HTTP/1.1\r\n\r\n";
+    return "GET " + path + " HTTP/1.1\r\n" + AUTH + "\r\n";
   }
 
   private static String send(Path socketPath, String request) throws Exception {

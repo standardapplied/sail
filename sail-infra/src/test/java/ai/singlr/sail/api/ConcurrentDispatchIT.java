@@ -58,7 +58,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
   @BeforeEach
   void provision() throws Exception {
     ensureIncusOrSkip();
-    launch(CONTAINER);
+    launchPrepared(CONTAINER);
     var setup =
         exec(
             CONTAINER,

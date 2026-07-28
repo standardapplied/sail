@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -47,6 +49,7 @@ class RunStoreTest {
         id,
         project,
         specId,
+        "node-a",
         "node-a",
         "build",
         "claude-code",
@@ -198,6 +201,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "claude-code",
         "feat/x",
         "review",
@@ -257,6 +261,7 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
+            "node-a",
             "codex",
             "feat/x",
             "review",
@@ -289,6 +294,7 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
+        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -323,6 +329,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -348,6 +355,7 @@ class RunStoreTest {
         id,
         "backend",
         null,
+        "node-a",
         "node-a",
         "build",
         "codex",
@@ -435,6 +443,7 @@ class RunStoreTest {
         project,
         specId,
         node,
+        node,
         "build",
         "claude-code",
         "feat/x",
@@ -465,6 +474,7 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
+        "node-a",
         "codex",
         "feat/x",
         "review it",
@@ -482,11 +492,21 @@ class RunStoreTest {
     var local = DateTimeUtils.newId().toString();
     var foreign = DateTimeUtils.newId().toString();
     store.createReview(
-        local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local, "sail-review-l");
+        local,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "codex",
+        "b",
+        "t",
+        "/runs/" + local,
+        "sail-review-l");
     store.createReview(
         foreign,
         "backend",
         "auth",
+        "node-b",
         "node-b",
         "codex",
         "b",
@@ -696,33 +716,44 @@ class RunStoreTest {
 
   private java.util.Optional<DispatchGate.Conflict> reserve(
       RunStore target, String id, String specId, String node, java.util.List<String> repos) {
-    return target.reserveDispatch(
-        id,
-        "backend",
-        specId,
-        node,
-        "build",
-        repos,
-        "claude-code",
-        "feat/x",
-        "do it",
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return conflictOf(
+        target.reserveDispatch(
+            id,
+            "backend",
+            specId,
+            node,
+            node,
+            "build",
+            repos,
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id));
+  }
+
+  private static java.util.Optional<DispatchGate.Conflict> conflictOf(
+      RunStore.Reservation reservation) {
+    return reservation instanceof RunStore.Reservation.Conflicted conflicted
+        ? java.util.Optional.of(conflicted.conflict())
+        : java.util.Optional.empty();
   }
 
   private java.util.Optional<DispatchGate.Conflict> reserveAdhoc(String id, String node) {
-    return store.reserveDispatch(
-        id,
-        "backend",
-        "",
-        node,
-        "adhoc",
-        java.util.List.of(),
-        "claude-code",
-        null,
-        "do it",
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return conflictOf(
+        store.reserveDispatch(
+            id,
+            "backend",
+            "",
+            node,
+            node,
+            "adhoc",
+            java.util.List.of(),
+            "claude-code",
+            null,
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id));
   }
 
   @Test
@@ -786,6 +817,7 @@ class RunStoreTest {
         "backend",
         null,
         "node-a",
+        "node-a",
         "build",
         "codex",
         null,
@@ -818,17 +850,18 @@ class RunStoreTest {
     var adhoc = DateTimeUtils.newId().toString();
     reserveAdhoc(adhoc, "node-a");
     var build = newRun("backend", "auth");
-    var review =
-        store.createReview(
-            DateTimeUtils.newId().toString(),
-            "backend",
-            "auth",
-            "node-a",
-            "codex",
-            "feat/x",
-            "review",
-            "/home/dev/.sail/runs/rev/review.log",
-            "sail-review-rev");
+    var review = DateTimeUtils.newId().toString();
+    store.createReview(
+        review,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "codex",
+        "feat/x",
+        "review",
+        "/home/dev/.sail/runs/rev/review.log",
+        "sail-review-rev");
 
     assertTrue(store.findById(adhoc).orElseThrow().sessionRole());
     assertTrue(store.findById(build).orElseThrow().sessionRole());
@@ -855,6 +888,7 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
+        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -1011,5 +1045,290 @@ class RunStoreTest {
         1,
         admitted.get(),
         "the BEGIN IMMEDIATE reservation must serialize dispatches across connections");
+  }
+
+  private String reservedCredential(String id, String specId, java.util.List<String> repos) {
+    var reservation =
+        store.reserveDispatch(
+            id,
+            "backend",
+            specId,
+            "node-a",
+            "uday",
+            "build",
+            repos,
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id);
+    return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  private long credentialRows(String id) {
+    return db.queryOne(
+            "SELECT COUNT(*) FROM run_credentials WHERE run_id = ?", row -> row.integer(0), id)
+        .orElseThrow();
+  }
+
+  @Test
+  void reserveDispatchMintsThePrincipalAndCredentialWithTheRow() {
+    var id = DateTimeUtils.newId().toString();
+
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("claude/" + id, run.principal());
+    assertEquals("uday", run.owner());
+    assertTrue(credential.startsWith("sailrun_"));
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+    assertTrue(
+        db.queryOne(
+                    "SELECT credential_hash FROM run_credentials WHERE run_id = ?",
+                    row -> row.text(0),
+                    id)
+                .orElseThrow()
+                .length()
+            == 64,
+        "only the SHA-256 hash is at rest, never the plaintext");
+  }
+
+  @Test
+  void aRefusedReservationMintsNothing() {
+    reservedCredential(DateTimeUtils.newId().toString(), "auth", java.util.List.of("app"));
+    var second = DateTimeUtils.newId().toString();
+
+    var conflict = reserve(store, second, "billing", "node-a", java.util.List.of("app"));
+
+    assertTrue(conflict.isPresent());
+    assertEquals(0, credentialRows(second));
+  }
+
+  @Test
+  void anAdhocReservationMintsAPrincipalOwnedByTheLaunchingNode() {
+    var id = DateTimeUtils.newId().toString();
+
+    reserveAdhoc(id, "node-a");
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("claude/" + id, run.principal());
+    assertEquals("node-a", run.owner());
+    assertEquals(1, credentialRows(id));
+  }
+
+  @Test
+  void createReviewMintsAReviewMarkedPrincipalOwnedByTheAssignee() {
+    var id = DateTimeUtils.newId().toString();
+
+    store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "uday",
+        "codex",
+        "feat/x",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("codex/review-" + id, run.principal());
+    assertEquals("uday", run.owner());
+    assertEquals(1, credentialRows(id));
+  }
+
+  @Test
+  void createReviewReturnsTheLiveCredentialOfItsRun() {
+    var id = DateTimeUtils.newId().toString();
+
+    var credential = createReview(id);
+
+    assertTrue(credential.startsWith("sailrun_"));
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+  }
+
+  @Test
+  void rotateCredentialRetiresTheOldPlaintextAndMintsAFreshOne() {
+    var id = DateTimeUtils.newId().toString();
+    var original = createReview(id);
+
+    var rotated = store.rotateCredential(id);
+
+    assertEquals(id, store.findByCredential(rotated).orElseThrow().id());
+    assertTrue(
+        store.findByCredential(original).isEmpty(),
+        "the previous invocation's credential is retired by the rotation");
+    assertEquals(1, credentialRows(id), "a run holds exactly one credential at a time");
+
+    assertTrue(store.transition(id, "running", "completed", 0));
+
+    assertTrue(store.findByCredential(rotated).isEmpty(), "the credential dies with the run");
+    assertEquals(0, credentialRows(id));
+  }
+
+  @Test
+  void rotateCredentialRefusesAMissingOrFinishedRun() {
+    assertThrows(IllegalStateException.class, () -> store.rotateCredential("ghost"));
+
+    var id = DateTimeUtils.newId().toString();
+    createReview(id);
+    assertTrue(store.transition(id, "running", "completed", 0));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.rotateCredential(id),
+        "a dead run's identity is never resurrected");
+  }
+
+  private String createReview(String id) {
+    return store.createReview(
+        id,
+        "backend",
+        "auth",
+        "node-a",
+        "uday",
+        "codex",
+        "feat/x",
+        "review it",
+        "/home/dev/.sail/runs/" + id + "/review.log",
+        "sail-review-" + id);
+  }
+
+  @Test
+  void findByCredentialRejectsBlankUnknownAndRevoked() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertTrue(store.findByCredential(null).isEmpty());
+    assertTrue(store.findByCredential("").isEmpty());
+    assertTrue(store.findByCredential("sailrun_wrong").isEmpty());
+
+    store.transition(id, "running", "completed", 0);
+
+    assertTrue(store.findByCredential(credential).isEmpty(), "a finished run's credential is dead");
+  }
+
+  @Test
+  void aCredentialWithoutAConfiguredHardStopNeverExpires() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var nullExpiryRows =
+        db.queryOne(
+                "SELECT COUNT(*) FROM run_credentials WHERE run_id = ? AND expires_at IS NULL",
+                row -> row.integer(0),
+                id)
+            .orElseThrow();
+
+    assertEquals(1L, nullExpiryRows, "no expiry at rest");
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+  }
+
+  @Test
+  void credentialExpiryCoversTheConfiguredHardStopPlusGrace() {
+    var id = DateTimeUtils.newId().toString();
+    var maxDuration = Duration.ofHours(169);
+
+    var reservation =
+        store.reserveDispatch(
+            id,
+            "backend",
+            "auth",
+            "node-a",
+            "uday",
+            "build",
+            java.util.List.of("app"),
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id,
+            maxDuration);
+    var credential = ((RunStore.Reservation.Reserved) reservation).credential();
+
+    var row =
+        db.queryOne(
+                "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
+                r -> new String[] {r.text(0), r.text(1)},
+                id)
+            .orElseThrow();
+    var expected = Instant.parse(row[0]).plus(maxDuration).plus(RunStore.CREDENTIAL_GRACE);
+    assertEquals(
+        expected,
+        Instant.parse(row[1]),
+        "the credential outlives the run's configured hard stop by exactly the grace window");
+    assertEquals(id, store.findByCredential(credential).orElseThrow().id());
+  }
+
+  @Test
+  void anExpiredCredentialIsRejectedAndPrunedOnLookup() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    db.execute(
+        "UPDATE run_credentials SET expires_at = ? WHERE run_id = ?", "2000-01-01T00:00:00Z", id);
+
+    assertTrue(store.findByCredential(credential).isEmpty());
+    assertEquals(0, credentialRows(id), "the expired row is pruned on lookup");
+  }
+
+  @Test
+  void everyTerminalTransitionRevokesTheCredential() {
+    for (var terminal : java.util.List.of("completed", "stopped", "failed")) {
+      var id = DateTimeUtils.newId().toString();
+      var credential = reservedCredential(id, "spec-" + terminal, java.util.List.of(terminal));
+
+      assertTrue(store.transition(id, "running", terminal));
+
+      assertTrue(store.findByCredential(credential).isEmpty(), terminal);
+      assertEquals(0, credentialRows(id), terminal);
+    }
+  }
+
+  @Test
+  void aStopClaimKeepsTheCredentialUntilTheVerifiedFinish() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertTrue(store.transition(id, "running", "stopping"));
+    assertTrue(
+        store.findByCredential(credential).isPresent(),
+        "mid-stop the agent may still be alive; only the verified finish revokes");
+
+    assertTrue(store.transition(id, "stopping", "stopped"));
+    assertTrue(store.findByCredential(credential).isEmpty());
+  }
+
+  @Test
+  void aLostTransitionRevokesNothing() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertFalse(store.transition(id, "stopping", "stopped"));
+
+    assertTrue(store.findByCredential(credential).isPresent());
+  }
+
+  @Test
+  void completeRevokesTheCredential() {
+    var id = DateTimeUtils.newId().toString();
+    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+
+    store.complete(id, "failed", 1);
+
+    assertTrue(store.findByCredential(credential).isEmpty());
+  }
+
+  @Test
+  void principalAndOwnerReplicateInTheComparableSnapshot() {
+    var id = DateTimeUtils.newId().toString();
+    reservedCredential(id, "auth", java.util.List.of("app"));
+
+    var snapshot = store.comparableSnapshot(id);
+
+    assertEquals("claude/" + id, snapshot.get("principal"));
+    assertEquals("uday", snapshot.get("owner"));
+    assertFalse(
+        snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");
   }
 }

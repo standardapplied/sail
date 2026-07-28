@@ -572,6 +572,10 @@ public final class StopOperations {
   }
 
   private void authorize(Actor actor, RunStore.RunRow run) {
+    if (actor.agentLane()) {
+      var refused = DispatchPolicy.agentLaneForbidden("stop runs");
+      throw new ApiException(refused.code(), refused.message(), refused.fix());
+    }
     var owner =
         Strings.isBlank(run.specId())
             ? run.node()

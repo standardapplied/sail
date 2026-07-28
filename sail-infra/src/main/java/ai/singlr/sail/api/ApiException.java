@@ -21,7 +21,7 @@ public final class ApiException extends RuntimeException {
     this(errorCode, message, null, cause);
   }
 
-  private ApiException(ErrorCode errorCode, String message, String action, Throwable cause) {
+  public ApiException(ErrorCode errorCode, String message, String action, Throwable cause) {
     super(message, cause);
     failure = new Result.Failure<>(errorCode, message, action, null, cause);
   }

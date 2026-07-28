@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecDirectory;
@@ -299,16 +300,19 @@ public final class DispatchOperations {
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    reserveRun(
-        runId,
-        project,
-        nextSpec.id(),
-        localHandle,
-        taskSpec.repos(),
-        agentType,
-        branch,
-        task,
-        unit);
+    var credential =
+        reserveRun(
+            runId,
+            project,
+            nextSpec.id(),
+            localHandle,
+            dispatchOwner(localHandle),
+            taskSpec.repos(),
+            agentType,
+            branch,
+            task,
+            unit,
+            loaded.config());
     try {
       var prepared =
           claimAndPrepare(
@@ -331,7 +335,8 @@ public final class DispatchOperations {
               taskSpec,
               agentType,
               unit,
-              runId);
+              runId,
+              credential);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
         throw launchLostToCancel(runId, project, unit);
@@ -402,10 +407,13 @@ public final class DispatchOperations {
               agentType,
               background,
               unit,
-              runId));
+              runId,
+              null));
       return new AdhocSession(runId, null, null, Optional.empty());
     }
-    reserveAdhocRun(runId, project, localHandle, agentType, request.branch(), request.task(), unit);
+    var credential =
+        reserveAdhocRun(
+            runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
     try {
       prepare(preparer);
       var launch =
@@ -423,7 +431,8 @@ public final class DispatchOperations {
               List.of(),
               background,
               unit,
-              runId);
+              runId,
+              credential);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
         throw launchLostToCancel(runId, project, unit);
@@ -736,6 +745,16 @@ public final class DispatchOperations {
    */
   private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
 
+  /**
+   * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
+   * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
+   * never becomes its authorization owner — the agent must act for the assignee whose spec it
+   * builds, not for whoever pressed the button.
+   */
+  private static String dispatchOwner(String localHandle) {
+    return localHandle;
+  }
+
   private LaunchOutcome launchAgent(
       String project,
       SailYaml config,
@@ -746,7 +765,8 @@ public final class DispatchOperations {
       Spec spec,
       String agentType,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     return launchSession(
         project,
         config,
@@ -761,7 +781,8 @@ public final class DispatchOperations {
         targetRepos.stream().map(SailYaml.Repo::path).toList(),
         background,
         unit,
-        runId);
+        runId,
+        runCredential);
   }
 
   /**
@@ -784,7 +805,8 @@ public final class DispatchOperations {
       List<String> repoPaths,
       boolean background,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -811,8 +833,9 @@ public final class DispatchOperations {
               agentType,
               background,
               unit,
-              runId);
-      listener.launching(background, command);
+              runId,
+              runCredential);
+      listener.launching(background, redactCredential(command, runCredential));
       var exitCode = launcher.launch(command);
       if (background) {
         if (exitCode != 0) {
@@ -828,6 +851,21 @@ public final class DispatchOperations {
     }
   }
 
+  /**
+   * The command as listeners may see it: the plaintext run credential replaced with a marker.
+   * Listeners print launch commands to terminals and logs, and a leaked live credential
+   * authenticates spec and event writes until the run finishes — only the launcher ever receives
+   * the real value.
+   */
+  private static List<String> redactCredential(List<String> command, String runCredential) {
+    if (Strings.isBlank(runCredential)) {
+      return command;
+    }
+    return command.stream()
+        .map(argument -> argument.equals(runCredential) ? "<redacted>" : argument)
+        .toList();
+  }
+
   private static List<String> launchCommand(
       String project,
       SailYaml config,
@@ -839,7 +877,8 @@ public final class DispatchOperations {
       String agentType,
       boolean background,
       AgentUnit unit,
-      String runId) {
+      String runId,
+      String runCredential) {
     var agentCli = AgentCli.fromYamlName(agentType);
     return background
         ? AgentSession.buildBackgroundLaunchCommand(
@@ -853,7 +892,8 @@ public final class DispatchOperations {
             specId,
             agentType,
             unit.logPath(),
-            runId)
+            runId,
+            runCredential)
         : AgentSession.buildForegroundTaskCommand(
             project,
             config.sshUser(),
@@ -865,7 +905,8 @@ public final class DispatchOperations {
             specId,
             agentType,
             unit.logPath(),
-            runId);
+            runId,
+            runCredential);
   }
 
   /**
@@ -943,16 +984,22 @@ public final class DispatchOperations {
         .toList();
   }
 
+  /**
+   * Installs or upgrades the in-container {@code sail spec} and event helpers before any agent
+   * launches. Failure aborts the launch: every local-socket route now requires the run's bearer
+   * credential, so an agent left with stale unauthenticated helpers would run apparently normally
+   * while every spec operation 401s and every lifecycle event is silently dropped.
+   */
   private void ensureSailSetup(String project) {
     try {
       var result = ContainerSailSetup.ensureInstalled(shell, project);
       listener.sailSetupUpdated(result == ContainerSailSetup.Result.UPDATED);
     } catch (Exception e) {
-      System.err.println(
-          "  [api] Warning: failed to update sail event helpers in "
-              + project
-              + ": "
-              + e.getMessage());
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED,
+          "Failed to install the authenticated sail helpers in " + project + ".",
+          "Repair the container's sail socket mount and retry the dispatch.",
+          e);
     }
   }
 
@@ -971,20 +1018,23 @@ public final class DispatchOperations {
    * missed-stop reconciler address a foreground session exactly like a background one. The
    * foreground run completes when its blocking launcher returns.
    */
-  private void reserveRun(
+  private String reserveRun(
       String runId,
       String project,
       String specId,
       String node,
+      String owner,
       List<String> repos,
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      SailYaml config) {
     if (runStore == null) {
-      return;
+      return null;
     }
-    reserve(runId, project, specId, node, "build", repos, agentType, branch, task, unit);
+    return reserve(
+        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
   }
 
   /**
@@ -994,55 +1044,75 @@ public final class DispatchOperations {
    * not a skip: the reservation is the only thing standing between two agents in one container, and
    * an ad-hoc session without a row would also be invisible to stop, status, and retention.
    */
-  private void reserveAdhocRun(
+  private String reserveAdhocRun(
       String runId,
       String project,
       String node,
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
+      AgentUnit unit,
+      SailYaml config) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
-    reserve(runId, project, "", node, "adhoc", List.of(), agentType, branch, task, unit);
+    return reserve(
+        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit, config);
   }
 
-  private void reserve(
+  private String reserve(
       String runId,
       String project,
       String specId,
       String node,
+      String owner,
       String role,
       List<String> repos,
       String agentType,
       String branch,
       String task,
-      AgentUnit unit) {
-    Optional<DispatchGate.Conflict> conflict;
+      AgentUnit unit,
+      SailYaml config) {
+    RunStore.Reservation reservation;
     try {
-      conflict =
+      reservation =
           runStore.reserveDispatch(
               runId,
               project,
               specId,
               node,
+              owner,
               role,
               repos,
               agentType,
               branch,
               task,
               unit.logPath(),
-              unit.unitName());
+              unit.unitName(),
+              configuredMaxDuration(config));
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
-    if (conflict.isPresent()) {
-      throw overlapRefusal(conflict.get());
+    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
+      throw overlapRefusal(conflicted.conflict());
     }
     pruneRuns(project);
+    return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  /**
+   * The run's configured hard lifetime, bounding its credential: {@code guardrails.max_duration},
+   * or null when unset — an unbounded run's credential is revoked by its verified finishers, never
+   * by a clock that could expire mid-work.
+   */
+  private static Duration configuredMaxDuration(SailYaml config) {
+    var agent = config.agent();
+    if (agent == null || agent.guardrails() == null) {
+      return null;
+    }
+    return Guardrails.parseDuration(agent.guardrails().maxDuration());
   }
 
   private void pruneRuns(String project) {

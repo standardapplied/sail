@@ -11,6 +11,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -46,29 +47,59 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       new SchemaManager(db).migrate();
       var specStore = new SpecStore(db);
       specStore.create(seededSpec());
+      var runStore = new RunStore(db);
+      var reservation =
+          (RunStore.Reservation.Reserved)
+              runStore.reserveDispatch(
+                  "01890000-0000-7000-8000-000000000001",
+                  CONTAINER,
+                  SPEC_ID,
+                  "it",
+                  "it",
+                  "build",
+                  List.of(),
+                  "claude-code",
+                  null,
+                  "probe",
+                  null,
+                  "");
+      var credential = reservation.credential();
 
       var bus = new EventBus();
       var operations =
-          new SailOperations(new ShellExecutor(false), "sail.yaml", bus, null, specStore);
+          new SailOperations(
+              new ShellExecutor(false),
+              "sail.yaml",
+              bus,
+              null,
+              specStore,
+              null,
+              runStore,
+              null,
+              ai.singlr.sail.api.SyncScheduler.disabled(),
+              null);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
-        launch(CONTAINER);
+        launchPrepared(CONTAINER);
         new IncusDeviceManager(shell).ensureEventSocket(CONTAINER, socketDir, CONTAINER_DIR);
 
-        var prepare =
+        var unauthenticated =
             exec(
                 CONTAINER,
                 List.of(
-                    "bash",
-                    "-c",
-                    "set -e;"
-                        + " for i in $(seq 1 30); do"
-                        + " getent hosts archive.ubuntu.com >/dev/null 2>&1 && break; sleep 1; done;"
-                        + " apt-get update -qq;"
-                        + " apt-get install -y -qq curl"));
+                    "curl",
+                    "--silent",
+                    "--unix-socket",
+                    CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "http://sail/v1/specs?project=" + CONTAINER));
         assertTrue(
-            prepare.ok(), "could not ready the container (network + curl): " + prepare.stderr());
+            unauthenticated.stdout().contains("401"),
+            "a request without a run credential must be refused: " + unauthenticated.stdout());
 
         var response =
             exec(
@@ -80,6 +111,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                     "--fail-with-body",
                     "--unix-socket",
                     CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-H",
+                    "Authorization: Bearer " + credential,
                     "http://sail/v1/specs?project=" + CONTAINER));
         assertTrue(
             response.ok(),

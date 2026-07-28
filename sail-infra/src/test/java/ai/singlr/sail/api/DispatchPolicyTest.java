@@ -116,4 +116,14 @@ class DispatchPolicyTest {
         DispatchDecision.Allowed.class,
         DispatchPolicy.check(Actor.cliOperator(NODE), spec(NODE), NODE));
   }
+
+  @Test
+  void agentLaneIsRefusedOutrightEvenForItsOwnersSpec() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", NODE);
+
+    var refused = refuse(agent, spec(NODE), NODE);
+
+    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, refused.code());
+    assertTrue(refused.message().contains("dispatch"));
+  }
 }

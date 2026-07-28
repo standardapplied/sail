@@ -37,6 +37,8 @@ class MissedStopsTest {
         startedAt,
         null,
         java.util.List.of(),
+        null,
+        null,
         null);
   }
 

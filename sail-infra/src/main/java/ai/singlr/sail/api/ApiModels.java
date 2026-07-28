@@ -949,7 +949,9 @@ record RunView(
     String startedAt,
     String completedAt,
     Integer exitCode,
-    String logPath)
+    String logPath,
+    String principal,
+    String owner)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -965,7 +967,9 @@ record RunView(
         row.startedAt(),
         row.completedAt(),
         row.exitCode(),
-        row.logPath());
+        row.logPath(),
+        row.principal(),
+        row.owner());
   }
 
   @Override
@@ -984,6 +988,8 @@ record RunView(
     if (completedAt != null) m.put("completed_at", completedAt);
     if (exitCode != null) m.put("exit_code", exitCode);
     if (logPath != null) m.put("log_path", logPath);
+    if (principal != null) m.put("principal", principal);
+    if (owner != null) m.put("owner", owner);
     return m;
   }
 }
@@ -1036,9 +1042,12 @@ record StopRunResponse(
  * The latest run of a spec, embedded in board and spec-detail responses so a client can gate its
  * "open logs" button on provenance ({@code node}) without a second call.
  */
-record RunSummary(String id, String node, String status, Integer exitCode) implements Mappable {
+record RunSummary(
+    String id, String node, String status, Integer exitCode, String principal, String owner)
+    implements Mappable {
   static RunSummary from(RunStore.RunRow row) {
-    return new RunSummary(row.id(), row.node(), row.status(), row.exitCode());
+    return new RunSummary(
+        row.id(), row.node(), row.status(), row.exitCode(), row.principal(), row.owner());
   }
 
   @Override
@@ -1048,6 +1057,8 @@ record RunSummary(String id, String node, String status, Integer exitCode) imple
     m.put("node", node);
     m.put("status", status);
     if (exitCode != null) m.put("exit_code", exitCode);
+    if (principal != null) m.put("principal", principal);
+    if (owner != null) m.put("owner", owner);
     return m;
   }
 }

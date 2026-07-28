@@ -6,13 +6,18 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.SpecStore;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 class LocalApiRouterTest {
@@ -21,26 +26,134 @@ class LocalApiRouterTest {
   private final RecordingOps ops = new RecordingOps();
   private final LocalApiRouter router = new LocalApiRouter(bus, ops);
 
+  private static Map<String, String> auth() {
+    return Map.of("authorization", "Bearer " + TestOperations.RUN_CREDENTIAL);
+  }
+
   private static LocalApiRequest get(String path, Map<String, String> query) {
-    return new LocalApiRequest("GET", path, query, new byte[0]);
+    return new LocalApiRequest("GET", path, query, auth(), new byte[0]);
   }
 
   private static LocalApiRequest form(String method, String path, String body) {
-    return new LocalApiRequest(method, path, Map.of(), body.getBytes(StandardCharsets.UTF_8));
+    return new LocalApiRequest(
+        method, path, Map.of(), auth(), body.getBytes(StandardCharsets.UTF_8));
   }
 
   @Test
-  void postEventPublishesAndReturns202() {
-    var event = Event.of("light-grid", "oauth", "spec_dispatched", "sail", "host-01");
+  void missingCredentialIs401OnEveryRoute() {
+    for (var path : List.of("/v1/specs", "/v1/specs/board", "/v1/events", "/v1/whoami", "/v1/x")) {
+      var response = router.handle(new LocalApiRequest("GET", path, Map.of(), new byte[0]));
+      assertEquals(401, response.status(), path);
+      assertTrue(response.body().get("error").toString().contains("run credential"), path);
+    }
+  }
+
+  @Test
+  void unknownCredentialIs401() {
     var response =
         router.handle(
             new LocalApiRequest(
-                "POST",
-                "/v1/events",
+                "GET",
+                "/v1/specs",
                 Map.of(),
-                event.toJsonLine().getBytes(StandardCharsets.UTF_8)));
+                Map.of("authorization", "Bearer sailrun_wrong"),
+                new byte[0]));
+    assertEquals(401, response.status());
+  }
+
+  @Test
+  void whoamiReflectsTheRunPrincipal() {
+    var response = router.handle(get("/v1/whoami", Map.of()));
+    assertEquals(200, response.status());
+    assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
+    assertEquals(TestOperations.OWNER, response.body().get("owner"));
+    assertEquals("member", response.body().get("role"));
+    assertEquals("agent", response.body().get("lane"));
+    assertEquals("run-1", response.body().get("run_id"));
+    assertEquals("acme", response.body().get("project"));
+
+    assertEquals(405, router.handle(form("POST", "/v1/whoami", "")).status());
+  }
+
+  @Test
+  void postEventPublishesStampedWithThePrincipalAndReturns202() throws Exception {
+    var seen = new AtomicReference<Event>();
+    var latch = new CountDownLatch(1);
+    var subscription =
+        bus.subscribe(
+            BusTesting.latching(
+                new EventSubscriber() {
+                  @Override
+                  public String name() {
+                    return "capture";
+                  }
+
+                  @Override
+                  public Predicate<Event> filter() {
+                    return e -> true;
+                  }
+
+                  @Override
+                  public void onEvent(Event event) {
+                    seen.set(event);
+                  }
+                },
+                latch));
+    var event =
+        Event.of(
+            "light-grid",
+            "oauth",
+            Event.WellKnownTypes.AGENT_TOOL_FINISHED,
+            "claude-code",
+            "host-01",
+            Map.of("run_id", "run-victim", "source", "watcher", "exit_code", 0, "reason", "done"));
+    var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
     assertEquals(202, response.status());
     assertTrue(((Long) response.body().get("id")) > 0);
+    BusTesting.awaitDelivery(latch);
+    var stamped = seen.get();
+    assertEquals(
+        TestOperations.PRINCIPAL,
+        stamped.agent(),
+        "the server stamps event authorship from the authenticated run, not the client body");
+    assertEquals("acme", stamped.project(), "the client-chosen project is overridden");
+    assertEquals("auth", stamped.spec(), "the client-chosen spec is overridden");
+    assertEquals(
+        "run-1",
+        stamped.data().get("run_id"),
+        "an event can only address the authenticated run, never another one");
+    assertFalse(
+        stamped.data().containsKey("source"),
+        "the agent lane can never mark its own stop authoritative");
+    assertFalse(stamped.data().containsKey("exit_code"), "exit codes come from the watcher only");
+    assertEquals("done", stamped.data().get("reason"), "benign payload fields pass through");
+    subscription.close();
+  }
+
+  @Test
+  void eventsRejectsTypesOutsideTheAgentLane() {
+    for (var type : List.of("spec_dispatched", "agent_cancelled", "spec_status_changed")) {
+      var event = Event.of("acme", "auth", type, "claude-code", "host-01");
+      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+      assertEquals(403, response.status(), type);
+      assertTrue(response.body().get("error").toString().contains(type), type);
+    }
+  }
+
+  @Test
+  void eventsRejectsTerminalSessionTypesSoARunCannotFinishItself() {
+    for (var type :
+        List.of(
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            Event.WellKnownTypes.AGENT_SESSION_COMPLETED)) {
+      var event =
+          Event.of("acme", "auth", type, "claude-code", "host-01", Map.of("run_id", "run-1"));
+      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+      assertEquals(
+          403,
+          response.status(),
+          type + " must come from the watcher's verified exit, never the live agent");
+    }
   }
 
   @Test
@@ -69,14 +182,14 @@ class LocalApiRouterTest {
   }
 
   @Test
-  void createSpecParsesFormFieldsCsvPriorityAndActor() {
+  void createSpecParsesFormFieldsCsvAndPriority() {
     var response =
         router.handle(
             form(
                 "POST",
                 "/v1/specs",
                 "id=oauth-flow&title=OAuth%20Flow&status=pending&priority=5"
-                    + "&depends_on=a,%20b%20,,c&repos=app,web&body=%23%20Goal&actor=ada"));
+                    + "&depends_on=a,%20b%20,,c&repos=app,web&body=%23%20Goal"));
     assertEquals(201, response.status());
     var req = ops.lastCreate;
     assertEquals("oauth-flow", req.id());
@@ -86,14 +199,17 @@ class LocalApiRouterTest {
     assertEquals(List.of("a", "b", "c"), req.dependsOn());
     assertEquals(List.of("app", "web"), req.repos());
     assertEquals("# Goal", req.body());
-    assertEquals("ada", req.createdBy());
+    assertEquals(TestOperations.PRINCIPAL, req.createdBy());
   }
 
   @Test
-  void createSpecDefaultsStatusDraftAndActorAgent() {
-    router.handle(form("POST", "/v1/specs", "id=x&title=X"));
+  void createSpecDefaultsStatusDraftAndStampsThePrincipal() {
+    router.handle(form("POST", "/v1/specs", "id=x&title=X&actor=ada"));
     assertEquals("draft", ops.lastCreate.status());
-    assertEquals("agent", ops.lastCreate.createdBy());
+    assertEquals(
+        TestOperations.PRINCIPAL,
+        ops.lastCreate.createdBy(),
+        "a client-sent actor field is ignored; authorship is the authenticated principal");
     assertEquals(0, ops.lastCreate.priority());
     assertEquals(List.of(), ops.lastCreate.dependsOn());
   }
@@ -126,7 +242,11 @@ class LocalApiRouterTest {
     assertEquals(200, updated.status());
     assertEquals("archived", ops.lastUpdate.status());
     assertEquals(List.of("a"), ops.lastUpdate.dependsOn());
-    assertEquals("ada", ops.lastUpdate.updatedBy());
+    assertEquals(TestOperations.PRINCIPAL, ops.lastUpdate.updatedBy());
+    assertEquals(TestOperations.PRINCIPAL, ops.lastActor.handle());
+    assertEquals(TestOperations.OWNER, ops.lastActor.owner());
+    assertEquals(Role.MEMBER, ops.lastActor.role());
+    assertTrue(ops.lastActor.agentLane());
 
     assertEquals(200, router.handle(form("DELETE", "/v1/specs/oauth", "")).status());
     assertEquals("oauth", ops.lastDeletedId);
@@ -137,8 +257,8 @@ class LocalApiRouterTest {
   @Test
   void updateLeavesUnsetListsNull() {
     router.handle(form("PUT", "/v1/specs/oauth", "status=done"));
-    org.junit.jupiter.api.Assertions.assertNull(ops.lastUpdate.dependsOn());
-    org.junit.jupiter.api.Assertions.assertNull(ops.lastUpdate.priority());
+    assertNull(ops.lastUpdate.dependsOn());
+    assertNull(ops.lastUpdate.priority());
   }
 
   @Test
@@ -172,6 +292,7 @@ class LocalApiRouterTest {
     private SpecCreateRequest lastCreate;
     private SpecUpdateRequest lastUpdate;
     private SpecContentRequest lastContent;
+    private Actor lastActor;
     private String lastBoardProject;
     private String lastShownId;
     private String lastDeletedId;
@@ -193,6 +314,7 @@ class LocalApiRouterTest {
     public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
         String specId, SpecUpdateRequest request, Actor actor) {
       lastUpdate = request;
+      lastActor = actor;
       return super.updateGlobalSpec(specId, request, actor);
     }
 
@@ -224,6 +346,7 @@ class LocalApiRouterTest {
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
         String specId, SpecContentRequest request, Actor actor) {
       lastContent = request;
+      lastActor = actor;
       return super.setGlobalSpecContent(specId, request, actor);
     }
 

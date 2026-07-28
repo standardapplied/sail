@@ -215,7 +215,7 @@ class ReviewPipelineControllerTest {
             reviewStore,
             p -> singleAgentStage("no_critical"),
             p -> "codex",
-            (p, a, pr, rid) -> "[]",
+            (p, a, pr, rid, cred) -> "[]",
             null,
             syncs::incrementAndGet,
             new DirectExecutorService());
@@ -229,7 +229,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aSyncDerivedStopNeverStartsAPipelineTheWorkLivesOnAnotherBox() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(
         Event.of(
@@ -247,7 +247,7 @@ class ReviewPipelineControllerTest {
   @Test
   void anAuthoritativeStopStillKicksOffReviewWhenStatusWasClobberedToReview() {
     createSpec("auth", "review");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -263,7 +263,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "review");
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(reviewId, "running");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -273,7 +273,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aTerminalSpecStatusIgnoresTheStop() {
     createSpec("auth", "awaiting_merge");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -283,7 +283,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void skipsAnUnknownSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("ghost"));
 
@@ -295,7 +295,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var capturedAgent = new AtomicReference<String>();
     ReviewAgentRunner capturing =
-        (p, a, prompt, rid) -> {
+        (p, a, prompt, rid, cred) -> {
           capturedAgent.set(a);
           return "[]";
         };
@@ -312,7 +312,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var ctrl =
         controller(
-            p -> singleStageNoAgent("no_critical"), p -> null, (p, a, pr, rid) -> "[]", null);
+            p -> singleStageNoAgent("no_critical"), p -> null, (p, a, pr, rid, cred) -> "[]", null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -322,7 +322,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void reusesOneExecutorAcrossEventsAndShutsItDownOnClose() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     createSpec("auth", "in_progress");
     createSpec("billing", "in_progress");
 
@@ -337,21 +337,21 @@ class ReviewPipelineControllerTest {
 
   @Test
   void filterAcceptsAgentSessionStoppedWithSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     var event = agentStoppedEvent("auth");
     assertTrue(ctrl.filter().test(event));
   }
 
   @Test
   void filterRejectsEventsWithoutSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     var event = Event.of("proj", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "sail", "h");
     assertFalse(ctrl.filter().test(event));
   }
 
   @Test
   void filterRejectsUnrelatedEventTypes() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     var event = Event.of("proj", "spec", "spec_dispatched", "sail", "h");
     assertFalse(ctrl.filter().test(event));
   }
@@ -359,7 +359,7 @@ class ReviewPipelineControllerTest {
   @Test
   void skipsSpecNotInProgress() {
     createSpec("auth", "pending");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -369,7 +369,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void skipsUnknownSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     ctrl.onEvent(agentStoppedEvent("nonexistent"));
 
     assertTrue(reviewStore.reviewsForSpec("nonexistent").isEmpty());
@@ -378,7 +378,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aStopArrivingAfterAnOperatorCancelNeverKicksAReview() {
     createSpec("auth", "cancelled");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -389,7 +389,7 @@ class ReviewPipelineControllerTest {
   @Test
   void ignoresAStopForASpecAlreadyAwaitingMerge() {
     createSpec("auth", "awaiting_merge");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -400,7 +400,7 @@ class ReviewPipelineControllerTest {
   @Test
   void transitionsSpecToReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -411,7 +411,7 @@ class ReviewPipelineControllerTest {
   @Test
   void cleanReviewPassesAndParksSpecAwaitingMerge() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -430,7 +430,7 @@ class ReviewPipelineControllerTest {
     var ctrl =
         controller(
             singleAgentStage("no_critical"),
-            (p, a, pr, rid) -> {
+            (p, a, pr, rid, cred) -> {
               specStore.updateStatus("auth", SpecStatus.CANCELLED);
               return "[]";
             });
@@ -446,7 +446,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aWatcherStopAndAReconcilerReplayBackToBackProduceExactlyOneReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     ctrl.onEvent(reconcilerStoppedEvent("auth"));
@@ -462,7 +462,7 @@ class ReviewPipelineControllerTest {
     ctrl.set(
         controller(
             singleAgentStage("no_critical"),
-            (p, a, pr, rid) -> {
+            (p, a, pr, rid, cred) -> {
               ctrl.get().onEvent(reconcilerStoppedEvent("auth"));
               return "[]";
             }));
@@ -494,7 +494,7 @@ class ReviewPipelineControllerTest {
           "description": "User input in query", "confidence": 0.9}]
         ```
         """;
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> agentOutput);
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -509,7 +509,7 @@ class ReviewPipelineControllerTest {
   void anUnparseableReviewIsAnErrorNeverACleanPass() {
     createSpec("auth", "in_progress");
     var promptEchoOnly = "Begin your response with ```json and end with ```.";
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> promptEchoOnly);
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> promptEchoOnly);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -530,7 +530,7 @@ class ReviewPipelineControllerTest {
     var ctrl =
         controller(
             singleAgentStage("no_critical"),
-            (p, a, pr, rid) -> {
+            (p, a, pr, rid, cred) -> {
               throw new IllegalStateException("Quota exceeded");
             });
 
@@ -549,14 +549,14 @@ class ReviewPipelineControllerTest {
     var broken =
         controller(
             singleAgentStage("no_critical"),
-            (p, a, pr, rid) -> {
+            (p, a, pr, rid, cred) -> {
               throw new IllegalStateException("Quota exceeded");
             });
     broken.onEvent(agentStoppedEvent("auth"));
     assertEquals(1, reviewStore.latestReviewForSpec("auth").orElseThrow().iteration());
 
     specStore.updateStatus("auth", SpecStatus.IN_PROGRESS);
-    var healthy = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var healthy = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     healthy.onEvent(agentStoppedEvent("auth"));
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
@@ -580,7 +580,7 @@ class ReviewPipelineControllerTest {
           "description": "Very bad", "confidence": 0.95}]
         ```
         """;
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> agentOutput);
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -594,7 +594,7 @@ class ReviewPipelineControllerTest {
     var exhausted = reviewStore.createReview("auth", 3);
     reviewStore.updateReviewStatus(exhausted, "escalated");
     reviewStore.supersedeForSpec("auth");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -610,7 +610,7 @@ class ReviewPipelineControllerTest {
     var interrupted = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(interrupted, "running");
     reviewStore.supersedeForSpec("auth");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -631,7 +631,7 @@ class ReviewPipelineControllerTest {
           "description": "Not great", "confidence": 0.5}]
         ```
         """;
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> agentOutput);
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -642,7 +642,7 @@ class ReviewPipelineControllerTest {
   @Test
   void twoStagesPipelineBothPass() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> twoAgentStages(), p -> "codex", (p, a, pr, rid) -> "[]", null);
+    var ctrl = controller(p -> twoAgentStages(), p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -658,7 +658,7 @@ class ReviewPipelineControllerTest {
   @Test
   void humanStageStopsAndWaits() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> agentThenHuman(), p -> "codex", (p, a, pr, rid) -> "[]", null);
+    var ctrl = controller(p -> agentThenHuman(), p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -675,7 +675,7 @@ class ReviewPipelineControllerTest {
   @Test
   void noPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid) -> "[]", null);
+    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -687,7 +687,7 @@ class ReviewPipelineControllerTest {
   void emptyPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
     var emptyConfig = ReviewPipelineConfig.fromMap(Map.of());
-    var ctrl = controller(emptyConfig, (p, a, pr, rid) -> "[]");
+    var ctrl = controller(emptyConfig, (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -699,7 +699,7 @@ class ReviewPipelineControllerTest {
   void agentRunnerExceptionFailsStage() {
     createSpec("auth", "in_progress");
     ReviewAgentRunner failing =
-        (p, a, pr, rid) -> {
+        (p, a, pr, rid, cred) -> {
           throw new RuntimeException("Agent crashed");
         };
     var ctrl = controller(singleAgentStage("no_critical"), failing);
@@ -712,7 +712,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void subscriberNameIsReviewPipeline() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     assertEquals("review-pipeline", ctrl.name());
   }
 
@@ -721,7 +721,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var capturedPrompt = new AtomicReference<String>();
     ReviewAgentRunner capturing =
-        (p, a, prompt, rid) -> {
+        (p, a, prompt, rid, cred) -> {
           capturedPrompt.set(prompt);
           return "[]";
         };
@@ -747,7 +747,7 @@ class ReviewPipelineControllerTest {
         """;
     var callCount = new AtomicInteger(0);
     ReviewAgentRunner runner =
-        (p, a, prompt, rid) -> {
+        (p, a, prompt, rid, cred) -> {
           var call = callCount.incrementAndGet();
           return call == 1 ? criticalOutput : "[]";
         };
@@ -774,7 +774,7 @@ class ReviewPipelineControllerTest {
         """;
     var reviewIds = new java.util.ArrayList<String>();
     ReviewAgentRunner runner =
-        (p, a, prompt, rid) -> {
+        (p, a, prompt, rid, cred) -> {
           reviewIds.add(rid);
           return reviewIds.size() == 1 ? criticalOutput : "[]";
         };
@@ -824,7 +824,7 @@ class ReviewPipelineControllerTest {
                         "codex",
                         "gate",
                         "no_critical"))));
-    var ctrl = controller(p -> config, p -> "codex", (p, a, pr, rid) -> criticalOutput, null);
+    var ctrl = controller(p -> config, p -> "codex", (p, a, pr, rid, cred) -> criticalOutput, null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -842,7 +842,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid) -> "prose with no fenced block",
+              (p, a, pr, rid, cred) -> "prose with no fenced block",
               bus);
 
       ctrl.onEvent(agentStoppedEvent("auth"));
@@ -881,7 +881,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid) -> "no fenced block here",
+              (p, a, pr, rid, cred) -> "no fenced block here",
               bus);
 
       ctrl.onEvent(agentStoppedEvent("auth"));
@@ -911,7 +911,7 @@ class ReviewPipelineControllerTest {
     var runner =
         new ReviewAgentRunner() {
           @Override
-          public String run(String p, String a, String prompt, String rid) {
+          public String run(String p, String a, String prompt, String rid, String cred) {
             return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
           }
 
@@ -950,7 +950,10 @@ class ReviewPipelineControllerTest {
     try (var bus = new EventBus()) {
       var ctrl =
           controller(
-              p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr, rid) -> "[]", bus);
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid, cred) -> "[]",
+              bus);
 
       ctrl.executePipeline(reviewId, singleAgentStage("no_critical"), "test-project", "auth");
 
@@ -982,7 +985,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid) -> agentOutput,
+              (p, a, pr, rid, cred) -> agentOutput,
               bus);
 
       ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1002,7 +1005,10 @@ class ReviewPipelineControllerTest {
       var captured = captureStagePassedEvents(bus, 1);
       var ctrl =
           controller(
-              p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr, rid) -> "[]", bus);
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid, cred) -> "[]",
+              bus);
 
       ctrl.onEvent(agentStoppedEvent("auth"));
       BusTesting.awaitDelivery(captured.latch());
@@ -1069,7 +1075,10 @@ class ReviewPipelineControllerTest {
               latch));
       var ctrl =
           controller(
-              p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr, rid) -> "[]", bus);
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid, cred) -> "[]",
+              bus);
       db.close();
 
       ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1086,7 +1095,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(reviewId, "running");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1099,7 +1108,7 @@ class ReviewPipelineControllerTest {
     var started = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     ReviewAgentRunner gated =
-        (p, a, pr, rid) -> {
+        (p, a, pr, rid, cred) -> {
           started.countDown();
           await(release);
           return "[]";
@@ -1129,7 +1138,7 @@ class ReviewPipelineControllerTest {
     var started = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     ReviewAgentRunner gated =
-        (p, a, pr, rid) -> {
+        (p, a, pr, rid, cred) -> {
           started.countDown();
           await(release);
           return "[]";
@@ -1179,7 +1188,7 @@ class ReviewPipelineControllerTest {
             reviewStore,
             p -> singleAgentStage("no_critical"),
             p -> "codex",
-            (p, a, pr, rid) -> {
+            (p, a, pr, rid, cred) -> {
               throw new ReviewAgentExecutionException("quota", 17);
             },
             null,
@@ -1197,9 +1206,104 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void reviewerAndFixAgentsEachReceiveALiveCredentialForTheirReviewRun() {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]
+        ```
+        """;
+    var runs = new RunStore(db);
+    var calls = new AtomicInteger();
+    var credentials = new java.util.concurrent.CopyOnWriteArrayList<List<String>>();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> {
+          credentials.add(List.of(rid, cred));
+          return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+        };
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            runner,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runs,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(credentials.size() >= 2, "reviewer and fix agent both ran");
+    for (var invocation : credentials) {
+      var reviewId = invocation.get(0);
+      var credential = invocation.get(1);
+      assertFalse(credential.isBlank(), "every review invocation carries a credential");
+      var resolvedAtCallTime = runs.findById(reviewId).orElseThrow();
+      assertEquals(
+          "codex/review-" + reviewId,
+          resolvedAtCallTime.principal(),
+          "the credential's run records the review principal the agent acts as");
+    }
+    var firstReview = credentials.getFirst();
+    var reviewerRun = runs.findById(firstReview.get(0)).orElseThrow();
+    assertEquals("review", reviewerRun.role());
+  }
+
+  @Test
+  void aFixLaneCredentialResolvesToTheStillRunningReviewRun() throws Exception {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]
+        ```
+        """;
+    var runs = new RunStore(db);
+    var calls = new AtomicInteger();
+    var fixResolved = new AtomicReference<RunStore.RunRow>();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> {
+          if (calls.incrementAndGet() == 2) {
+            fixResolved.set(runs.findByCredential(cred).orElse(null));
+          }
+          return calls.get() == 1 ? criticalOutput : "[]";
+        };
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            runner,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runs,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertNotNull(fixResolved.get(), "the fix agent's re-issued credential resolves to a run");
+    assertEquals("review", fixResolved.get().role());
+    assertEquals(
+        "running",
+        fixResolved.get().status(),
+        "the fix lane rejoins the still-open review negotiation");
+  }
+
+  @Test
   void closeAwaitsInFlightPipelines() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     ctrl.close();
@@ -1210,7 +1314,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void awaitCompletionWithNoInFlightReturnsImmediately() throws Exception {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
     ctrl.awaitCompletion(1000);
   }
 
@@ -1243,7 +1347,7 @@ class ReviewPipelineControllerTest {
             new ReviewStore(errDb),
             p -> singleAgentStage("no_critical"),
             p -> "codex",
-            (p, a, pr, rid) -> "[]",
+            (p, a, pr, rid, cred) -> "[]",
             null,
             () -> {},
             new DirectExecutorService());
@@ -1255,7 +1359,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aHookTurnEndStopIsIgnoredUntilTheAuthoritativeStopArrives() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(hookTurnEndEvent("auth"));
 
@@ -1266,7 +1370,7 @@ class ReviewPipelineControllerTest {
   @Test
   void nonZeroExitSkipsReviewAndLeavesSpecInProgress() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth", 137));
 
@@ -1280,7 +1384,10 @@ class ReviewPipelineControllerTest {
     try (var bus = new EventBus()) {
       var ctrl =
           controller(
-              p -> singleAgentStage("no_critical"), p -> "codex", (p, a, pr, rid) -> "[]", bus);
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              (p, a, pr, rid, cred) -> "[]",
+              bus);
 
       ctrl.onEvent(agentStoppedEvent("auth", 1));
 
@@ -1291,7 +1398,7 @@ class ReviewPipelineControllerTest {
   @Test
   void zeroExitStillRunsReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth", 0));
 
@@ -1303,7 +1410,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var reviewId = reviewStore.createReview("auth", 3);
     reviewStore.updateReviewStatus(reviewId, "failed");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1323,7 +1430,7 @@ class ReviewPipelineControllerTest {
         """;
     var calls = new AtomicInteger(0);
     ReviewAgentRunner runner =
-        (p, a, pr, rid) -> {
+        (p, a, pr, rid, cred) -> {
           if (calls.incrementAndGet() == 1) return criticalOutput;
           throw new RuntimeException("fix agent crashed");
         };

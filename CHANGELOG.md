@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+Agent principals: every run acts as an attributable identity.
+
+- Every run — dispatch, ad-hoc, review — now mints an agent principal inside its
+  reservation transaction: a handle (`claude/a1b2c3`; reviews read `claude/review-a1b2c3`)
+  plus the FDE it acts for, recorded on the run row and replicated with it, and an opaque
+  run credential, SHA-256-hashed at rest in a local-only table that never syncs.
+- The in-container `spec` and event helpers present the credential
+  (`SAIL_RUN_CREDENTIAL`, injected into the agent's launch environment) on every local-API
+  request; the server resolves it to the run's principal and stamps that identity on
+  `events.agent`, `specs.updated_by`, and the change log. The client-chosen `SAIL_ACTOR`
+  field is gone: a request with a missing, unknown, or revoked credential is refused with
+  401 and never falls back to `agent`. A container installed by an older binary
+  re-installs its helpers on the next dispatch.
+- `spec whoami` reports the run's principal handle, owning FDE, role, and lane.
+- Agent principals are member-tier on the spec/event surface — never admin — and the
+  dispatch and stop lanes refuse the agent lane outright.
+- Every run finisher revokes the credential — the watcher's authoritative stop, the
+  operator cancel, the reconciler's stranded release and interrupted-stop finalization,
+  launch failure, and a launch lost to a cancel — and the hourly expired-row sweep
+  collects stragglers. Run history keeps the principal handle after revocation.
+- First post-baseline schema migrations (v127–v129): `runs.principal`, `runs.owner`, and
+  the `run_credentials` table, applied incrementally on `sail migrate`.
+- Run listings (`/v1/runs`, `--json`) carry `principal` and `owner`, so consumers see
+  "claude/a1b2c3 (for uday)" attribution for free.
+
 One identity model: every agent session is a run.
 
 - `sail agent run --task` and `sail agent sweep` now mint a first-class run

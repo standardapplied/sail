@@ -31,10 +31,12 @@ class SpecCliHelperTest {
   }
 
   @Test
-  void scriptDerivesProjectFromHostnameAndDefaultsActor() {
+  void scriptDerivesProjectFromHostnameAndPresentsTheRunCredential() {
     var content = SpecCliHelper.scriptContent();
     assertTrue(content.contains("PROJECT=\"$(hostname)\""));
-    assertTrue(content.contains("ACTOR=\"${SAIL_ACTOR:-agent}\""));
+    assertTrue(content.contains("CREDENTIAL=\"${SAIL_RUN_CREDENTIAL:-}\""));
+    assertTrue(content.contains("Authorization: Bearer $CREDENTIAL"));
+    assertFalse(content.contains("SAIL_ACTOR"));
   }
 
   @Test

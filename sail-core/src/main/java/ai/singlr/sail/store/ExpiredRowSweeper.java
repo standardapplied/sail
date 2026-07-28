@@ -74,6 +74,8 @@ public final class ExpiredRowSweeper implements AutoCloseable {
     deleted += db.changes();
     db.execute("DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < ?", now);
     deleted += db.changes();
+    db.execute("DELETE FROM run_credentials WHERE expires_at < ?", now);
+    deleted += db.changes();
     return deleted;
   }
 

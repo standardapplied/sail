@@ -70,10 +70,10 @@ class SchemaManagerTest {
   }
 
   @Test
-  void freshInstallStampsTheV1BaselineVersion() {
+  void freshInstallStampsTheCurrentVersion() {
     var schema = new SchemaManager(db);
     schema.migrate();
-    assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
+    assertEquals(SchemaManager.CURRENT_VERSION, schema.currentVersion());
   }
 
   @Test
@@ -144,7 +144,7 @@ class SchemaManagerTest {
 
       schema.migrate();
 
-      assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
+      assertEquals(SchemaManager.CURRENT_VERSION, schema.currentVersion());
       var row =
           floor
               .queryOne(
@@ -168,7 +168,7 @@ class SchemaManagerTest {
               .orElseThrow());
 
       schema.migrate();
-      assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
+      assertEquals(SchemaManager.CURRENT_VERSION, schema.currentVersion());
     }
   }
 
@@ -189,7 +189,7 @@ class SchemaManagerTest {
 
       new SchemaManager(midRamp).migrate();
 
-      assertEquals(SchemaManager.V1_VERSION, new SchemaManager(midRamp).currentVersion());
+      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(midRamp).currentVersion());
       assertEquals(canonicalSchema(baseline), canonicalSchema(midRamp));
     }
   }
@@ -222,14 +222,14 @@ class SchemaManagerTest {
 
   @Test
   void migrateRefusesADatabaseNewerThanThisBinary() {
-    stageAtVersion(SchemaManager.V1_VERSION + 1);
+    stageAtVersion(SchemaManager.CURRENT_VERSION + 1);
     var schema = new SchemaManager(db);
 
     var refusal = assertThrows(IllegalStateException.class, schema::migrate);
 
-    assertTrue(refusal.getMessage().contains("schema v" + (SchemaManager.V1_VERSION + 1)));
+    assertTrue(refusal.getMessage().contains("schema v" + (SchemaManager.CURRENT_VERSION + 1)));
     assertTrue(refusal.getMessage().contains("newer than this Sail binary"));
-    assertEquals(SchemaManager.V1_VERSION + 1, schema.currentVersion());
+    assertEquals(SchemaManager.CURRENT_VERSION + 1, schema.currentVersion());
   }
 
   @Test
@@ -266,5 +266,57 @@ class SchemaManagerTest {
 
   private static String canonical(String sql) {
     return sql.replace("\"", "").replaceAll("\\s+", " ").replaceAll("\\s*([(),])\\s*", "$1").trim();
+  }
+
+  @Test
+  void postBaselineMigrationsCarryASeededV1DatabaseForward() {
+    stageAtBaseline();
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at)"
+            + " VALUES ('r1', 'acme', 'claude-code', 'running', 't0')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+    var row =
+        db.queryOne(
+                "SELECT project, status, principal, owner FROM runs WHERE id = 'r1'",
+                r ->
+                    List.of(
+                        r.text(0), r.text(1), String.valueOf(r.text(2)), String.valueOf(r.text(3))))
+            .orElseThrow();
+    assertEquals(List.of("acme", "running", "null", "null"), row);
+    assertTrue(
+        db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'run_credentials'",
+                r -> r.text(0))
+            .contains("run_credentials"));
+  }
+
+  @Test
+  void aMidChainPostBaselineDatabaseResumesAndConvergesToTheSameSchema() {
+    try (var fresh = Sqlite.open(tempDir.resolve("fresh.db"))) {
+      new SchemaManager(fresh).migrate();
+      stageAtBaseline();
+      db.execute(SchemaManager.MIGRATIONS.getFirst());
+      db.execute(
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+          SchemaManager.V1_VERSION + 1);
+
+      new SchemaManager(db).migrate();
+
+      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+      assertEquals(canonicalSchema(fresh), canonicalSchema(db));
+    }
+  }
+
+  private void stageAtBaseline() {
+    FloorSchema.stage(db);
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.ON_RAMP.forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION);
   }
 }

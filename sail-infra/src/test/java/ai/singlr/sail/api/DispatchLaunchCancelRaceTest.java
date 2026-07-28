@@ -113,6 +113,7 @@ class DispatchLaunchCancelRaceTest {
     var runStore = new RunStore(db);
     var events = new CopyOnWriteArrayList<Event>();
     var cancelled = new AtomicReference<String>();
+    var launchCredential = new AtomicReference<String>();
     var shell = new CancelDuringLaunchShell(cancelled);
     var ops =
         new DispatchOperations(
@@ -126,6 +127,7 @@ class DispatchLaunchCancelRaceTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
+              launchCredential.set(command.getLast());
               var run = runStore.running().getFirst();
               assertTrue(runStore.transition(run.id(), "running", "stopped"));
               cancelled.set(run.id());
@@ -153,6 +155,12 @@ class DispatchLaunchCancelRaceTest {
     assertTrue(
         events.stream().noneMatch(e -> "agent_session_started".equals(e.type())),
         "a cancelled launch must not announce a started session");
+    assertTrue(
+        launchCredential.get().startsWith("sailrun_"),
+        "the launch command carries the run credential into the container env");
+    assertTrue(
+        runStore.findByCredential(launchCredential.get()).isEmpty(),
+        "a launch lost to a cancel leaves no live credential behind");
   }
 
   /**
@@ -179,6 +187,8 @@ class DispatchLaunchCancelRaceTest {
       }
       if (joined.contains("mkdir -p /home/dev/.sail")
           || joined.contains("printf '%s'")
+          || joined.contains("incus config device add")
+          || joined.contains("grep -qsF")
           || joined.contains("test -d /home/dev/workspace/app/.git")
           || joined.contains("git -C /home/dev/workspace/app checkout -b sail/auth")
           || joined.contains("claude")) {

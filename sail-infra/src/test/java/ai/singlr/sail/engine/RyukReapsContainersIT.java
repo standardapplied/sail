@@ -45,7 +45,7 @@ class RyukReapsContainersIT extends AbstractIncusIT {
   void privilegedRyukReapsContainersUnderRootlessPodman() throws Exception {
     ensureIncusOrSkip();
     try {
-      launch(CONTAINER);
+      launchPrepared(CONTAINER);
       configureForNestedPodman();
       waitForNetwork();
       setUpRootlessPodman();
@@ -99,19 +99,6 @@ class RyukReapsContainersIT extends AbstractIncusIT {
                 "userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev")),
         "create the dev user");
-
-    assertOk(
-        slow(
-            List.of(
-                "incus",
-                "exec",
-                CONTAINER,
-                "--",
-                "bash",
-                "-c",
-                "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq"
-                    + " podman uidmap")),
-        "install Podman");
 
     assertOk(
         exec(

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,11 +25,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,8 +76,27 @@ class AdhocDispatchTest {
   private DispatchOperations operations(
       ShellExec shell, DispatchOperations.AgentLauncher launcher, boolean withRunStore)
       throws IOException {
+    return operations(shell, launcher, withRunStore, DispatchOperations.Listener.NONE);
+  }
+
+  private DispatchOperations operations(
+      ShellExec shell,
+      DispatchOperations.AgentLauncher launcher,
+      boolean withRunStore,
+      DispatchOperations.Listener listener)
+      throws IOException {
+    return operations(shell, launcher, withRunStore, listener, YAML);
+  }
+
+  private DispatchOperations operations(
+      ShellExec shell,
+      DispatchOperations.AgentLauncher launcher,
+      boolean withRunStore,
+      DispatchOperations.Listener listener,
+      String yamlContent)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, YAML);
+    Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
@@ -91,7 +113,7 @@ class AdhocDispatchTest {
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
         (project, config) -> "",
         launcher,
-        DispatchOperations.Listener.NONE);
+        listener);
   }
 
   private static StubShell liveAgentShell() {
@@ -126,6 +148,90 @@ class AdhocDispatchTest {
     assertEquals("fix the flaky test", run.task());
     assertNotNull(session.session());
     assertTrue(session.watcher().isPresent());
+  }
+
+  @Test
+  void aGuardrailedLaunchBoundsItsCredentialToTheHardStopPlusGrace() throws Exception {
+    var guardrailed =
+        """
+        name: acme
+        ssh:
+          user: dev
+        agent:
+          type: claude-code
+          guardrails:
+            max_duration: 169h
+        """;
+    var ops =
+        operations(
+            liveAgentShell(), command -> 0, true, DispatchOperations.Listener.NONE, guardrailed);
+
+    var session = ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var row =
+        db.queryOne(
+                "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
+                r -> new String[] {r.text(0), r.text(1)},
+                session.runId())
+            .orElseThrow();
+    var expected =
+        Instant.parse(row[0]).plus(Duration.ofHours(169)).plus(RunStore.CREDENTIAL_GRACE);
+    assertEquals(
+        expected,
+        Instant.parse(row[1]),
+        "the credential covers the configured hard stop however long, plus the finisher grace");
+  }
+
+  @Test
+  void anUnguardrailedLaunchMintsACredentialWithNoExpiry() throws Exception {
+    var ops = operations(liveAgentShell());
+
+    var session = ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var nullExpiryRows =
+        db.queryOne(
+                "SELECT COUNT(*) FROM run_credentials WHERE run_id = ? AND expires_at IS NULL",
+                r -> r.integer(0),
+                session.runId())
+            .orElseThrow();
+    assertEquals(
+        1L,
+        nullExpiryRows,
+        "with no configured hard stop only a verified finisher revokes the credential");
+  }
+
+  @Test
+  void listenersSeeTheLaunchCommandWithTheCredentialRedacted() throws Exception {
+    var launched = new AtomicReference<List<String>>();
+    var shown = new AtomicReference<List<String>>();
+    var listener =
+        new DispatchOperations.Listener() {
+          @Override
+          public void launching(boolean bg, List<String> command) {
+            shown.set(command);
+          }
+        };
+    var ops =
+        operations(
+            liveAgentShell(),
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            true,
+            listener);
+
+    ops.startAdhoc("acme", background("task"), HANDLE);
+
+    var credential = launched.get().getLast();
+    assertTrue(credential.startsWith("sailrun_"), "the launcher receives the real credential");
+    assertTrue(
+        shown.get().contains("<redacted>"),
+        "the listener command carries the redaction marker in the credential's place");
+    assertFalse(
+        shown.get().contains(credential),
+        "presentation listeners print commands to terminals and logs; the plaintext credential"
+            + " must never reach them");
   }
 
   @Test
@@ -219,6 +325,27 @@ class AdhocDispatchTest {
   }
 
   @Test
+  void aFailedHelperInstallAbortsTheLaunchAndReleasesTheReservation() throws Exception {
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("printf '%s'", "")
+            .fail("incus config device add");
+    var ops = operations(shell);
+
+    var refusal =
+        assertThrows(ApiException.class, () -> ops.startAdhoc("acme", background("task"), HANDLE));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
+    assertTrue(refusal.getMessage().contains("authenticated sail helpers"), refusal.getMessage());
+    assertEquals("failed", runStore.listForProject("acme").getFirst().status());
+    assertTrue(
+        runStore.runningForProjectOnNode("acme", HANDLE).isEmpty(),
+        "an agent that never launched must not hold the container reservation");
+  }
+
+  @Test
   void anAdhocSessionBlocksDispatchAndDispatchBlocksAdhoc() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
@@ -250,6 +377,7 @@ class AdhocDispatchTest {
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "acme",
         "auth",
+        HANDLE,
         HANDLE,
         "build",
         List.of("app"),
@@ -394,6 +522,10 @@ class AdhocDispatchTest {
     assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
     assertEquals("failed", runStore.listForProject("acme").getFirst().status());
     assertTrue(runStore.runningForProjectOnNode("acme", HANDLE).isEmpty());
+    assertEquals(
+        0L,
+        db.queryOne("SELECT COUNT(*) FROM run_credentials", row -> row.integer(0)).orElseThrow(),
+        "failing the run on a launch failure revokes its credential");
   }
 
   @Test
@@ -464,8 +596,19 @@ class AdhocDispatchTest {
   private static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
+    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    StubShell() {
+      on("incus config device add", "");
+      on("grep -qsF", "");
+    }
+
     StubShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
+      return this;
+    }
+
+    StubShell fail(String pattern) {
+      scripts.put(pattern, new Result(1, "", "refused"));
       return this;
     }
 
