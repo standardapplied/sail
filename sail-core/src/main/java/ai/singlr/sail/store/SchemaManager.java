@@ -101,7 +101,14 @@ public final class SchemaManager {
               rev TEXT NOT NULL,
               base_rev TEXT
           )""",
-          "CREATE INDEX idx_spec_messages_page ON spec_messages(spec_id, id DESC)");
+          "CREATE INDEX idx_spec_messages_page ON spec_messages(spec_id, id DESC)",
+          """
+          CREATE TABLE box_credential (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              handle TEXT NOT NULL,
+              credential_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -57,6 +58,7 @@ public final class SailOperations implements Operations {
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
   private MessageStore messageStore;
+  private BoxCredentialStore boxCredentialStore;
 
   public SailOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -165,6 +167,28 @@ public final class SailOperations implements Operations {
     this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
     this.dispatchOps.useMessages(messageStore);
     return this;
+  }
+
+  /** Wires the box's ambient credential store for the local socket lane; returns {@code this}. */
+  public SailOperations useBoxCredentials(BoxCredentialStore boxCredentialStore) {
+    this.boxCredentialStore = Objects.requireNonNull(boxCredentialStore, "boxCredentialStore");
+    return this;
+  }
+
+  /**
+   * The FDE actor the box credential stands for: resolved through the roster so the role is the
+   * FDE's real one and a handle that has left the roster refuses. Empty when the box store is not
+   * wired (a lane that never authenticates is a lane that fails closed).
+   */
+  @Override
+  public Optional<Actor> boxActorForCredential(String credential) {
+    if (boxCredentialStore == null || fdeStore == null) {
+      return Optional.empty();
+    }
+    return boxCredentialStore
+        .resolve(credential)
+        .flatMap(fdeStore::byHandle)
+        .map(fde -> new Actor(fde.handle(), Role.fromAttribute(fde.role()), Actor.Lane.CLI));
   }
 
   SailOperations(

@@ -11,6 +11,8 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -66,6 +68,10 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   "");
       var credential = reservation.credential();
 
+      var fdeStore = new FdeStore(db);
+      fdeStore.add("it", "IT", "it@example.dev", "admin");
+      var boxStore = new BoxCredentialStore(db);
+      BoxCredentialFile.ensure(boxStore, "it", socketDir);
       var bus = new EventBus();
       var operations =
           new SailOperations(
@@ -78,8 +84,9 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   runStore,
                   null,
                   ai.singlr.sail.api.SyncScheduler.disabled(),
-                  null)
-              .useMessages(new MessageStore(db));
+                  fdeStore)
+              .useMessages(new MessageStore(db))
+              .useBoxCredentials(boxStore);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
@@ -166,6 +173,69 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
         assertTrue(
             room.stdout().contains("mid-run progress from inside the container"),
             "the posted message must read back through the socket: " + room.stdout());
+
+        var ambient =
+            exec(
+                CONTAINER,
+                List.of(
+                    "bash",
+                    "-c",
+                    "curl --silent --show-error --fail-with-body --unix-socket "
+                        + CONTAINER_DIR.resolve("api.sock")
+                        + " -H \"Authorization: Bearer $(cat "
+                        + CONTAINER_DIR.resolve(BoxCredentialFile.FILE_NAME)
+                        + ")\" http://sail/v1/whoami"));
+        assertTrue(
+            ambient.ok(),
+            "a session with no injected credential must authenticate via the ambient file: "
+                + ambient.stdout()
+                + ambient.stderr());
+        assertTrue(
+            ambient.stdout().contains("\"it\"") && ambient.stdout().contains("box"),
+            "the ambient credential must resolve to the box FDE: " + ambient.stdout());
+
+        var interactive =
+            exec(
+                CONTAINER,
+                List.of(
+                    "bash",
+                    "-c",
+                    "curl --silent --show-error --fail-with-body --unix-socket "
+                        + CONTAINER_DIR.resolve("api.sock")
+                        + " -H \"Authorization: Bearer $(cat "
+                        + CONTAINER_DIR.resolve(BoxCredentialFile.FILE_NAME)
+                        + ")\" -X POST --data-urlencode \"body=guidance from the engineer\""
+                        + " http://sail/v1/specs/"
+                        + SPEC_ID
+                        + "/messages"));
+        assertTrue(
+            interactive.ok(),
+            "the box FDE must be able to post to the room: "
+                + interactive.stdout()
+                + interactive.stderr());
+        assertTrue(
+            interactive.stdout().contains("\"author\": \"it\""),
+            "an interactive post is attributed to the FDE, not a principal: "
+                + interactive.stdout());
+
+        var bogus =
+            exec(
+                CONTAINER,
+                List.of(
+                    "curl",
+                    "--silent",
+                    "--unix-socket",
+                    CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-H",
+                    "Authorization: Bearer sailbox_" + "0".repeat(64),
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "http://sail/v1/whoami"));
+        assertTrue(
+            bogus.stdout().contains("401"),
+            "a forged box credential must be refused: " + bogus.stdout());
       }
     } finally {
       deleteContainerQuietly(CONTAINER);

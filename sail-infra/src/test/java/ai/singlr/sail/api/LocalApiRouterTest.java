@@ -15,6 +15,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
@@ -28,6 +29,10 @@ class LocalApiRouterTest {
 
   private static Map<String, String> auth() {
     return Map.of("authorization", "Bearer " + TestOperations.RUN_CREDENTIAL);
+  }
+
+  private static Map<String, String> boxAuth() {
+    return Map.of("authorization", "Bearer " + TestOperations.BOX_CREDENTIAL);
   }
 
   private static LocalApiRequest get(String path, Map<String, String> query) {
@@ -44,7 +49,8 @@ class LocalApiRouterTest {
     for (var path : List.of("/v1/specs", "/v1/specs/board", "/v1/events", "/v1/whoami", "/v1/x")) {
       var response = router.handle(new LocalApiRequest("GET", path, Map.of(), new byte[0]));
       assertEquals(401, response.status(), path);
-      assertTrue(response.body().get("error").toString().contains("run credential"), path);
+      assertTrue(response.body().get("error").toString().contains("SAIL_RUN_CREDENTIAL"), path);
+      assertTrue(response.body().get("error").toString().contains("box.credential"), path);
     }
   }
 
@@ -307,6 +313,89 @@ class LocalApiRouterTest {
     assertEquals(
         400, router.handle(get("/v1/specs/oauth/messages", Map.of("limit", "bad"))).status());
     assertEquals(405, router.handle(form("DELETE", "/v1/specs/oauth/messages", "")).status());
+  }
+
+  @Test
+  void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
+    var created =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/specs",
+                Map.of(),
+                boxAuth(),
+                "id=room&title=Room".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(201, created.status());
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastCreate.createdBy());
+
+    var posted =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/specs/oauth/messages",
+                Map.of(),
+                boxAuth(),
+                "body=hello".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(201, posted.status());
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastMessageAuthor);
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastActor.handle());
+    assertEquals(Role.MEMBER, ops.lastActor.role());
+    assertFalse(ops.lastActor.agentLane());
+
+    var updated =
+        router.handle(
+            new LocalApiRequest(
+                "PUT",
+                "/v1/specs/oauth",
+                Map.of(),
+                boxAuth(),
+                "status=done".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(200, updated.status());
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastUpdate.updatedBy());
+  }
+
+  @Test
+  void boxCredentialCannotPostEvents() {
+    var response =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/events",
+                Map.of(),
+                boxAuth(),
+                "{\"v\":1,\"ts\":\"t\",\"type\":\"agent_tool_started\"}"
+                    .getBytes(StandardCharsets.UTF_8)));
+
+    assertEquals(403, response.status());
+    assertTrue(response.body().get("error").toString().contains("run credential"));
+  }
+
+  @Test
+  void whoamiReflectsTheBoxFde() {
+    var response =
+        router.handle(new LocalApiRequest("GET", "/v1/whoami", Map.of(), boxAuth(), new byte[0]));
+
+    assertEquals(200, response.status());
+    assertEquals(TestOperations.BOX_HANDLE, response.body().get("handle"));
+    assertEquals("member", response.body().get("role"));
+    assertEquals("cli", response.body().get("lane"));
+    assertEquals("box", response.body().get("credential"));
+    assertFalse(response.body().containsKey("run_id"));
+  }
+
+  @Test
+  void boxResolutionNeverShadowsARunCredential() {
+    var greedy =
+        new TestOperations() {
+          @Override
+          public Optional<Actor> boxActorForCredential(String credential) {
+            return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CLI));
+          }
+        };
+    var response = new LocalApiRouter(bus, greedy).handle(get("/v1/whoami", Map.of()));
+
+    assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
+    assertEquals("agent", response.body().get("lane"));
   }
 
   @Test

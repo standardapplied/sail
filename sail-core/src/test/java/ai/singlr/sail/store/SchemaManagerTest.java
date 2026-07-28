@@ -297,6 +297,11 @@ class SchemaManagerTest {
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'spec_messages'",
                 r -> r.text(0))
             .contains("spec_messages"));
+    assertTrue(
+        db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'box_credential'",
+                r -> r.text(0))
+            .contains("box_credential"));
     assertEquals(
         "acme",
         db.queryOne("SELECT project FROM runs WHERE id = 'r1'", r -> r.text(0)).orElseThrow());
