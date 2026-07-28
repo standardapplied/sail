@@ -174,7 +174,7 @@ class SchemaManagerTest {
 
   @Test
   void migrateRefusesABelowFloorDatabaseWithTheRemedy() {
-    stageBelowFloor(37);
+    stageAtVersion(37);
     var schema = new SchemaManager(db);
 
     var refusal = assertThrows(SchemaManager.PreFloorException.class, schema::migrate);
@@ -182,7 +182,7 @@ class SchemaManagerTest {
     assertTrue(refusal.getMessage().contains("schema v37"));
     assertTrue(refusal.getMessage().contains("schema v" + SchemaManager.FLOOR_VERSION));
     assertTrue(refusal.getMessage().contains("0.14"));
-    assertTrue(refusal.getMessage().contains("sail upgrade"));
+    assertTrue(refusal.getMessage().contains("sail migrate"));
     assertEquals(37, schema.currentVersion());
     assertEquals(
         List.of("schema_version"),
@@ -193,9 +193,21 @@ class SchemaManagerTest {
 
   @Test
   void migrateRefusesTheVersionJustBelowTheFloor() {
-    stageBelowFloor(SchemaManager.FLOOR_VERSION - 1);
+    stageAtVersion(SchemaManager.FLOOR_VERSION - 1);
 
     assertThrows(SchemaManager.PreFloorException.class, () -> new SchemaManager(db).migrate());
+  }
+
+  @Test
+  void migrateRefusesADatabaseNewerThanThisBinary() {
+    stageAtVersion(SchemaManager.V1_VERSION + 1);
+    var schema = new SchemaManager(db);
+
+    var refusal = assertThrows(IllegalStateException.class, schema::migrate);
+
+    assertTrue(refusal.getMessage().contains("schema v" + (SchemaManager.V1_VERSION + 1)));
+    assertTrue(refusal.getMessage().contains("newer than this Sail binary"));
+    assertEquals(SchemaManager.V1_VERSION + 1, schema.currentVersion());
   }
 
   @Test
@@ -214,7 +226,7 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_runs_spec"));
   }
 
-  private void stageBelowFloor(int version) {
+  private void stageAtVersion(int version) {
     db.execute(
         "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
     for (var v = 1; v <= version; v++) {

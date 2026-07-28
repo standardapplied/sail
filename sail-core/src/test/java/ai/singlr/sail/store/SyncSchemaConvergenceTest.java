@@ -151,7 +151,7 @@ class SyncSchemaConvergenceTest {
 
     assertTrue(failure.getMessage().contains("schema v100"));
     assertTrue(failure.getMessage().contains("0.14"));
-    assertTrue(failure.getMessage().contains("sail upgrade"));
+    assertTrue(failure.getMessage().contains("sail migrate"));
     try (var db = Sqlite.open(path)) {
       assertEquals(100, new SchemaManager(db).currentVersion());
     }

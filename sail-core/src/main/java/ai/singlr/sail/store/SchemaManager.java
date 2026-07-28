@@ -339,13 +339,23 @@ public final class SchemaManager {
    * Converges the schema to the v1 baseline. A fresh database gets the baseline directly; a
    * database at the 0.14 floor is stamped forward in one step (the floor schema and the baseline
    * are structurally identical); a database below the floor raises {@link PreFloorException} with
-   * the remedy, because this release no longer carries the pre-1.0 migration chain. Idempotent:
-   * re-running on a current database is a no-op.
+   * the remedy, because this release no longer carries the pre-1.0 migration chain; a database
+   * above the v1 baseline raises {@link IllegalStateException}, because an older binary must not
+   * operate on a schema it does not understand. Idempotent: re-running on a current database is a
+   * no-op.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     var current = currentVersion();
-    if (current >= V1_VERSION) {
+    if (current > V1_VERSION) {
+      throw new IllegalStateException(
+          "Database schema v"
+              + current
+              + " is newer than this Sail binary supports (v"
+              + V1_VERSION
+              + "). Upgrade Sail before opening this database.");
+    }
+    if (current == V1_VERSION) {
       return;
     }
     if (current == 0) {
@@ -366,7 +376,8 @@ public final class SchemaManager {
             + ", below the sail 1.0 floor (schema v"
             + FLOOR_VERSION
             + "), and this release does not carry pre-floor migrations."
-            + " Install sail 0.14.x and run 'sail upgrade', then retry.");
+            + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
+            + " retry.");
   }
 
   private void stamp() {
