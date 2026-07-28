@@ -421,7 +421,7 @@ public final class SchemaManager {
     throw new PreFloorException(
         "This database is schema v"
             + current
-            + ", below the sail 1.0 floor (schema v"
+            + ", below the v1 schema floor (schema v"
             + FLOOR_VERSION
             + "), and this release does not carry pre-floor migrations."
             + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
