@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -157,6 +158,12 @@ public final class StopOperations {
   private final AgentHalter halter;
   private final Listener listener;
 
+  private static final Duration HALT_VERIFY_DEADLINE = Duration.ofSeconds(10);
+  private static final Duration HALT_VERIFY_PACE = Duration.ofMillis(250);
+
+  private final Duration haltVerifyDeadline;
+  private final Duration haltVerifyPace;
+
   public StopOperations(
       ShellExec shell,
       String file,
@@ -165,6 +172,28 @@ public final class StopOperations {
       DispatchOperations.EventSink events,
       AgentHalter halter,
       Listener listener) {
+    this(
+        shell,
+        file,
+        specStore,
+        runStore,
+        events,
+        halter,
+        listener,
+        HALT_VERIFY_DEADLINE,
+        HALT_VERIFY_PACE);
+  }
+
+  StopOperations(
+      ShellExec shell,
+      String file,
+      SpecStore specStore,
+      RunStore runStore,
+      DispatchOperations.EventSink events,
+      AgentHalter halter,
+      Listener listener,
+      Duration haltVerifyDeadline,
+      Duration haltVerifyPace) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projects = new ProjectLoader(shell, Objects.requireNonNull(file, "file"));
     this.specStore = Objects.requireNonNull(specStore, "specStore");
@@ -172,6 +201,8 @@ public final class StopOperations {
     this.events = Objects.requireNonNull(events, "events");
     this.halter = Objects.requireNonNull(halter, "halter");
     this.listener = Objects.requireNonNull(listener, "listener");
+    this.haltVerifyDeadline = Objects.requireNonNull(haltVerifyDeadline, "haltVerifyDeadline");
+    this.haltVerifyPace = Objects.requireNonNull(haltVerifyPace, "haltVerifyPace");
   }
 
   /**
@@ -464,13 +495,36 @@ public final class StopOperations {
    * A verified halt leaves no live process on the addressed unit. Rejecting <em>any</em> running
    * result — not only the original pid — keeps a replacement process (a unit restart, a pid reused
    * mid-halt) from being mistaken for a successful termination.
+   *
+   * <p>Verification polls to a deadline because termination is asynchronous on three fronts —
+   * signal delivery, the parent reaping the zombie, and systemd observing the exit — so a single
+   * instantaneous probe misreads an in-flight halt as failure. That misread happened in the field:
+   * a spurious "still running after the stop signal" that rolled the claim back on a stop that had
+   * in fact landed. Any running result at the deadline still fails loud.
    */
   private void verifyHalted(String project, AgentUnit unit) {
+    var deadline = System.nanoTime() + haltVerifyDeadline.toNanos();
     var remaining = probe(project, unit);
-    if (remaining != null && remaining.running()) {
+    while (remaining != null && remaining.running()) {
+      if (System.nanoTime() >= deadline) {
+        throw new ApiException(
+            ErrorCode.AGENT_STOP_FAILED,
+            "Agent PID " + remaining.pid() + " is still running after the stop signal.",
+            "Retry the stop.");
+      }
+      pace();
+      remaining = probe(project, unit);
+    }
+  }
+
+  private void pace() {
+    try {
+      Thread.sleep(haltVerifyPace.toMillis());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
       throw new ApiException(
           ErrorCode.AGENT_STOP_FAILED,
-          "Agent PID " + remaining.pid() + " is still running after the stop signal.",
+          "Interrupted while verifying the agent halt.",
           "Retry the stop.");
     }
   }

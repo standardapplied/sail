@@ -567,7 +567,9 @@ class StopOperationsTest {
         stopOps(
             liveAgentShell(),
             (project, unit) -> halts.add(unit.unitName()),
-            StopOperations.Listener.NONE);
+            StopOperations.Listener.NONE,
+            java.time.Duration.ofMillis(20),
+            java.time.Duration.ZERO);
     seedAdhocRun(123, UNIT);
 
     var refusal =
@@ -767,7 +769,13 @@ class StopOperationsTest {
 
   @Test
   void aHaltThatLeavesTheAgentAliveRestoresTheSpecAndFails() throws Exception {
-    var ops = stopOps(liveAgentShell(), (project, unit) -> {}, StopOperations.Listener.NONE);
+    var ops =
+        stopOps(
+            liveAgentShell(),
+            (project, unit) -> {},
+            StopOperations.Listener.NONE,
+            java.time.Duration.ofMillis(20),
+            java.time.Duration.ZERO);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
@@ -793,7 +801,9 @@ class StopOperationsTest {
               shell.on("kill -0 456", "");
               shell.on("kill -0 123", new ShellExec.Result(1, "", ""));
             },
-            StopOperations.Listener.NONE);
+            StopOperations.Listener.NONE,
+            java.time.Duration.ofMillis(20),
+            java.time.Duration.ZERO);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
@@ -1117,6 +1127,63 @@ class StopOperationsTest {
     return (project, unit) -> agentDies(shell);
   }
 
+  @Test
+  void haltVerificationAbsorbsReapLatencyByPolling() throws Exception {
+    var shell = liveAgentShell();
+    var probes = new java.util.concurrent.atomic.AtomicInteger();
+    shell.hookOn(
+        "kill -0 123",
+        () -> {
+          if (probes.incrementAndGet() >= 3) {
+            agentDies(shell);
+          }
+        });
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {},
+            StopOperations.Listener.NONE,
+            java.time.Duration.ofSeconds(5),
+            java.time.Duration.ZERO);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var outcome = ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false);
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertTrue(
+        probes.get() >= 3, "verification must have re-probed, not given up on the first look");
+  }
+
+  @Test
+  void anInterruptedVerificationFailsLoudKeepsTheInterruptAndRestoresTheClaim() throws Exception {
+    var ops =
+        stopOps(
+            liveAgentShell(),
+            (project, unit) -> {},
+            StopOperations.Listener.NONE,
+            Duration.ofSeconds(5),
+            Duration.ZERO);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    Thread.currentThread().interrupt();
+    ApiException refusal;
+    try {
+      refusal =
+          assertThrows(
+              ApiException.class,
+              () -> ops.stop(new StopOperations.RunTarget(R1), ADMIN, LOCAL_HANDLE, false));
+    } finally {
+      assertTrue(Thread.interrupted(), "the interrupt flag must be preserved for the caller");
+    }
+
+    assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
   private static void agentDies(FakeShell shell) {
     shell.on("kill -0 123", new ShellExec.Result(1, "", ""));
   }
@@ -1172,6 +1239,39 @@ class StopOperationsTest {
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     return new StopOperations(shell, yaml.toString(), specStore, runStore, sink, halter, listener);
+  }
+
+  private StopOperations stopOps(
+      FakeShell shell,
+      StopOperations.AgentHalter halter,
+      StopOperations.Listener listener,
+      java.time.Duration verifyDeadline,
+      java.time.Duration verifyPace)
+      throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(
+        yaml,
+        """
+        name: acme
+        ssh:
+          user: dev
+        agent:
+          type: claude-code
+        """);
+    var db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    specStore = new SpecStore(db);
+    runStore = new RunStore(db);
+    return new StopOperations(
+        shell,
+        yaml.toString(),
+        specStore,
+        runStore,
+        events::add,
+        halter,
+        listener,
+        verifyDeadline,
+        verifyPace);
   }
 
   private void seedSpec(String id, SpecStatus status, String assignee) {
