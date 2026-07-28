@@ -81,22 +81,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 
-        launch(CONTAINER);
+        launchPrepared(CONTAINER);
         new IncusDeviceManager(shell).ensureEventSocket(CONTAINER, socketDir, CONTAINER_DIR);
-
-        var prepare =
-            exec(
-                CONTAINER,
-                List.of(
-                    "bash",
-                    "-c",
-                    "set -e;"
-                        + " for i in $(seq 1 30); do"
-                        + " getent hosts archive.ubuntu.com >/dev/null 2>&1 && break; sleep 1; done;"
-                        + " apt-get update -qq;"
-                        + " apt-get install -y -qq curl"));
-        assertTrue(
-            prepare.ok(), "could not ready the container (network + curl): " + prepare.stderr());
 
         var unauthenticated =
             exec(

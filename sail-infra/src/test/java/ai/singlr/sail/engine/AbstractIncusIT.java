@@ -62,6 +62,100 @@ public abstract class AbstractIncusIT {
         launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
   }
 
+  private static final String PREPARED_ALIAS = "sail-it-prepared";
+  private static final String BUILDER = "sail-it-image-builder";
+  private static final List<String> PREPARED_PACKAGES =
+      List.of("curl", "git", "python3", "podman", "uidmap");
+  private static final Object PREPARE_LOCK = new Object();
+  private static boolean preparedImageReady;
+
+  /**
+   * Launches {@code container} from the locally published prepared image — the base image plus
+   * every package the incus suite needs. The image is baked at most once per host: baking is the
+   * only step that touches the network (the public image server, container DNS, the apt archive),
+   * each stage is retried and fails naming itself with diagnostics, and every test launch
+   * afterwards is a local copy. Tests must never reach the internet from inside their own bodies —
+   * a bootstrap that depends on external infrastructure at test time is a defect of the test.
+   */
+  protected void launchPrepared(String container) throws Exception {
+    synchronized (PREPARE_LOCK) {
+      if (!preparedImageReady) {
+        if (!shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok()) {
+          bakePreparedImage();
+        }
+        preparedImageReady = true;
+      }
+    }
+    deleteContainerQuietly(container);
+    var launched = shell.exec(List.of("incus", "launch", PREPARED_ALIAS, container));
+    assertTrue(
+        launched.ok(),
+        "could not launch test container from local image "
+            + PREPARED_ALIAS
+            + ": "
+            + launched.stderr());
+  }
+
+  private void bakePreparedImage() throws Exception {
+    shell.exec(List.of("incus", "delete", "--force", BUILDER));
+    retryStage(
+        "launch builder container from " + IMAGE,
+        () -> shell.exec(List.of("incus", "launch", IMAGE, BUILDER)));
+    retryStage(
+        "container outbound DNS",
+        () ->
+            exec(
+                BUILDER,
+                List.of(
+                    "bash",
+                    "-c",
+                    "for i in $(seq 1 45); do"
+                        + " getent hosts archive.ubuntu.com >/dev/null 2>&1 && exit 0; sleep 2;"
+                        + " done; echo '--- resolv.conf ---'; cat /etc/resolv.conf;"
+                        + " echo '--- addresses ---'; ip -brief addr; exit 1")));
+    retryStage("apt-get update", () -> exec(BUILDER, List.of("apt-get", "update", "-qq")));
+    var install = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
+    install.addAll(PREPARED_PACKAGES);
+    retryStage(
+        "apt-get install " + String.join(" ", PREPARED_PACKAGES),
+        () ->
+            exec(
+                BUILDER,
+                List.of(
+                    "env",
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "bash",
+                    "-c",
+                    String.join(" ", install))));
+    retryStage("stop builder", () -> shell.exec(List.of("incus", "stop", BUILDER)));
+    retryStage(
+        "publish prepared image",
+        () -> shell.exec(List.of("incus", "publish", BUILDER, "--alias", PREPARED_ALIAS)));
+    deleteContainerQuietly(BUILDER);
+  }
+
+  private void retryStage(String stage, StageCommand command) throws Exception {
+    ShellExec.Result last = null;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      last = command.run();
+      if (last.ok()) {
+        return;
+      }
+    }
+    deleteContainerQuietly(BUILDER);
+    throw new AssertionError(
+        "prepared-image bake failed at stage '"
+            + stage
+            + "' after 3 attempts: "
+            + last.stderr()
+            + (last.stdout().isBlank() ? "" : "\nstdout: " + last.stdout()));
+  }
+
+  @FunctionalInterface
+  protected interface StageCommand {
+    ShellExec.Result run() throws Exception;
+  }
+
   protected ShellExec.Result exec(String container, List<String> argv) throws Exception {
     var command = new ArrayList<>(List.of("incus", "exec", container, "--"));
     command.addAll(argv);
