@@ -173,6 +173,28 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aMidRampDevelopmentBoxResumesAndConvergesToTheSameSchema() {
+    try (var baseline = Sqlite.open(tempDir.resolve("baseline.db"));
+        var midRamp = Sqlite.open(tempDir.resolve("mid-ramp.db"))) {
+      new SchemaManager(baseline).migrate();
+      FloorSchema.stage(midRamp);
+      midRamp.execute("PRAGMA foreign_keys = OFF");
+      for (var i = 0; i < 3; i++) {
+        midRamp.execute(SchemaManager.ON_RAMP.get(i));
+        midRamp.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+            SchemaManager.FLOOR_VERSION + i + 1);
+      }
+      midRamp.execute("PRAGMA foreign_keys = ON");
+
+      new SchemaManager(midRamp).migrate();
+
+      assertEquals(SchemaManager.V1_VERSION, new SchemaManager(midRamp).currentVersion());
+      assertEquals(canonicalSchema(baseline), canonicalSchema(midRamp));
+    }
+  }
+
+  @Test
   void migrateRefusesABelowFloorDatabaseWithTheRemedy() {
     stageAtVersion(37);
     var schema = new SchemaManager(db);

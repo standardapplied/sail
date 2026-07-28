@@ -9,21 +9,68 @@ import java.util.List;
 
 /**
  * Manages SQLite schema versioning against the v1 baseline. A fresh database gets the current
- * schema in one shot; a database at the published 0.14 floor (schema v{@value #FLOOR_VERSION},
- * structurally identical to the baseline) is stamped forward in one step; anything below the floor
- * is refused with the remedy, never silently replayed. The pre-1.0 migration chain lives in git
- * history only.
+ * schema in one shot; a database at or above the published 0.14 floor (schema v{@value
+ * #FLOOR_VERSION}, the version every released 0.14.x binary reaches) rides the on-ramp — the
+ * post-floor migrations that never shipped in a 0.14.x release — to the baseline; anything below
+ * the floor is refused with the remedy, never silently replayed. The pre-1.0 migration chain lives
+ * in git history only.
  *
  * <p>Policy: migrations are append-only within a major version, and baselining like this happens
- * only at a major version with a published floor. See ARCHITECTURE.md.
+ * only at a major version with a published floor. The floor must be a version a released binary can
+ * actually reach — a floor no release can produce strands the fleet behind an impossible remedy.
+ * See ARCHITECTURE.md.
  */
 public final class SchemaManager {
 
-  /** The schema version a fully-migrated sail 0.14.x database carries: the v1 upgrade floor. */
-  static final int FLOOR_VERSION = 125;
+  /** The schema version a fully-migrated released sail 0.14.x database carries: the v1 floor. */
+  static final int FLOOR_VERSION = 118;
 
-  /** The v1 baseline version, one step past the floor it is structurally identical to. */
-  static final int V1_VERSION = FLOOR_VERSION + 1;
+  /**
+   * The migrations between the floor and the baseline: appended after 0.14.1 shipped, never
+   * released, so a floor database must replay them here. Verbatim from the deleted chain; a
+   * database mid-ramp (a development box) resumes at its recorded version.
+   */
+  static final List<String> ON_RAMP =
+      List.of(
+          """
+          CREATE TABLE runs_v4 (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              exit_code INTEGER,
+              watcher_pid INTEGER,
+              node TEXT,
+              role TEXT NOT NULL DEFAULT 'build'
+                  CHECK (role IN ('build', 'adhoc', 'review')),
+              log_path TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              unit TEXT,
+              repos TEXT
+          )""",
+          """
+          INSERT INTO runs_v4 (id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos)
+              SELECT id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos FROM runs""",
+          "DROP TABLE runs",
+          "ALTER TABLE runs_v4 RENAME TO runs",
+          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "ALTER TABLE runs ADD COLUMN pid_ticks INTEGER");
+
+  /** The v1 baseline version: the floor plus the on-ramp it is structurally equivalent to. */
+  static final int V1_VERSION = FLOOR_VERSION + ON_RAMP.size() + 1;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -337,12 +384,13 @@ public final class SchemaManager {
 
   /**
    * Converges the schema to the v1 baseline. A fresh database gets the baseline directly; a
-   * database at the 0.14 floor is stamped forward in one step (the floor schema and the baseline
-   * are structurally identical); a database below the floor raises {@link PreFloorException} with
-   * the remedy, because this release no longer carries the pre-1.0 migration chain; a database
-   * above the v1 baseline raises {@link IllegalStateException}, because an older binary must not
-   * operate on a schema it does not understand. Idempotent: re-running on a current database is a
-   * no-op.
+   * database at or past the 0.14 floor rides the on-ramp remainder to the baseline (a released
+   * 0.14.x database replays the never-released post-floor migrations; a development box mid-ramp
+   * resumes where its version left off); a database below the floor raises {@link
+   * PreFloorException} with the remedy, because this release no longer carries the pre-1.0
+   * migration chain; a database above the v1 baseline raises {@link IllegalStateException}, because
+   * an older binary must not operate on a schema it does not understand. Idempotent: re-running on
+   * a current database is a no-op.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
@@ -366,8 +414,8 @@ public final class SchemaManager {
           });
       return;
     }
-    if (current == FLOOR_VERSION) {
-      db.transaction(this::stamp);
+    if (current >= FLOOR_VERSION) {
+      onRampFrom(current);
       return;
     }
     throw new PreFloorException(
@@ -378,6 +426,36 @@ public final class SchemaManager {
             + "), and this release does not carry pre-floor migrations."
             + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
             + " retry.");
+  }
+
+  /**
+   * Applies the on-ramp remainder from {@code current} and stamps the baseline version, atomically.
+   * Foreign-key enforcement is suspended for the window because the on-ramp contains a table
+   * rebuild that must drop-and-recreate a parent without firing child cascades; integrity is
+   * verified before enforcement is restored, so a violated rebuild fails loud rather than shipping
+   * a corrupted database.
+   */
+  private void onRampFrom(int current) {
+    db.execute("PRAGMA foreign_keys = OFF");
+    try {
+      db.transaction(
+          () -> {
+            ON_RAMP.subList(current - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
+            stamp();
+          });
+      requireForeignKeysIntact();
+    } finally {
+      db.execute("PRAGMA foreign_keys = ON");
+    }
+  }
+
+  private void requireForeignKeysIntact() {
+    var violations =
+        db.query("PRAGMA foreign_key_check", row -> row.text(0) + " row " + row.integer(1));
+    if (!violations.isEmpty()) {
+      throw new SqliteException(
+          "Migration broke referential integrity: " + String.join(", ", violations), 0);
+    }
   }
 
   private void stamp() {

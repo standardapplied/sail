@@ -58,7 +58,7 @@ class RemoteMainReplicaTest {
 
     var failure = assertThrows(SyncTransportException.class, replica::entityIds);
 
-    assertTrue(failure.getMessage().contains("0.14.0"));
+    assertTrue(failure.getMessage().contains(SyncWire.V1_UPGRADE_FLOOR));
     assertTrue(failure.getMessage().contains("sail upgrade"));
   }
 
