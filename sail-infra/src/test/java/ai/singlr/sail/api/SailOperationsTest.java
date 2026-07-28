@@ -2942,6 +2942,12 @@ class SailOperationsTest {
     private final Map<String, Exception> failures = new LinkedHashMap<>();
     private final List<String> invocations = new ArrayList<>();
 
+    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    FakeShell() {
+      on("incus config device add", "");
+      on("grep -qsF", "");
+    }
+
     FakeShell on(String pattern, String stdout) {
       return on(pattern, new Result(0, stdout, ""));
     }

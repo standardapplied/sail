@@ -984,16 +984,22 @@ public final class DispatchOperations {
         .toList();
   }
 
+  /**
+   * Installs or upgrades the in-container {@code sail spec} and event helpers before any agent
+   * launches. Failure aborts the launch: every local-socket route now requires the run's bearer
+   * credential, so an agent left with stale unauthenticated helpers would run apparently normally
+   * while every spec operation 401s and every lifecycle event is silently dropped.
+   */
   private void ensureSailSetup(String project) {
     try {
       var result = ContainerSailSetup.ensureInstalled(shell, project);
       listener.sailSetupUpdated(result == ContainerSailSetup.Result.UPDATED);
     } catch (Exception e) {
-      System.err.println(
-          "  [api] Warning: failed to update sail event helpers in "
-              + project
-              + ": "
-              + e.getMessage());
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED,
+          "Failed to install the authenticated sail helpers in " + project + ".",
+          "Repair the container's sail socket mount and retry the dispatch.",
+          e);
     }
   }
 

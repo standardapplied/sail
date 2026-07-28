@@ -325,6 +325,27 @@ class AdhocDispatchTest {
   }
 
   @Test
+  void aFailedHelperInstallAbortsTheLaunchAndReleasesTheReservation() throws Exception {
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("mkdir -p /home/dev/.sail", "")
+            .on("printf '%s'", "")
+            .fail("incus config device add");
+    var ops = operations(shell);
+
+    var refusal =
+        assertThrows(ApiException.class, () -> ops.startAdhoc("acme", background("task"), HANDLE));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refusal.failure().errorCode());
+    assertTrue(refusal.getMessage().contains("authenticated sail helpers"), refusal.getMessage());
+    assertEquals("failed", runStore.listForProject("acme").getFirst().status());
+    assertTrue(
+        runStore.runningForProjectOnNode("acme", HANDLE).isEmpty(),
+        "an agent that never launched must not hold the container reservation");
+  }
+
+  @Test
   void anAdhocSessionBlocksDispatchAndDispatchBlocksAdhoc() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
@@ -575,8 +596,19 @@ class AdhocDispatchTest {
   private static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
+    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    StubShell() {
+      on("incus config device add", "");
+      on("grep -qsF", "");
+    }
+
     StubShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
+      return this;
+    }
+
+    StubShell fail(String pattern) {
+      scripts.put(pattern, new Result(1, "", "refused"));
       return this;
     }
 

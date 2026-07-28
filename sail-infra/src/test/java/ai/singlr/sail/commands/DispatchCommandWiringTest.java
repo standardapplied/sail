@@ -238,6 +238,12 @@ class DispatchCommandWiringTest {
   private static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
+    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    StubShell() {
+      on("incus config device add", "");
+      on("grep -qsF", "");
+    }
+
     StubShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
       return this;

@@ -23,13 +23,15 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Listens on a Unix domain socket and serves the small local API ({@link LocalApiRouter}) to
- * project containers, which see the same socket via an Incus disk bind-mount. Filesystem
- * permissions are the authentication — a container that can {@code write(2)} the socket is trusted,
- * no bearer token.
+ * project containers, which see the same socket via an Incus disk bind-mount. Reachability is gated
+ * by filesystem permissions — only sail-provisioned containers see the socket — and every request
+ * must additionally present a live run credential as a bearer token, which {@link LocalApiRouter}
+ * resolves to the acting run before routing.
  *
  * <p>Implements a minimal HTTP/1.1 server: it parses the request line, the {@code Content-Length},
  * and the body, hands a {@link LocalApiRequest} to the {@link LocalApiHandler}, and serializes the
@@ -46,6 +48,7 @@ public final class LocalApiSocket implements AutoCloseable {
   private static final int MAX_BODY_BYTES = 1024 * 1024;
   private static final int DEFAULT_MAX_IN_FLIGHT = 64;
   private static final String CONTENT_LENGTH = "content-length";
+  private static final Set<String> RETAINED_HEADERS = Set.of(CONTENT_LENGTH, "authorization");
 
   private final LocalApiHandler handler;
   private final Path socketPath;
@@ -224,6 +227,11 @@ public final class LocalApiSocket implements AutoCloseable {
       var method = parts[0].toUpperCase();
       var target = parts[1];
       var headers = readHeaders(in);
+      if (headers == null) {
+        badRequests.increment();
+        writeStatus(out, 431, null);
+        return;
+      }
       var contentLength = contentLength(headers);
       if (contentLength > MAX_BODY_BYTES) {
         badRequests.increment();
@@ -253,18 +261,33 @@ public final class LocalApiSocket implements AutoCloseable {
     }
   }
 
+  /**
+   * Parses the header block within a single {@link #MAX_HEADER_BYTES} budget shared by every line,
+   * retaining only the two headers the server consumes ({@code Content-Length} and {@code
+   * Authorization}) so an unauthenticated client cannot grow retained memory by streaming uniquely
+   * named headers. Returns null when the block overruns the budget or the stream ends before the
+   * terminating blank line.
+   */
   private static Map<String, String> readHeaders(InputStream in) throws IOException {
     var headers = new LinkedHashMap<String, String>();
+    var remaining = MAX_HEADER_BYTES;
     while (true) {
-      var line = readLine(in, MAX_HEADER_BYTES);
-      if (line == null || line.isEmpty()) {
+      var line = readLine(in, remaining);
+      if (line == null) {
+        return null;
+      }
+      if (line.isEmpty()) {
         return headers;
       }
+      remaining -= line.getBytes(StandardCharsets.UTF_8).length + 2;
       var colon = line.indexOf(':');
       if (colon <= 0) {
         continue;
       }
-      headers.put(line.substring(0, colon).toLowerCase(), line.substring(colon + 1).strip());
+      var name = line.substring(0, colon).toLowerCase();
+      if (RETAINED_HEADERS.contains(name)) {
+        headers.put(name, line.substring(colon + 1).strip());
+      }
     }
   }
 
@@ -348,6 +371,7 @@ public final class LocalApiSocket implements AutoCloseable {
       case 405 -> "Method Not Allowed";
       case 409 -> "Conflict";
       case 413 -> "Payload Too Large";
+      case 431 -> "Request Header Fields Too Large";
       case 500 -> "Internal Server Error";
       case 503 -> "Service Unavailable";
       default -> "Status";
