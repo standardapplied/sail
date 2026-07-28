@@ -34,11 +34,11 @@ public final class SyncDatabase implements AutoCloseable {
    * Opens the database at {@code dbPath}, converges its schema, and guarantees the v1 data floor
    * before returning. A failure closes the handle before any sync data is touched.
    *
-   * <p>{@link SchemaManager#migrate} refuses an unrepaired pre-floor database with the 'sail
-   * migrate' remedy — that refusal passes through untouched. A database that converges cleanly but
-   * has no floor marker was necessarily born at or above the floor (the guard forbids any other
-   * crossing), so every data migration is vacuous on it and runs here only to stamp the markers —
-   * keeping a fresh or auxiliary-created box's first sync frictionless.
+   * <p>{@link SchemaManager#migrate} refuses a below-floor database with the install-0.14.x remedy
+   * — that refusal passes through untouched. A database that converges cleanly but has no floor
+   * marker was necessarily born at or above the floor (the schema floor forbids any other
+   * crossing), so the data migrations run here only to finish or stamp the floor repair — keeping a
+   * fresh or auxiliary-created box's first sync frictionless.
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);

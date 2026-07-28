@@ -130,8 +130,11 @@ revision ids), `ConflictDetector` (a pure three-way merge), `ConflictResolver` (
 by the three synced stores), `SyncConflicts` (parked conflicts), `SyncState` (per-peer
 checkpoints), `ExpiredRowSweeper` (hourly housekeeping), and `PushOutcome` (the CAS result).
 
-Migrations are two-layer and idempotent. `SchemaManager.MIGRATIONS` is an append-only,
-version-tracked list of SQL statements, and entries are never reordered or removed. A
+Migrations are two-layer and idempotent. `SchemaManager` owns the schema layer: the v1
+baseline creates the current schema directly on a fresh database, a database at the
+published 0.14 floor (schema v125, structurally identical to the baseline) is stamped
+forward in one step, and a database below the floor is refused with the remedy — install
+sail 0.14.x, run `sail upgrade`, retry — never a silent replay of deleted steps. A
 separate `DataMigration` framework runs one-shot content fix-ups exactly once, tracked by
 name. `MigrationRunner.applyAll` runs schema migrations then data migrations.
 `MigrateCommand` additionally imports on-disk descriptors and shared files, scrubs
@@ -140,6 +143,19 @@ data migrations run on `sail migrate`, on `sail upgrade` (which spawns the new b
 `migrate` so a release's new migrations actually execute), and on every daemon start, so a
 failed upgrade-time migration self-heals on the next service start. Imports run only from
 the explicit migrate lane.
+
+**Migration policy.** Schema migrations are append-only within a major version: entries
+are added after the baseline, never reordered, edited, or removed, and each one ships in
+the PR that needs it together with a test that migrates a seeded database and asserts the
+data survived. Collapsing the chain into a new baseline is allowed only at a major
+version with a published floor: the floor's final schema and the new baseline must be
+structurally identical (the `FloorSchema` fixture and the schema-diff test in
+`SchemaManagerTest` pin this), the on-ramp is a single version stamp, and everything
+below the floor is refused with an actionable error naming the release that can still
+carry it. Sync peers enforce the same floor in the wire handshake before any rows are
+exchanged. There is no downgrade path: pre-1.0 explicitly has none, and post-1.0 policy
+is forward-only with the documented floor mechanism. The pre-1.0 chain is recoverable
+from git history only.
 
 ## The sync layer: one main, many nodes
 

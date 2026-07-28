@@ -19,20 +19,21 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Regression for the in-sync self-update incident: a node's binary was replaced mid-sync and the
- * new code wrote {@code awaiting_merge} into a specs table still carrying the old narrow CHECK
- * constraint. Every sync entry point now opens its database through {@link SyncDatabase#converge},
- * which migrates before any data is touched. Lives in the store package to reach the
- * package-private {@link SchemaManager#migrateTo} staging seam.
+ * Every sync entry point opens its database through {@link SyncDatabase#converge}, which migrates
+ * before any data is touched — the lesson of the in-sync self-update incident, where a
+ * freshly-replaced binary kept syncing against the previous release's schema. Under the v1 baseline
+ * that convergence is the floor on-ramp: a 0.14-floor database is stamped forward and syncs in the
+ * same round, and a below-floor database is refused with the remedy before any sync data moves.
+ * Lives in the store package to reach the package-private {@link FloorSchema} fixture.
  */
 class SyncSchemaConvergenceTest {
 
   @TempDir Path tempDir;
 
-  private Path stagedAtNarrowStatusCheck(String name) {
+  private Path stagedAtFloor(String name) {
     var path = tempDir.resolve(name + ".db");
     try (var db = Sqlite.open(path)) {
-      new SchemaManager(db).migrateTo(SchemaManager.LAST_VERSION_WITH_NARROW_STATUS_CHECK);
+      FloorSchema.stage(db);
       markMigrationCompleted(db);
     }
     return path;
@@ -79,21 +80,17 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
-  void theStagedSchemaRejectsAwaitingMergeWithoutConvergence() {
-    var path = stagedAtNarrowStatusCheck("raw");
-    try (var db = Sqlite.open(path)) {
-      assertThrows(
-          SqliteException.class,
-          () ->
-              db.execute(
-                  "INSERT INTO specs (id, title, status, created_at, updated_at)"
-                      + " VALUES ('m', 'M', 'awaiting_merge', 't', 't')"));
+  void convergeOnRampsAFloorDatabaseToTheBaseline() {
+    var path = stagedAtFloor("floor");
+
+    try (var converged = SyncDatabase.converge(path, "box")) {
+      assertEquals(SchemaManager.V1_VERSION, new SchemaManager(converged.db()).currentVersion());
     }
   }
 
   @Test
-  void aPulledAwaitingMergeRevisionAppliesBecauseTheReplicaOpenConvergedFirst() {
-    var nodePath = stagedAtNarrowStatusCheck("node");
+  void aPulledRevisionAppliesBecauseTheReplicaOpenOnRampedFirst() {
+    var nodePath = stagedAtFloor("node");
     try (var main = SyncDatabase.converge(currentDatabase("main"), "main");
         var node = SyncDatabase.converge(nodePath, "node")) {
       new SpecStore(main.db()).create(spec("auth", "Auth", "awaiting_merge"));
@@ -109,8 +106,8 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
-  void mainAcceptsAPushedAwaitingMergeCommitBecauseTheServingOpenConvergedFirst() {
-    var mainPath = stagedAtNarrowStatusCheck("main");
+  void mainAcceptsAPushedCommitBecauseTheServingOpenOnRampedFirst() {
+    var mainPath = stagedAtFloor("main");
     try (var main = SyncDatabase.converge(mainPath, "main");
         var node = SyncDatabase.converge(currentDatabase("node"), "node")) {
       new SpecStore(node.db()).create(spec("auth", "Auth", "awaiting_merge"));
@@ -140,33 +137,23 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
-  void convergenceRefusesToSyncUntilTheUpgradeFloorMigrationCompleted() {
+  void convergenceRefusesABelowFloorDatabaseWithTheRemedy() {
     var path = tempDir.resolve("pre-floor.db");
     try (var db = Sqlite.open(path)) {
-      new SchemaManager(db).migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
       db.execute(
-          """
-          INSERT INTO runs (id, project, role, agent, status, started_at, unit)
-          VALUES ('legacy-run', 'proj', 'build', 'codex', 'running', 'test', '')""");
+          "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (100, 'staged')");
     }
 
     var failure =
-        assertThrows(IllegalStateException.class, () -> SyncDatabase.converge(path, "box"));
+        assertThrows(
+            SchemaManager.PreFloorException.class, () -> SyncDatabase.converge(path, "box"));
 
-    assertTrue(failure.getMessage().contains(LegacyDataMigration.NAME));
-    assertTrue(failure.getMessage().contains("sail migrate"));
+    assertTrue(failure.getMessage().contains("schema v100"));
+    assertTrue(failure.getMessage().contains("0.14"));
+    assertTrue(failure.getMessage().contains("sail upgrade"));
     try (var db = Sqlite.open(path)) {
-      assertEquals(
-          0L,
-          db.queryOne(
-                  "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
-                  row -> row.integer(0),
-                  LegacyDataMigration.NAME)
-              .orElseThrow());
-      assertEquals(
-          "running",
-          db.queryOne("SELECT status FROM runs WHERE id = 'legacy-run'", row -> row.text(0))
-              .orElseThrow());
+      assertEquals(100, new SchemaManager(db).currentVersion());
     }
   }
 

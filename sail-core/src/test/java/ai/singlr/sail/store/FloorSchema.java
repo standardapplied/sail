@@ -8,34 +8,25 @@ package ai.singlr.sail.store;
 import java.util.List;
 
 /**
- * Manages SQLite schema versioning against the v1 baseline. A fresh database gets the current
- * schema in one shot; a database at the published 0.14 floor (schema v{@value #FLOOR_VERSION},
- * structurally identical to the baseline) is stamped forward in one step; anything below the floor
- * is refused with the remedy, never silently replayed. The pre-1.0 migration chain lives in git
- * history only.
- *
- * <p>Policy: migrations are append-only within a major version, and baselining like this happens
- * only at a major version with a published floor. See ARCHITECTURE.md.
+ * The v1 upgrade floor contract: the exact {@code sqlite_master} contents of a fully-migrated sail
+ * 0.14.x database, captured verbatim (including the quoted names and appended-column artifacts its
+ * rebuild-heavy migration chain left behind) before that chain was deleted. Tests stage a floor
+ * database from this fixture to prove the one-step on-ramp into the v1 baseline; if the baseline
+ * ever drifts from this shape, the schema-diff test fails and the floor has been broken.
  */
-public final class SchemaManager {
+final class FloorSchema {
 
-  /** The schema version a fully-migrated sail 0.14.x database carries: the v1 upgrade floor. */
-  static final int FLOOR_VERSION = 125;
+  private FloorSchema() {}
 
-  /** The v1 baseline version, one step past the floor it is structurally identical to. */
-  static final int V1_VERSION = FLOOR_VERSION + 1;
-
-  private static final String SCHEMA_VERSION_TABLE =
-      """
-      CREATE TABLE IF NOT EXISTS schema_version (
-          version INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL
-      )""";
-
-  private static final List<String> BASELINE =
+  private static final List<String> DDL =
       List.of(
           """
-          CREATE TABLE specs (
+          CREATE TABLE schema_version (
+              version INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE "specs" (
               id TEXT PRIMARY KEY,
               title TEXT NOT NULL,
               status TEXT NOT NULL DEFAULT 'draft'
@@ -57,9 +48,8 @@ public final class SchemaManager {
               rev TEXT,
               base_rev TEXT
           )""",
-          "CREATE INDEX idx_specs_project ON specs(project)",
           """
-          CREATE TABLE spec_dependencies (
+          CREATE TABLE "spec_dependencies" (
               spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
               depends_on TEXT NOT NULL,
               PRIMARY KEY (spec_id, depends_on)
@@ -98,10 +88,6 @@ public final class SchemaManager {
               host TEXT NOT NULL,
               data TEXT NOT NULL DEFAULT '{}'
           )""",
-          "CREATE INDEX idx_events_type ON events(type)",
-          "CREATE INDEX idx_events_project ON events(project)",
-          "CREATE INDEX idx_events_spec ON events(spec_id)",
-          "CREATE INDEX idx_events_timestamp ON events(timestamp DESC)",
           """
           CREATE TABLE fdes (
               id TEXT PRIMARY KEY,
@@ -110,11 +96,10 @@ public final class SchemaManager {
               email TEXT,
               status TEXT NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active', 'disabled')),
-              created_at TEXT NOT NULL,
-              role TEXT NOT NULL DEFAULT 'member'
-          )""",
+              created_at TEXT NOT NULL
+          , role TEXT NOT NULL DEFAULT 'member')""",
           """
-          CREATE TABLE api_tokens (
+          CREATE TABLE "api_tokens" (
               token_hash TEXT PRIMARY KEY,
               name TEXT NOT NULL UNIQUE,
               role TEXT NOT NULL DEFAULT 'member'
@@ -138,7 +123,6 @@ public final class SchemaManager {
               created_at TEXT NOT NULL,
               last_used_at TEXT
           )""",
-          "CREATE INDEX idx_webauthn_credentials_fde ON webauthn_credentials(fde_id)",
           """
           CREATE TABLE sessions (
               token_hash TEXT PRIMARY KEY,
@@ -173,7 +157,7 @@ public final class SchemaManager {
               created_at TEXT NOT NULL
           )""",
           """
-          CREATE TABLE reviews (
+          CREATE TABLE "reviews" (
               id TEXT PRIMARY KEY,
               spec_id TEXT NOT NULL,
               iteration INTEGER NOT NULL DEFAULT 1,
@@ -187,7 +171,6 @@ public final class SchemaManager {
               rev TEXT,
               base_rev TEXT
           )""",
-          "CREATE INDEX idx_reviews_spec ON reviews(spec_id)",
           """
           CREATE TABLE review_stages (
               id TEXT PRIMARY KEY,
@@ -198,11 +181,8 @@ public final class SchemaManager {
                   CHECK (status IN ('pending', 'running', 'passed', 'failed', 'skipped')),
               reviewer TEXT,
               started_at TEXT,
-              completed_at TEXT,
-              error TEXT,
-              finding_counts TEXT
-          )""",
-          "CREATE INDEX idx_review_stages_review ON review_stages(review_id)",
+              completed_at TEXT
+          , error TEXT, finding_counts TEXT)""",
           """
           CREATE TABLE review_findings (
               id TEXT PRIMARY KEY,
@@ -222,8 +202,6 @@ public final class SchemaManager {
               resolution TEXT NOT NULL DEFAULT 'OPEN'
                   CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED'))
           )""",
-          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
           """
           CREATE TABLE spec_source_findings (
               spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
@@ -231,7 +209,7 @@ public final class SchemaManager {
               PRIMARY KEY (spec_id, finding_id)
           )""",
           """
-          CREATE TABLE runs (
+          CREATE TABLE "runs" (
               id TEXT PRIMARY KEY,
               project TEXT NOT NULL,
               spec_id TEXT,
@@ -252,11 +230,8 @@ public final class SchemaManager {
               rev TEXT,
               base_rev TEXT,
               unit TEXT,
-              repos TEXT,
-              pid_ticks INTEGER
-          )""",
-          "CREATE INDEX idx_runs_project ON runs(project)",
-          "CREATE INDEX idx_runs_spec ON runs(spec_id)",
+              repos TEXT
+          , pid_ticks INTEGER)""",
           """
           CREATE TABLE projects (
               name TEXT PRIMARY KEY,
@@ -264,10 +239,8 @@ public final class SchemaManager {
               created_by TEXT,
               created_at TEXT NOT NULL,
               updated_by TEXT,
-              updated_at TEXT NOT NULL,
-              rev TEXT,
-              base_rev TEXT
-          )""",
+              updated_at TEXT NOT NULL
+          , rev TEXT, base_rev TEXT)""",
           """
           CREATE TABLE project_files (
               id TEXT PRIMARY KEY,
@@ -289,10 +262,8 @@ public final class SchemaManager {
               recorded_at TEXT NOT NULL,
               origin TEXT NOT NULL,
               deleted INTEGER NOT NULL DEFAULT 0,
-              snapshot TEXT NOT NULL,
-              peer TEXT
-          )""",
-          "CREATE INDEX idx_change_log_entity ON change_log(entity_type, entity_id, seq)",
+              snapshot TEXT NOT NULL
+          , peer TEXT)""",
           """
           CREATE TABLE sync_conflicts (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -306,8 +277,6 @@ public final class SchemaManager {
               status TEXT NOT NULL DEFAULT 'pending',
               resolved_rev TEXT
           )""",
-          "CREATE INDEX idx_sync_conflicts_pending"
-              + " ON sync_conflicts(status, entity_type, entity_id)",
           """
           CREATE TABLE sync_state (
               peer TEXT PRIMARY KEY,
@@ -327,69 +296,27 @@ public final class SchemaManager {
           CREATE TABLE data_migrations (
               name TEXT PRIMARY KEY,
               applied_at TEXT NOT NULL
-          )""");
+          )""",
+          "CREATE INDEX idx_specs_project ON specs(project)",
+          "CREATE INDEX idx_events_type ON events(type)",
+          "CREATE INDEX idx_events_project ON events(project)",
+          "CREATE INDEX idx_events_spec ON events(spec_id)",
+          "CREATE INDEX idx_events_timestamp ON events(timestamp DESC)",
+          "CREATE INDEX idx_webauthn_credentials_fde ON webauthn_credentials(fde_id)",
+          "CREATE INDEX idx_reviews_spec ON reviews(spec_id)",
+          "CREATE INDEX idx_review_stages_review ON review_stages(review_id)",
+          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
+          "CREATE INDEX idx_runs_project ON runs(project)",
+          "CREATE INDEX idx_runs_spec ON runs(spec_id)",
+          "CREATE INDEX idx_change_log_entity ON change_log(entity_type, entity_id, seq)",
+          "CREATE INDEX idx_sync_conflicts_pending"
+              + " ON sync_conflicts(status, entity_type, entity_id)");
 
-  private final Sqlite db;
-
-  public SchemaManager(Sqlite db) {
-    this.db = db;
-  }
-
-  /**
-   * Converges the schema to the v1 baseline. A fresh database gets the baseline directly; a
-   * database at the 0.14 floor is stamped forward in one step (the floor schema and the baseline
-   * are structurally identical); a database below the floor raises {@link PreFloorException} with
-   * the remedy, because this release no longer carries the pre-1.0 migration chain. Idempotent:
-   * re-running on a current database is a no-op.
-   */
-  public void migrate() {
-    db.execute(SCHEMA_VERSION_TABLE);
-    var current = currentVersion();
-    if (current >= V1_VERSION) {
-      return;
-    }
-    if (current == 0) {
-      db.transaction(
-          () -> {
-            BASELINE.forEach(db::execute);
-            stamp();
-          });
-      return;
-    }
-    if (current == FLOOR_VERSION) {
-      db.transaction(this::stamp);
-      return;
-    }
-    throw new PreFloorException(
-        "This database is schema v"
-            + current
-            + ", below the sail 1.0 floor (schema v"
-            + FLOOR_VERSION
-            + "), and this release does not carry pre-floor migrations."
-            + " Install sail 0.14.x and run 'sail upgrade', then retry.");
-  }
-
-  private void stamp() {
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))", V1_VERSION);
-  }
-
-  /**
-   * A database below the v1 schema floor: only a sail 0.14.x binary can carry it forward. Kept
-   * distinct so callers can surface the message without re-wrapping.
-   */
-  public static final class PreFloorException extends IllegalStateException {
-    PreFloorException(String message) {
-      super(message);
-    }
-  }
-
-  public int currentVersion() {
-    try {
-      return db.queryOne("SELECT MAX(version) FROM schema_version", row -> (int) row.integer(0))
-          .orElse(0);
-    } catch (SqliteException e) {
-      return 0;
+  static void stage(Sqlite db) {
+    DDL.forEach(db::execute);
+    for (var version = 1; version <= SchemaManager.FLOOR_VERSION; version++) {
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", version);
     }
   }
 }

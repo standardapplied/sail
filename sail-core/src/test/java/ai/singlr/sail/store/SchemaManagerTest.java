@@ -48,6 +48,8 @@ class SchemaManagerTest {
     assertTrue(tables.contains("events"));
     assertTrue(tables.contains("api_tokens"));
     assertTrue(tables.contains("schema_version"));
+    assertTrue(tables.contains("runs"));
+    assertFalse(tables.contains("agent_sessions"));
   }
 
   @Test
@@ -68,10 +70,10 @@ class SchemaManagerTest {
   }
 
   @Test
-  void currentVersionMatchesMigrationCount() {
+  void freshInstallStampsTheV1BaselineVersion() {
     var schema = new SchemaManager(db);
     schema.migrate();
-    assertTrue(schema.currentVersion() > 0);
+    assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
   }
 
   @Test
@@ -100,60 +102,13 @@ class SchemaManagerTest {
   }
 
   @Test
-  void specsRebuildPreservesRowsAndChildren() {
-    var schema = new SchemaManager(db);
-    schema.migrateTo(SchemaManager.LAST_VERSION_WITH_NARROW_STATUS_CHECK);
-    db.execute(
-        "INSERT INTO specs (id, title, status, priority, created_at, updated_at, project,"
-            + " updated_by, rev, base_rev)"
-            + " VALUES ('auth', 'OAuth', 'review', 7, 'c', 'u', 'acme', 'uday', 'r1', 'r0')");
-    db.execute(
-        "INSERT INTO spec_content (spec_id, body, plan, updated_at)"
-            + " VALUES ('auth', 'body', 'plan', 't')");
-    db.execute("INSERT INTO spec_repos (spec_id, repo) VALUES ('auth', 'api')");
-    db.execute("INSERT INTO spec_dependencies (spec_id, depends_on) VALUES ('auth', 'base')");
-    db.execute(
-        "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
-            + " VALUES ('rev-1', 'auth', 1, 'passed', 't')");
-
-    schema.migrateAll();
-
-    var row =
-        db.queryOne(
-                "SELECT title, status, priority, project, updated_by, rev, base_rev"
-                    + " FROM specs WHERE id = 'auth'",
-                r ->
-                    List.of(
-                        r.text(0),
-                        r.text(1),
-                        String.valueOf(r.integer(2)),
-                        r.text(3),
-                        r.text(4),
-                        r.text(5),
-                        r.text(6)))
-            .orElseThrow();
-    assertEquals(List.of("OAuth", "review", "7", "acme", "uday", "r1", "r0"), row);
-    assertEquals(
-        "body",
-        db.queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
-            .orElseThrow());
-    assertEquals(
-        "api",
-        db.queryOne("SELECT repo FROM spec_repos WHERE spec_id = 'auth'", r -> r.text(0))
-            .orElseThrow());
-    assertTrue(db.query("PRAGMA foreign_key_check", r -> r.text(0)).isEmpty());
-  }
-
-  @Test
-  void specsRebuildKeepsChildCascadesWired() {
-    var schema = new SchemaManager(db);
-    schema.migrateTo(SchemaManager.LAST_VERSION_WITH_NARROW_STATUS_CHECK);
+  void baselineWiresChildCascades() {
+    new SchemaManager(db).migrate();
     db.execute(
         "INSERT INTO specs (id, title, status, created_at, updated_at)"
             + " VALUES ('auth', 'OAuth', 'pending', 't', 't')");
     db.execute(
         "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES ('auth', 'b', 'p', 't')");
-    schema.migrateAll();
 
     db.execute("DELETE FROM specs WHERE id = 'auth'");
 
@@ -163,29 +118,84 @@ class SchemaManagerTest {
   }
 
   @Test
-  void migrateRefusesToCarryAnUnrepairedDatabaseAcrossTheFloor() {
-    var schema = new SchemaManager(db);
-    schema.migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
-    var staged = schema.currentVersion();
+  void freshBaselineEqualsFloorPlusOnRamp() {
+    new SchemaManager(db).migrate();
+    try (var floor = Sqlite.open(tempDir.resolve("floor.db"))) {
+      FloorSchema.stage(floor);
+      new SchemaManager(floor).migrate();
 
-    var refusal = assertThrows(SchemaManager.PreFloorException.class, schema::migrate);
-
-    assertTrue(refusal.getMessage().contains("sail migrate"));
-    assertTrue(refusal.getMessage().contains(LegacyDataMigration.NAME));
-    assertEquals(staged, schema.currentVersion());
+      assertEquals(canonicalSchema(db), canonicalSchema(floor));
+    }
   }
 
   @Test
-  void migrateCrossesTheFloorWhenTheDataMigrationAlreadyRan() {
+  void migrateOnRampsAFloorDatabaseInOneStepPreservingRows() {
+    try (var floor = Sqlite.open(tempDir.resolve("floor.db"))) {
+      FloorSchema.stage(floor);
+      floor.execute(
+          "INSERT INTO specs (id, title, status, priority, created_at, updated_at, project,"
+              + " updated_by, rev, base_rev)"
+              + " VALUES ('auth', 'OAuth', 'review', 7, 'c', 'u', 'acme', 'uday', 'r1', 'r0')");
+      floor.execute(
+          "INSERT INTO spec_content (spec_id, body, plan, updated_at)"
+              + " VALUES ('auth', 'body', 'plan', 't')");
+      var schema = new SchemaManager(floor);
+      assertEquals(SchemaManager.FLOOR_VERSION, schema.currentVersion());
+
+      schema.migrate();
+
+      assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
+      var row =
+          floor
+              .queryOne(
+                  "SELECT title, status, priority, project, updated_by, rev, base_rev"
+                      + " FROM specs WHERE id = 'auth'",
+                  r ->
+                      List.of(
+                          r.text(0),
+                          r.text(1),
+                          String.valueOf(r.integer(2)),
+                          r.text(3),
+                          r.text(4),
+                          r.text(5),
+                          r.text(6)))
+              .orElseThrow();
+      assertEquals(List.of("OAuth", "review", "7", "acme", "uday", "r1", "r0"), row);
+      assertEquals(
+          "body",
+          floor
+              .queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
+              .orElseThrow());
+
+      schema.migrate();
+      assertEquals(SchemaManager.V1_VERSION, schema.currentVersion());
+    }
+  }
+
+  @Test
+  void migrateRefusesABelowFloorDatabaseWithTheRemedy() {
+    stageBelowFloor(37);
     var schema = new SchemaManager(db);
-    schema.migrateTo(SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
-    db.execute(
-        "INSERT INTO data_migrations (name, applied_at) VALUES (?, 'test')",
-        LegacyDataMigration.NAME);
 
-    schema.migrate();
+    var refusal = assertThrows(SchemaManager.PreFloorException.class, schema::migrate);
 
-    assertTrue(schema.currentVersion() > SchemaManager.LAST_VERSION_BEFORE_V1_FLOOR);
+    assertTrue(refusal.getMessage().contains("schema v37"));
+    assertTrue(refusal.getMessage().contains("schema v" + SchemaManager.FLOOR_VERSION));
+    assertTrue(refusal.getMessage().contains("0.14"));
+    assertTrue(refusal.getMessage().contains("sail upgrade"));
+    assertEquals(37, schema.currentVersion());
+    assertEquals(
+        List.of("schema_version"),
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            row -> row.text(0)));
+  }
+
+  @Test
+  void migrateRefusesTheVersionJustBelowTheFloor() {
+    stageBelowFloor(SchemaManager.FLOOR_VERSION - 1);
+
+    assertThrows(SchemaManager.PreFloorException.class, () -> new SchemaManager(db).migrate());
   }
 
   @Test
@@ -200,24 +210,27 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_events_project"));
     assertTrue(indexes.contains("idx_events_spec"));
     assertTrue(indexes.contains("idx_events_timestamp"));
-  }
-
-  @Test
-  void migrateRenamesAgentSessionsToRunsAndDropsStaleIndexes() {
-    new SchemaManager(db).migrate();
-
-    var tables =
-        db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
-    assertTrue(tables.contains("runs"));
-    assertFalse(tables.contains("agent_sessions"));
-
-    var indexes =
-        db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'",
-            row -> row.text(0));
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
-    assertFalse(indexes.contains("idx_agent_sessions_project"));
-    assertFalse(indexes.contains("idx_agent_sessions_spec"));
+  }
+
+  private void stageBelowFloor(int version) {
+    db.execute(
+        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+    for (var v = 1; v <= version; v++) {
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
+    }
+  }
+
+  private static List<String> canonicalSchema(Sqlite database) {
+    return database.query(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master"
+            + " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
+            + " ORDER BY type, name",
+        row -> row.text(0) + "|" + row.text(1) + "|" + row.text(2) + "|" + canonical(row.text(3)));
+  }
+
+  private static String canonical(String sql) {
+    return sql.replace("\"", "").replaceAll("\\s+", " ").replaceAll("\\s*([(),])\\s*", "$1").trim();
   }
 }
