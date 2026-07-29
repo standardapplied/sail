@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,6 +80,22 @@ class MessageStoreTest {
     assertThrows(IllegalArgumentException.class, () -> messages.list("room", null, 0));
     assertThrows(IllegalArgumentException.class, () -> messages.list("room", "not-a-uuid", 1));
     assertTrue(messages.list("room", null, 10).isEmpty());
+  }
+
+  @Test
+  void latestBySpecReportsEachRoomsNewestMessageTime() {
+    assertEquals(Map.of(), messages.latestBySpec());
+
+    messages.append("room", "uday", "first", null);
+    var second = messages.append("room", "uday", "second", null);
+    db.execute(
+        """
+        INSERT INTO specs (id, title, project, created_at, updated_at)
+        VALUES ('other', 'Other', 'acme', 'now', 'now')""");
+    var other = messages.append("other", "uday", "solo", null);
+
+    assertEquals(
+        Map.of("room", second.createdAt(), "other", other.createdAt()), messages.latestBySpec());
   }
 
   @Test

@@ -731,11 +731,40 @@ record GlobalSpecView(
   }
 }
 
-record GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) implements Mappable {
+record GlobalSpecsListResponse(
+    List<GlobalSpecView> specs, int total, Map<String, String> latestMessageAt)
+    implements Mappable {
+
+  GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) {
+    this(specs, total, null);
+  }
+
+  /**
+   * Each spec's {@code last_activity_at} = max(updated_at, its room's newest message) — the one
+   * activity source {@code updated_at} cannot see. Emitted only when the serving box has the
+   * message store, so a skewed client can detect absence and fall back.
+   */
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("specs", specs);
+    if (latestMessageAt == null) {
+      m.put("specs", specs);
+    } else {
+      m.put(
+          "specs",
+          specs.stream()
+              .map(
+                  view -> {
+                    var spec = view.toMap();
+                    var message = latestMessageAt.get(view.id());
+                    var updated = view.updatedAt();
+                    spec.put(
+                        "last_activity_at",
+                        message != null && message.compareTo(updated) > 0 ? message : updated);
+                    return spec;
+                  })
+              .toList());
+    }
     m.put("total", total);
     return m;
   }
