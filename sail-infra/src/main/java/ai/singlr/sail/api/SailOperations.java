@@ -1046,7 +1046,15 @@ public final class SailOperations implements Operations {
 
   @Override
   public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
-    return safeRead(() -> globalSpecOps.list(filter));
+    return safeRead(
+        () -> {
+          var listed = globalSpecOps.list(filter);
+          if (messageStore == null) {
+            return listed;
+          }
+          return new GlobalSpecsListResponse(
+              listed.specs(), listed.total(), messageStore.latestBySpec());
+        });
   }
 
   @Override

@@ -108,6 +108,18 @@ public final class MessageStore {
     return List.copyOf(oldest);
   }
 
+  /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
+  public Map<String, String> latestBySpec() {
+    var latest = new LinkedHashMap<String, String>();
+    for (var entry :
+        db.query(
+            "SELECT spec_id, MAX(created_at) FROM spec_messages GROUP BY spec_id",
+            row -> Map.entry(row.text(0), row.text(1)))) {
+      latest.put(entry.getKey(), entry.getValue());
+    }
+    return latest;
+  }
+
   public Optional<MessageRow> findById(String id) {
     return db.queryOne(
         "SELECT " + COLUMNS + " FROM spec_messages WHERE id = ?", MessageStore::map, id);

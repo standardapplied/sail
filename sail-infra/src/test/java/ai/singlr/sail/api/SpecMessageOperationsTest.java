@@ -155,6 +155,29 @@ class SpecMessageOperationsTest {
   }
 
   @Test
+  void specListCarriesLastActivityFromMessagesOrUpdatedAt() throws Exception {
+    db.execute(
+        """
+        INSERT INTO specs (id, title, project, assignee, created_by, created_at, updated_at)
+        VALUES ('quiet', 'Quiet', 'acme', 'ada', 'ada', '2026-07-01T00:00:00Z',
+            '2026-07-02T00:00:00Z')""");
+    db.execute("UPDATE specs SET updated_at = '2026-07-01T00:00:00Z' WHERE id = 'room'");
+    var posted =
+        operations
+            .postSpecMessage("room", new SpecMessageRequest("activity", null), member("ada"), "ada")
+            .orThrow();
+
+    var listed = operations.globalSpecs(new SpecStore.SpecFilter(null, null, null, null, null));
+    @SuppressWarnings("unchecked")
+    var maps = (List<Map<String, Object>>) listed.orThrow().toMap().get("specs");
+
+    var room = maps.stream().filter(m -> "room".equals(m.get("id"))).findFirst().orElseThrow();
+    assertEquals(posted.message().createdAt(), room.get("last_activity_at"));
+    var quiet = maps.stream().filter(m -> "quiet".equals(m.get("id"))).findFirst().orElseThrow();
+    assertEquals(quiet.get("updated_at"), quiet.get("last_activity_at"));
+  }
+
+  @Test
   void messageModelsMapOptionalFieldsAndDefaults() {
     var emptyRequest = SpecMessageRequest.fromMap(Map.of());
     assertEquals(null, emptyRequest.body());
