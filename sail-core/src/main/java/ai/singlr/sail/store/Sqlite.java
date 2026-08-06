@@ -23,6 +23,13 @@ import java.util.function.Supplier;
  * Thin Panama FFI wrapper over the system {@code libsqlite3.so.0}. Opens a database with WAL mode,
  * foreign keys enabled, and a 5-second busy timeout.
  *
+ * <p>The busy timeout is installed <em>first</em>, before any other pragma. Until it is set the
+ * connection fails instantly on contention, and {@code journal_mode = WAL} briefly needs an
+ * exclusive lock — so opening while any other process held a write lock threw "database is locked"
+ * out of {@link #open} itself, with the very timeout meant to absorb that contention still one
+ * statement away. Every process opens through here (CLI, in-container helpers, the sync server, the
+ * reconciler), so the ordering is what makes concurrent access survivable at all.
+ *
  * <p>Thread-safe at the LOGICAL level, not just the C level: a connection-wide reentrant lock
  * serializes every statement and every whole transaction scope. SQLite's serialized mode ({@code
  * FULLMUTEX}) only protects individual C calls — it happily interleaves two threads' {@code BEGIN}s
@@ -75,9 +82,9 @@ public final class Sqlite implements AutoCloseable {
       }
       var db = dbPtr.get(ValueLayout.ADDRESS, 0);
       var sqlite = new Sqlite(arena, db, lib);
+      sqlite.pragma("busy_timeout", "5000");
       sqlite.pragma("journal_mode", "WAL");
       sqlite.pragma("foreign_keys", "ON");
-      sqlite.pragma("busy_timeout", "5000");
       return sqlite;
     } catch (SqliteException e) {
       throw e;
