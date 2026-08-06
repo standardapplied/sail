@@ -89,10 +89,10 @@ public final class ProjectCreateCommand implements Runnable {
     }
 
     refreshCanonicalFromCatalog();
-    var singYamlPath = resolveSailYamlPath();
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = resolveSailYamlPath();
+    if (!Files.exists(sailYamlPath)) {
       var hint = new StringBuilder();
-      hint.append("Project descriptor not found: ").append(singYamlPath.toAbsolutePath());
+      hint.append("Project descriptor not found: ").append(sailYamlPath.toAbsolutePath());
       if (name != null) {
         hint.append("\n  Run 'sail project init' to create ")
             .append(defaultDescriptorPath(name))
@@ -109,7 +109,7 @@ public final class ProjectCreateCommand implements Runnable {
             LocalIdentity.detect(),
             InteractiveIdentity.canPrompt(yes, json, dryRun, ConsoleHelper.hasConsole()));
     SailYaml config =
-        ProjectDefinitions.resolveForProvisioning(Files.readString(singYamlPath), identity);
+        ProjectDefinitions.resolveForProvisioning(Files.readString(sailYamlPath), identity);
 
     if (config.name() == null || config.name().isBlank()) {
       throw new IllegalStateException("sail.yaml must have a 'name' field.");
@@ -123,7 +123,7 @@ public final class ProjectCreateCommand implements Runnable {
     var projectDir = SailPaths.projectDir(config.name());
     Files.createDirectories(projectDir);
     var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
-    syncProjectBundle(singYamlPath, canonicalYaml);
+    syncProjectBundle(sailYamlPath, canonicalYaml);
     if (!dryRun) {
       ProjectCatalog.record(config.name(), Files.readString(canonicalYaml), null);
     }
@@ -180,7 +180,7 @@ public final class ProjectCreateCommand implements Runnable {
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     var provisioner = new ProjectProvisioner(shell, tracker, listener);
-    provisioner.provision(config, hostYaml, gitTokens, singYamlPath);
+    provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

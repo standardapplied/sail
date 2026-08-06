@@ -14,7 +14,7 @@ This audit covers the current `sail` CLI and runtime trust boundaries:
 - Engineer workstation invoking `sail` locally or through SSH.
 - Bare-metal Ubuntu host running Incus and project containers.
 - Project containers running developer tooling and agent CLIs as the `dev` user.
-- Local API server used by Chorus through an SSH tunnel.
+- Local API server used by a GUI client through an SSH tunnel.
 - Spec directories, generated project files, agent session files, logs, webhooks, GitHub tokens,
   API bearer tokens, release assets, installer scripts, and generated handoff/report artifacts.
 
@@ -30,7 +30,7 @@ This audit covers the current `sail` CLI and runtime trust boundaries:
 - CLI arguments and `sail.yaml` configuration cross from the engineer workstation into host and
   container command execution.
 - Spec content crosses from project data into agent prompts and dispatch flows.
-- Local API requests cross from Chorus into `sail` host operations through bearer-token
+- Local API requests cross from a GUI client into `sail` host operations through bearer-token
   authentication.
 - Agent output crosses from untrusted model/tool execution into PR, handoff, report, and review
   workflows.
@@ -199,7 +199,7 @@ Open items deliberately deferred (need a product decision or larger change, trac
 - Add release signing with cosign or minisign and verify signatures in `install.sh`, `sail upgrade`,
   and the auto-upgrader.
 - Pin GitHub Actions by commit SHA once the release process stabilizes.
-- Add a small API request-rate guard if the API is expected to stay open for long-lived Chorus
+- Add a small API request-rate guard if the API is expected to stay open for long-lived a GUI client
   sessions.
 - Consider replacing npm/global shell install snippets with typed installer implementations.
 - Add a periodic secret-scan job for generated examples, scripts, and release artifacts.

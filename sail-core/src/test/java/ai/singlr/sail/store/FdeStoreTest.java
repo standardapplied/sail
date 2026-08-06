@@ -161,11 +161,11 @@ class FdeStoreTest {
 
   @Test
   void addAssignsGeneratedIdAndActiveStatus() {
-    var fde = store.add("uday", "Uday Chandra", "uday@singlr.ai");
+    var fde = store.add("uday", "Alex Morgan", "alex@example.com");
     assertTrue(fde.id().startsWith("fde_"));
     assertEquals("uday", fde.handle());
-    assertEquals("Uday Chandra", fde.displayName());
-    assertEquals("uday@singlr.ai", fde.email());
+    assertEquals("Alex Morgan", fde.displayName());
+    assertEquals("alex@example.com", fde.email());
     assertEquals("member", fde.role());
     assertEquals("active", fde.status());
   }

@@ -93,12 +93,6 @@ class AuditPersisterTest {
   }
 
   @Test
-  void atDefaultUsesHomeDotSail() {
-    var persister = AuditPersister.atDefault();
-    assertTrue(persister.eventsFilePath().toString().endsWith("/.sail/events.jsonl"));
-  }
-
-  @Test
   void ringBufferDropsOldestPastCapacity(@TempDir Path dir) {
     var persister = new AuditPersister(dir.resolve("e.jsonl"), 2);
     persister.onEvent(Event.of("p", null, "t", "a", "h").withId(1L));

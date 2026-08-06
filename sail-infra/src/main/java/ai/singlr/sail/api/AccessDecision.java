@@ -7,11 +7,11 @@ package ai.singlr.sail.api;
 
 /**
  * The outcome of a resource-scoped {@code AccessPolicy} evaluation: either {@link Allowed} or a
- * {@link Refused} carrying the structured {@link ErrorCode} Mast renders verbatim, a human-readable
- * reason that names the resource's owner, and the concrete fixing action. Shared by {@link
- * SpecPolicy}, {@link RunPolicy}, and {@link ReviewPolicy} so every lane refuses with one envelope
- * ({@code code}, {@code message}, {@code fix}); {@link #enforce()} turns a refusal into the {@link
- * ApiException} the operations layer already propagates.
+ * {@link Refused} carrying the structured {@link ErrorCode} a GUI client renders verbatim, a
+ * human-readable reason that names the resource's owner, and the concrete fixing action. Shared by
+ * {@link SpecPolicy}, {@link RunPolicy}, and {@link ReviewPolicy} so every lane refuses with one
+ * envelope ({@code code}, {@code message}, {@code fix}); {@link #enforce()} turns a refusal into
+ * the {@link ApiException} the operations layer already propagates.
  *
  * <p>Never-silent: a refusal always names both why it happened and how to unblock it.
  */

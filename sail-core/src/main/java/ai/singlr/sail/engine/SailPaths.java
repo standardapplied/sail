@@ -201,17 +201,6 @@ public final class SailPaths {
   }
 
   /**
-   * Expands a leading {@code ~} to the current user's home directory. Returns the path unchanged if
-   * it does not start with {@code ~/}.
-   */
-  public static String expandHome(String path) {
-    if (path != null && path.startsWith("~/")) {
-      return System.getProperty("user.home") + path.substring(1);
-    }
-    return path;
-  }
-
-  /**
    * Path of the event-ingress Unix domain socket: {@code <dataDir>/run/api.sock}, under the
    * control-plane {@link #dataDir()}. A persistent location ({@code /var/lib/sail/run} on a
    * provisioned host, {@code ~/.sail/run} otherwise) chosen deliberately <em>not</em> under {@code

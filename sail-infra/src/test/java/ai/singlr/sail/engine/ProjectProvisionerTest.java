@@ -1417,14 +1417,14 @@ class ProjectProvisionerTest {
 
   @Test
   void workspaceFilesSkippedWhenNoFilesDirectory() throws Exception {
-    var singYaml = tempDir.resolve("sail.yaml");
-    java.nio.file.Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    java.nio.file.Files.writeString(sailYaml, "name: test");
 
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
-    provisioner.provision(fullConfig(), hostYaml(), null, singYaml);
+    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
     assertTrue(
         steps.stream()
@@ -1437,14 +1437,14 @@ class ProjectProvisionerTest {
     java.nio.file.Files.createDirectories(filesDir.resolve("outline"));
     java.nio.file.Files.writeString(filesDir.resolve("outline/.env"), "KEY=VALUE");
     java.nio.file.Files.writeString(filesDir.resolve("setup.sh"), "#!/bin/bash");
-    var singYaml = tempDir.resolve("sail.yaml");
-    java.nio.file.Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    java.nio.file.Files.writeString(sailYaml, "name: test");
 
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
-    provisioner.provision(fullConfig(), hostYaml(), null, singYaml);
+    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:14/") && s.contains("2 workspace file(s)")));
@@ -1477,14 +1477,14 @@ class ProjectProvisionerTest {
   @Test
   void workspaceFilesSkippedWhenFilesDirEmpty() throws Exception {
     java.nio.file.Files.createDirectories(tempDir.resolve("files"));
-    var singYaml = tempDir.resolve("sail.yaml");
-    java.nio.file.Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    java.nio.file.Files.writeString(sailYaml, "name: test");
 
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
-    provisioner.provision(fullConfig(), hostYaml(), null, singYaml);
+    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
     assertTrue(
         steps.stream()

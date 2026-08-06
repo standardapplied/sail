@@ -69,7 +69,7 @@ Always write modern Java — leverage JDK 25 features, never write old-style cod
 4. **Declarative config.** `sail.yaml` is the source of truth. The container is derived state that can be destroyed and recreated.
 5. **Zero network assumptions.** `sail host init` detects disks, network interfaces, and available resources. No hardcoded device paths or IPs.
 6. **Agent context: sail owns the home layer, the engineer owns the workspace.** Both Claude Code and Codex natively merge a home-level context file with project-level files, so sail writes its generated layer to the home namespace (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) and overwrites it every run, while the engineer owns `~/workspace/CLAUDE.md`/`AGENTS.md` outright — sail never creates or touches it, and (being "closer") it overrides sail's layer on conflict. No `@import` pointer, no `--force`. `sail agent context regen` re-overwrites only sail's home layer.
-7. **Onboarding via `project pull`.** Project descriptors can live in a private GitHub repo. `global.yaml` holds shared defaults; `<project>/sail.yaml` holds overrides. `sail project pull` fetches both, deep-merges them (maps recurse, lists union, scalars override), resolves per-developer placeholders (`${GIT_NAME}`, `${GIT_EMAIL}`, `${SSH_PUBLIC_KEY}`), and writes a ready-to-use `sail.yaml`. Token resolution is consistent everywhere: `--github-token` flag → `GITHUB_TOKEN` env var → interactive prompt.
+7. **Database-backed project sync.** The main box stores project descriptors and shared workspace files in SQLite. Node boxes reconcile that state through the sync protocol; project configuration does not travel through a Git repository or a merged global descriptor.
 
 ## GraalVM Native Image Build
 

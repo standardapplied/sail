@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
  * which spec is ready to dispatch next, which are blocked by unmet dependencies, and the kanban
  * counts. Pure functions over the given list — no file or database I/O.
  */
-public final class SpecDirectory {
+public final class SpecCatalog {
 
   /** Statuses an engineer may assign by hand via {@code sail spec status}. */
   public static final Set<SpecStatus> CLI_SETTABLE =
@@ -42,7 +42,7 @@ public final class SpecDirectory {
     }
   }
 
-  private SpecDirectory() {}
+  private SpecCatalog() {}
 
   /**
    * Returns the first pending spec whose dependencies are all done and whose assignee matches the

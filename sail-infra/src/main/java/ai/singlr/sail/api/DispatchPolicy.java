@@ -16,9 +16,9 @@ import java.util.Objects;
  *
  * <p>It enforces one invariant above all: <em>a spec executes only on the node whose handle equals
  * the spec's assignee</em>. Node identity is {@code SyncConfig.handle} — one FDE, one devbox — so
- * an FDE dispatching on their own box (over the CLI or over Mast's passkey session to that box)
- * always matches; anyone, admin included, asking a box to run another FDE's spec is refused with
- * the owning node named. Moving work is explicit: reassign the spec, then dispatch.
+ * an FDE dispatching on their own box (over the CLI or over a GUI client's passkey session to that
+ * box) always matches; anyone, admin included, asking a box to run another FDE's spec is refused
+ * with the owning node named. Moving work is explicit: reassign the spec, then dispatch.
  *
  * <p>Fails closed at every step: a box with no handle can run nothing, a read-only credential is
  * refused, and a caller whose handle does not match the spec's assignee cannot dispatch unless they

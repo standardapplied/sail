@@ -770,15 +770,15 @@ class AgentSessionTest {
 
   @Test
   void launchWorkDirUsesSingleTargetRepo() {
-    var repo = new SailYaml.Repo("https://github.com/org/chorus.git", "chorus", null);
+    var repo = new SailYaml.Repo("https://github.com/org/web.git", "web", null);
 
-    assertEquals("/home/dev/workspace/chorus", AgentSession.launchWorkDir("dev", List.of(repo)));
+    assertEquals("/home/dev/workspace/web", AgentSession.launchWorkDir("dev", List.of(repo)));
   }
 
   @Test
   void launchWorkDirUsesWorkspaceForMultipleTargets() {
-    var first = new SailYaml.Repo("https://github.com/org/chorus.git", "chorus", null);
-    var second = new SailYaml.Repo("https://github.com/org/sing.git", "sing", null);
+    var first = new SailYaml.Repo("https://github.com/org/web.git", "web", null);
+    var second = new SailYaml.Repo("https://github.com/org/api.git", "api", null);
 
     assertEquals("/home/dev/workspace", AgentSession.launchWorkDir("dev", List.of(first, second)));
   }

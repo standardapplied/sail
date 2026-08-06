@@ -17,7 +17,7 @@ class PersonalFieldsTest {
 
   @Test
   void redactsGitIdentityToPlaceholders() {
-    var redacted = PersonalFields.redact("git:\n  name: Uday Chandra\n  email: uday@example.com\n");
+    var redacted = PersonalFields.redact("git:\n  name: Alex Morgan\n  email: uday@example.com\n");
     var git = git(redacted);
     assertEquals("${GIT_NAME}", git.get("name"));
     assertEquals("${GIT_EMAIL}", git.get("email"));
@@ -110,9 +110,9 @@ class PersonalFieldsTest {
   void redactedDefinitionNoLongerCarriesTheOriginalIdentity() {
     var redacted =
         PersonalFields.redact(
-            "git:\n  name: Uday Chandra\n  email: uday@example.com\n"
+            "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
                 + "ssh:\n  authorized_keys:\n    - ssh-ed25519 SECRETKEY main\n");
-    assertFalse(redacted.contains("Uday Chandra"));
+    assertFalse(redacted.contains("Alex Morgan"));
     assertFalse(redacted.contains("uday@example.com"));
     assertFalse(redacted.contains("SECRETKEY"));
   }

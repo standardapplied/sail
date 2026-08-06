@@ -46,8 +46,8 @@ import java.util.function.Supplier;
  *
  * <p>Authentication is the {@code Authorization: Bearer} header only — the same gate {@code
  * /v1/events/stream} uses. A browser {@code EventSource} cannot set headers and is unsupported; a
- * native client that sets the header (Mast's Rust core, {@code sail agent stream}) authenticates
- * normally.
+ * native client that sets the header (a GUI client's Rust core, {@code sail agent stream})
+ * authenticates normally.
  */
 public final class AgentLogStreamer implements HttpHandler {
 

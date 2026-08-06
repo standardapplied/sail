@@ -25,7 +25,6 @@ public final class NameValidator {
   private static final Pattern VERSION = Pattern.compile("^\\d+(\\.\\d+)*$");
   private static final Pattern SAFE_PATH = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
   private static final Pattern GIT_REF = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
-  static final Pattern GITHUB_REPO = Pattern.compile("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$");
   private static final Pattern SCHEME_GIT_URL = Pattern.compile("^(https?|ssh|git)://[^\\s]+$");
   private static final Pattern SCP_GIT_URL =
       Pattern.compile("^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^\\s]+$");
@@ -148,16 +147,6 @@ public final class NameValidator {
     if (ref == null || !GIT_REF.matcher(ref).matches() || containsDotDot(ref)) {
       throw new IllegalArgumentException(
           "Invalid " + field + ": '" + ref + "'. Must match [a-zA-Z0-9][a-zA-Z0-9._/-]*.");
-    }
-  }
-
-  /** Validates a GitHub repo identifier (owner/name). Throws if invalid. */
-  public static void requireValidGitHubRepo(String repo) {
-    if (repo == null || !GITHUB_REPO.matcher(repo).matches()) {
-      throw new IllegalArgumentException(
-          "Invalid GitHub repository: '"
-              + repo
-              + "'. Must be in 'owner/name' format (e.g. acme-org/backend).");
     }
   }
 

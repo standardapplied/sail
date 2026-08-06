@@ -137,7 +137,7 @@
                                     <!--
                                         Ratchet: each minimum sits just under the weakest module's
                                         actual for that counter, all currently bound by sail-infra
-                                        (~0.57 line / 0.51 branch / 0.75 method / 0.94 class) so the
+                                        (~0.65 line / 0.59 branch / 0.79 method / 0.95 class) so the
                                         current bar is locked in and any regression fails the build.
                                         Raise these as coverage climbs toward 100%.
                                     -->
@@ -145,22 +145,22 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.56</minimum>
+                                            <minimum>0.64</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.74</minimum>
+                                            <minimum>0.79</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.50</minimum>
+                                            <minimum>0.59</minimum>
                                         </limit>
                                         <limit>
                                             <counter>CLASS</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.93</minimum>
+                                            <minimum>0.95</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
@@ -361,31 +361,6 @@
                                             <counter>METHOD</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.0</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>ai.singlr.sail.api.SailOperations</include>
-                                    </includes>
-                                    <!--
-                                        SailOperations dispatch path includes lifecycle event
-                                        publishers and review operations that depend on container
-                                        state or database stores injected at server startup.
-                                        Tested via router integration tests with FakeOperations;
-                                        real operations tested where database is available.
-                                    -->
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.80</minimum>
-                                        </limit>
-                                        <limit>
-                                            <counter>METHOD</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.78</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

@@ -231,28 +231,19 @@ public final class UpgradeCommand implements Runnable {
     var totalSteps = 4;
     if (dryRun) {
       if (!json) {
-        System.out.println(
-            Banner.stepLine(stepNum, totalSteps, "Reconcile + restart sail-api...", Ansi.AUTO));
-        System.out.println(
-            "[dry-run] Would re-render the unit file from the new binary, daemon-reload, and"
-                + " restart sail-api.service when installed.");
+        System.out.println(Banner.stepLine(stepNum, totalSteps, "Restart sail-api...", Ansi.AUTO));
+        System.out.println("[dry-run] Would restart sail-api.service when installed.");
       }
       return RestartStatus.DRY_RUN;
     }
     if (!json) {
-      System.out.println(
-          Banner.stepLine(
-              stepNum, totalSteps, "Reconciling sail-api unit + restart...", Ansi.AUTO));
+      System.out.println(Banner.stepLine(stepNum, totalSteps, "Restarting sail-api...", Ansi.AUTO));
     }
     try {
       var shell = new ShellExecutor(false);
-      var defaultEndpoint = new Endpoint("127.0.0.1", 7070);
       var bootstrap =
           HostServiceInstallers.create(
-              shell,
-              defaultEndpoint.host(),
-              defaultEndpoint.port(),
-              HostServiceInstallers.currentUsername());
+              shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
       if (!bootstrap.isInstalled()) {
         if (!json) {
           var provisioned = Files.exists(SailPaths.hostConfigPath());
@@ -269,34 +260,27 @@ public final class UpgradeCommand implements Runnable {
         }
         return RestartStatus.NOT_INSTALLED;
       }
-      var endpoint = readUnitEndpoint(bootstrap.serviceFilePath()).orElse(defaultEndpoint);
-      var installer =
-          HostServiceInstallers.create(
-              shell, endpoint.host(), endpoint.port(), HostServiceInstallers.currentUsername());
-      var driftReconciled = reconcileUnitFile(installer);
-      var status = installer.status();
+      var status = bootstrap.status();
       if (!status.running()) {
         if (!json) {
           System.out.println(
               Banner.stepDoneLine(
                   stepNum,
                   totalSteps,
-                  "sail-api is installed but not running; left as-is"
-                      + (driftReconciled ? " (unit file reconciled)" : ""),
+                  "sail-api is installed but not running; left as-is",
                   Ansi.AUTO));
         }
         return RestartStatus.NOT_RUNNING;
       }
-      installer.restart();
+      bootstrap.restart();
       if (!json) {
         var modeLabel =
-            installer.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";
-        var reconciledTag = driftReconciled ? " (unit file reconciled)" : "";
+            bootstrap.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";
         System.out.println(
             Banner.stepDoneLine(
                 stepNum,
                 totalSteps,
-                "Restarted sail-api (" + modeLabel + ") on the new binary" + reconciledTag,
+                "Restarted sail-api (" + modeLabel + ") on the new binary",
                 Ansi.AUTO));
       }
       return RestartStatus.RESTARTED;
@@ -312,53 +296,6 @@ public final class UpgradeCommand implements Runnable {
       }
       return RestartStatus.FAILED;
     }
-  }
-
-  /**
-   * Re-renders the unit file iff it drifted from the new binary's template, then {@code
-   * daemon-reload}s. Skipping this would let template changes shipped with a new binary stay
-   * invisible to systemd — the bug class that held 0.12.5 / 0.12.6 stuck on the 0.12.0 {@code
-   * RuntimeDirectory} mode and held 0.13.6 stuck on the legacy {@code sail api} command.
-   */
-  private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
-    return installer.reconcile();
-  }
-
-  /** Bind address + port pair extracted from a sail-api unit file's {@code ExecStart}. */
-  record Endpoint(String host, int port) {}
-
-  /**
-   * Reads the existing sail-api unit file and pulls the {@code --host}/{@code --port} values out of
-   * the {@code ExecStart=} line so the reconcile step preserves the operator's configured endpoint.
-   * Returns empty when the file can't be parsed; the caller falls back to the bootstrap defaults.
-   */
-  static Optional<Endpoint> readUnitEndpoint(Path unitFile) {
-    try {
-      var content = Files.readString(unitFile);
-      var host = extractOption(content, "--host");
-      var port = extractOption(content, "--port");
-      if (host == null || port == null) {
-        return Optional.empty();
-      }
-      return Optional.of(new Endpoint(host, Integer.parseInt(port)));
-    } catch (IOException | NumberFormatException e) {
-      return Optional.empty();
-    }
-  }
-
-  private static String extractOption(String unitContent, String optionName) {
-    for (var line : unitContent.split("\n", -1)) {
-      if (!line.stripLeading().startsWith("ExecStart=")) {
-        continue;
-      }
-      var tokens = line.trim().split("\\s+");
-      for (var i = 0; i < tokens.length - 1; i++) {
-        if (optionName.equals(tokens[i])) {
-          return tokens[i + 1];
-        }
-      }
-    }
-    return null;
   }
 
   /**

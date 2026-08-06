@@ -178,15 +178,6 @@ public final class Banner {
     out.println();
   }
 
-  /** Prints the root required message. */
-  public static void printRootRequired(PrintStream out, Ansi ansi) {
-    out.println(
-        amber(
-            ansi,
-            "  @|bold,red \u2717 Root privileges required.|@"
-                + " Run with: @|bold sudo sail host init|@"));
-  }
-
   /** Returns a formatted provisioning step progress line. */
   public static String stepLine(int step, int total, String description, Ansi ansi) {
     return amber(ansi, "  @|bold [" + step + "/" + total + "]|@ " + description);

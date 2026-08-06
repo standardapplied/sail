@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -647,7 +647,7 @@ public final class SailOperations implements Operations {
   private SpecsResponse specsValue(String project) {
     projects.requireExists(project);
     var specs = specStore.projectSpecs(project);
-    var summary = SpecDirectory.summarize(specs);
+    var summary = SpecCatalog.summarize(specs);
     return new SpecsResponse(
         project,
         specs.stream().map(spec -> specView(specs, spec)).toList(),
@@ -658,7 +658,7 @@ public final class SailOperations implements Operations {
   private SpecResponse specValue(String project, String specId) {
     projects.requireExists(project);
     var specs = specStore.projectSpecs(project);
-    var spec = SpecDirectory.findById(specs, specId);
+    var spec = SpecCatalog.findById(specs, specId);
     if (spec == null) {
       throw new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
     }
@@ -819,9 +819,9 @@ public final class SailOperations implements Operations {
         spec.model(),
         spec.reasoningEffort(),
         spec.branch(),
-        SpecDirectory.isReady(specs, spec),
-        SpecDirectory.isBlocked(specs, spec),
-        SpecDirectory.unmetDependencies(specs, spec));
+        SpecCatalog.isReady(specs, spec),
+        SpecCatalog.isBlocked(specs, spec),
+        SpecCatalog.unmetDependencies(specs, spec));
   }
 
   private static DispatchedSpecView dispatchedSpecView(Spec spec, String branch) {
@@ -911,7 +911,7 @@ public final class SailOperations implements Operations {
         counts.getOrDefault("done", 0));
   }
 
-  private static BoardSummaryView boardSummaryView(SpecDirectory.Summary summary) {
+  private static BoardSummaryView boardSummaryView(SpecCatalog.Summary summary) {
     return new BoardSummaryView(
         summaryView(summary.counts()),
         summary.readyCount(),

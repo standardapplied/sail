@@ -11,7 +11,7 @@ import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
@@ -582,13 +582,13 @@ public final class DispatchOperations {
    */
   static SpecResolution resolveSpec(
       List<Spec> specs, String specId, boolean restart, Actor actor, String localHandle) {
-    var spec = Strings.isBlank(specId) ? null : SpecDirectory.findById(specs, specId);
+    var spec = Strings.isBlank(specId) ? null : SpecCatalog.findById(specs, specId);
     if (spec == null) {
       if (RestartResolution.decide(specId, null, restart)
           instanceof RestartResolution.Refused refused) {
         throw refusal(refused);
       }
-      var next = SpecDirectory.nextReadyAssignedTo(specs, localHandle);
+      var next = SpecCatalog.nextReadyAssignedTo(specs, localHandle);
       if (next == null) {
         return SpecResolution.none();
       }
@@ -599,7 +599,7 @@ public final class DispatchOperations {
     return switch (RestartResolution.decide(specId, spec, restart)) {
       case RestartResolution.Refused refused -> throw refusal(refused);
       case RestartResolution.NotRestarted ignored -> {
-        if (!SpecDirectory.isReady(specs, spec)) {
+        if (!SpecCatalog.isReady(specs, spec)) {
           throw new ApiException(
               ErrorCode.SPEC_NOT_READY,
               "Spec '" + specId + "' is not ready for dispatch.",

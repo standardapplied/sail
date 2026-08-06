@@ -25,7 +25,8 @@ inherits:
   `sqlite_master` diff test against the captured floor fixture (`FloorSchema`) — the
   on-ramp from the floor is a single version stamp, and anything below the floor is
   refused with an error naming the release that can still carry it forward. The v1
-  baseline's floor is sail 0.14.x (schema v125).
+  baseline's schema floor is v118, produced by sail 0.14.x. Fleet sync requires sail
+  0.15.0 or later.
 - **No downgrade path.** Schema changes are forward-only; the floor mechanism above is
   the only supported way to cross a baseline.
 - **One-shot data fix-ups are not schema migrations.** They belong in the

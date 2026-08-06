@@ -280,9 +280,9 @@ public final class ProjectApplier {
    * Pushes workspace files from the local {@code files/} directory into the container at {@code
    * ~/workspace/}. Pushes each file individually to preserve correct path structure.
    */
-  public ApplyResult applyWorkspaceFiles(String name, Path singYamlPath, String sshUser)
+  public ApplyResult applyWorkspaceFiles(String name, Path sailYamlPath, String sshUser)
       throws IOException, InterruptedException, TimeoutException {
-    var filesDir = WorkspaceFiles.resolveFilesDir(singYamlPath);
+    var filesDir = WorkspaceFiles.resolveFilesDir(sailYamlPath);
     if (filesDir == null) {
       return ApplyResult.empty();
     }

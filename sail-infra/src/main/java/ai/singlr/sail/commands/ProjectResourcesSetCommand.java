@@ -208,12 +208,12 @@ public final class ProjectResourcesSetCommand implements Runnable {
     return value == null ? "" : value.strip().replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
   }
 
-  private void printAlreadyCurrent(Path singYamlPath, SailYaml.Resources desiredResources) {
+  private void printAlreadyCurrent(Path sailYamlPath, SailYaml.Resources desiredResources) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("status", "unchanged");
-      map.put("descriptor", singYamlPath.toAbsolutePath().toString());
+      map.put("descriptor", sailYamlPath.toAbsolutePath().toString());
       map.put("resources", resourceMap(desiredResources));
       out.println(YamlUtil.dumpJson(map));
       return;
@@ -223,7 +223,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
   }
 
   private void printResult(
-      Path singYamlPath,
+      Path sailYamlPath,
       SailYaml.Resources previous,
       SailYaml.Resources desired,
       boolean descriptorChanged,
@@ -232,7 +232,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
-      map.put("descriptor", singYamlPath.toAbsolutePath().toString());
+      map.put("descriptor", sailYamlPath.toAbsolutePath().toString());
       map.put("dry_run", dryRun);
       map.put("updated_descriptor", descriptorChanged);
       map.put("applied_live", liveChanged);
@@ -247,7 +247,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
       out.println(
           Ansi.AUTO.string(
               "  @|green \u2713|@ Updated sail.yaml @|faint "
-                  + singYamlPath.toAbsolutePath()
+                  + sailYamlPath.toAbsolutePath()
                   + "|@"));
     }
     if (liveChanged) {

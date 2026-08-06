@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
  * <p>{@link #AWAITING_MERGE} sits between the review gate and completion: the review passed, the
  * pull request is open, and a human still has to merge it on the forge and mark the spec {@link
  * #DONE}. {@link #DRAFT} is the explicit pre-planning bucket; {@link #ARCHIVED} is hidden from the
- * default board. Only {@link SpecDirectory#CLI_SETTABLE} statuses may be assigned by hand via
- * {@code sail spec status}.
+ * default board. Only {@link SpecCatalog#CLI_SETTABLE} statuses may be assigned by hand via {@code
+ * sail spec status}.
  *
  * <p>{@link #CANCELLED} is the terminal record of an operator's clean stop: the spec's run was
  * deliberately halted, not finished. It is intentionally outside every set the lifecycle machinery

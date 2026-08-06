@@ -27,7 +27,7 @@ to do it. Every feature is judged by whether it helps coordinate agents.
   central scheduler.
 - **Cross-agent review pipelines.** When one agent writes the code, another can review it.
 - **Remote operation.** Through the CLI (on the box or from a Mac thin client), through
-  Mast (a desktop GUI client, in development), and through future mobile clients.
+  a desktop GUI client, and through future mobile clients.
 
 ### Glossary
 
@@ -39,11 +39,11 @@ to do it. Every feature is judged by whether it helps coordinate agents.
   definitions. A **node** is a box pointed at a main that syncs to it. A **standalone** box
   has no sync peer. Standalone is the default, and sync is opt-in.
 - **`sail-api`.** The per-box control-plane service: a loopback HTTP API and event stream
-  that the CLI, in-container agents, and Mast talk to. It runs as a systemd unit.
+  that the CLI, in-container agents, and GUI clients talk to. It runs as a systemd unit.
 - **Client.** A thin machine, typically a Mac, that drives a box remotely over SSH and runs
   no control plane of its own.
-- **Mast.** A desktop GUI client for FDEs who prefer a GUI, currently in development. It
-  connects to a box's API for specs and review, and to its workspaces for execution.
+- **GUI clients.** Desktop clients for FDEs who prefer a GUI connect to a box's API for
+  specs and review, and to its workspaces for execution.
 
 ## Topology: one main, many nodes
 
@@ -59,7 +59,7 @@ to do it. Every feature is judged by whether it helps coordinate agents.
    └────────────────────────────┘             └──────────────────────────────────────────┘
          ▲                                                ▲
          │ SSH (gateway: sail@box, _gateway --fde)        │
-   ┌─────┴───────────┐                              Mast / browser, HTTP via a TLS reverse
+   ┌─────┴───────────┐                              GUI client / browser, HTTP via a TLS reverse
    │ Mac thin client │                              proxy with passkeys, to sail-api
    │ sail (darwin)   │
    └─────────────────┘
@@ -106,7 +106,7 @@ normally runs as the `sail-api` systemd service rather than by hand.
 
 ### The store layer (`ai.singlr.sail.store`)
 
-Thirteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
+Sixteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
 
 | Store | Owns | Synced across boxes? |
 |---|---|---|
@@ -460,7 +460,7 @@ are lossy by design so publishers never block) fans out to the SSE stream and to
 reactors: audit persistence, the webhook reactor, and the spec lifecycle reactor, which
 advances a spec from `in_progress` to `review` when its agent session ends. A
 `board_updated` event after a sync that changed the board surfaces an updates-available
-banner in the CLI and in Mast.
+banner in the CLI and in GUI clients.
 
 ## Security model
 
@@ -478,7 +478,7 @@ and `Authorizer`:
    `_sync` is admitted, and everything else is refused. A short-lived session is minted per invocation. `sail fde
    add <handle> --key "<pubkey>"` is the whole enrollment, and removing the key revokes SSH
    and API access in one step.
-2. **Web, opt-in and off by default: passkeys and WebAuthn.** For Mast and browser clients
+2. **Web, opt-in and off by default: passkeys and WebAuthn.** For GUI and browser clients
    only. Until the operator configures the `webauthn` block (RP id and origins) the
    endpoints answer `503`. Login start and finish are unauthenticated by design.
    Registration needs an enrollment ticket or an authenticated admin.
@@ -513,7 +513,7 @@ these roles distinct is what lets the synced catalog stay identity-free.
 - **Rate limiting.** A per-credential token-bucket limiter, defaulting to 600 per minute,
   sits after auth in the API router and returns `429` when exceeded.
 - **Transport and TLS are out of scope by design.** `sail-api` serves plain HTTP on loopback
-  and never terminates TLS or issues certificates. For network or browser access (Mast,
+  and never terminates TLS or issues certificates. For network or browser access (a GUI client,
   passkeys) the operator fronts it with a TLS-terminating reverse proxy such as Caddy,
   Traefik, or nginx, which owns the public hostname and the cert lifecycle. For passkeys, the
   secure context and the RP id are the browser's view of the proxy's `https://` origin.
@@ -537,34 +537,31 @@ See `SECURITY_AUDIT.md` for the full checklist and the accepted risks.
 ## Known gaps and evolution
 
 These are the deliberate edges between today's tool and the multi-FDE platform that must
-support Mast and direct-API clients:
+support GUI and direct-API clients:
 
 1. **Project lifecycle is host-privileged, not API-backed.** `project up` and `project
    create` drive `incus` directly, so they cannot ride the FDE gateway, and provisioning
    needs admin SSH. The fix is for the control plane, which is already root on the box, to
    own provisioning and for the CLI to become a pure client. This is the largest gap before a
    member-role FDE can create containers without host privileges.
-2. **The host admin token rides along for back-compat**, where a missing role maps to ADMIN.
-   Once SSH-key and passkey identity are field-proven, it should be scoped down to
-   break-glass.
-3. **Two remote-config models.** `ClientConfig` (SSH-forward through `host` and `user`) and
+2. **Two remote-config models.** `ClientConfig` (SSH-forward through `host` and `user`) and
    `ServerConnectionConfig` (HTTP API through `server` and `token`) both read
    `~/.sail/config.yaml` with different keys. SSH-forwarding papers over this today, but a
-   direct-API client (Mast, or a future direct-mode CLI) needs them reconciled. `sail login`
-   and `sail enroll` now run their passkey ceremonies from a forwarding client over a
+   direct-API client (a GUI client, or a future direct-mode CLI) needs them reconciled.
+   `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
-4. **Sync identity is the box hostname.** Replicas key off the hostname rather than a stable
+3. **Sync identity is the box hostname.** Replicas key off the hostname rather than a stable
    per-box id, so renames or collisions could confuse sync identity. A stable id is the
    robust fix. The risk is low for a known small fleet and worth doing before larger ones.
-5. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
+4. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
    and projects, but shared files have no author column at all, which is a schema change for
    low value, and the change-log's internal author column stays null for projects and files.
-6. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
+5. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
    them out everywhere, since the gateway refuses a disabled role, but the row lingers on
    nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
-7. **One platform per OS.** Mac arm64 and Linux amd64 only.
+6. **One platform per OS.** Mac arm64 and Linux amd64 only.
 
 ## Design invariants to preserve
 

@@ -130,7 +130,7 @@ class FleetSyncTest {
     main.files.put("acme", "scripts/deploy.sh", b64("deploy"));
     main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
     main.projects.upsert("outline", "name: outline\n", "uday");
-    main.fdes.add("uday", "Uday Chandra", "uday@example.com", "admin");
+    main.fdes.add("uday", "Alex Morgan", "uday@example.com", "admin");
     main.fdes.add("mady", "Mady M", "mady@example.com", "member");
   }
 
@@ -162,7 +162,7 @@ class FleetSyncTest {
     main.projects.upsert(
         "acme",
         "name: acme\n"
-            + "git:\n  name: Uday Chandra\n  email: uday@example.com\n"
+            + "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
             + "ssh:\n  authorized_keys:\n    - ssh-ed25519 UDAYKEY uday@main\n",
         "uday");
 
@@ -171,7 +171,7 @@ class FleetSyncTest {
     var onNode = node.projects.findByName("acme").orElseThrow().definition();
     assertTrue(onNode.contains("${GIT_NAME}"), "the node sees a placeholder, not Uday's name");
     assertTrue(onNode.contains("${SSH_PUBLIC_KEY}"), "and a placeholder, not Uday's key");
-    assertFalse(onNode.contains("Uday Chandra"));
+    assertFalse(onNode.contains("Alex Morgan"));
     assertFalse(onNode.contains("uday@example.com"));
     assertFalse(onNode.contains("UDAYKEY"), "main's SSH key never lands on the node");
   }
