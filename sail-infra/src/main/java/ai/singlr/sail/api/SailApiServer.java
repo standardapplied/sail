@@ -159,6 +159,37 @@ public final class SailApiServer implements AutoCloseable {
       SpecStore specStore,
       ReviewPipelineController reviewController)
       throws IOException {
+    this(
+        host,
+        port,
+        operations,
+        auth,
+        eventBus,
+        auditSubscriber,
+        socketPath,
+        passkeyHandler,
+        specStore,
+        reviewController,
+        new RateLimitGate());
+  }
+
+  /**
+   * Constructor seam that lets a caller supply the {@link RateLimitGate}, so tests can pin a tiny
+   * budget. Every context served over TCP is gated by this one instance.
+   */
+  SailApiServer(
+      String host,
+      int port,
+      Operations operations,
+      ApiAuth auth,
+      EventBus eventBus,
+      EventSubscriber auditSubscriber,
+      Path socketPath,
+      HttpHandler passkeyHandler,
+      SpecStore specStore,
+      ReviewPipelineController reviewController,
+      RateLimitGate rateLimits)
+      throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
     this.persisterSubscription =
@@ -174,16 +205,17 @@ public final class SailApiServer implements AutoCloseable {
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
-    server.createContext("/", new ApiRouter(operations, auth, new AgentLogStreamer(auth)));
+    server.createContext(
+        "/", new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)));
     if (passkeyHandler != null) {
-      server.createContext("/v1/auth", passkeyHandler);
-      var pages = new WebauthnPageHandler();
+      server.createContext("/v1/auth", rateLimits.wrap(passkeyHandler));
+      var pages = rateLimits.wrap(new WebauthnPageHandler());
       server.createContext("/login", pages);
       server.createContext("/enroll", pages);
     }
     if (eventBus != null) {
       sseHandler = new SseHandler(eventBus, auth);
-      server.createContext("/v1/events/stream", sseHandler);
+      server.createContext("/v1/events/stream", rateLimits.wrap(sseHandler));
       socketListener =
           socketPath == null ? null : new LocalApiSocket(eventBus, operations, socketPath);
     } else {

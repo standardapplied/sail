@@ -184,6 +184,12 @@ reflected/DOM XSS. Fixed:
   checks each address (incl. IPv4-mapped IPv6 like `::ffff:169.254.169.254`, full 169.254/16,
   CGNAT 100.64/10, ULA fc00::/7) instead of string prefixes; fail-closed on resolution failure.
 - **No-store on passkey responses** so a session-token body is never cached.
+- **One rate limiter over every TCP context.** The limiter lived inside `ApiRouter` and so covered
+  only the `/` context; `/v1/auth`, `/login`, `/enroll`, and `/v1/events/stream` are separate
+  `HttpContext`s and bypassed it, leaving the unauthenticated passkey ceremony unthrottled
+  (brute-force, challenge-table exhaustion, CPU-DoS). `RateLimitGate` now owns one budget applied
+  before dispatch on every context — keyed by credential once authenticated, by remote address
+  before that. SSE is charged at connection establishment only; the UDS lane stays exempt.
 
 Open items deliberately deferred (need a product decision or larger change, tracked separately):
 - **Route privilege tiers.** The main router maps mutating verbs to WRITE, so a `member` can
