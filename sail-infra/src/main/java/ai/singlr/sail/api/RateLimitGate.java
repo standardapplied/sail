@@ -53,9 +53,17 @@ public final class RateLimitGate {
     this.limiter = Objects.requireNonNull(limiter, "limiter");
   }
 
-  /** Takes one token for the caller; throws {@code 429} when their budget is exhausted. */
+  /**
+   * Charges an <em>authenticated</em> request to its credential, falling back to its address when
+   * the caller has none. Only safe to call after {@link ApiAuth#require} has run on this exchange —
+   * see {@link #wrap} for why the credential cannot be trusted before that.
+   */
   public void require(HttpExchange exchange) {
-    if (!limiter.tryAcquire(keyOf(exchange))) {
+    charge(keyOf(exchange));
+  }
+
+  private void charge(String key) {
+    if (!limiter.tryAcquire(key)) {
       throw new ApiException(
           ErrorCode.RATE_LIMITED,
           "Rate limit exceeded. Slow down and retry shortly.",
@@ -67,12 +75,18 @@ public final class RateLimitGate {
    * Wraps {@code delegate} so the budget is charged before dispatch. An over-budget caller gets the
    * router's problem shape — the same status, media type, and JSON error body — without the
    * delegate ever seeing the request.
+   *
+   * <p>Charging is by address only, never by credential: {@code HttpExchange} attributes are stored
+   * on the {@code HttpContext}, so a {@code token.name} set by {@link ApiAuth#require} on one
+   * request stays readable by every later request to that context. Trusting it here would key an
+   * unauthenticated caller to whoever last authenticated — letting them skip their own budget and
+   * drain that user's instead.
    */
   public HttpHandler wrap(HttpHandler delegate) {
     Objects.requireNonNull(delegate, "delegate");
     return exchange -> {
       try {
-        require(exchange);
+        charge("address:" + addressKey(exchange.getRemoteAddress()));
       } catch (ApiException e) {
         try {
           writeError(exchange, e);

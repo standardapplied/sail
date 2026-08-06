@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -94,6 +95,7 @@ class RateLimitGateTest {
   }
 
   @Test
+  @Timeout(60)
   void establishedStreamIsNotMeteredPerEvent(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus();
         var server = server(tmp, null, bus, oneRequest())) {
@@ -104,8 +106,10 @@ class RateLimitGateTest {
           client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofInputStream());
       assertEquals(200, stream.statusCode());
 
-      var second = client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofString());
+      var second =
+          client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofInputStream());
       assertEquals(429, second.statusCode());
+      second.body().close();
 
       var reader = new BufferedReader(new InputStreamReader(stream.body(), StandardCharsets.UTF_8));
       var delivered = new CountDownLatch(1);
@@ -149,6 +153,37 @@ class RateLimitGateTest {
     client.close();
     bus.publish(Event.of("light", null, "spec_dispatched", "sail", "h"));
     bus.publish(Event.of("light", null, "spec_dispatched", "sail", "h"));
+  }
+
+  /**
+   * A caller reaching the gate before authentication must be charged to their address, never to the
+   * credential of whoever authenticated last. {@code HttpExchange} attributes live on the
+   * HttpContext, so the {@code token.name} that {@link SseHandler} sets while serving one stream is
+   * still readable when the next connection arrives; keying on it hands the newcomer a full budget
+   * under someone else's name — and here that means a second stream is established instead of
+   * refused.
+   */
+  @Test
+  @Timeout(60)
+  void aSecondStreamIsRefusedNotChargedToTheFirstStreamsCredential(@TempDir Path tmp)
+      throws Exception {
+    try (var bus = new EventBus();
+        var server = server(tmp, null, bus, oneRequest())) {
+      server.start();
+
+      try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
+        var first =
+            client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(200, first.statusCode());
+
+        var second =
+            client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(429, second.statusCode(), "the address budget is spent");
+        second.body().close();
+        first.body().close();
+      }
+      bus.publish(Event.of("light", null, "spec_dispatched", "sail", "h"));
+    }
   }
 
   @Test
