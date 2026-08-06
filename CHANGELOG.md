@@ -4,6 +4,22 @@
 
 No unreleased changes.
 
+## 0.17.3
+
+- The SQLite busy timeout is now set before any other pragma. Opening a database while another
+  process held a write lock could fail outright with "database is locked" — the CLI, the
+  in-container `spec` helper, the sync server, and the reconciler all open through that path.
+- One rate limiter now covers every TCP context. The passkey ceremony endpoints (`/v1/auth`),
+  the login and enroll pages, and SSE connection establishment sat outside the limiter and were
+  unthrottled; callers reaching the server before authentication are throttled by address (IPv6
+  grouped by /64), and authenticated callers stay throttled by credential. SSE is charged once at
+  connection establishment, never per event, and `/v1/health` stays unmetered.
+- Documentation corrections: the upgrade floor is 0.15.0 (README and CHANGELOG said 0.14.0, which
+  would strand an operator whose fleet sync then refused them) and the schema floor is v118
+  (CONTRIBUTING said v125). Releases 0.15.0 through 0.17.2 now have changelog entries.
+- Retired code removed: the `global.yaml` merge and file-era spec scaffolding from the withdrawn
+  GitHub project-pull flow, plus internal helpers no longer called by anything shipped.
+
 ## 0.17.2
 
 - Spec listings now expose `last_activity_at` so clients can order rooms by recent activity.
