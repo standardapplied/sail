@@ -63,44 +63,33 @@ public final class ApiRouter implements HttpHandler {
   private static final int MAX_TAIL = 5000;
   private static final int DEFAULT_RECENT = 100;
 
-  private static final int DEFAULT_PERMITS_PER_MINUTE = 600;
-  private static final int DEFAULT_BURST = 600;
-
   private final Operations operations;
   private final ApiAuth auth;
-  private final RateLimiter rateLimiter;
+  private final RateLimitGate rateLimits;
   private final AgentLogStreamer agentStreamer;
   private final Supplier<String> nodeHandle;
 
   public ApiRouter(Operations operations, ApiAuth auth, RateLimiter rateLimiter) {
-    this(operations, auth, rateLimiter, null);
-  }
-
-  public ApiRouter(Operations operations, ApiAuth auth, AgentLogStreamer agentStreamer) {
-    this(
-        operations,
-        auth,
-        RateLimiter.perMinute(DEFAULT_PERMITS_PER_MINUTE, DEFAULT_BURST),
-        agentStreamer);
+    this(operations, auth, new RateLimitGate(rateLimiter), null);
   }
 
   public ApiRouter(
       Operations operations,
       ApiAuth auth,
-      RateLimiter rateLimiter,
+      RateLimitGate rateLimits,
       AgentLogStreamer agentStreamer) {
-    this(operations, auth, rateLimiter, agentStreamer, NodeIdentity::handle);
+    this(operations, auth, rateLimits, agentStreamer, NodeIdentity::handle);
   }
 
   ApiRouter(
       Operations operations,
       ApiAuth auth,
-      RateLimiter rateLimiter,
+      RateLimitGate rateLimits,
       AgentLogStreamer agentStreamer,
       Supplier<String> nodeHandle) {
     this.operations = operations;
     this.auth = auth;
-    this.rateLimiter = rateLimiter;
+    this.rateLimits = rateLimits;
     this.agentStreamer = agentStreamer;
     this.nodeHandle = nodeHandle;
   }
@@ -151,7 +140,7 @@ public final class ApiRouter implements HttpHandler {
   private void handleStream(HttpExchange exchange) throws IOException {
     try {
       auth.require(exchange);
-      requireWithinRateLimit(exchange);
+      rateLimits.require(exchange);
       Authorizer.require(exchange, Capability.READ);
     } catch (ApiException e) {
       try {
@@ -171,7 +160,7 @@ public final class ApiRouter implements HttpHandler {
     }
 
     auth.require(exchange);
-    requireWithinRateLimit(exchange);
+    rateLimits.require(exchange);
     Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
 
     if (request.matches(GET, V1, WHOAMI)) {
@@ -220,21 +209,6 @@ public final class ApiRouter implements HttpHandler {
       case CONNECT -> routeConnect(request, project);
       default -> throw notFound();
     };
-  }
-
-  /**
-   * Throttles per credential after authentication, so one client (a token's worth of identity)
-   * cannot exhaust the server. Keyed by token name; the role gate runs next, so even a request the
-   * caller is not authorized for still counts against their budget.
-   */
-  private void requireWithinRateLimit(HttpExchange exchange) {
-    var key = Objects.toString(exchange.getAttribute("token.name"), "anonymous");
-    if (!rateLimiter.tryAcquire(key)) {
-      throw new ApiException(
-          ErrorCode.RATE_LIMITED,
-          "Rate limit exceeded. Slow down and retry shortly.",
-          "This credential exceeded " + DEFAULT_PERMITS_PER_MINUTE + " requests per minute.");
-    }
   }
 
   private ApiResponse routeProject(RouteRequest request, String project) {
