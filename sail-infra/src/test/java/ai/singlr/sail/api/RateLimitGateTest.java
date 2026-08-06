@@ -11,17 +11,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpContext;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpPrincipal;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -145,6 +155,177 @@ class RateLimitGateTest {
   void gateRejectsANullLimiterAndNullHandler() {
     assertThrows(NullPointerException.class, () -> new RateLimitGate(null));
     assertThrows(NullPointerException.class, () -> new RateLimitGate().wrap(null));
+  }
+
+  @Test
+  void oneIpv6HostCannotMintAFreshBudgetPerSourceAddress() {
+    var gate = oneRequest();
+
+    gate.require(from("2001:db8:1:1::1"));
+
+    assertThrows(
+        ApiException.class,
+        () -> gate.require(from("2001:db8:1:1::2")),
+        "a second address in the same /64 draws on the same budget");
+  }
+
+  @Test
+  void separateIpv6PrefixesKeepSeparateBudgets() {
+    var gate = oneRequest();
+
+    gate.require(from("2001:db8:1:1::1"));
+    gate.require(from("2001:db8:1:2::1"));
+  }
+
+  @Test
+  void ipv4CallersAreKeyedExactlyIncludingTheirV6MappedForm() {
+    var gate = oneRequest();
+
+    gate.require(from("198.51.100.7"));
+    gate.require(from("::ffff:198.51.100.8"));
+
+    assertThrows(ApiException.class, () -> gate.require(from("::ffff:198.51.100.7")));
+  }
+
+  @Test
+  void aV4MappedAddressArrivingAsIpv6IsStillKeyedExactly() throws Exception {
+    var gate = oneRequest();
+
+    gate.require(mapped("198.51.100.7"));
+    gate.require(mapped("198.51.100.8"));
+
+    assertThrows(
+        ApiException.class,
+        () -> gate.require(mapped("198.51.100.7")),
+        "mapped v4 callers must not collapse into one ::/64 budget");
+  }
+
+  @Test
+  void callersWithNoResolvableAddressShareOneBudget() {
+    var gate = oneRequest();
+
+    gate.require(new AddressExchange(null));
+
+    assertThrows(ApiException.class, () -> gate.require(new AddressExchange(null)));
+  }
+
+  /**
+   * A caller whose v4 address reaches the server in its 16-byte v6-mapped form, which a dual-stack
+   * socket can hand back. Grouping those by /64 would put every IPv4 client on the planet in one
+   * budget, so the gate must key them exactly.
+   */
+  private static HttpExchange mapped(String ipv4) throws Exception {
+    var bytes = new byte[16];
+    bytes[10] = (byte) 0xff;
+    bytes[11] = (byte) 0xff;
+    System.arraycopy(InetAddress.getByName(ipv4).getAddress(), 0, bytes, 12, 4);
+    return new AddressExchange(
+        new InetSocketAddress(Inet6Address.getByAddress(null, bytes, 0), 41000));
+  }
+
+  private static HttpExchange from(String address) {
+    try {
+      return new AddressExchange(new InetSocketAddress(InetAddress.getByName(address), 41000));
+    } catch (UnknownHostException e) {
+      throw new IllegalArgumentException(address, e);
+    }
+  }
+
+  /**
+   * An exchange that carries nothing but a remote address — the pre-auth caller's whole identity.
+   */
+  private static final class AddressExchange extends HttpExchange {
+    private final InetSocketAddress remote;
+    private final Map<String, Object> attributes = new HashMap<>();
+
+    private AddressExchange(InetSocketAddress remote) {
+      this.remote = remote;
+    }
+
+    @Override
+    public InetSocketAddress getRemoteAddress() {
+      return remote;
+    }
+
+    @Override
+    public Object getAttribute(String name) {
+      return attributes.get(name);
+    }
+
+    @Override
+    public void setAttribute(String name, Object value) {
+      attributes.put(name, value);
+    }
+
+    @Override
+    public Headers getRequestHeaders() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Headers getResponseHeaders() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public URI getRequestURI() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String getRequestMethod() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public HttpContext getHttpContext() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void close() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InputStream getRequestBody() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public OutputStream getResponseBody() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void sendResponseHeaders(int code, long length) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InetSocketAddress getLocalAddress() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String getProtocol() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getResponseCode() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public HttpPrincipal getPrincipal() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void setStreams(InputStream input, OutputStream output) {
+      throw new UnsupportedOperationException();
+    }
   }
 
   private static SailApiServer server(

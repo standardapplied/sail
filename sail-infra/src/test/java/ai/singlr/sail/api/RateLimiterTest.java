@@ -59,6 +59,43 @@ class RateLimiterTest {
   }
 
   @Test
+  void aNewKeyEvictsARefilledBucketRatherThanGrowingTheMap() {
+    var clock = new AtomicLong(0);
+    var oneTokenPerSecond = 1d / 1_000_000_000d;
+    var limiter = new RateLimiter(1, oneTokenPerSecond, clock::get, 2);
+
+    assertTrue(limiter.tryAcquire("a"));
+    assertTrue(limiter.tryAcquire("b"));
+    clock.set(1_000_000_000L);
+
+    assertTrue(limiter.tryAcquire("c"), "both buckets refilled, so the cap makes room");
+    assertFalse(limiter.tryAcquire("c"), "the evicting caller still gets a real bucket");
+  }
+
+  @Test
+  void aFloodOfNewKeysIsRefusedRatherThanAllowedToGrowTheMap() {
+    var limiter = new RateLimiter(1, 0d, () -> 0L, 2);
+
+    assertTrue(limiter.tryAcquire("a"));
+    assertTrue(limiter.tryAcquire("b"));
+
+    assertFalse(limiter.tryAcquire("c"), "no bucket can be freed, so the new key is refused");
+    assertFalse(limiter.tryAcquire("d"));
+  }
+
+  @Test
+  void anEvictedKeyStartsFreshWhenItReturns() {
+    var clock = new AtomicLong(0);
+    var limiter = new RateLimiter(1, 1d / 1_000_000_000d, clock::get, 1);
+
+    assertTrue(limiter.tryAcquire("a"));
+    clock.set(1_000_000_000L);
+
+    assertTrue(limiter.tryAcquire("b"), "'a' refilled and was evicted");
+    assertFalse(limiter.tryAcquire("a"), "'a' is refused: 'b' now holds the only slot");
+  }
+
+  @Test
   void perMinuteFactoryBurstsThenThrottles() {
     var limiter = RateLimiter.perMinute(60, 2);
 

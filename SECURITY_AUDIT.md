@@ -189,7 +189,10 @@ reflected/DOM XSS. Fixed:
   `HttpContext`s and bypassed it, leaving the unauthenticated passkey ceremony unthrottled
   (brute-force, challenge-table exhaustion, CPU-DoS). `RateLimitGate` now owns one budget applied
   before dispatch on every context — keyed by credential once authenticated, by remote address
-  before that. SSE is charged at connection establishment only; the UDS lane stays exempt.
+  before that (IPv6 grouped by /64, so a host cannot rotate source addresses to mint fresh budgets).
+  The bucket map is capped and evicts refilled buckets, so an attacker cycling addresses on the
+  pre-auth surface cannot grow it without bound. SSE is charged at connection establishment only;
+  the UDS lane stays exempt.
 
 Open items deliberately deferred (need a product decision or larger change, tracked separately):
 - **Route privilege tiers.** The main router maps mutating verbs to WRITE, so a `member` can
