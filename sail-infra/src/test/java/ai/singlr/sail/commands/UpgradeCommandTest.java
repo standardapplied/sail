@@ -19,29 +19,6 @@ import picocli.CommandLine;
 
 class UpgradeCommandTest {
 
-  @Test
-  void helpTextIncludesOptions() {
-    var cmd = new CommandLine(new UpgradeCommand());
-    var usage = cmd.getUsageMessage();
-
-    assertTrue(usage.contains("upgrade"));
-    assertTrue(usage.contains("--check"));
-    assertTrue(usage.contains("--target"));
-    assertTrue(usage.contains("--dry-run"));
-    assertTrue(usage.contains("--json"));
-  }
-
-  @Test
-  void versionFlagOutputStartsWithSail() {
-    var version = SailVersion.version();
-    assertNotNull(version);
-    assertFalse(version.isBlank());
-
-    var provider = new SailVersion();
-    var lines = provider.getVersion();
-    assertTrue(lines[0].startsWith("sail "));
-  }
-
   @TempDir Path tempDir;
 
   @Test
@@ -56,20 +33,6 @@ class UpgradeCommandTest {
     var endpoint = UpgradeCommand.readUnitEndpoint(unit).orElseThrow();
     assertEquals("10.0.0.5", endpoint.host());
     assertEquals(9999, endpoint.port());
-  }
-
-  @Test
-  void readUnitEndpointHandlesLegacyApiExecStart() throws Exception {
-    var unit = tempDir.resolve("legacy.service");
-    Files.writeString(
-        unit,
-        """
-        [Service]
-        ExecStart=/usr/local/bin/sail api --host 127.0.0.1 --port 7070
-        """);
-    var endpoint = UpgradeCommand.readUnitEndpoint(unit).orElseThrow();
-    assertEquals("127.0.0.1", endpoint.host());
-    assertEquals(7070, endpoint.port());
   }
 
   @Test
@@ -94,6 +57,29 @@ class UpgradeCommandTest {
         ExecStart=/usr/local/bin/sail server start --host 127.0.0.1 --port not-a-number
         """);
     assertTrue(UpgradeCommand.readUnitEndpoint(unit).isEmpty());
+  }
+
+  @Test
+  void helpTextIncludesOptions() {
+    var cmd = new CommandLine(new UpgradeCommand());
+    var usage = cmd.getUsageMessage();
+
+    assertTrue(usage.contains("upgrade"));
+    assertTrue(usage.contains("--check"));
+    assertTrue(usage.contains("--target"));
+    assertTrue(usage.contains("--dry-run"));
+    assertTrue(usage.contains("--json"));
+  }
+
+  @Test
+  void versionFlagOutputStartsWithSail() {
+    var version = SailVersion.version();
+    assertNotNull(version);
+    assertFalse(version.isBlank());
+
+    var provider = new SailVersion();
+    var lines = provider.getVersion();
+    assertTrue(lines[0].startsWith("sail "));
   }
 
   @Test

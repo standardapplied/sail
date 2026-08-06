@@ -34,11 +34,6 @@ public final class AuditPersister implements EventSubscriber {
   private final Object writeLock = new Object();
   private final Object recentLock = new Object();
 
-  /** Persister writing to {@code ~/.sail/events.jsonl} with a 1024-event recent buffer. */
-  public static AuditPersister atDefault() {
-    return new AuditPersister(defaultEventsFile(), DEFAULT_RECENT_CAPACITY);
-  }
-
   public AuditPersister(Path eventsFile, int recentCapacity) {
     if (eventsFile == null) {
       throw new IllegalArgumentException("eventsFile is required");
@@ -119,9 +114,5 @@ public final class AuditPersister implements EventSubscriber {
             "sail audit-persister: failed to append to " + eventsFile + ": " + e.getMessage());
       }
     }
-  }
-
-  private static Path defaultEventsFile() {
-    return Path.of(System.getProperty("user.home"), ".sail", "events.jsonl");
   }
 }

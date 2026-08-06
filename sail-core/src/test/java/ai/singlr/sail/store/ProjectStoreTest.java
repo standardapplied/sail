@@ -150,14 +150,14 @@ class ProjectStoreTest {
   void upsertRedactsPersonalFieldsBeforeStoring() {
     store.upsert(
         "acme",
-        "git:\n  name: Uday Chandra\n  email: uday@example.com\n"
+        "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
             + "ssh:\n  authorized_keys:\n    - ssh-ed25519 SECRETKEY main\n",
         "uday");
 
     var definition = store.findByName("acme").orElseThrow().definition();
     assertTrue(definition.contains("${GIT_NAME}"));
     assertTrue(definition.contains("${SSH_PUBLIC_KEY}"));
-    assertFalse(definition.contains("Uday Chandra"));
+    assertFalse(definition.contains("Alex Morgan"));
     assertFalse(definition.contains("SECRETKEY"));
   }
 

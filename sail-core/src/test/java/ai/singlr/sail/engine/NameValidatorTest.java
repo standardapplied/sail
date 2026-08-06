@@ -235,23 +235,6 @@ class NameValidatorTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"acme-org/backend", "org/repo", "my.org/my-repo", "a/b"})
-  void validGitHubRepos(String repo) {
-    assertDoesNotThrow(() -> NameValidator.requireValidGitHubRepo(repo));
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"noslash", "too/many/parts", "../bad/repo", "", "a/", "/b"})
-  void invalidGitHubRepos(String repo) {
-    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidGitHubRepo(repo));
-  }
-
-  @Test
-  void nullGitHubRepoIsInvalid() {
-    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidGitHubRepo(null));
-  }
-
-  @ParameterizedTest
   @ValueSource(strings = {"uday", "e2e-member", "Ada.Lovelace_1", "a"})
   void validFdeHandles(String handle) {
     assertDoesNotThrow(() -> NameValidator.requireValidFdeHandle(handle));

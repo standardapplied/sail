@@ -31,14 +31,14 @@ final class ProjectLoader {
   }
 
   LoadedProject load(String project) {
-    var singYamlPath = SailPaths.resolveSailYaml(project, file);
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = SailPaths.resolveSailYaml(project, file);
+    if (!Files.exists(sailYamlPath)) {
       throw new ApiException(
           ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
-          "Project descriptor was not found: " + singYamlPath.toAbsolutePath());
+          "Project descriptor was not found: " + sailYamlPath.toAbsolutePath());
     }
     try {
-      var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+      var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
       var state = new ContainerManager(shell).queryState(project);
       return new LoadedProject(config, state);
     } catch (Exception e) {

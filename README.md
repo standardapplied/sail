@@ -24,7 +24,7 @@ a full host. macOS (arm64) runs as a thin client that drives a remote host over 
 
 ### Upgrade compatibility
 
-Version 0.14.0 is the v1 upgrade floor. Upgrade every main and node box to 0.14.0 before
+Version 0.15.0 is the v1 upgrade floor. Upgrade every main and node box to 0.15.0 before
 installing any later v1 release. A mixed fleet below that floor is refused before sync touches
 data, with an error naming the required version.
 

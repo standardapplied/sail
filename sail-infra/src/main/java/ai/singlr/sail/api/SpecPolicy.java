@@ -9,8 +9,8 @@ import ai.singlr.sail.common.Strings;
 
 /**
  * Resource-scoped authorization for the spec aggregate, shared by every lane (the HTTP API a member
- * reaches over {@code sail spec edit} or Mast, and the in-container socket an agent uses). Pure and
- * I/O-free so the full {role × ownership × verb} matrix is table-testable.
+ * reaches over {@code sail spec edit} or a GUI client, and the in-container socket an agent uses).
+ * Pure and I/O-free so the full {role × ownership × verb} matrix is table-testable.
  *
  * <p>Two verbs. {@link #mutate} governs edit / content-write / restore / delete / status change:
  * the spec's assignee or an admin, and for an unassigned spec its creator or an admin. {@link

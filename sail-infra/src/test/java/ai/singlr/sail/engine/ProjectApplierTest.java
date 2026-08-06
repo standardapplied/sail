@@ -688,13 +688,13 @@ class ProjectApplierTest {
     Files.createDirectories(filesDir.resolve("outline"));
     Files.writeString(filesDir.resolve("outline/.env"), "KEY=VALUE");
     Files.writeString(filesDir.resolve("setup.sh"), "#!/bin/bash");
-    var singYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = projectDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, singYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
 
     assertEquals(2, result.added());
     assertTrue(
@@ -724,13 +724,13 @@ class ProjectApplierTest {
 
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenNoFilesDir() throws Exception {
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, singYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
 
     assertEquals(0, result.added());
     assertTrue(shell.invocations().isEmpty());
@@ -739,13 +739,13 @@ class ProjectApplierTest {
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenFilesDirEmpty() throws Exception {
     Files.createDirectories(tempDir.resolve("files"));
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, singYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
 
     assertEquals(0, result.added());
   }
@@ -765,13 +765,13 @@ class ProjectApplierTest {
     var filesDir = tempDir.resolve("files");
     Files.createDirectories(filesDir);
     Files.writeString(filesDir.resolve("config.env"), "X=1");
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
 
-    applier.applyWorkspaceFiles(CONTAINER, singYaml, "dev");
+    applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
 
     assertTrue(
         shell.invocations().stream()

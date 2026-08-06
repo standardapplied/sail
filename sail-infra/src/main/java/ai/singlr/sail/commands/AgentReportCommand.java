@@ -81,11 +81,11 @@ public final class AgentReportCommand implements Runnable {
           throw new IllegalStateException("Container error: " + e.message());
     }
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
+    if (!Files.exists(sailYamlPath)) {
       throw new IllegalStateException("No sail.yaml found at " + file);
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
 
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(name, config, projectSpecs(name), latestSession(name));

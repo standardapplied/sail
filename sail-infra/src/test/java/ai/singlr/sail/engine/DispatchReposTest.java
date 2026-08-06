@@ -23,56 +23,42 @@ class DispatchReposTest {
   void usesSpecRepoWhenProjectHasMultipleRepos() {
     var targets =
         DispatchRepos.resolve(
-            config("sing", "chorus"),
+            config("api", "web"),
             new Spec(
-                "ui",
-                "test",
-                "UI",
-                SpecStatus.PENDING,
-                null,
-                List.of(),
-                List.of("chorus"),
-                "feat/ui"),
+                "ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of("web"), "feat/ui"),
             List.of());
 
-    assertEquals(List.of("chorus"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
   }
 
   @Test
   void overrideWinsOverSpecRepo() {
     var targets =
         DispatchRepos.resolve(
-            config("sing", "chorus"),
+            config("api", "web"),
             new Spec(
-                "ui",
-                "test",
-                "UI",
-                SpecStatus.PENDING,
-                null,
-                List.of(),
-                List.of("sing"),
-                "feat/ui"),
-            List.of("chorus"));
+                "ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of("api"), "feat/ui"),
+            List.of("web"));
 
-    assertEquals(List.of("chorus"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
   }
 
   @Test
   void fallsBackToSingleConfiguredRepo() {
     var targets =
         DispatchRepos.resolve(
-            config("sing"),
+            config("api"),
             new Spec("ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of(), "feat/ui"),
             List.of());
 
-    assertEquals(List.of("sing"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("api"), targets.stream().map(SailYaml.Repo::path).toList());
   }
 
   @Test
   void leavesMultiRepoDispatchUntargetedWhenSpecOmitsRepo() {
     var targets =
         DispatchRepos.resolve(
-            config("sing", "chorus"),
+            config("api", "web"),
             new Spec("ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of(), "feat/ui"),
             List.of());
 
@@ -85,7 +71,7 @@ class DispatchReposTest {
         IllegalArgumentException.class,
         () ->
             DispatchRepos.resolve(
-                config("sing"),
+                config("api"),
                 new Spec(
                     "ui",
                     "test",
@@ -93,7 +79,7 @@ class DispatchReposTest {
                     SpecStatus.PENDING,
                     null,
                     List.of(),
-                    List.of("chorus"),
+                    List.of("web"),
                     "feat/ui"),
                 List.of()));
   }

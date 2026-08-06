@@ -27,10 +27,10 @@ class WorkspaceFilesTest {
   void resolveFilesDirFindsAdjacentDirectory() throws IOException {
     var filesDir = tempDir.resolve("files");
     Files.createDirectories(filesDir);
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
-    var result = WorkspaceFiles.resolveFilesDir(singYaml);
+    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
 
     assertNotNull(result);
     assertEquals(filesDir.toAbsolutePath(), result.toAbsolutePath());
@@ -38,10 +38,10 @@ class WorkspaceFilesTest {
 
   @Test
   void resolveFilesDirReturnsNullWhenNoFilesDir() throws IOException {
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
-    var result = WorkspaceFiles.resolveFilesDir(singYaml);
+    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
 
     assertNull(result);
   }
@@ -50,10 +50,10 @@ class WorkspaceFilesTest {
   void resolveFilesDirReturnsNullWhenFilesIsFile() throws IOException {
     var filesFile = tempDir.resolve("files");
     Files.writeString(filesFile, "not a directory");
-    var singYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
-    var result = WorkspaceFiles.resolveFilesDir(singYaml);
+    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
 
     assertNull(result);
   }
@@ -180,10 +180,10 @@ class WorkspaceFilesTest {
   void resolveFilesDirWorksWithAbsolutePath() throws IOException {
     var filesDir = tempDir.resolve("files");
     Files.createDirectories(filesDir);
-    var singYaml = tempDir.resolve("sail.yaml").toAbsolutePath();
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = tempDir.resolve("sail.yaml").toAbsolutePath();
+    Files.writeString(sailYaml, "name: test");
 
-    var result = WorkspaceFiles.resolveFilesDir(singYaml);
+    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
 
     assertNotNull(result);
   }
@@ -203,10 +203,10 @@ class WorkspaceFilesTest {
   void resolveFilesDirFromSubdirectory() throws IOException {
     var projectDir = tempDir.resolve("myproject");
     Files.createDirectories(projectDir.resolve("files"));
-    var singYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(singYaml, "name: test");
+    var sailYaml = projectDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
 
-    var result = WorkspaceFiles.resolveFilesDir(singYaml);
+    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
 
     assertNotNull(result);
     assertTrue(result.toString().endsWith("files"));

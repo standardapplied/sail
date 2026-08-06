@@ -7,8 +7,9 @@ package ai.singlr.sail.api;
 
 /**
  * The outcome of {@link DispatchPolicy#check}: either {@link Allowed} or a {@link Refused} carrying
- * the structured {@link ErrorCode} Mast renders verbatim, a human-readable reason, and the concrete
- * fixing action. Never-silent: a refusal always names both why it happened and how to unblock it.
+ * the structured {@link ErrorCode} a GUI client renders verbatim, a human-readable reason, and the
+ * concrete fixing action. Never-silent: a refusal always names both why it happened and how to
+ * unblock it.
  */
 public sealed interface DispatchDecision
     permits DispatchDecision.Allowed, DispatchDecision.Refused {

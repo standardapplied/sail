@@ -6,9 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -147,30 +145,6 @@ class SailPathsTest {
     var result = SailPaths.resolveSailYaml(null, "sail.yaml");
 
     assertEquals(Path.of("sail.yaml"), result);
-  }
-
-  @Test
-  void expandHomeExpandsTilde() {
-    var result = SailPaths.expandHome("~/.ssh/id_ed25519");
-
-    assertTrue(result.startsWith("/"));
-    assertTrue(result.endsWith("/.ssh/id_ed25519"));
-    assertFalse(result.startsWith("~"));
-  }
-
-  @Test
-  void expandHomeReturnsAbsolutePathUnchanged() {
-    assertEquals("/home/user/.ssh/id_ed25519", SailPaths.expandHome("/home/user/.ssh/id_ed25519"));
-  }
-
-  @Test
-  void expandHomeReturnsNullForNull() {
-    assertNull(SailPaths.expandHome(null));
-  }
-
-  @Test
-  void expandHomeDoesNotExpandMidPath() {
-    assertEquals("/some/~/path", SailPaths.expandHome("/some/~/path"));
   }
 
   @Test

@@ -72,32 +72,32 @@ class InteractiveIdentityTest {
   @Test
   void promptOffersTheGitConfigDefaultAcceptedWithEnter() {
     stdin("\n");
-    var id = resolver(box("Uday Chandra", "uday@singlr.ai"), true);
+    var id = resolver(box("Alex Morgan", "alex@example.com"), true);
 
-    assertEquals("Uday Chandra", id.apply(PlaceholderResolver.GIT_NAME));
+    assertEquals("Alex Morgan", id.apply(PlaceholderResolver.GIT_NAME));
   }
 
   @Test
   void aTypedValueOverridesTheDefault() {
     stdin("Mady Lee\n");
-    var id = resolver(box("Uday Chandra", "uday@singlr.ai"), true);
+    var id = resolver(box("Alex Morgan", "alex@example.com"), true);
 
     assertEquals("Mady Lee", id.apply(PlaceholderResolver.GIT_NAME));
   }
 
   @Test
   void promptsAsRequiredWhenTheBoxHasNoGitIdentity() {
-    stdin("mady@singlr.ai\n");
+    stdin("taylor@example.com\n");
     var id = resolver(box("", ""), true);
 
-    assertEquals("mady@singlr.ai", id.apply(PlaceholderResolver.GIT_EMAIL));
+    assertEquals("taylor@example.com", id.apply(PlaceholderResolver.GIT_EMAIL));
   }
 
   @Test
   void nonInteractiveUsesTheBoxIdentitySilently() {
-    var id = resolver(box("Uday Chandra", "uday@singlr.ai"), false);
+    var id = resolver(box("Alex Morgan", "alex@example.com"), false);
 
-    assertEquals("uday@singlr.ai", id.apply(PlaceholderResolver.GIT_EMAIL));
+    assertEquals("alex@example.com", id.apply(PlaceholderResolver.GIT_EMAIL));
   }
 
   @Test

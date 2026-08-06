@@ -484,11 +484,11 @@ class SpecStoreTest {
 
   @Test
   void boardScopesCountsAndNextReadyToTheProject() {
-    store.create(spec("sing-ready", "sing", "Sing ready", "pending"));
-    store.create(spec("sing-archived", "sing", "Sing archived", "archived"));
+    store.create(spec("sing-ready", "api", "Sing ready", "pending"));
+    store.create(spec("sing-archived", "api", "Sing archived", "archived"));
     store.create(spec("other-ready", "light-grid", "Other ready", "pending"));
 
-    var board = store.board("sing");
+    var board = store.board("api");
 
     assertEquals(1, board.pending(), "counts only this project's specs");
     assertEquals(1, board.archived(), "archived specs are counted, not dropped");
@@ -498,10 +498,10 @@ class SpecStoreTest {
 
   @Test
   void readySpecsScopesToTheProject() {
-    store.create(spec("sing-ready", "sing", "Sing", "pending"));
+    store.create(spec("sing-ready", "api", "Sing", "pending"));
     store.create(spec("other-ready", "light-grid", "Other", "pending"));
 
-    var ready = store.readySpecs("sing");
+    var ready = store.readySpecs("api");
 
     assertEquals(1, ready.size());
     assertEquals("sing-ready", ready.getFirst().id());

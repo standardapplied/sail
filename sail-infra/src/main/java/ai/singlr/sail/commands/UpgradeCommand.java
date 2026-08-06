@@ -273,7 +273,7 @@ public final class UpgradeCommand implements Runnable {
       var installer =
           HostServiceInstallers.create(
               shell, endpoint.host(), endpoint.port(), HostServiceInstallers.currentUsername());
-      var driftReconciled = reconcileUnitFile(installer);
+      var driftReconciled = installer.reconcile();
       var status = installer.status();
       if (!status.running()) {
         if (!json) {
@@ -312,16 +312,6 @@ public final class UpgradeCommand implements Runnable {
       }
       return RestartStatus.FAILED;
     }
-  }
-
-  /**
-   * Re-renders the unit file iff it drifted from the new binary's template, then {@code
-   * daemon-reload}s. Skipping this would let template changes shipped with a new binary stay
-   * invisible to systemd — the bug class that held 0.12.5 / 0.12.6 stuck on the 0.12.0 {@code
-   * RuntimeDirectory} mode and held 0.13.6 stuck on the legacy {@code sail api} command.
-   */
-  private boolean reconcileUnitFile(SystemdServiceInstaller installer) throws Exception {
-    return installer.reconcile();
   }
 
   /** Bind address + port pair extracted from a sail-api unit file's {@code ExecStart}. */

@@ -28,7 +28,7 @@ class SpecTest {
             "status", "in_progress",
             "assignee", "alice",
             "depends_on", List.of("setup-db"),
-            "repo", "chorus",
+            "repo", "web",
             "branch", "feat/oauth");
 
     var spec = Spec.fromMap(map);
@@ -38,7 +38,7 @@ class SpecTest {
     assertEquals(SpecStatus.IN_PROGRESS, spec.status());
     assertEquals("alice", spec.assignee());
     assertEquals(List.of("setup-db"), spec.dependsOn());
-    assertEquals(List.of("chorus"), spec.repos());
+    assertEquals(List.of("web"), spec.repos());
     assertEquals("feat/oauth", spec.branch());
   }
 
@@ -184,21 +184,21 @@ class SpecTest {
             SpecStatus.DONE,
             "bob",
             List.of("setup"),
-            List.of("chorus"),
+            List.of("web"),
             "feat/auth");
 
     var map = spec.toMap();
 
-    assertEquals("chorus", map.get("repo"));
+    assertEquals("web", map.get("repo"));
     assertFalse(map.containsKey("repos"));
   }
 
   @Test
   void parsesMultipleRepos() {
     var spec =
-        Spec.fromMap(Map.of("id", "auth", "project", "test", "repos", List.of("sing", "chorus")));
+        Spec.fromMap(Map.of("id", "auth", "project", "test", "repos", List.of("api", "web")));
 
-    assertEquals(List.of("sing", "chorus"), spec.repos());
+    assertEquals(List.of("api", "web"), spec.repos());
   }
 
   @Test
@@ -210,8 +210,8 @@ class SpecTest {
                 Map.of(
                     "id", "auth",
                     "project", "test",
-                    "repo", "sing",
-                    "repos", List.of("chorus"))));
+                    "repo", "api",
+                    "repos", List.of("web"))));
   }
 
   @Test

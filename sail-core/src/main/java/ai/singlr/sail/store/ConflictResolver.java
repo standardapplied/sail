@@ -10,8 +10,8 @@ import java.util.Map;
 /**
  * Rebases an entity onto main's conflicting state and writes the chosen resolution, returning the
  * rev the row now carries. Implemented by every store whose rows sync ({@link SpecStore}, {@link
- * FileStore}) so conflict resolution can dispatch on entity type without knowing the concrete
- * store.
+ * ProjectStore}, {@link FileStore}, {@link RunStore}, and {@link ReviewStore}) so conflict
+ * resolution can dispatch on entity type without knowing the concrete store.
  */
 public interface ConflictResolver {
 

@@ -62,14 +62,14 @@ public final class AgentContextRegenCommand implements Runnable {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
+    if (!Files.exists(sailYamlPath)) {
       throw new IllegalStateException(
           "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
+              + sailYamlPath.toAbsolutePath()
               + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);

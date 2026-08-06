@@ -61,9 +61,9 @@ import picocli.CommandLine.Option;
  *
  * <p>With {@code --watch} it loops on an interval, staying up through a transient main outage and
  * resuming from the checkpoint when main returns. Each round that brings remote work (or raises a
- * conflict) emits a {@code board_updated} event onto the local event stream, so the CLI and Mast
- * surface an "updates available" banner. The notification is advisory — a sync that cannot reach
- * the event server still completes.
+ * conflict) emits a {@code board_updated} event onto the local event stream, so the CLI and GUI
+ * clients surface an "updates available" banner. The notification is advisory — a sync that cannot
+ * reach the event server still completes.
  */
 @Command(
     name = "sync",

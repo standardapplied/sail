@@ -109,11 +109,11 @@ public final class ProjectDemoCommand implements Runnable {
     var resolvedYaml = resolveAutoDetected(yamlContent, out, ansi);
 
     var outputDir = Path.of(DEMO_PROJECT);
-    var singYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
+    var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     Files.createDirectories(outputDir);
-    Files.writeString(singYamlPath, resolvedYaml);
+    Files.writeString(sailYamlPath, resolvedYaml);
     if (!json) {
-      out.println(ansi.string("  @|green \u2713|@ " + singYamlPath + " written"));
+      out.println(ansi.string("  @|green \u2713|@ " + sailYamlPath + " written"));
     }
 
     var filesPulled = writeDemoFiles(outputDir, out, ansi);
@@ -123,7 +123,7 @@ public final class ProjectDemoCommand implements Runnable {
         var map = new LinkedHashMap<String, Object>();
         map.put("name", DEMO_PROJECT);
         map.put("source", "catalog");
-        map.put("output", singYamlPath.toAbsolutePath().toString());
+        map.put("output", sailYamlPath.toAbsolutePath().toString());
         map.put("files_pulled", filesPulled);
         map.put("dry_run", true);
         out.println(YamlUtil.dumpJson(map));
@@ -149,7 +149,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     var provisioner = new ProjectProvisioner(shell, tracker, listener);
-    provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), singYamlPath);
+    provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

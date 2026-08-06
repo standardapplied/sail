@@ -8,7 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
@@ -177,9 +177,9 @@ public final class AgentStatusCommand implements Runnable {
     var info = resolveSession(shell, name);
 
     SailYaml config = null;
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (Files.exists(singYamlPath)) {
-      config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
+    if (Files.exists(sailYamlPath)) {
+      config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
     }
 
     var commitCount = 0;
@@ -208,7 +208,7 @@ public final class AgentStatusCommand implements Runnable {
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        taskCounts = SpecDirectory.statusCounts(new SpecStore(db).projectSpecs(name));
+        taskCounts = SpecCatalog.statusCounts(new SpecStore(db).projectSpecs(name));
       } catch (Exception ignored) {
       }
     }
@@ -248,9 +248,9 @@ public final class AgentStatusCommand implements Runnable {
 
   private List<String> resolveRepoPaths(String projectName) {
     try {
-      var singYamlPath = SailPaths.resolveSailYaml(projectName, file);
-      if (Files.exists(singYamlPath)) {
-        var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+      var sailYamlPath = SailPaths.resolveSailYaml(projectName, file);
+      if (Files.exists(sailYamlPath)) {
+        var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
         return config.repoPaths();
       }
     } catch (Exception ignored) {

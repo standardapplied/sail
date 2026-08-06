@@ -94,7 +94,7 @@ public final class DemoProject {
       SECRET_KEY=$(openssl rand -hex 32)
       UTILS_SECRET=$(openssl rand -hex 32)
 
-      # Defaults — match sing.yaml Postgres config (superuser=dev, db=outline)
+      # Defaults — match sail.yaml Postgres config (superuser=dev, db=outline)
       PG_ADMIN="dev"
       DB_USER="dev"
       DB_PASS="dev"

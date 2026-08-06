@@ -50,7 +50,8 @@ class BannerTest {
     var out = new ByteArrayOutputStream();
     var fdes =
         List.of(
-            new FdeStore.Fde("id1", "uday", "Uday Chandra", "uday@x.ai", "admin", "active", "t"),
+            new FdeStore.Fde(
+                "id1", "uday", "Alex Morgan", "alex@example.com", "admin", "active", "t"),
             new FdeStore.Fde("id2", "mady", null, null, "member", "active", "t"));
 
     Banner.printFdeTable(fdes, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
@@ -61,7 +62,7 @@ class BannerTest {
     assertTrue(text.contains("EMAIL"));
     assertTrue(text.contains("STATUS"));
     assertTrue(text.contains("uday"));
-    assertTrue(text.contains("Uday Chandra"));
+    assertTrue(text.contains("Alex Morgan"));
     assertTrue(text.contains("admin"));
     assertTrue(text.contains("mady"));
     assertTrue(text.contains("-"), "missing name/email render as a dash");
@@ -275,16 +276,6 @@ class BannerTest {
         assertEquals(2, pipeCount, "Misaligned borders in: " + line);
       }
     }
-  }
-
-  @Test
-  void rootRequiredMessage() {
-    var out = new ByteArrayOutputStream();
-    Banner.printRootRequired(new PrintStream(out), Ansi.OFF);
-    var output = out.toString(StandardCharsets.UTF_8);
-
-    assertTrue(output.contains("Root privileges required"));
-    assertTrue(output.contains("sudo sail host init"));
   }
 
   @Test

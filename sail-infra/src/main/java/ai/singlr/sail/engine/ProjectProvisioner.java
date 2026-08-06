@@ -58,7 +58,7 @@ public final class ProjectProvisioner {
    * the tracker and the exception is re-thrown.
    */
   public void provision(
-      SailYaml config, HostYaml host, Map<String, String> gitTokens, Path singYamlPath)
+      SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
       throws Exception {
     tracker.load();
     try {
@@ -76,7 +76,7 @@ public final class ProjectProvisioner {
       configureGit(config, gitTokens);
       installMaven(config);
       cloneRepos(config, gitTokens);
-      pushWorkspaceFiles(config, singYamlPath);
+      pushWorkspaceFiles(config, sailYamlPath);
       provisionServices(config);
       configurePruneCron(config);
       installAgentTools(config);
@@ -839,14 +839,14 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void pushWorkspaceFiles(SailYaml config, Path singYamlPath) throws Exception {
+  private void pushWorkspaceFiles(SailYaml config, Path sailYamlPath) throws Exception {
     currentPhase = ProjectPhase.WORKSPACE_FILES_PUSHED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(14, "workspace files already pushed");
       return;
     }
 
-    var filesDir = WorkspaceFiles.resolveFilesDir(singYamlPath);
+    var filesDir = WorkspaceFiles.resolveFilesDir(sailYamlPath);
     if (filesDir == null) {
       tracker.advance(currentPhase);
       stepSkipped(14, "no files/ directory");

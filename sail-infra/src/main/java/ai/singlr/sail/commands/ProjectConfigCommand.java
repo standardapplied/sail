@@ -7,7 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
@@ -175,7 +175,7 @@ public final class ProjectConfigCommand implements Runnable {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return SpecSnapshot.available(SpecDirectory.summarize(new SpecStore(db).projectSpecs(name)));
+      return SpecSnapshot.available(SpecCatalog.summarize(new SpecStore(db).projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");
     }
@@ -202,9 +202,9 @@ public final class ProjectConfigCommand implements Runnable {
     return map;
   }
 
-  private record SpecSnapshot(boolean available, String reason, SpecDirectory.Summary summary) {
+  private record SpecSnapshot(boolean available, String reason, SpecCatalog.Summary summary) {
 
-    private static SpecSnapshot available(SpecDirectory.Summary summary) {
+    private static SpecSnapshot available(SpecCatalog.Summary summary) {
       return new SpecSnapshot(true, null, summary);
     }
 

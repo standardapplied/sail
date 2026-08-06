@@ -62,11 +62,11 @@ public final class WorkspaceFiles {
    *
    * @return the files directory path, or {@code null} if it does not exist or is not a directory
    */
-  public static Path resolveFilesDir(Path singYamlPath) {
-    if (singYamlPath == null) {
+  public static Path resolveFilesDir(Path sailYamlPath) {
+    if (sailYamlPath == null) {
       return null;
     }
-    var parent = singYamlPath.toAbsolutePath().getParent();
+    var parent = sailYamlPath.toAbsolutePath().getParent();
     if (parent == null) {
       return null;
     }

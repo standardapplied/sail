@@ -14,7 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecDirectory;
+import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentContextInstaller;
@@ -122,14 +122,14 @@ public final class RunCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
 
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
+    if (!Files.exists(sailYamlPath)) {
       throw new IllegalStateException(
           "Project descriptor not found: "
-              + singYamlPath.toAbsolutePath()
+              + sailYamlPath.toAbsolutePath()
               + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -177,7 +177,7 @@ public final class RunCommand implements Runnable {
     if (task == null && config.agent() != null) {
       try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
         var store = new SpecStore(db);
-        var nextSpec = SpecDirectory.nextReady(store.projectSpecs(name));
+        var nextSpec = SpecCatalog.nextReady(store.projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
               store.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");

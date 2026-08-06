@@ -279,11 +279,11 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   private SailYaml loadConfig() throws Exception {
-    var singYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(singYamlPath)) {
+    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
+    if (!Files.exists(sailYamlPath)) {
       throw new IllegalStateException("No sail.yaml found at " + file);
     }
-    return SailYaml.fromMap(YamlUtil.parseFile(singYamlPath));
+    return SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
   }
 
   private static WebhookNotifier buildNotifier(Notifications notifications) {

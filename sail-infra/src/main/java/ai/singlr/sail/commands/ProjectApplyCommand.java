@@ -74,7 +74,7 @@ public final class ProjectApplyCommand implements Runnable {
                             + "'. Sync it from main with 'sail sync', or author one with 'sail"
                             + " project init'."));
     SailYaml config = ProjectDefinitions.resolveForProvisioning(definitionText);
-    var singYamlPath =
+    var sailYamlPath =
         explicit != null ? explicit : ProjectDefinitions.materialize(name, definitionText);
 
     var shell = new ShellExecutor(dryRun);
@@ -129,7 +129,7 @@ public final class ProjectApplyCommand implements Runnable {
     totalAdded += repoResult.added();
     totalSkipped += repoResult.skipped();
 
-    var filesResult = applier.applyWorkspaceFiles(name, singYamlPath, sshUser);
+    var filesResult = applier.applyWorkspaceFiles(name, sailYamlPath, sshUser);
     totalAdded += filesResult.added();
     totalSkipped += filesResult.skipped();
 

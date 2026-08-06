@@ -86,27 +86,6 @@ public final class ServicePresets {
     return ALL;
   }
 
-  /** Finds a preset by key, or null if not found. */
-  public static Preset findByKey(String key) {
-    for (var preset : ALL) {
-      if (preset.key().equals(key)) {
-        return preset;
-      }
-    }
-    return null;
-  }
-
-  /** Builds a services map from the selected preset keys, preserving catalog order. */
-  public static Map<String, SailYaml.Service> buildServicesMap(List<String> selectedKeys) {
-    var result = new LinkedHashMap<String, SailYaml.Service>();
-    for (var preset : ALL) {
-      if (selectedKeys.contains(preset.key())) {
-        result.put(preset.key(), preset.service());
-      }
-    }
-    return result;
-  }
-
   /** Builds an insertion-ordered environment map from key-value pairs. */
   private static Map<String, String> orderedEnv(String... kvPairs) {
     var map = new LinkedHashMap<String, String>();
