@@ -34,7 +34,9 @@ installing a later v1 release.
 
 - The pre-v1 migration chain is collapsed into a guarded schema baseline; sync refuses a peer
   below 0.15.0 before exchanging data.
-- Every agent session is now a first-class run with one whole-container reservation model.
+- Every agent session is now a first-class run with one whole-container reservation model. Stop any
+  running agent session before upgrading: the fixed `sail-agent` unit is gone, and a session
+  launched by an older binary is invisible to this version's stop, status, and log commands.
 - Ad-hoc, dispatch, and review sessions share run-scoped units, logs, process identity, stop,
   status, watcher recovery, and reconciliation behavior.
 - Process start-time fingerprints prevent stale runs from signaling a reused PID.

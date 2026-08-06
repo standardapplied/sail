@@ -199,7 +199,7 @@ Open items deliberately deferred (need a product decision or larger change, trac
 - Add release signing with cosign or minisign and verify signatures in `install.sh`, `sail upgrade`,
   and the auto-upgrader.
 - Pin GitHub Actions by commit SHA once the release process stabilizes.
-- Add a small API request-rate guard if the API is expected to stay open for long-lived a GUI client
+- Add a small API request-rate guard if the API is expected to stay open for long-lived GUI client
   sessions.
 - Consider replacing npm/global shell install snippets with typed installer implementations.
 - Add a periodic secret-scan job for generated examples, scripts, and release artifacts.

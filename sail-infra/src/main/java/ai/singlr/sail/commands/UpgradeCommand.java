@@ -231,19 +231,28 @@ public final class UpgradeCommand implements Runnable {
     var totalSteps = 4;
     if (dryRun) {
       if (!json) {
-        System.out.println(Banner.stepLine(stepNum, totalSteps, "Restart sail-api...", Ansi.AUTO));
-        System.out.println("[dry-run] Would restart sail-api.service when installed.");
+        System.out.println(
+            Banner.stepLine(stepNum, totalSteps, "Reconcile + restart sail-api...", Ansi.AUTO));
+        System.out.println(
+            "[dry-run] Would re-render the unit file from the new binary, daemon-reload, and"
+                + " restart sail-api.service when installed.");
       }
       return RestartStatus.DRY_RUN;
     }
     if (!json) {
-      System.out.println(Banner.stepLine(stepNum, totalSteps, "Restarting sail-api...", Ansi.AUTO));
+      System.out.println(
+          Banner.stepLine(
+              stepNum, totalSteps, "Reconciling sail-api unit + restart...", Ansi.AUTO));
     }
     try {
       var shell = new ShellExecutor(false);
+      var defaultEndpoint = new Endpoint("127.0.0.1", 7070);
       var bootstrap =
           HostServiceInstallers.create(
-              shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+              shell,
+              defaultEndpoint.host(),
+              defaultEndpoint.port(),
+              HostServiceInstallers.currentUsername());
       if (!bootstrap.isInstalled()) {
         if (!json) {
           var provisioned = Files.exists(SailPaths.hostConfigPath());
@@ -260,27 +269,34 @@ public final class UpgradeCommand implements Runnable {
         }
         return RestartStatus.NOT_INSTALLED;
       }
-      var status = bootstrap.status();
+      var endpoint = readUnitEndpoint(bootstrap.serviceFilePath()).orElse(defaultEndpoint);
+      var installer =
+          HostServiceInstallers.create(
+              shell, endpoint.host(), endpoint.port(), HostServiceInstallers.currentUsername());
+      var driftReconciled = installer.reconcile();
+      var status = installer.status();
       if (!status.running()) {
         if (!json) {
           System.out.println(
               Banner.stepDoneLine(
                   stepNum,
                   totalSteps,
-                  "sail-api is installed but not running; left as-is",
+                  "sail-api is installed but not running; left as-is"
+                      + (driftReconciled ? " (unit file reconciled)" : ""),
                   Ansi.AUTO));
         }
         return RestartStatus.NOT_RUNNING;
       }
-      bootstrap.restart();
+      installer.restart();
       if (!json) {
         var modeLabel =
-            bootstrap.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";
+            installer.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";
+        var reconciledTag = driftReconciled ? " (unit file reconciled)" : "";
         System.out.println(
             Banner.stepDoneLine(
                 stepNum,
                 totalSteps,
-                "Restarted sail-api (" + modeLabel + ") on the new binary",
+                "Restarted sail-api (" + modeLabel + ") on the new binary" + reconciledTag,
                 Ansi.AUTO));
       }
       return RestartStatus.RESTARTED;
@@ -296,6 +312,43 @@ public final class UpgradeCommand implements Runnable {
       }
       return RestartStatus.FAILED;
     }
+  }
+
+  /** Bind address + port pair extracted from a sail-api unit file's {@code ExecStart}. */
+  record Endpoint(String host, int port) {}
+
+  /**
+   * Reads the existing sail-api unit file and pulls the {@code --host}/{@code --port} values out of
+   * the {@code ExecStart=} line so the reconcile step preserves the operator's configured endpoint.
+   * Returns empty when the file can't be parsed; the caller falls back to the bootstrap defaults.
+   */
+  static Optional<Endpoint> readUnitEndpoint(Path unitFile) {
+    try {
+      var content = Files.readString(unitFile);
+      var host = extractOption(content, "--host");
+      var port = extractOption(content, "--port");
+      if (host == null || port == null) {
+        return Optional.empty();
+      }
+      return Optional.of(new Endpoint(host, Integer.parseInt(port)));
+    } catch (IOException | NumberFormatException e) {
+      return Optional.empty();
+    }
+  }
+
+  private static String extractOption(String unitContent, String optionName) {
+    for (var line : unitContent.split("\n", -1)) {
+      if (!line.stripLeading().startsWith("ExecStart=")) {
+        continue;
+      }
+      var tokens = line.trim().split("\\s+");
+      for (var i = 0; i < tokens.length - 1; i++) {
+        if (optionName.equals(tokens[i])) {
+          return tokens[i + 1];
+        }
+      }
+    }
+    return null;
   }
 
   /**
