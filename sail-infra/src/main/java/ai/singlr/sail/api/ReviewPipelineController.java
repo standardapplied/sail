@@ -550,12 +550,17 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
           spec.get().repos(),
           spec.get().model(),
           spec.get().reasoningEffort());
-      var rescued = agentRunner.ensureCommitted(project, spec.get().repos(), spec.get().branch());
+      var rescued =
+          agentRunner.ensureCommitted(
+              project,
+              spec.get().repos(),
+              spec.get().branch(),
+              FixTaskBuilder.commitMessage(findings));
       if (!rescued.isEmpty()) {
         publishGuardrail(
             project,
             specId,
-            "fix agent left uncommitted changes in " + String.join(", ", rescued),
+            "fix agent left uncommitted changes in " + describeRescues(rescued),
             "committed and pushed them to " + spec.get().branch());
       }
     } catch (Exception e) {
@@ -571,6 +576,29 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return reviewStore.reviewsForSpec(specId).stream()
         .filter(r -> !r.superseded() && r.errored() && r.iteration() == iteration)
         .count();
+  }
+
+  /**
+   * Names what each rescue swept — {@code "api (3 files: A.java, B.java, C.java)"} — capped so a
+   * large sweep stays one readable notification line while still revealing debris immediately.
+   */
+  private static String describeRescues(List<ReviewAgentRunner.Rescue> rescued) {
+    return rescued.stream()
+        .map(
+            rescue -> {
+              var files = rescue.files();
+              var shown = files.stream().limit(5).toList();
+              var suffix = files.size() > shown.size() ? ", +" + (files.size() - shown.size()) : "";
+              return "%s (%d file%s: %s%s)"
+                  .formatted(
+                      rescue.repo(),
+                      files.size(),
+                      files.size() == 1 ? "" : "s",
+                      String.join(", ", shown),
+                      suffix);
+            })
+        .reduce((a, b) -> a + ", " + b)
+        .orElse("");
   }
 
   private void publishGuardrail(String project, String specId, String reason, String action) {

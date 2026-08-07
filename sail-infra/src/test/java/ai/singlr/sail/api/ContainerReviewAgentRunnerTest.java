@@ -246,15 +246,37 @@ class ContainerReviewAgentRunnerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
-            .onOk("status --porcelain", " M Api.java\n");
+            .onOk("status --porcelain", " M Api.java\n?? docs/New.md\n");
 
-    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+    var rescued =
+        runner(shell)
+            .ensureCommitted(
+                "acme", List.of("api"), "agent/spec", "fix: address 2 review findings");
 
-    assertEquals(List.of("api"), rescued);
+    assertEquals(1, rescued.size());
+    assertEquals("api", rescued.getFirst().repo());
+    assertEquals(
+        List.of("Api.java", "docs/New.md"),
+        rescued.getFirst().files(),
+        "the rescue names what it swept up, so the guardrail event can show it");
     var joined = String.join("\n", shell.invocations());
     assertTrue(joined.contains("git -C /home/dev/workspace/api add -A"));
-    assertTrue(joined.contains("git -C /home/dev/workspace/api commit -m"));
+    assertTrue(
+        joined.contains("fix: address 2 review findings"),
+        "the rescue commit says what the work was, not that an agent forgot to commit");
     assertTrue(joined.contains("git -C /home/dev/workspace/api push"));
+  }
+
+  @Test
+  void ensureCommittedResolvesARenameToItsNewPath() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n")
+            .onOk("status --porcelain", "R  Old.java -> New.java\n");
+
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec", "fix: x");
+
+    assertEquals(List.of("New.java"), rescued.getFirst().files());
   }
 
   @Test
@@ -263,7 +285,7 @@ class ContainerReviewAgentRunnerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("rev-parse --abbrev-ref HEAD", "agent/spec\n");
 
-    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec", "fix: x");
 
     assertTrue(rescued.isEmpty());
     assertFalse(String.join("\n", shell.invocations()).contains("add -A"));
@@ -276,7 +298,7 @@ class ContainerReviewAgentRunnerTest {
             .onOk("rev-parse --abbrev-ref HEAD", "main\n")
             .onOk("status --porcelain", " M Api.java\n");
 
-    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec");
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec", "fix: x");
 
     assertTrue(
         rescued.isEmpty(),
@@ -289,7 +311,7 @@ class ContainerReviewAgentRunnerTest {
   void ensureCommittedSkipsASpecWithNoBranch() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    assertTrue(runner(shell).ensureCommitted("acme", List.of("api"), " ").isEmpty());
+    assertTrue(runner(shell).ensureCommitted("acme", List.of("api"), " ", "fix: x").isEmpty());
     assertEquals(0, shell.invocations().size(), "no branch to guard means nothing to touch");
   }
 
@@ -304,7 +326,7 @@ class ContainerReviewAgentRunnerTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec"));
+            () -> runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec", "fix: x"));
     assertTrue(ex.getMessage().contains("git identity not configured"), ex.getMessage());
   }
 
@@ -316,9 +338,10 @@ class ContainerReviewAgentRunnerTest {
             .onOk("status --porcelain", " M Api.java\n")
             .onFail("push", "no network");
 
+    var rescued = runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec", "fix: x");
     assertEquals(
         List.of("api"),
-        runner(shell).ensureCommitted("acme", List.of("api"), "agent/spec"),
+        rescued.stream().map(ReviewAgentRunner.Rescue::repo).toList(),
         "the commit is the rescue; a push failure must not fail the pipeline");
   }
 

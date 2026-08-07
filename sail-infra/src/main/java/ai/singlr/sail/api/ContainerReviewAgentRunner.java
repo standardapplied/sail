@@ -186,27 +186,45 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
    * fail the pipeline.
    */
   @Override
-  public List<String> ensureCommitted(String project, List<String> repos, String branch)
-      throws Exception {
+  public List<Rescue> ensureCommitted(
+      String project, List<String> repos, String branch, String commitMessage) throws Exception {
     if (branch == null || branch.isBlank()) {
       return List.of();
     }
-    var rescued = new ArrayList<String>();
+    var rescued = new ArrayList<Rescue>();
     for (var repo : repos) {
       var dir = WORKSPACE + "/" + repo;
-      if (!onBranch(project, dir, branch) || git(project, dir, "status", "--porcelain").isBlank()) {
+      if (!onBranch(project, dir, branch)) {
+        continue;
+      }
+      var porcelain = git(project, dir, "status", "--porcelain");
+      if (porcelain.isBlank()) {
         continue;
       }
       git(project, dir, "add", "-A");
-      git(project, dir, "commit", "-m", "fix: review-fix changes left uncommitted by the agent");
+      git(project, dir, "commit", "-m", commitMessage);
       var push = shell.exec(ContainerExec.asDevUser(project, List.of("git", "-C", dir, "push")));
       if (!push.ok()) {
         System.err.println(
             "review-pipeline: push failed for " + dir + " on " + branch + ": " + push.stderr());
       }
-      rescued.add(repo);
+      rescued.add(new Rescue(repo, changedFiles(porcelain)));
     }
     return List.copyOf(rescued);
+  }
+
+  /** Paths from {@code status --porcelain} output; a rename resolves to its new path. */
+  private static List<String> changedFiles(String porcelain) {
+    return porcelain
+        .lines()
+        .filter(line -> !line.isBlank())
+        .map(line -> line.length() > 3 ? line.substring(3) : line.strip())
+        .map(
+            path -> {
+              var arrow = path.lastIndexOf(" -> ");
+              return arrow < 0 ? path : path.substring(arrow + 4);
+            })
+        .toList();
   }
 
   private boolean onBranch(String project, String dir, String branch) throws Exception {

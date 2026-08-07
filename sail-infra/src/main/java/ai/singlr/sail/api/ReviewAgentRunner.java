@@ -72,18 +72,21 @@ public interface ReviewAgentRunner {
     return run(project, agent, prompt, reviewId, runCredential, model, reasoningEffort);
   }
 
+  /** One rescued repo and the files the rescue commit swept up, for the guardrail event. */
+  record Rescue(String repo, List<String> files) {}
+
   /**
-   * Commits and pushes any work an agent left uncommitted on the spec's branch. The fix lane runs
-   * hook-free (so a reviewer's completion can never re-enter the pipeline), which also strips the
-   * dispatch lane's stop-readiness gate — so nothing stops a fix agent from ending its run with a
-   * dirty tree, contaminating the shared clone and starving the re-review of the very fixes it is
-   * about to judge. This is the deterministic backstop: a repo is rescued only when it is checked
-   * out on the spec's own branch, never any other.
+   * Commits and pushes any work an agent left uncommitted on the spec's branch, using {@code
+   * commitMessage} so the commit explains the work it contains. The fix lane runs gated, but the
+   * gate is a nudge, not a jail — a fix agent can still end its second stop with a dirty tree,
+   * contaminating the shared clone and starving the re-review of the very fixes it is about to
+   * judge. This is the deterministic backstop: a repo is rescued only when it is checked out on the
+   * spec's own branch, never any other.
    *
-   * @return the repos that had uncommitted work, now committed
+   * @return the repos that had uncommitted work, now committed, each with the files it swept
    */
-  default List<String> ensureCommitted(String project, List<String> repos, String branch)
-      throws Exception {
+  default List<Rescue> ensureCommitted(
+      String project, List<String> repos, String branch, String commitMessage) throws Exception {
     return List.of();
   }
 }

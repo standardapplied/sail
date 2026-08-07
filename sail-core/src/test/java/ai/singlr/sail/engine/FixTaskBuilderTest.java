@@ -179,4 +179,60 @@ class FixTaskBuilderTest {
     var task = FixTaskBuilder.build("Payment Integration", List.of(finding));
     assertTrue(task.contains("\"Payment Integration\""));
   }
+
+  @Test
+  void commitMessageNamesEveryFindingItAddresses() {
+    var high =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "a.java",
+            1,
+            1,
+            "SQL injection in login",
+            "",
+            "",
+            null,
+            0.9);
+    var low =
+        Finding.create(
+            Finding.Severity.LOW,
+            Finding.Category.LOGIC,
+            "b.java",
+            2,
+            2,
+            "Off-by-one in pager",
+            "",
+            "",
+            null,
+            0.5);
+
+    var message = FixTaskBuilder.commitMessage(List.of(high, low));
+
+    assertTrue(
+        message.startsWith("fix: address 2 review findings"),
+        "the subject says what the commit is, not that an agent forgot to commit");
+    assertTrue(message.contains("[HIGH] SQL injection in login"));
+    assertTrue(message.contains("[LOW] Off-by-one in pager"));
+  }
+
+  @Test
+  void commitMessageUsesSingularForOneFinding() {
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "a.java",
+            1,
+            1,
+            "Bad",
+            "",
+            "",
+            null,
+            0.9);
+
+    assertTrue(
+        FixTaskBuilder.commitMessage(List.of(finding))
+            .startsWith("fix: address 1 review finding\n"));
+  }
 }

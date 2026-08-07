@@ -929,9 +929,10 @@ class ReviewPipelineControllerTest {
           }
 
           @Override
-          public List<String> ensureCommitted(String project, List<String> repos, String branch) {
-            ensured.set(List.of(project, repos, branch));
-            return List.of("api");
+          public List<Rescue> ensureCommitted(
+              String project, List<String> repos, String branch, String commitMessage) {
+            ensured.set(List.of(project, repos, branch, commitMessage));
+            return List.of(new Rescue("api", List.of("Api.java", "ApiTest.java")));
           }
         };
 
@@ -944,11 +945,18 @@ class ReviewPipelineControllerTest {
 
       assertEquals(
           List.of("test-project", List.of("api"), "feat/test"),
-          ensured.get(),
+          ensured.get().subList(0, 3),
           "after the fix agent runs, its work is verified committed on the spec branch");
+      assertTrue(
+          ensured.get().get(3).toString().contains("Bad"),
+          "the rescue commit message names the findings the fix addressed, so the PR history"
+              + " explains itself instead of reading 'left uncommitted by the agent'");
       var reason =
           java.util.Objects.toString(captured.events().getFirst().data().get("reason"), "");
       assertTrue(reason.contains("api"), "the guardrail names the contaminated repo");
+      assertTrue(
+          reason.contains("Api.java"),
+          "the guardrail names the files it swept, so debris is visible the moment it happens");
     }
   }
 
