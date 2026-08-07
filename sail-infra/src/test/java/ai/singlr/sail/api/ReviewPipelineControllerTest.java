@@ -932,7 +932,9 @@ class ReviewPipelineControllerTest {
           public List<Rescue> ensureCommitted(
               String project, List<String> repos, String branch, String commitMessage) {
             ensured.set(List.of(project, repos, branch, commitMessage));
-            return List.of(new Rescue("api", List.of("Api.java", "ApiTest.java")));
+            return List.of(
+                new Rescue("api", List.of("Api.java", "ApiTest.java")),
+                new Rescue("web", List.of("App.tsx")));
           }
         };
 
@@ -957,6 +959,9 @@ class ReviewPipelineControllerTest {
       assertTrue(
           reason.contains("Api.java"),
           "the guardrail names the files it swept, so debris is visible the moment it happens");
+      assertTrue(
+          reason.contains("web (1 file: App.tsx)"),
+          "every rescued repo is named, joined into one readable line");
     }
   }
 
