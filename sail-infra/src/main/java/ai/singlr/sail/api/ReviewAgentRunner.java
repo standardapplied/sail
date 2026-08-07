@@ -32,6 +32,47 @@ public interface ReviewAgentRunner {
       throws Exception;
 
   /**
+   * Same as {@link #run(String, String, String, String, String)} but carrying the spec's tuning: a
+   * spec dispatched at {@code xhigh} reasoning effort must be judged at {@code xhigh}, not at the
+   * CLI default. {@code model} is passed only when the lane runs the spec's own agent — model names
+   * are agent-specific and the roster reviewer is usually the other agent.
+   */
+  default String run(
+      String project,
+      String agent,
+      String prompt,
+      String reviewId,
+      String runCredential,
+      String model,
+      String reasoningEffort)
+      throws Exception {
+    return run(project, agent, prompt, reviewId, runCredential);
+  }
+
+  /**
+   * Launches the review's fix agent. Unlike a reviewer, a fix agent writes to the spec branch, so
+   * it runs with the stop gate armed ({@code SAIL_RUN_ID} exported, session file stamped with the
+   * spec's {@code branch} and {@code repos}) — the dispatch lane's commit discipline lives in that
+   * gate, not in the prompt, and an ungated fix agent ends its turn with a dirty tree every time.
+   * It still exports no {@code SAIL_SPEC_ID}, so the event helper stays silent and the fix agent's
+   * own stop can never re-enter the pipeline. The fix agent is the spec's own agent, so it carries
+   * the spec's {@code model} and {@code reasoningEffort} exactly as the dispatch lane did.
+   */
+  default String runFix(
+      String project,
+      String agent,
+      String prompt,
+      String reviewId,
+      String runCredential,
+      String branch,
+      List<String> repos,
+      String model,
+      String reasoningEffort)
+      throws Exception {
+    return run(project, agent, prompt, reviewId, runCredential, model, reasoningEffort);
+  }
+
+  /**
    * Commits and pushes any work an agent left uncommitted on the spec's branch. The fix lane runs
    * hook-free (so a reviewer's completion can never re-enter the pipeline), which also strips the
    * dispatch lane's stop-readiness gate — so nothing stops a fix agent from ending its run with a

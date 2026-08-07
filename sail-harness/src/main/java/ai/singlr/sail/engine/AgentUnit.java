@@ -58,8 +58,11 @@ public record AgentUnit(
    * ~/.sail/runs/<reviewId>/}. The pipeline reviews concurrently completed specs on concurrent
    * virtual threads, so each review (and its fix agent, which shares the file set) must own its
    * prompt, log offsets, and output — a shared file would attach one spec's findings to another's
-   * review. Review runs as a blocking foreground exec, not a systemd unit, so only the task file
-   * and log are used in practice.
+   * review. Review runs as a blocking foreground exec, not a systemd unit, so only the task file,
+   * log, and session file are used in practice. The session file is named {@code
+   * agent-session.json} because that is the {@link SailStopGate} contract — the gate resolves
+   * {@code RUN_ID/agent-session.json} to scope its checks, and the fix lane stamps the spec's repos
+   * there so the gate never nudges over another spec's dirty repo.
    */
   public static AgentUnit forReview(String reviewId) {
     var id = Ids.requireUuid(reviewId);
@@ -68,7 +71,7 @@ public record AgentUnit(
         "sail-review-" + id,
         dir + "/review.log",
         dir + "/review.pid",
-        dir + "/review-session.json",
+        dir + "/agent-session.json",
         dir + "/review-prompt.txt");
   }
 

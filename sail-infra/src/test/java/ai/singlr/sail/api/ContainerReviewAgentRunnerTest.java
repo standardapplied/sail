@@ -96,6 +96,152 @@ class ContainerReviewAgentRunnerTest {
   }
 
   @Test
+  void theFixLaneArmsTheStopGateWithTheRunIdentity() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "done");
+
+    runner(shell)
+        .runFix(
+            "acme",
+            "claude-code",
+            "fix it",
+            REVIEW_ID,
+            CREDENTIAL,
+            "agent/spec",
+            List.of("api"),
+            null,
+            null);
+
+    var exec =
+        shell.invocations().stream()
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("the fix agent must append to the review log"));
+    assertTrue(
+        exec.contains("export SAIL_RUN_ID=\"$2\""),
+        "the run id arms the stop gate, read from its positional argument");
+    assertTrue(exec.contains(REVIEW_ID), "the review id travels as the argument itself");
+    assertTrue(
+        exec.contains("--settings " + "/home/dev/.sail/claude-fix-settings.json"),
+        "claude loads the Stop-only settings so the gate fires without any event hooks");
+    assertFalse(
+        exec.contains("SAIL_SPEC_ID"),
+        "no spec id: the event helper stays silent and the pipeline can never re-enter");
+  }
+
+  @Test
+  void theFixLaneForCodexArmsTheGateWithoutClaudeSettings() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "done");
+
+    runner(shell)
+        .runFix(
+            "acme",
+            "codex",
+            "fix it",
+            REVIEW_ID,
+            CREDENTIAL,
+            "agent/spec",
+            List.of("api"),
+            null,
+            null);
+
+    var exec =
+        shell.invocations().stream()
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(exec.contains("export SAIL_RUN_ID=\"$2\""));
+    assertTrue(
+        exec.contains("--dangerously-bypass-hook-trust"),
+        "codex discovers the global hooks file; the trust bypass is what arms it headlessly");
+    assertFalse(exec.contains("--settings"), "the claude settings flag never leaks into codex");
+  }
+
+  @Test
+  void theFixLaneScopesTheGateToTheSpecReposViaTheSessionFile() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "done");
+
+    runner(shell)
+        .runFix(
+            "acme",
+            "claude-code",
+            "fix it",
+            REVIEW_ID,
+            CREDENTIAL,
+            "agent/spec",
+            List.of("api", "web"),
+            null,
+            null);
+
+    var write =
+        shell.invocations().stream()
+            .filter(c -> c.contains(REVIEW_DIR + "/agent-session.json"))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new AssertionError(
+                        "the fix lane must stamp the gate's session file, or the gate checks"
+                            + " every repo in the shared container"));
+    assertTrue(write.contains("api") && write.contains("web"), "session carries the spec repos");
+    assertTrue(write.contains("agent/spec"), "session carries the spec branch");
+  }
+
+  @Test
+  void theReviewerLaneCarriesTheSpecsReasoningEffort() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
+
+    runner(shell).run("acme", "codex", "review please", REVIEW_ID, CREDENTIAL, null, "xhigh");
+
+    var exec =
+        shell.invocations().stream()
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(
+        exec.contains("model_reasoning_effort='\"xhigh\"'"),
+        "a spec dispatched at xhigh must be judged at xhigh — the review lane must not"
+            + " silently drop to the default effort");
+  }
+
+  @Test
+  void theFixLaneCarriesTheSpecsModelAndEffort() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "done");
+
+    runner(shell)
+        .runFix(
+            "acme",
+            "codex",
+            "fix it",
+            REVIEW_ID,
+            CREDENTIAL,
+            "agent/spec",
+            List.of("api"),
+            "gpt-5.3-codex",
+            "xhigh");
+
+    var exec =
+        shell.invocations().stream()
+            .filter(c -> c.contains(">> " + REVIEW_DIR + "/review.log"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(exec.contains("--model gpt-5.3-codex"), "the fix agent is the spec's own agent");
+    assertTrue(exec.contains("model_reasoning_effort='\"xhigh\"'"));
+  }
+
+  @Test
+  void theReviewerLaneStaysUngated() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("tail -c", "[]");
+
+    runner(shell).run("acme", "claude-code", "review please", REVIEW_ID, CREDENTIAL);
+
+    var joined = String.join("\n", shell.invocations());
+    assertFalse(
+        joined.contains("SAIL_RUN_ID"),
+        "a reviewer must be free to stop without committing — gating it would nudge it to"
+            + " commit its own scratch into the spec branch");
+    assertFalse(joined.contains("agent-session.json"), "no gate scope file for the reviewer");
+  }
+
+  @Test
   void ensureCommittedRescuesWorkLeftUncommittedOnTheSpecBranch() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))

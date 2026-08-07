@@ -20,9 +20,12 @@ import java.util.concurrent.TimeoutException;
  * (a run must never mark itself finished and release its reservation), so run completion comes
  * solely from the watcher's verified exit, with the missed-stop reconciler as the rescue lane.
  *
- * <p>Only build-role sessions are gated: they carry a non-blank {@code SAIL_RUN_ID}. Review
- * sessions load no settings file at all, and ad-hoc {@code sail agent start} or engineer sessions
- * carry no run id, so all of them keep the old publish-and-allow behavior.
+ * <p>Sessions that write to a spec branch are gated: they carry a non-blank {@code SAIL_RUN_ID} —
+ * build-role dispatches, and the review pipeline's fix lane (which exports the run id but no {@code
+ * SAIL_SPEC_ID}, so this gate blocks its premature stops while its publishes stay silent). Reviewer
+ * sessions carry no run id — a reviewer must be free to stop without committing — and ad-hoc {@code
+ * sail agent start} or engineer sessions carry none either, so all of them keep the old
+ * publish-and-allow behavior.
  *
  * <p>The dirty/unpushed/PR checks are scoped to the run's spec repos — read from {@code repos} in
  * the run's own session file, {@code ~/.sail/runs/<runId>/agent-session.json}, which dispatch

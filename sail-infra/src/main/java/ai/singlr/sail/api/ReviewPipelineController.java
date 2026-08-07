@@ -423,7 +423,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), room);
 
       var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
-      var output = agentRunner.run(project, agent, prompt, stage.reviewId(), credential);
+      var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
+      var output =
+          agentRunner.run(project, agent, prompt, stage.reviewId(), credential, null, effort);
       var parseResult = FindingParser.parse(output);
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
         var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
@@ -520,10 +522,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   /**
    * The fix agent runs under the failed review's identity, appending to that review's log. It runs
-   * hook-free, outside the dispatch lane's stop-readiness gate, so after it finishes {@link
-   * ReviewAgentRunner#ensureCommitted} rescues any work it left uncommitted — otherwise the
-   * re-review judges a branch without the fixes and the shared clone carries the leftovers into the
-   * next dispatch.
+   * with the stop-readiness gate armed ({@link ReviewAgentRunner#runFix}) so it cannot end its turn
+   * with a dirty tree, and {@link ReviewAgentRunner#ensureCommitted} stays as the deterministic
+   * backstop — otherwise the re-review judges a branch without the fixes and the shared clone
+   * carries the leftovers into the next dispatch.
    */
   private void triggerFixIteration(
       String reviewId, String specId, List<Finding> findings, String project) {
@@ -538,7 +540,16 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
           startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
-      agentRunner.run(project, agent, fixTask, reviewId, credential);
+      agentRunner.runFix(
+          project,
+          agent,
+          fixTask,
+          reviewId,
+          credential,
+          spec.get().branch(),
+          spec.get().repos(),
+          spec.get().model(),
+          spec.get().reasoningEffort());
       var rescued = agentRunner.ensureCommitted(project, spec.get().repos(), spec.get().branch());
       if (!rescued.isEmpty()) {
         publishGuardrail(

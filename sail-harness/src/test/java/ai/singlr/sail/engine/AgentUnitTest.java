@@ -72,6 +72,11 @@ class AgentUnitTest {
     assertEquals("/home/dev/.sail/runs/" + reviewId + "/review.log", unit.logPath());
     assertEquals("/home/dev/.sail/runs/" + reviewId + "/review-prompt.txt", unit.taskPath());
     assertEquals(
+        "/home/dev/.sail/runs/" + reviewId + "/agent-session.json",
+        unit.sessionPath(),
+        "the stop gate resolves RUN_ID/agent-session.json, so the fix lane's repo scoping"
+            + " only works when the review unit names exactly that file");
+    assertEquals(
         unit.logPath(),
         AgentUnit.REVIEW.runLogPath(reviewId),
         "the review-role log endpoints resolve exactly the file the review writes");
@@ -94,7 +99,12 @@ class AgentUnitTest {
     assertNotEquals(run.unitName(), review.unitName());
     assertNotEquals(run.logPath(), review.logPath());
     assertNotEquals(run.pidPath(), review.pidPath());
-    assertNotEquals(run.sessionPath(), review.sessionPath());
+    assertEquals(
+        run.sessionPath(),
+        review.sessionPath(),
+        "the session filename is the one deliberate overlap: the stop gate resolves"
+            + " RUN_ID/agent-session.json for whichever lane armed it, and run ids and review"
+            + " ids are minted from disjoint UUID sequences so the same id never names both");
     assertNotEquals(run.taskPath(), review.taskPath());
   }
 

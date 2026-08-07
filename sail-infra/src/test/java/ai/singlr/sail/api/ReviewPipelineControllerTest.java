@@ -59,6 +59,11 @@ class ReviewPipelineControllerTest {
   }
 
   private void createSpec(String id, String status, List<String> repos) {
+    createSpec(id, status, repos, null, null);
+  }
+
+  private void createSpec(
+      String id, String status, List<String> repos, String model, String reasoningEffort) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
@@ -67,8 +72,8 @@ class ReviewPipelineControllerTest {
             SpecStatus.fromWire(status),
             null,
             null,
-            null,
-            null,
+            model,
+            reasoningEffort,
             "feat/test",
             0,
             null,
@@ -944,6 +949,76 @@ class ReviewPipelineControllerTest {
       var reason =
           java.util.Objects.toString(captured.events().getFirst().data().get("reason"), "");
       assertTrue(reason.contains("api"), "the guardrail names the contaminated repo");
+    }
+  }
+
+  @Test
+  void theFixLaneCarriesTheSpecBranchReposAndTuningIntoTheGate() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"), "opus-5", "xhigh");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]
+        ```
+        """;
+    var fixLaunch = new AtomicReference<List<Object>>();
+    var reviewEffort = new AtomicReference<String>();
+    var calls = new AtomicInteger();
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String prompt, String rid, String cred) {
+            return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+          }
+
+          @Override
+          public String run(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String model,
+              String effort) {
+            reviewEffort.set(effort);
+            return run(p, a, prompt, rid, cred);
+          }
+
+          @Override
+          public String runFix(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String branch,
+              List<String> repos,
+              String model,
+              String effort) {
+            fixLaunch.set(List.of(a, branch, repos, model, effort));
+            return "done";
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          List.of("claude-code", "feat/test", List.of("api"), "opus-5", "xhigh"),
+          fixLaunch.get(),
+          "the fix agent launches as the spec's own agent with the spec's branch, repo scope,"
+              + " model, and reasoning effort — a spec dispatched at xhigh is fixed at xhigh");
+      assertEquals(
+          "xhigh",
+          reviewEffort.get(),
+          "the reviewer judges at the spec's effort; the model stays out of the review lane"
+              + " because model names are agent-specific and the reviewer is the other agent");
     }
   }
 

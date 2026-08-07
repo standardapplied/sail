@@ -52,6 +52,18 @@ public final class ClaudeCodeHookConfig {
   /** Container-side absolute path to the settings file. Used with {@code claude --settings}. */
   public static final String SETTINGS_PATH = SETTINGS_DIR + "/" + SETTINGS_FILE;
 
+  /** Fix-lane settings filename. */
+  public static final String FIX_SETTINGS_FILE = "claude-fix-settings.json";
+
+  /**
+   * Container-side absolute path of the fix-lane settings file: the {@code Stop} gate and nothing
+   * else. The review pipeline's fix agent must be gated — the dispatch protocol's commit discipline
+   * lives in the gate, not in the prompt, and a hook-free fix agent ends its turn with a dirty tree
+   * every time — but it must stay off the event bus: no {@code SAIL_SPEC_ID} is exported, so even
+   * the gate's own publishes no-op, and the pipeline can never re-enter on a fix agent's stop.
+   */
+  public static final String FIX_SETTINGS_PATH = SETTINGS_DIR + "/" + FIX_SETTINGS_FILE;
+
   /**
    * Event type of the {@code PreToolUse} heartbeat, and the marker {@link
    * ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a settings file written before
@@ -90,8 +102,22 @@ public final class ClaudeCodeHookConfig {
   }
 
   /**
-   * Idempotently writes {@link #SETTINGS_PATH} inside the container. Install-once at provision or
-   * {@code sail project sync}; not rewritten per dispatch.
+   * The fix-lane settings: the {@code Stop} gate as the only hook. See {@link #FIX_SETTINGS_PATH}
+   * for why the fix agent is gated but silent. Pure function — no I/O.
+   */
+  public static String renderFixLane() {
+    var hooks = new LinkedHashMap<String, Object>();
+    hooks.put("Stop", List.of(matcherGroup(null, stopGateCommand())));
+
+    var root = new LinkedHashMap<String, Object>();
+    root.put("includeCoAuthoredBy", false);
+    root.put("hooks", hooks);
+    return YamlUtil.dumpJson(root);
+  }
+
+  /**
+   * Idempotently writes {@link #SETTINGS_PATH} and {@link #FIX_SETTINGS_PATH} inside the container.
+   * Install-once at provision or {@code sail project sync}; not rewritten per dispatch.
    */
   public void install(String container) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
@@ -103,15 +129,19 @@ public final class ClaudeCodeHookConfig {
           "Failed to create " + SETTINGS_DIR + " in " + container + ": " + mkdir.stderr());
     }
 
+    writeSettings(container, render(), SETTINGS_PATH);
+    writeSettings(container, renderFixLane(), FIX_SETTINGS_PATH);
+  }
+
+  private void writeSettings(String container, String content, String path)
+      throws IOException, InterruptedException, TimeoutException {
     var write =
         shell.exec(
             ContainerExec.asDevUser(
                 container,
-                List.of(
-                    "bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", render(), SETTINGS_PATH)));
+                List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", content, path)));
     if (!write.ok()) {
-      throw new IOException(
-          "Failed to write " + SETTINGS_PATH + " in " + container + ": " + write.stderr());
+      throw new IOException("Failed to write " + path + " in " + container + ": " + write.stderr());
     }
   }
 
