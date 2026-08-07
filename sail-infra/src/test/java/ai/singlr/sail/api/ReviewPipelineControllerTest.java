@@ -1031,6 +1031,79 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void theLoopNarratesVerdictsIntoTheSpecRoom() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var messages = new MessageStore(db);
+    var failedOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
+          "line_start": 7, "line_end": 7, "title": "Token logged in plaintext",
+          "description": "d", "confidence": 0.9}]
+        ```
+        """;
+    var passedOutput =
+        """
+        ```json
+        [{"severity": "LOW", "category": "LOGIC", "file": "Pager.java",
+          "line_start": 3, "line_end": 3, "title": "Off-by-one in pager",
+          "description": "d", "confidence": 0.6}]
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? failedOutput : passedOutput;
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+      ctrl.useMessages(messages);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      var room = messages.list("auth", null, 50);
+      assertEquals(
+          2,
+          room.size(),
+          "one message per verdict and nothing else — lifecycle beats ride the event stream;"
+              + " the room carries only what events cannot: the findings themselves");
+      var failed = room.get(0);
+      assertEquals("sail", failed.author());
+      assertTrue(failed.body().contains("Review failed"), failed.body());
+      assertTrue(
+          failed.body().contains("Token logged in plaintext"),
+          "the failed verdict names its findings — the reviewer's next pass reads the room, so"
+              + " this is also the loop's cross-iteration memory");
+      assertTrue(failed.body().contains("Auth.java:7"), failed.body());
+      var passed = room.get(1);
+      assertTrue(passed.body().contains("Review passed"), passed.body());
+      assertTrue(
+          passed.body().contains("Off-by-one in pager"),
+          "sub-gate findings on a passed review deserve eyes before merge, not silence");
+    }
+  }
+
+  @Test
+  void aRoomWriteFailureNeverFailsThePipeline() {
+    createSpec("auth", "in_progress");
+    var brokenDb = Sqlite.open(tempDir.resolve("broken.db"));
+    new SchemaManager(brokenDb).migrate();
+    var brokenMessages = new MessageStore(brokenDb);
+    brokenDb.close();
+
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    ctrl.useMessages(brokenMessages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        SpecStatus.AWAITING_MERGE,
+        specStore.findById("auth").orElseThrow().status(),
+        "narration is best-effort: a dead room store must not strand the verdict");
+  }
+
+  @Test
   void executePipelinePublishesEventsWhenBusProvided() {
     createSpec("auth", "in_progress");
     specStore.updateStatus("auth", SpecStatus.REVIEW);

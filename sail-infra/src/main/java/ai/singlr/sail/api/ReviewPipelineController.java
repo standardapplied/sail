@@ -376,6 +376,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
       reviewStore.updateReviewStatus(reviewId, "passed");
       advanceSpec(specId, SpecStatus.AWAITING_MERGE);
+      postRoom(specId, passedVerdict(reviewId));
       publishEvent(project, specId, "review_completed", null);
 
     } catch (Exception e) {
@@ -416,11 +417,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
-      var room =
-          messageStore == null
-              ? List.<MessageStore.MessageRow>of()
-              : messageStore.list(specId, null, 20);
-      var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), room);
+      var prompt =
+          ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), roomMessages(specId));
 
       var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
       var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
@@ -492,6 +490,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var review = reviewStore.findReview(reviewId);
     if (review.isEmpty()) return;
 
+    var openFindings = reviewStore.openFindingsForReview(reviewId);
+    postRoom(specId, failedVerdict(review.get().iteration(), openFindings));
+
     if (review.get().iteration() >= config.maxIterations()) {
       escalate(
           project,
@@ -501,7 +502,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       return;
     }
 
-    var openFindings = reviewStore.openFindingsForReview(reviewId);
     if (openFindings.isEmpty()) return;
 
     triggerFixIteration(reviewId, specId, openFindings, project);
@@ -576,6 +576,101 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return reviewStore.reviewsForSpec(specId).stream()
         .filter(r -> !r.superseded() && r.errored() && r.iteration() == iteration)
         .count();
+  }
+
+  /**
+   * Posts the pipeline's own narration to the spec's room. Lifecycle beats (stage started, fix
+   * iteration, guardrail, escalation) already ride the event stream; the room carries only what
+   * events cannot — the findings themselves. This is also the loop's cross-iteration memory: the
+   * reviewer's prompt includes the room's recent messages, so the next pass sees the previous
+   * verdict. Best-effort by design — a room write must never fail the pipeline.
+   */
+  /**
+   * The room's recent messages for the reviewer's prompt. Best-effort like {@link #postRoom}: the
+   * conversation enriches the prompt, it is not a precondition — a dead message store must degrade
+   * the review, never error it.
+   */
+  private List<MessageStore.MessageRow> roomMessages(String specId) {
+    if (messageStore == null) {
+      return List.of();
+    }
+    try {
+      return messageStore.list(specId, null, 20);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());
+      return List.of();
+    }
+  }
+
+  private void postRoom(String specId, String body) {
+    if (messageStore == null) return;
+    try {
+      messageStore.append(specId, Event.SAIL_AGENT, body, null);
+      syncTrigger.run();
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not post to the room of spec " + specId + ": " + e.getMessage());
+    }
+  }
+
+  private static String failedVerdict(int iteration, List<Finding> findings) {
+    return "Review failed (iteration "
+        + iteration
+        + "): "
+        + severitySummary(findings)
+        + "."
+        + findingLines(findings);
+  }
+
+  private String passedVerdict(String reviewId) {
+    var iteration =
+        reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::iteration).orElse(0);
+    var open =
+        reviewStore.findingsForReview(reviewId).stream()
+            .filter(f -> f.resolution() == Finding.Resolution.OPEN)
+            .toList();
+    if (open.isEmpty()) {
+      return "Review passed (iteration " + iteration + "). Awaiting merge.";
+    }
+    return "Review passed (iteration "
+        + iteration
+        + ") with "
+        + severitySummary(open)
+        + " below the gate — worth a look before merge."
+        + findingLines(open)
+        + "\nAwaiting merge.";
+  }
+
+  /** {@code "2 high, 1 low"} in severity order, or {@code "no findings"}. */
+  private static String severitySummary(List<Finding> findings) {
+    var summary =
+        severityCounts(findings).entrySet().stream()
+            .map(e -> e.getValue() + " " + e.getKey())
+            .reduce((a, b) -> a + ", " + b)
+            .orElse("");
+    return summary.isEmpty() ? "no findings" : summary;
+  }
+
+  /** One line per finding, capped so a noisy review stays one readable room message. */
+  private static String findingLines(List<Finding> findings) {
+    if (findings.isEmpty()) {
+      return "";
+    }
+    var shown =
+        findings.stream()
+            .limit(10)
+            .map(
+                f ->
+                    "- ["
+                        + f.severity()
+                        + "] "
+                        + f.title()
+                        + (f.file() == null ? "" : " (" + f.file() + ":" + f.lineStart() + ")"))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+    var more = findings.size() - Math.min(findings.size(), 10);
+    return "\n" + shown + (more > 0 ? "\n- +" + more + " more" : "");
   }
 
   /**
