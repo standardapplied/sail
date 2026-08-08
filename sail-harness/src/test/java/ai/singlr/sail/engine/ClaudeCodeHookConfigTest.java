@@ -129,35 +129,6 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
-  void fixLaneSettingsPathConstantsMatch() {
-    assertEquals("claude-fix-settings.json", ClaudeCodeHookConfig.FIX_SETTINGS_FILE);
-    assertEquals(
-        "/home/dev/.sail/claude-fix-settings.json", ClaudeCodeHookConfig.FIX_SETTINGS_PATH);
-  }
-
-  @Test
-  @SuppressWarnings("unchecked")
-  void fixLaneSettingsCarryTheStopGateAndNothingElse() {
-    var json = ClaudeCodeHookConfig.renderFixLane();
-    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
-    assertEquals(
-        List.of("Stop"),
-        List.copyOf(hooks.keySet()),
-        "the fix lane is gated but must stay off the event bus: a session-start or tool"
-            + " heartbeat from a fix agent would narrate a run the watcher does not own");
-    var stopGroups = (List<Map<String, Object>>) hooks.get("Stop");
-    assertEquals(1, stopGroups.size());
-    var stopHooks = (List<Map<String, Object>>) stopGroups.get(0).get("hooks");
-    assertEquals(1, stopHooks.size());
-    assertEquals(SailStopGate.SCRIPT_PATH, stopHooks.get(0).get("command"));
-    assertEquals(SailStopGate.HOOK_TIMEOUT_SECONDS, stopHooks.get(0).get("timeout"));
-    assertFalse(
-        json.contains(SailEventHelper.SCRIPT_PATH),
-        "no event helper anywhere: the gate's own publishes already no-op without SAIL_SPEC_ID");
-    assertTrue(json.contains("\"includeCoAuthoredBy\": false"));
-  }
-
-  @Test
   void installWritesToSailOwnedSettingsPath() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var writer = new ClaudeCodeHookConfig(shell);
@@ -165,13 +136,13 @@ class ClaudeCodeHookConfigTest {
     writer.install("light-grid");
 
     var cmds = shell.invocations();
-    assertEquals(3, cmds.size());
+    assertEquals(
+        2,
+        cmds.size(),
+        "one hooks layer only: lanes are expressed by SAIL_SPEC_ID/SAIL_RUN_ID at launch, never"
+            + " by a second settings file");
     assertTrue(cmds.get(0).contains("mkdir -p /home/dev/.sail"));
     assertTrue(cmds.get(1).contains("/home/dev/.sail/claude-settings.json"));
-    assertTrue(
-        cmds.get(2).contains("/home/dev/.sail/claude-fix-settings.json"),
-        "both lane files install together so a container never has the dispatch settings"
-            + " without the fix-lane settings");
     assertFalse(
         cmds.get(1).contains("settings.local.json"),
         "must not write to the project-scoped settings.local.json anymore");
