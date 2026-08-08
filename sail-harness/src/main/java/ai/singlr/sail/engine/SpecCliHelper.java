@@ -33,8 +33,6 @@ public final class SpecCliHelper {
   /** Dev-user login profile that {@link #install} puts {@link #SCRIPT_DIR} on the PATH through. */
   public static final String PROFILE_PATH = "/home/dev/.profile";
 
-  private static final String PATH_DIR_FRAGMENT = ".sail/bin";
-
   private static final String PATH_EXPORT = "export PATH=\"$HOME/.sail/bin:$PATH\"";
 
   private static final String SCRIPT =
@@ -226,11 +224,10 @@ public final class SpecCliHelper {
                 List.of(
                     "bash",
                     "-c",
-                    "grep -qsF \"$1\" \"$2\" || printf '\\n%s\\n' \"$3\" >> \"$2\"",
+                    "grep -Fqsx -- \"$1\" \"$2\" || printf '\\n%s\\n' \"$1\" >> \"$2\"",
                     "bash",
-                    PATH_DIR_FRAGMENT,
-                    PROFILE_PATH,
-                    PATH_EXPORT)));
+                    PATH_EXPORT,
+                    PROFILE_PATH)));
     if (!onPath.ok()) {
       throw new IOException(
           "Failed to add " + SCRIPT_DIR + " to PATH in " + container + ": " + onPath.stderr());

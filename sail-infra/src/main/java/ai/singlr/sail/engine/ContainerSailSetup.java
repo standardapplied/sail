@@ -29,9 +29,10 @@ import java.util.concurrent.TimeoutException;
  *       successful full install stamps {@link #STAMP_PATH} with the SHA-256 {@link #fingerprint()}
  *       of all payloads, and the staleness probe verifies observed state, not just the stamp: the
  *       stamp must equal the fingerprint this binary would install right now, every installed file
- *       must match its payload byte for byte, and the profile must carry the PATH line. A missing,
- *       mismatched, deleted, or hand-edited file runs every installer and restamps — the stamp is a
- *       fast-path hint, never proof, so machinery tampering cannot hide behind a current stamp.
+ *       must match its payload byte for byte, every bin script must still be executable, and the
+ *       profile must carry the PATH line as its own exact line. A missing, mismatched, deleted, or
+ *       hand-edited file runs every installer and restamps — the stamp is a fast-path hint, never
+ *       proof, so machinery tampering cannot hide behind a current stamp.
  * </ol>
  *
  * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
@@ -59,12 +60,22 @@ public final class ContainerSailSetup {
    */
   public static Result ensureInstalled(ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
+    return ensureInstalled(shell, shell, container);
+  }
+
+  /**
+   * Same reconciliation with the staleness probe split from the mutations: {@code probe} always
+   * observes the live container, while {@code shell} carries the installers — so a dry-run executor
+   * can print what would change without blinding the probe that decides whether anything would.
+   */
+  public static Result ensureInstalled(ShellExec probe, ShellExec shell, String container)
+      throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
     new IncusDeviceManager(shell)
         .refreshEventSocket(
             container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
     var expected = fingerprint();
-    if (stampMatches(shell, container, expected)) {
+    if (stampMatches(probe, container, expected)) {
       return Result.ALREADY_PRESENT;
     }
     new SailEventHelper(shell).install(container);
@@ -118,7 +129,8 @@ public final class ContainerSailSetup {
       stamp=$1
       expected=$2
       profile=$3
-      shift 3
+      bin=$4
+      shift 4
       [ "$(cat -- "$stamp" 2>/dev/null)" = "$expected" ]
       while [ "$#" -gt 0 ]; do
         path=$1
@@ -128,6 +140,9 @@ public final class ContainerSailSetup {
           grep -Fqx -- "$content" "$path"
         else
           printf '%s' "$content" | cmp -s -- "$path" -
+          case "$path" in
+            "$bin"/*) [ -x "$path" ] ;;
+          esac
         fi
       done
       """;
@@ -143,7 +158,8 @@ public final class ContainerSailSetup {
                 "bash",
                 STAMP_PATH,
                 expected,
-                SpecCliHelper.PROFILE_PATH));
+                SpecCliHelper.PROFILE_PATH,
+                SpecCliHelper.SCRIPT_DIR));
     installedFiles()
         .forEach(
             (path, content) -> {

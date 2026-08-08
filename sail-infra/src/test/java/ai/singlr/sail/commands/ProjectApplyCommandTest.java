@@ -164,6 +164,33 @@ class ProjectApplyCommandTest {
   }
 
   @Test
+  void rejectsJsonCombinedWithDryRun() {
+    var err = new StringWriter();
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(err));
+
+    var exit = cmd.execute("project", "apply", "web", "--json", "--dry-run");
+
+    assertNotEquals(0, exit, "dry-run narration on stdout would corrupt the JSON document");
+    assertTrue(err.toString().contains("--json and --dry-run"));
+  }
+
+  @Test
+  void dryRunSkipsCanonicalBundlePersistenceEntirely() throws Exception {
+    var missingSource = Path.of("/definitely/not/there/sail.yaml");
+
+    ProjectApplyCommand.persistCanonicalBundle("web", missingSource, true);
+
+    assertThrows(
+        Exception.class,
+        () ->
+            ProjectApplyCommand.syncProjectBundle(
+                missingSource, missingSource.resolveSibling("canonical.yaml")),
+        "the same source outside dry-run would fail loudly — proof the dry run never reached"
+            + " the filesystem");
+  }
+
+  @Test
   void rejectsFileWithAll() {
     var cmd = new CommandLine(new Sail());
     cmd.setErr(new PrintWriter(new StringWriter()));

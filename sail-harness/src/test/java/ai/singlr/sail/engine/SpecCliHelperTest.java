@@ -83,7 +83,13 @@ class SpecCliHelperTest {
     assertTrue(cmds.get(1).contains("chmod 0755"));
     assertTrue(cmds.get(1).contains("/home/dev/.sail/bin/spec"));
     assertTrue(cmds.get(2).contains("/home/dev/.profile"), "puts ~/.sail/bin on the login PATH");
-    assertTrue(cmds.get(2).contains("grep -qsF"), "adds the PATH export only when absent");
+    assertTrue(
+        cmds.get(2).contains("grep -Fqsx"),
+        "the installer must test the exact export line — the same invariant the machinery"
+            + " verifier probes — or a profile mentioning .sail/bin never converges");
+    assertTrue(
+        cmds.get(2).contains(SpecCliHelper.profileLine()),
+        "presence check and append must both use the generated export line");
   }
 
   @Test

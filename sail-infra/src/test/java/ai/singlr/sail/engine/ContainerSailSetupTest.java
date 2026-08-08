@@ -65,6 +65,47 @@ class ContainerSailSetupTest {
   }
 
   @Test
+  void theProbeRequiresBinScriptsToStayExecutable() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onOk(PROBE);
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var probe =
+        shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
+    assertTrue(
+        probe.contains("[ -x \"$path\" ]"),
+        "byte-identical scripts with a dropped executable bit are still stale — hooks and the"
+            + " spec CLI fail with EACCES, so the probe must fail and trigger a heal");
+    assertTrue(
+        probe.contains(SpecCliHelper.SCRIPT_DIR),
+        "the executable check must scope to the bin directory the scripts install into");
+  }
+
+  @Test
+  void theSplitOverloadProbesOnTheObserverAndInstallsOnTheMutator() throws Exception {
+    var probe = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail(PROBE, "stale");
+    var mutator =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n");
+
+    var result = ContainerSailSetup.ensureInstalled(probe, mutator, CONTAINER);
+
+    assertEquals(ContainerSailSetup.Result.UPDATED, result);
+    assertTrue(
+        probe.invocations().stream().allMatch(c -> c.contains(PROBE)),
+        "the observer shell must carry only the staleness probe");
+    assertTrue(
+        mutator.invocations().stream().noneMatch(c -> c.contains(PROBE)),
+        "the mutator shell must never carry the probe — a dry-run mutator would blind it");
+    assertTrue(
+        mutator.invocations().stream().anyMatch(c -> c.contains("chmod 0755")),
+        "installers must ride the mutator shell");
+  }
+
+  @Test
   void aFailedVerificationInstallsEverythingAndStamps() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))

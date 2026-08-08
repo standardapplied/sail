@@ -40,10 +40,21 @@ public final class ProjectApplier {
     }
   }
 
+  private final ShellExec probes;
   private final ShellExec shell;
   private final PrintStream out;
 
   public ProjectApplier(ShellExec shell, PrintStream out) {
+    this(shell, shell, out);
+  }
+
+  /**
+   * Splits delta detection from mutation: {@code probes} always observes the live container, while
+   * {@code shell} carries the changes — so a dry-run executor prints what would change without
+   * blinding the probes that compute the actual delta.
+   */
+  public ProjectApplier(ShellExec probes, ShellExec shell, PrintStream out) {
+    this.probes = probes;
     this.shell = shell;
     this.out = out;
   }
@@ -62,7 +73,7 @@ public final class ProjectApplier {
       var svcName = entry.getKey();
       var svc = entry.getValue();
       var check =
-          shell.exec(
+          probes.exec(
               ContainerExec.asDevUser(name, List.of("podman", "container", "inspect", svcName)));
       if (check.ok()) {
         out.println("  [skip] Service '" + svcName + "' already running");
@@ -99,7 +110,7 @@ public final class ProjectApplier {
     var skipped = 0;
     for (var repo : repos) {
       var targetDir = "/home/" + sshUser + "/workspace/" + repo.path();
-      var check = shell.exec(ContainerExec.asDevUser(name, List.of("test", "-d", targetDir)));
+      var check = probes.exec(ContainerExec.asDevUser(name, List.of("test", "-d", targetDir)));
       if (check.ok()) {
         out.println("  [skip] Repo '" + repo.path() + "' already cloned");
         skipped++;
@@ -133,7 +144,7 @@ public final class ProjectApplier {
     for (var agentName : install) {
       var tool = AgentCli.fromYamlName(agentName);
       var check =
-          shell.exec(
+          probes.exec(
               ContainerExec.asDevUser(name, List.of("bash", "-lc", "which " + tool.binaryName())));
       if (check.ok()) {
         out.println("  [skip] Agent '" + agentName + "' already installed");
@@ -210,7 +221,7 @@ public final class ProjectApplier {
     var skipped = 0;
     for (var svcName : serviceNames) {
       var check =
-          shell.exec(
+          probes.exec(
               ContainerExec.asDevUser(name, List.of("podman", "container", "inspect", svcName)));
       if (!check.ok()) {
         out.println("  [skip] Service '" + svcName + "' not found in container");
@@ -262,7 +273,7 @@ public final class ProjectApplier {
   List<String> queryRunningServiceNames(String containerName)
       throws IOException, InterruptedException, TimeoutException {
     var cmd = ContainerExec.asDevUser(containerName, List.of("podman", "ps", "--format", "json"));
-    var result = shell.exec(cmd);
+    var result = probes.exec(cmd);
     if (!result.ok() || result.stdout().isBlank()) {
       return List.of();
     }
@@ -316,11 +327,11 @@ public final class ProjectApplier {
    */
   public ApplyResult applyCleanupCron(String name, String sshUser)
       throws IOException, InterruptedException, TimeoutException {
-    var check = shell.exec(ContainerExec.asDevUser(name, List.of("crontab", "-l")));
+    var check = probes.exec(ContainerExec.asDevUser(name, List.of("crontab", "-l")));
     var existingCron = check.ok() ? check.stdout() : "";
 
     var scriptsExist =
-        shell
+        probes
             .exec(
                 ContainerExec.asDevUser(
                     name, List.of("test", "-f", CleanupScripts.CONTAINER_CLEANUP_PATH)))

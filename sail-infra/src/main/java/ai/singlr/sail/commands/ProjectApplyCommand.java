@@ -120,6 +120,12 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    if (json && dryRun) {
+      throw new IllegalArgumentException(
+          "--json and --dry-run cannot be combined: dry-run narrates the underlying shell"
+              + " commands on stdout, which would corrupt the JSON document. Drop one of the two"
+              + " flags.");
+    }
     if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
@@ -155,15 +161,21 @@ public final class ProjectApplyCommand implements Runnable {
     }
     NameValidator.requireValidProjectName(config.name());
     requireMatchingName(name, config.name(), sailYamlPath);
+    if (config.resources() == null) {
+      throw new IllegalStateException(
+          "sail.yaml must have a 'resources' section with cpu, memory, and disk.");
+    }
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
       System.out.println();
     }
 
+    var observer = new ShellExecutor(false);
     var shell = new ShellExecutor(dryRun);
+    var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
-    var action = plan(mgr.queryState(config.name()));
+    var action = plan(observed.queryState(config.name()));
 
     if (action == Action.STARTED) {
       if (!json) {
@@ -196,7 +208,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var outcome = converge(shell, mgr, config, sailYamlPath);
+    var outcome = converge(observer, shell, config, sailYamlPath);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(jsonSummary(config.name(), action, outcome)));
@@ -208,7 +220,7 @@ public final class ProjectApplyCommand implements Runnable {
     }
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + summaryLine(action, outcome)));
     if (action == Action.CREATED) {
-      printConnectHints(config, shell, mgr);
+      printConnectHints(config, observer, observed);
     }
   }
 
@@ -218,9 +230,10 @@ public final class ProjectApplyCommand implements Runnable {
    * This is the post-upgrade retrofit: one command brings the whole box current.
    */
   private void applyAll() throws Exception {
+    var observer = new ShellExecutor(false);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
-    var targets = mgr.listAll();
+    var targets = new ContainerManager(observer).listAll();
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -248,9 +261,9 @@ public final class ProjectApplyCommand implements Runnable {
           var config = ProjectDefinitions.resolveForProvisioning(definition.get());
           requireMatchingName(project, config.name(), null);
           var sailYamlPath = ProjectDefinitions.materialize(project, definition.get());
-          outcome = converge(shell, mgr, config, sailYamlPath);
+          outcome = converge(observer, shell, config, sailYamlPath);
         } else {
-          outcome = convergeMachineryOnly(shell, mgr, project);
+          outcome = convergeMachineryOnly(observer, shell, project);
         }
         applied++;
         if (json) {
@@ -339,16 +352,22 @@ public final class ProjectApplyCommand implements Runnable {
       boolean hostnameRealigned,
       List<String> warnings) {}
 
-  /** The full convergence pass: descriptor state, sail machinery, agent context, hostname. */
+  /**
+   * The full convergence pass: descriptor state, sail machinery, agent context, hostname. The
+   * {@code observer} always executes, so every state probe sees the live container; only mutations
+   * ride {@code shell}, which a dry run swaps for command narration.
+   */
   private Outcome converge(
-      ShellExecutor shell, ContainerManager mgr, SailYaml config, Path sailYamlPath)
+      ShellExecutor observer, ShellExecutor shell, SailYaml config, Path sailYamlPath)
       throws Exception {
     var project = config.name();
-    var hostnameRealigned = mgr.setHostname(project);
-    var machinery = ContainerSailSetup.ensureInstalled(shell, project);
+    var observed = new ContainerManager(observer);
+    var mgr = new ContainerManager(shell);
+    var hostnameRealigned = !observed.hostnameMatches(project) && mgr.setHostname(project);
+    var machinery = ContainerSailSetup.ensureInstalled(observer, shell, project);
 
-    var applier = new ProjectApplier(shell, progressOut(json));
-    var info = mgr.queryInfo(project);
+    var applier = new ProjectApplier(observer, shell, progressOut(json));
+    var info = observed.queryInfo(project);
     var warnings = new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits()));
     var sshUser = config.sshUser();
     var token = Strings.isNotBlank(gitToken) ? gitToken : null;
@@ -375,10 +394,12 @@ public final class ProjectApplyCommand implements Runnable {
     return new Outcome(added, removed, skipped, machinery, hostnameRealigned, warnings);
   }
 
-  private Outcome convergeMachineryOnly(ShellExecutor shell, ContainerManager mgr, String project)
+  private Outcome convergeMachineryOnly(ShellExecutor observer, ShellExecutor shell, String project)
       throws Exception {
-    var hostnameRealigned = mgr.setHostname(project);
-    var machinery = ContainerSailSetup.ensureInstalled(shell, project);
+    var observed = new ContainerManager(observer);
+    var mgr = new ContainerManager(shell);
+    var hostnameRealigned = !observed.hostnameMatches(project) && mgr.setHostname(project);
+    var machinery = ContainerSailSetup.ensureInstalled(observer, shell, project);
     return new Outcome(
         0,
         0,
@@ -442,18 +463,7 @@ public final class ProjectApplyCommand implements Runnable {
       ProvisionTracker<ProjectPhase> tracker)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
-    if (config.resources() == null) {
-      throw new IllegalStateException(
-          "sail.yaml must have a 'resources' section with cpu, memory, and disk.");
-    }
-
-    var projectDir = SailPaths.projectDir(config.name());
-    Files.createDirectories(projectDir);
-    var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
-    syncProjectBundle(sailYamlPath, canonicalYaml);
-    if (!dryRun) {
-      ProjectCatalog.record(config.name(), Files.readString(canonicalYaml), null);
-    }
+    persistCanonicalBundle(config.name(), sailYamlPath, dryRun);
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
@@ -613,6 +623,24 @@ public final class ProjectApplyCommand implements Runnable {
       return defaultDescriptorPath(name);
     }
     return cwdPath;
+  }
+
+  /**
+   * Copies the descriptor and its {@code files/} directory into the canonical project bundle and
+   * records it in the catalog. A dry run must not touch the host filesystem at all — the plan is
+   * computed from the source descriptor, and the sync starts by deleting the canonical files
+   * directory, so running it under dry-run would destroy locally authored project files.
+   */
+  static void persistCanonicalBundle(String name, Path sailYamlPath, boolean dryRun)
+      throws Exception {
+    if (dryRun) {
+      return;
+    }
+    var projectDir = SailPaths.projectDir(name);
+    Files.createDirectories(projectDir);
+    var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
+    syncProjectBundle(sailYamlPath, canonicalYaml);
+    ProjectCatalog.record(name, Files.readString(canonicalYaml), null);
   }
 
   static void syncProjectBundle(Path sourceSailYamlPath, Path canonicalYamlPath) throws Exception {
