@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
+import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectApplier;
@@ -41,6 +42,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -140,22 +143,14 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void applyOne() throws Exception {
-    refreshCanonicalFromCatalog();
-    var sailYamlPath = resolveSailYamlPath(name, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + sailYamlPath.toAbsolutePath()
-              + "\n  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
-              + " specify one with --file.");
-    }
+    var definition = loadDefinition();
+    var sailYamlPath = definition.path();
 
     var identity =
         new InteractiveIdentity(
             LocalIdentity.detect(),
             InteractiveIdentity.canPrompt(yes, json, dryRun, ConsoleHelper.hasConsole()));
-    SailYaml config =
-        ProjectDefinitions.resolveForProvisioning(Files.readString(sailYamlPath), identity);
+    SailYaml config = ProjectDefinitions.resolveForProvisioning(definition.text(), identity);
     if (config.name() == null || config.name().isBlank()) {
       throw new IllegalStateException("sail.yaml must have a 'name' field.");
     }
@@ -225,14 +220,20 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /**
-   * Converges every existing container. Descriptors resolve from the store; a container without one
-   * still gets its machinery and hostname healed, reported with a warning line, never a failure.
-   * This is the post-upgrade retrofit: one command brings the whole box current.
+   * Converges every Sail-managed container: one with a definition in the store, or a legacy
+   * descriptor-less one an earlier release provisioned (recognizable by its API-socket device) —
+   * the latter still gets its machinery and hostname healed, reported with a warning line, never a
+   * failure. Unrelated Incus instances on the same host are never targets: starting one or
+   * attaching the API-socket mount would hand the box credential to a container Sail did not
+   * provision. Each target rides the same resumable lifecycle as single-project apply, so an
+   * interrupted provisioning run finishes its remaining phases instead of being skipped. This is
+   * the post-upgrade retrofit: one command brings the whole box current.
    */
   private void applyAll() throws Exception {
     var observer = new ShellExecutor(false);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
+    var devices = new IncusDeviceManager(observer);
     var targets = new ContainerManager(observer).listAll();
 
     if (!json) {
@@ -249,18 +250,28 @@ public final class ProjectApplyCommand implements Runnable {
 
     for (var target : targets) {
       var project = target.name();
+      var definition = definitionFor(project);
       try {
+        if (!sailManaged(project, definition.isPresent(), devices)) {
+          continue;
+        }
         var action = plan(target.state());
         if (action == Action.STARTED) {
           mgr.start(project);
           mgr.waitUntilReady(project);
         }
-        var definition = ProjectDefinitions.definition(project, null);
         Outcome outcome;
         if (definition.isPresent()) {
           var config = ProjectDefinitions.resolveForProvisioning(definition.get());
           requireMatchingName(project, config.name(), null);
-          var sailYamlPath = ProjectDefinitions.materialize(project, definition.get());
+          var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
+          var tracker =
+              new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(project), dryRun);
+          tracker.load();
+          if (tracker.hasIncompleteRun()) {
+            provision(config, sailYamlPath, shell, tracker);
+            action = Action.CREATED;
+          }
           outcome = converge(observer, shell, config, sailYamlPath);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
@@ -299,6 +310,23 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string(allSummaryLine(applied, failed)));
     }
     requireAllApplied(failed);
+  }
+
+  /**
+   * The trust gate for {@code --all}: a container is Sail-managed when a definition resolves for
+   * it, or when an earlier Sail release already attached the API-socket device. Anything else is a
+   * foreign Incus instance that must never receive the API mount and box credential.
+   */
+  static boolean sailManaged(String project, boolean hasDefinition, IncusDeviceManager devices)
+      throws IOException, InterruptedException, TimeoutException {
+    return NameValidator.isValidProjectName(project)
+        && (hasDefinition || devices.currentEventSocketSource(project) != null);
+  }
+
+  private static Optional<String> definitionFor(String project) {
+    return NameValidator.isValidProjectName(project)
+        ? ProjectDefinitions.definition(project, null)
+        : Optional.empty();
   }
 
   static String allSummaryLine(int applied, int failed) {
@@ -580,21 +608,44 @@ public final class ProjectApplyCommand implements Runnable {
     return Map.copyOf(tokens);
   }
 
+  private record Definition(String text, Path path) {}
+
   /**
-   * Refreshes the canonical descriptor from the catalog (the source of truth) before reading it, so
-   * apply converges a definition edited or synced on main rather than a stale local copy. A no-op
-   * when {@code -f} is given (an explicit override), the project is absent from the catalog (a
-   * brand-new local authoring), or no name was supplied.
+   * Loads the definition text catalog-first (the source of truth), so apply converges a definition
+   * edited or synced on main rather than a stale local copy. Falls back to the resolved descriptor
+   * file when {@code -f} is given (an explicit override), the project is absent from the catalog (a
+   * brand-new local authoring), or no name was supplied. The plan always reads the same desired
+   * state; only a real apply re-materializes the canonical descriptor from the catalog.
    */
-  private void refreshCanonicalFromCatalog() throws IOException {
-    if (ProjectDefinitions.explicitFile(file) != null || name == null) {
-      return;
+  private Definition loadDefinition() throws IOException {
+    if (ProjectDefinitions.explicitFile(file) == null && name != null) {
+      NameValidator.requireValidProjectName(name);
+      var catalog = ProjectDefinitions.definition(name, null);
+      if (catalog.isPresent()) {
+        return new Definition(catalog.get(), materializeUnlessDryRun(name, catalog.get(), dryRun));
+      }
     }
-    NameValidator.requireValidProjectName(name);
-    var definition = ProjectDefinitions.definition(name, null);
-    if (definition.isPresent()) {
-      ProjectDefinitions.materialize(name, definition.get());
+    var sailYamlPath = resolveSailYamlPath(name, file);
+    if (!Files.exists(sailYamlPath)) {
+      throw new IllegalStateException(
+          "Project descriptor not found: "
+              + sailYamlPath.toAbsolutePath()
+              + "\n  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
+              + " specify one with --file.");
     }
+    return new Definition(Files.readString(sailYamlPath), sailYamlPath);
+  }
+
+  /**
+   * A dry run promises to leave the host untouched, so it plans against the in-memory definition
+   * and only resolves where the canonical descriptor would live; a real apply materializes it.
+   */
+  static Path materializeUnlessDryRun(String name, String definition, boolean dryRun)
+      throws IOException {
+    if (dryRun) {
+      return defaultDescriptorPath(name);
+    }
+    return ProjectDefinitions.materialize(name, definition);
   }
 
   static Path defaultDescriptorPath(String name) {

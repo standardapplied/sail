@@ -31,9 +31,14 @@ public final class NameValidator {
 
   private NameValidator() {}
 
+  /** Returns whether the given name is a valid project name. */
+  public static boolean isValidProjectName(String name) {
+    return name != null && name.length() <= MAX_LENGTH && PROJECT_NAME.matcher(name).matches();
+  }
+
   /** Validates a project name. Throws if invalid. */
   public static void requireValidProjectName(String name) {
-    if (name == null || name.length() > MAX_LENGTH || !PROJECT_NAME.matcher(name).matches()) {
+    if (!isValidProjectName(name)) {
       throw new IllegalArgumentException(
           "Invalid project name: '"
               + name

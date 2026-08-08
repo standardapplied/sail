@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,6 +34,14 @@ class NameValidatorTest {
   @Test
   void nullProjectNameIsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidProjectName(null));
+  }
+
+  @Test
+  void isValidProjectNameAnswersWithoutThrowing() {
+    assertTrue(NameValidator.isValidProjectName("acme-health"));
+    assertFalse(NameValidator.isValidProjectName("Acme_Health"));
+    assertFalse(NameValidator.isValidProjectName("../traversal"));
+    assertFalse(NameValidator.isValidProjectName(null));
   }
 
   @Test

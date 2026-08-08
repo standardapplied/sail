@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -247,6 +249,45 @@ class ProjectApplyCommandTest {
 
     assertTrue(thrown.getMessage().contains("2 project(s)"));
     ProjectApplyCommand.requireAllApplied(0);
+  }
+
+  @Test
+  void allOnlyTargetsSailManagedContainers() throws Exception {
+    var probe =
+        new ScriptedShellExecutor()
+            .onOk("incus config device get legacy sail-api-sock source", "/run/sail/api");
+    var devices = new IncusDeviceManager(probe);
+
+    assertTrue(ProjectApplyCommand.sailManaged("web", true, devices));
+    assertTrue(
+        ProjectApplyCommand.sailManaged("legacy", false, devices),
+        "a descriptor-less container an earlier release provisioned keeps its retrofit");
+    assertFalse(
+        ProjectApplyCommand.sailManaged("foreign", false, devices),
+        "an unrelated Incus instance must never receive the API mount and box credential");
+    assertTrue(
+        probe.invocations().stream().noneMatch(c -> c.contains("web")),
+        "a catalogued project needs no device probe");
+  }
+
+  @Test
+  void anInvalidInstanceNameIsForeignBeforeAnyProbeRuns() throws Exception {
+    var probe = new ScriptedShellExecutor();
+    var devices = new IncusDeviceManager(probe);
+
+    assertFalse(ProjectApplyCommand.sailManaged("Not_A_Project", true, devices));
+    assertTrue(probe.invocations().isEmpty(), "an invalid name must never reach incus");
+  }
+
+  @Test
+  void aDryRunResolvesTheCanonicalPathWithoutMaterializing() throws Exception {
+    var project = "dry-run-materialize-proof";
+
+    var path =
+        ProjectApplyCommand.materializeUnlessDryRun(project, "name: " + project + "\n", true);
+
+    assertEquals(ProjectApplyCommand.defaultDescriptorPath(project), path);
+    assertFalse(Files.exists(path), "a dry run must never write the canonical descriptor");
   }
 
   @Test
