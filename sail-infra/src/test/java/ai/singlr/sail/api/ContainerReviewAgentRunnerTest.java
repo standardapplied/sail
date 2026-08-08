@@ -53,7 +53,10 @@ class ContainerReviewAgentRunnerTest {
     assertTrue(
         exec.contains(REVIEW_DIR + "/review-prompt.txt"),
         "prompt staged to the review's own task file");
-    assertFalse(exec.contains("--settings"), "reviewer loads no hooks");
+    assertTrue(
+        exec.contains("--settings /home/dev/.sail/claude-settings.json"),
+        "the reviewer loads the same single hooks layer as every sail-launched claude session;"
+            + " with neither SAIL_SPEC_ID nor SAIL_RUN_ID exported every hook is inert");
     assertFalse(
         exec.contains("SAIL_SPEC_ID"), "reviewer runs without a spec id, so it can't recurse");
     assertFalse(
@@ -121,8 +124,9 @@ class ContainerReviewAgentRunnerTest {
         "the run id arms the stop gate, read from its positional argument");
     assertTrue(exec.contains(REVIEW_ID), "the review id travels as the argument itself");
     assertTrue(
-        exec.contains("--settings " + "/home/dev/.sail/claude-fix-settings.json"),
-        "claude loads the Stop-only settings so the gate fires without any event hooks");
+        exec.contains("--settings /home/dev/.sail/claude-settings.json"),
+        "one hooks layer: the fix lane loads the same settings as dispatch; the run id alone"
+            + " arms the gate and the missing spec id keeps the event hooks silent");
     assertFalse(
         exec.contains("SAIL_SPEC_ID"),
         "no spec id: the event helper stays silent and the pipeline can never re-enter");

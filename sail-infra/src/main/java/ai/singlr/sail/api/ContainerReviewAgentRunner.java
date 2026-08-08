@@ -33,13 +33,14 @@ import java.util.Objects;
  * from the bytes this run appended — parsed via {@link StreamJsonResult} so a streamed reviewer and
  * a plain one are handled uniformly.
  *
- * <p>Neither lane exports {@code SAIL_SPEC_ID}, so no completion event ever re-enters the pipeline
- * (which would recurse forever). The reviewer additionally runs hook-free and ungated — it must be
- * free to stop without committing. The fix lane arms the stop gate (see {@link #runFix}) because it
- * writes to the spec branch and the commit discipline lives in the gate, not the prompt. The run
- * credential rides in as a positional shell argument — never interpolated into the script text —
- * and lands in {@code SAIL_RUN_CREDENTIAL}, so the agent's spec commands authenticate as its review
- * run's principal.
+ * <p>Both lanes run the one sail-owned hooks layer every sail-launched session runs; the lane is
+ * expressed entirely by the environment. Neither exports {@code SAIL_SPEC_ID}, so no completion
+ * event ever re-enters the pipeline (which would recurse forever). The reviewer exports no {@code
+ * SAIL_RUN_ID} either — every hook is inert, and it stays free to stop without committing. The fix
+ * lane exports the run id, arming the stop gate (see {@link #runFix}), because it writes to the
+ * spec branch and the commit discipline lives in the gate, not the prompt. The run credential rides
+ * in as a positional shell argument — never interpolated into the script text — and lands in {@code
+ * SAIL_RUN_CREDENTIAL}, so the agent's spec commands authenticate as its review run's principal.
  */
 final class ContainerReviewAgentRunner implements ReviewAgentRunner {
 
@@ -83,16 +84,15 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
       throws Exception {
     var cli = AgentCli.fromYamlName(agent);
     var unit = stage(project, prompt, reviewId);
-    return launch(project, cli, agent, unit, runCredential, null, null, model, reasoningEffort);
+    return launch(project, cli, agent, unit, runCredential, null, model, reasoningEffort);
   }
 
   /**
    * The fix lane launches with the stop gate armed: {@code SAIL_RUN_ID} rides in as a positional
-   * argument, the session file carries the spec's branch and repos so the gate checks exactly this
-   * spec's repos, and Claude Code loads the Stop-only settings file. Codex needs no settings flag —
-   * it discovers the global hooks file, armed by the trust bypass every full-permission launch
-   * already passes — so both CLIs gate identically. {@code SAIL_SPEC_ID} stays unset: the gate's
-   * own publishes no-op and the pipeline can never re-enter on the fix agent's stop.
+   * argument and the session file carries the spec's branch and repos so the gate checks exactly
+   * this spec's repos. Both CLIs run the same single hooks layer they always run — the run id alone
+   * is what arms the gate. {@code SAIL_SPEC_ID} stays unset: the gate's own publishes no-op and the
+   * pipeline can never re-enter on the fix agent's stop.
    */
   @Override
   public String runFix(
@@ -109,16 +109,7 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
     var cli = AgentCli.fromYamlName(agent);
     var unit = stage(project, prompt, reviewId);
     session.writeSession(project, prompt, branch, "", agent, reviewId, repos, unit);
-    return launch(
-        project,
-        cli,
-        agent,
-        unit,
-        runCredential,
-        ClaudeCodeHookConfig.FIX_SETTINGS_PATH,
-        reviewId,
-        model,
-        reasoningEffort);
+    return launch(project, cli, agent, unit, runCredential, reviewId, model, reasoningEffort);
   }
 
   private AgentUnit stage(String project, String prompt, String reviewId) throws Exception {
@@ -134,7 +125,6 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
       String agent,
       AgentUnit unit,
       String runCredential,
-      String claudeSettingsPath,
       String gateRunId,
       String model,
       String reasoningEffort)
@@ -143,7 +133,12 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
 
     var agentCmd =
         cli.headlessCommand(
-            unit.taskPath(), true, model, reasoningEffort, claudeSettingsPath, true);
+            unit.taskPath(),
+            true,
+            model,
+            reasoningEffort,
+            ClaudeCodeHookConfig.SETTINGS_PATH,
+            true);
     var gateExport = gateRunId == null ? "" : "export SAIL_RUN_ID=\"$2\"; ";
     var command =
         "export SAIL_RUN_CREDENTIAL=\"$1\"; "

@@ -125,8 +125,6 @@ public final class ContainerSailSetup {
                         + " && grep -qsF includeCoAuthoredBy "
                         + ClaudeCodeHookConfig.SETTINGS_PATH
                         + " && test -f "
-                        + ClaudeCodeHookConfig.FIX_SETTINGS_PATH
-                        + " && test -f "
                         + CodexHookConfig.SETTINGS_PATH
                         + " && grep -qsF "
                         + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
