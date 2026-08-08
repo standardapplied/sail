@@ -36,7 +36,7 @@ class ContainerStateGuardTest {
             IllegalStateException.class,
             () -> ContainerStateGuard.requireRunning(new ContainerState.NotCreated(), "demo"));
     assertEquals(
-        "Project 'demo' does not exist. Run 'sail project create' first.", ex.getMessage());
+        "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
   }
 
   @Test
@@ -67,7 +67,7 @@ class ContainerStateGuardTest {
             IllegalStateException.class,
             () -> ContainerStateGuard.requireCreated(new ContainerState.NotCreated(), "demo"));
     assertEquals(
-        "Project 'demo' does not exist. Run 'sail project create' first.", ex.getMessage());
+        "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
   }
 
   @Test

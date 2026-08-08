@@ -23,7 +23,7 @@ public final class ContainerStateGuard {
               "Project '" + name + "' is stopped. Start it with: sail project start " + name);
       case ContainerState.NotCreated ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
+              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }
@@ -36,7 +36,7 @@ public final class ContainerStateGuard {
       case ContainerState.Stopped ignored -> {}
       case ContainerState.NotCreated ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
+              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }

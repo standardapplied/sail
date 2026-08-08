@@ -12,7 +12,7 @@ import java.util.function.UnaryOperator;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Answers a synced descriptor's per-developer placeholders when {@code project create} provisions
+ * Answers a synced descriptor's per-developer placeholders when {@code project apply} provisions
  * it. Git identity is prompted — offering this box's {@code git config} as a default to accept or
  * override — so each engineer's containers commit as them even when their box has a different (or
  * no) global identity. {@code ${SSH_PUBLIC_KEY}} stays box-resolved from the box owner's registered

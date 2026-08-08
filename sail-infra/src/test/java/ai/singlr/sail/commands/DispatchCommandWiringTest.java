@@ -18,6 +18,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
@@ -241,7 +242,7 @@ class DispatchCommandWiringTest {
     /** Every launch reconciles the in-container sail helpers; answer as already installed. */
     StubShell() {
       on("incus config device add", "");
-      on("grep -qsF", "");
+      on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
     }
 
     StubShell on(String pattern, String stdout) {

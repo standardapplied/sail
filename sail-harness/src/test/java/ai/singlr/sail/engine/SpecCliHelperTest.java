@@ -42,7 +42,7 @@ class SpecCliHelperTest {
   @Test
   void scriptHandlesEverySubcommand() {
     var content = SpecCliHelper.scriptContent();
-    assertTrue(content.contains(SpecCliHelper.BOX_CREDENTIAL_MARKER));
+    assertTrue(content.contains("box.credential"));
     assertTrue(
         content.contains("SAIL_RUN_CREDENTIAL:-"),
         "the run credential must stay the preferred identity");

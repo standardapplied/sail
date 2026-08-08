@@ -33,19 +33,9 @@ public final class SpecCliHelper {
   /** Dev-user login profile that {@link #install} puts {@link #SCRIPT_DIR} on the PATH through. */
   public static final String PROFILE_PATH = "/home/dev/.profile";
 
-  /** Fixed-string marker proving the PATH line is already in {@link #PROFILE_PATH}. */
-  public static final String PATH_MARKER = ".sail/bin";
+  private static final String PATH_DIR_FRAGMENT = ".sail/bin";
 
   private static final String PATH_EXPORT = "export PATH=\"$HOME/.sail/bin:$PATH\"";
-
-  /** Fixed-string marker proving the installed script presents the run credential. */
-  public static final String CREDENTIAL_MARKER = "SAIL_RUN_CREDENTIAL";
-
-  /** Fixed-string marker proving the installed script has the conversation commands. */
-  public static final String MESSAGES_MARKER = "spec comment";
-
-  /** Fixed-string marker proving the installed script falls back to the ambient box credential. */
-  public static final String BOX_CREDENTIAL_MARKER = "box.credential";
 
   private static final String SCRIPT =
       """
@@ -194,6 +184,11 @@ public final class SpecCliHelper {
     return SCRIPT.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
   }
 
+  /** Returns the PATH line that {@link #install(String)} appends to {@link #PROFILE_PATH}. */
+  public static String profileLine() {
+    return PATH_EXPORT;
+  }
+
   /**
    * Idempotently installs the helper script at {@link #SCRIPT_PATH} inside the given container,
    * chmod 0755, owned by the dev user, and ensures {@link #SCRIPT_DIR} is on the login PATH (so an
@@ -233,7 +228,7 @@ public final class SpecCliHelper {
                     "-c",
                     "grep -qsF \"$1\" \"$2\" || printf '\\n%s\\n' \"$3\" >> \"$2\"",
                     "bash",
-                    PATH_MARKER,
+                    PATH_DIR_FRAGMENT,
                     PROFILE_PATH,
                     PATH_EXPORT)));
     if (!onPath.ok()) {

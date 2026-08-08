@@ -86,7 +86,7 @@ public final class UpCommand implements Runnable {
       }
       case ContainerState.NotCreated ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project create' first.");
+              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }

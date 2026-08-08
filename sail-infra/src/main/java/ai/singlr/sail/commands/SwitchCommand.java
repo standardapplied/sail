@@ -54,7 +54,7 @@ public final class SwitchCommand implements Runnable {
     var state = mgr.queryState(name);
     if (state instanceof ContainerState.NotCreated) {
       throw new IllegalStateException(
-          "Project '" + name + "' does not exist. Run 'sail project create' first.");
+          "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
     }
     if (state instanceof ContainerState.Error e) {
       throw new IllegalStateException("Container error: " + e.message());

@@ -56,13 +56,6 @@ public final class ClaudeCodeHookConfig {
   /** Container-side absolute path to the settings file. Used with {@code claude --settings}. */
   public static final String SETTINGS_PATH = SETTINGS_DIR + "/" + SETTINGS_FILE;
 
-  /**
-   * Event type of the {@code PreToolUse} heartbeat, and the marker {@link
-   * ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a settings file written before
-   * the tool hooks existed, so a stale container is refreshed on the next dispatch.
-   */
-  public static final String PROGRESS_HOOK_MARKER = "agent_tool_started";
-
   private final ShellExec shell;
 
   public ClaudeCodeHookConfig(ShellExec shell) {
@@ -75,7 +68,7 @@ public final class ClaudeCodeHookConfig {
    */
   public static String render() {
     var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started");
-    var toolStarted = hookCommand(SailEventHelper.SCRIPT_PATH, PROGRESS_HOOK_MARKER);
+    var toolStarted = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_started");
     var toolFinished = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_finished");
     var stop = stopGateCommand();
     var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed");
@@ -95,7 +88,7 @@ public final class ClaudeCodeHookConfig {
 
   /**
    * Idempotently writes {@link #SETTINGS_PATH} inside the container. Install-once at provision or
-   * {@code sail project sync}; not rewritten per dispatch.
+   * {@code sail project apply}; not rewritten per dispatch.
    */
   public void install(String container) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);

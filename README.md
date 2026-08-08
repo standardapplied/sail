@@ -70,13 +70,14 @@ It forwards commands over SSH, and no control plane runs locally.
 
 A project is one `sail.yaml`: runtimes, services, repos, and agent config. The database is
 the source of truth, and the on-disk descriptor is a materialized view. `sail project
-create` turns the definition into an isolated Incus container with runtimes installed,
-Podman services running under `--restart=always`, repos cloned, and agent context
-generated.
+apply` makes the container match the definition from any starting state: an absent
+container is provisioned — runtimes installed, Podman services running under
+`--restart=always`, repos cloned, agent context generated — a stopped one is started, and
+a running one is converged in place. Run it again any time; a current project is a no-op.
 
 ```bash
 sail project init        # author a sail.yaml
-sail project create web  # provision the container
+sail project apply web   # make it real (create, start, or converge — one verb)
 sail project edit web    # change the definition (saved to the catalog, synced to peers)
 sail project connect web # print SSH config for your editor
 ```

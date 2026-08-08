@@ -6,55 +6,54 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.SequencedMap;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Self-healing entry point for sail's in-container plumbing. Reconciles two things on every
- * dispatch:
+ * Self-healing entry point for sail's in-container machinery. Reconciles two invariants on every
+ * call:
  *
  * <ol>
- *   <li><b>Event-socket bind mount.</b> {@link IncusDeviceManager#ensureEventSocket} is called
- *       every time so the source path matches the current {@link SailPaths#apiSocketHostDir()} —
- *       containers provisioned before the directory-mount fix (file-level mounts that stranded on
- *       stale inodes when {@code sail-api} restarted) get auto-migrated to the directory mount on
- *       the next dispatch.
- *   <li><b>Helper files in the container.</b> {@code sail-event.sh}, {@code sail-stop-gate}, {@code
- *       claude-settings.json}, and {@code codex hooks.json} are probed with a single {@code test
- *       -f} chain; if any is missing — or the {@code spec} script still references a stale socket
- *       path after the socket moved off {@code /run}, or {@code claude-settings.json} or the codex
- *       {@code hooks.json} predates the tool-progress hooks or the stop gate, or {@code
- *       sail-event.sh} predates the reason argument, or {@code sail-stop-gate} predates the
- *       run-scoped session file — the installers re-run and rewrite them. The content checks matter
- *       because the files are install-once: without them, a container provisioned before the hooks
- *       existed would keep a settings file the stall watcher gets no progress from, and its agents
- *       die at {@code max_idle}.
+ *   <li><b>Event-socket bind mount.</b> {@link IncusDeviceManager#ensureEventSocket} runs every
+ *       time so the mount always points at the current {@link SailPaths#apiSocketHostDir()} inode.
+ *       Incus tracks the bind by inode and the source directory can be recreated under the same
+ *       path, so the mount is force-refreshed (remove + re-add) rather than compared.
+ *   <li><b>Sail-owned files.</b> Every installed payload is a pure function of this binary. A
+ *       successful full install stamps {@link #STAMP_PATH} with the SHA-256 {@link #fingerprint()}
+ *       of all payloads, and the staleness probe is a content comparison: read the stamp, compare
+ *       to the fingerprint this binary would install right now. A missing, mismatched, or corrupt
+ *       stamp runs every installer and restamps — so a container converges on first touch after any
+ *       binary change, with no per-file staleness bookkeeping.
  * </ol>
  *
- * Designed for the dispatch hot path: ensureEventSocket is one idempotent shell call, the
- * file-existence probe is one more, and only a broken/missing setup costs the five installer
- * shells.
+ * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
+ * probe is one {@code cat}, and only a stale container pays for the installer shells.
  */
 public final class ContainerSailSetup {
+
+  /** Container-side path of the machinery fingerprint stamp. */
+  public static final String STAMP_PATH = "/home/dev/.sail/.machinery";
 
   private ContainerSailSetup() {}
 
   /** Result of a setup reconciliation. */
   public enum Result {
-    /** Mount and all sail-owned files were already in place; no install ran. */
+    /** The stamp matched this binary's fingerprint; no installer ran. */
     ALREADY_PRESENT,
-    /** Mount was added or replaced, or at least one helper file was missing. */
+    /** The stamp was missing or stale; every installer ran and the stamp was rewritten. */
     UPDATED
   }
 
   /**
-   * Reconciles the event-socket bind mount and the three sail-owned helper files in {@code
-   * container}. The mount is force-refreshed on every call (remove + re-add) because Incus tracks
-   * the bind by inode, and the source directory can be recreated under the same path by {@code
-   * systemd}'s {@code RuntimeDirectory=} cleanup — the only signal that the existing mount is stale
-   * is the inode mismatch, which Incus does not surface in {@code config device show}. Idempotent
-   * at the user-visible level (post-call the mount always points at the current inode); costs two
-   * extra {@code incus} shell calls per dispatch.
+   * Reconciles the event-socket bind mount and the sail-owned files in {@code container}.
+   * Idempotent at the user-visible level: post-call the mount points at the current inode and the
+   * installed files match this binary's payloads.
    */
   public static Result ensureInstalled(ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
@@ -62,7 +61,8 @@ public final class ContainerSailSetup {
     new IncusDeviceManager(shell)
         .refreshEventSocket(
             container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
-    if (allFilesPresent(shell, container)) {
+    var expected = fingerprint();
+    if (stampMatches(shell, container, expected)) {
       return Result.ALREADY_PRESENT;
     }
     new SailEventHelper(shell).install(container);
@@ -70,78 +70,63 @@ public final class ContainerSailSetup {
     new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
+    writeStamp(shell, container, expected);
     return Result.UPDATED;
   }
 
-  private static boolean allFilesPresent(ShellExec shell, String container)
+  /**
+   * SHA-256 over the ordered {@code (path, content)} pairs of every payload sail installs in a
+   * container. Pure function of this binary: any change to any payload changes the fingerprint.
+   */
+  public static String fingerprint() {
+    return fingerprintOf(installedFiles());
+  }
+
+  static String fingerprintOf(SequencedMap<String, String> files) {
+    MessageDigest digest;
+    try {
+      digest = MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+    files.forEach(
+        (path, content) -> {
+          digest.update(path.getBytes(StandardCharsets.UTF_8));
+          digest.update((byte) 0);
+          digest.update(content.getBytes(StandardCharsets.UTF_8));
+          digest.update((byte) 0);
+        });
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  static SequencedMap<String, String> installedFiles() {
+    var files = new LinkedHashMap<String, String>();
+    files.put(SailEventHelper.SCRIPT_PATH, SailEventHelper.scriptContent());
+    files.put(SailStopGate.SCRIPT_PATH, SailStopGate.scriptContent());
+    files.put(SpecCliHelper.SCRIPT_PATH, SpecCliHelper.scriptContent());
+    files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
+    files.put(ClaudeCodeHookConfig.SETTINGS_PATH, ClaudeCodeHookConfig.render());
+    files.put(CodexHookConfig.SETTINGS_PATH, CodexHookConfig.render());
+    return files;
+  }
+
+  private static boolean stampMatches(ShellExec shell, String container, String expected)
       throws IOException, InterruptedException, TimeoutException {
-    var probe =
+    var probe = shell.exec(ContainerExec.asDevUser(container, List.of("cat", STAMP_PATH)));
+    return probe.ok() && probe.stdout().strip().equals(expected);
+  }
+
+  private static void writeStamp(ShellExec shell, String container, String fingerprint)
+      throws IOException, InterruptedException, TimeoutException {
+    var write =
         shell.exec(
             ContainerExec.asDevUser(
                 container,
                 List.of(
-                    "bash",
-                    "-c",
-                    "test -f "
-                        + SailEventHelper.SCRIPT_PATH
-                        + " && grep -qsF "
-                        + SailEventHelper.REASON_MARKER
-                        + " "
-                        + SailEventHelper.SCRIPT_PATH
-                        + " && grep -qsF "
-                        + SailEventHelper.CREDENTIAL_MARKER
-                        + " "
-                        + SailEventHelper.SCRIPT_PATH
-                        + " && grep -qsF "
-                        + SpecCliHelper.CREDENTIAL_MARKER
-                        + " "
-                        + SpecCliHelper.SCRIPT_PATH
-                        + " && grep -qsF '"
-                        + SpecCliHelper.MESSAGES_MARKER
-                        + "' "
-                        + SpecCliHelper.SCRIPT_PATH
-                        + " && grep -qsF '"
-                        + SpecCliHelper.BOX_CREDENTIAL_MARKER
-                        + "' "
-                        + SpecCliHelper.SCRIPT_PATH
-                        + " && test -f "
-                        + SailStopGate.SCRIPT_PATH
-                        + " && grep -qsF "
-                        + SailStopGate.RUN_SESSION_MARKER
-                        + " "
-                        + SailStopGate.SCRIPT_PATH
-                        + " && test -f "
-                        + SpecCliHelper.SCRIPT_PATH
-                        + " && test -f "
-                        + ClaudeCodeHookConfig.SETTINGS_PATH
-                        + " && grep -qsF "
-                        + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
-                        + " "
-                        + ClaudeCodeHookConfig.SETTINGS_PATH
-                        + " && grep -qsF "
-                        + SailStopGate.SCRIPT_PATH
-                        + " "
-                        + ClaudeCodeHookConfig.SETTINGS_PATH
-                        + " && grep -qsF includeCoAuthoredBy "
-                        + ClaudeCodeHookConfig.SETTINGS_PATH
-                        + " && test -f "
-                        + CodexHookConfig.SETTINGS_PATH
-                        + " && grep -qsF "
-                        + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
-                        + " "
-                        + CodexHookConfig.SETTINGS_PATH
-                        + " && grep -qsF "
-                        + SailStopGate.SCRIPT_PATH
-                        + " "
-                        + CodexHookConfig.SETTINGS_PATH
-                        + " && grep -qsF "
-                        + SpecCliHelper.PATH_MARKER
-                        + " "
-                        + SpecCliHelper.PROFILE_PATH
-                        + " && grep -qsF "
-                        + SailPaths.apiSocketContainerPath()
-                        + " "
-                        + SpecCliHelper.SCRIPT_PATH)));
-    return probe.ok();
+                    "bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", fingerprint, STAMP_PATH)));
+    if (!write.ok()) {
+      throw new IOException(
+          "Failed to stamp " + STAMP_PATH + " in " + container + ": " + write.stderr());
+    }
   }
 }

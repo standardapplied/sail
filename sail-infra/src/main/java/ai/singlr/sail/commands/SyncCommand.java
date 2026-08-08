@@ -308,7 +308,7 @@ public final class SyncCommand implements Callable<Integer> {
                   + created.size()
                   + " new project(s) synced from main: "
                   + String.join(", ", created)
-                  + ". Provision with 'sudo sail project create <name>'.|@"));
+                  + ". Provision with 'sudo sail project apply <name>'.|@"));
     }
     return created;
   }

@@ -143,11 +143,7 @@ public final class ProjectRenameCommand implements Runnable {
     for (var warning : result.warnings()) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|yellow ⚠|@ "
-                  + warning
-                  + " — run 'sail project reconfigure "
-                  + result.to()
-                  + "'"));
+              "  @|yellow ⚠|@ " + warning + " — run 'sail project apply " + result.to() + "'"));
     }
     System.out.println();
     System.out.println(
