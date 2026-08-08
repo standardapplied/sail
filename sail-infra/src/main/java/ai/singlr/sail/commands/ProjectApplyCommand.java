@@ -28,6 +28,9 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -151,6 +154,7 @@ public final class ProjectApplyCommand implements Runnable {
       throw new IllegalStateException("sail.yaml must have a 'name' field.");
     }
     NameValidator.requireValidProjectName(config.name());
+    requireMatchingName(name, config.name(), sailYamlPath);
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -242,6 +246,7 @@ public final class ProjectApplyCommand implements Runnable {
         Outcome outcome;
         if (definition.isPresent()) {
           var config = ProjectDefinitions.resolveForProvisioning(definition.get());
+          requireMatchingName(project, config.name(), null);
           var sailYamlPath = ProjectDefinitions.materialize(project, definition.get());
           outcome = converge(shell, mgr, config, sailYamlPath);
         } else {
@@ -276,15 +281,54 @@ public final class ProjectApplyCommand implements Runnable {
       map.put("dry_run", dryRun);
       map.put("projects", rows);
       System.out.println(YamlUtil.dumpJson(map));
-      return;
+    } else {
+      System.out.println();
+      System.out.println(Ansi.AUTO.string(allSummaryLine(applied, failed)));
     }
-    System.out.println();
-    System.out.println(
-        Ansi.AUTO.string(
-            "  @|bold,green ✓|@ Applied "
-                + applied
-                + (failed > 0 ? ", failed " + failed : "")
-                + "."));
+    requireAllApplied(failed);
+  }
+
+  static String allSummaryLine(int applied, int failed) {
+    var style = failed == 0 ? "bold,green ✓" : "bold,red ✗";
+    return "  @|"
+        + style
+        + "|@ Applied "
+        + applied
+        + (failed > 0 ? ", failed " + failed : "")
+        + ".";
+  }
+
+  static void requireAllApplied(int failed) {
+    if (failed > 0) {
+      throw new IllegalStateException("Failed to apply " + failed + " project(s).");
+    }
+  }
+
+  /**
+   * The requested name selects the target; the descriptor must agree. Silently letting the
+   * descriptor's name win would redirect a destructive converge — undeclared-service removal
+   * included — at a container the operator never named.
+   */
+  static void requireMatchingName(String requested, String declared, Path descriptorPath) {
+    if (Strings.isNotBlank(requested) && !requested.equals(declared)) {
+      var source = descriptorPath != null ? descriptorPath.toString() : "its catalog descriptor";
+      throw new IllegalStateException(
+          "Requested project '"
+              + requested
+              + "' but "
+              + source
+              + " declares name '"
+              + declared
+              + "'.\n  Fix the 'name' field or apply the project the descriptor names.");
+    }
+  }
+
+  private static final PrintStream DISCARD =
+      new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8);
+
+  /** JSON mode promises one parseable document on stdout, so progress narration is discarded. */
+  static PrintStream progressOut(boolean json) {
+    return json ? DISCARD : System.out;
   }
 
   record Outcome(
@@ -303,7 +347,7 @@ public final class ProjectApplyCommand implements Runnable {
     var hostnameRealigned = mgr.setHostname(project);
     var machinery = ContainerSailSetup.ensureInstalled(shell, project);
 
-    var applier = new ProjectApplier(shell, System.out);
+    var applier = new ProjectApplier(shell, progressOut(json));
     var info = mgr.queryInfo(project);
     var warnings = new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits()));
     var sshUser = config.sshUser();

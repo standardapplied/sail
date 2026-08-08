@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,14 +27,15 @@ import java.util.concurrent.TimeoutException;
  *       path, so the mount is force-refreshed (remove + re-add) rather than compared.
  *   <li><b>Sail-owned files.</b> Every installed payload is a pure function of this binary. A
  *       successful full install stamps {@link #STAMP_PATH} with the SHA-256 {@link #fingerprint()}
- *       of all payloads, and the staleness probe is a content comparison: read the stamp, compare
- *       to the fingerprint this binary would install right now. A missing, mismatched, or corrupt
- *       stamp runs every installer and restamps — so a container converges on first touch after any
- *       binary change, with no per-file staleness bookkeeping.
+ *       of all payloads, and the staleness probe verifies observed state, not just the stamp: the
+ *       stamp must equal the fingerprint this binary would install right now, every installed file
+ *       must match its payload byte for byte, and the profile must carry the PATH line. A missing,
+ *       mismatched, deleted, or hand-edited file runs every installer and restamps — the stamp is a
+ *       fast-path hint, never proof, so machinery tampering cannot hide behind a current stamp.
  * </ol>
  *
  * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
- * probe is one {@code cat}, and only a stale container pays for the installer shells.
+ * probe is one shell, and only a stale container pays for the installer shells.
  */
 public final class ContainerSailSetup {
 
@@ -110,10 +112,45 @@ public final class ContainerSailSetup {
     return files;
   }
 
+  private static final String VERIFY_SCRIPT =
+      """
+      set -eu
+      stamp=$1
+      expected=$2
+      profile=$3
+      shift 3
+      [ "$(cat -- "$stamp" 2>/dev/null)" = "$expected" ]
+      while [ "$#" -gt 0 ]; do
+        path=$1
+        content=$2
+        shift 2
+        if [ "$path" = "$profile" ]; then
+          grep -Fqx -- "$content" "$path"
+        else
+          printf '%s' "$content" | cmp -s -- "$path" -
+        fi
+      done
+      """;
+
   private static boolean stampMatches(ShellExec shell, String container, String expected)
       throws IOException, InterruptedException, TimeoutException {
-    var probe = shell.exec(ContainerExec.asDevUser(container, List.of("cat", STAMP_PATH)));
-    return probe.ok() && probe.stdout().strip().equals(expected);
+    var command =
+        new ArrayList<>(
+            List.of(
+                "bash",
+                "-c",
+                VERIFY_SCRIPT,
+                "bash",
+                STAMP_PATH,
+                expected,
+                SpecCliHelper.PROFILE_PATH));
+    installedFiles()
+        .forEach(
+            (path, content) -> {
+              command.add(path);
+              command.add(content);
+            });
+    return shell.exec(ContainerExec.asDevUser(container, command)).ok();
   }
 
   private static void writeStamp(ShellExec shell, String container, String fingerprint)

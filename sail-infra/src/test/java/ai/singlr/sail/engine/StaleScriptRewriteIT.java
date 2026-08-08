@@ -14,10 +14,11 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Validates the content-addressed converge against a real container: an old-shape container — no
- * machinery stamp, a {@code spec} script still pointing at a stale socket path — is fully rewritten
- * and stamped on the next {@link ContainerSailSetup#ensureInstalled}, and a stamped, current
- * container converges as a no-op without an installer running.
+ * Validates the content-addressed converge against a real container: a {@code spec} script pointing
+ * at a stale socket path is fully rewritten and stamped on the next {@link
+ * ContainerSailSetup#ensureInstalled} — even when the machinery stamp still matches, because the
+ * probe verifies observed file contents, never the stamp alone — and a stamped, current container
+ * converges as a no-op without an installer running.
  */
 class StaleScriptRewriteIT extends AbstractIncusIT {
 
@@ -61,18 +62,21 @@ class StaleScriptRewriteIT extends AbstractIncusIT {
                   "sed -i 's|"
                       + currentPath
                       + "|/run/sail/api.sock|' "
-                      + SpecCliHelper.SCRIPT_PATH
-                      + " && rm -f "
-                      + ContainerSailSetup.STAMP_PATH));
-      assertTrue(corrupt.ok(), "could not stage the old-shape container: " + corrupt.stderr());
+                      + SpecCliHelper.SCRIPT_PATH));
+      assertTrue(corrupt.ok(), "could not stage the tampered container: " + corrupt.stderr());
       assertTrue(specScript().contains("/run/sail/api.sock"), "the script is now stale (old path)");
+      var stamp = exec(CONTAINER, List.of("cat", ContainerSailSetup.STAMP_PATH));
+      assertEquals(
+          ContainerSailSetup.fingerprint(),
+          stamp.stdout().strip(),
+          "the stamp still matches — only the script content betrays the tampering");
 
       var heal = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
       assertEquals(
           ContainerSailSetup.Result.UPDATED,
           heal,
-          "a container without a stamp reinstalls everything");
+          "a tampered payload reinstalls everything even though the stamp matches");
       var rewritten = specScript();
       assertTrue(
           rewritten.contains(currentPath),

@@ -18,13 +18,14 @@ import org.junit.jupiter.api.Test;
 class ContainerSailSetupTest {
 
   private static final String CONTAINER = "light-grid";
+  private static final String PROBE = "cmp -s --";
 
   @Test
-  void aMatchingStampIsAlreadyPresentAndRunsNoInstaller() throws Exception {
+  void aVerifiedContainerIsAlreadyPresentAndRunsNoInstaller() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onOk("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint() + "\n");
+            .onOk(PROBE);
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
@@ -35,15 +36,40 @@ class ContainerSailSetupTest {
     assertEquals(
         1,
         shell.invocations().stream().filter(c -> c.contains(CONTAINER + " --user 1000")).count(),
-        "the staleness probe is exactly one shell: cat the stamp");
+        "the staleness probe is exactly one shell: verify stamp and contents");
   }
 
   @Test
-  void aMissingStampInstallsEverythingAndStamps() throws Exception {
+  void theProbeVerifiesObservedContentsNotJustTheStamp() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("cat " + ContainerSailSetup.STAMP_PATH, "No such file or directory");
+            .onOk(PROBE);
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var probe =
+        shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
+    assertTrue(probe.contains(ContainerSailSetup.STAMP_PATH), "the probe must read the stamp");
+    assertTrue(
+        probe.contains(ContainerSailSetup.fingerprint()),
+        "the probe must carry the expected fingerprint");
+    ContainerSailSetup.installedFiles()
+        .forEach(
+            (path, content) -> {
+              assertTrue(probe.contains(path), "the probe must check the installed file " + path);
+              assertTrue(
+                  probe.contains(content),
+                  "the probe must compare " + path + " against this binary's payload");
+            });
+  }
+
+  @Test
+  void aFailedVerificationInstallsEverythingAndStamps() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail(PROBE, "No such file or directory");
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
@@ -65,29 +91,30 @@ class ContainerSailSetupTest {
             .anyMatch(
                 c ->
                     c.contains(ContainerSailSetup.fingerprint())
-                        && c.contains(ContainerSailSetup.STAMP_PATH)),
+                        && c.endsWith(" " + ContainerSailSetup.STAMP_PATH)),
         "a full install must stamp the current fingerprint");
   }
 
   @Test
-  void aCorruptStampReinstallsAndRestamps() throws Exception {
+  void aTamperedPayloadReinstallsAndRestampsEvenWithACurrentStamp() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onOk("cat " + ContainerSailSetup.STAMP_PATH, "not-a-fingerprint\n");
+            .onFail(PROBE, "");
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
         ContainerSailSetup.Result.UPDATED,
         result,
-        "a stamp that does not match what this binary would install is stale by definition");
+        "observed state that does not match what this binary would install is stale by"
+            + " definition — a matching stamp alone is never proof");
     assertTrue(
         shell.invocations().stream()
             .anyMatch(
                 c ->
                     c.contains(ContainerSailSetup.fingerprint())
-                        && c.contains(ContainerSailSetup.STAMP_PATH)),
+                        && c.endsWith(" " + ContainerSailSetup.STAMP_PATH)),
         "the reinstall must rewrite the stamp to the current fingerprint");
   }
 
@@ -146,7 +173,7 @@ class ContainerSailSetupTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, hostDir + "\n")
-            .onOk("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
+            .onOk(PROBE);
 
     ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
@@ -165,7 +192,7 @@ class ContainerSailSetupTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("config device get " + CONTAINER, "Device not found")
-            .onOk("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
+            .onOk(PROBE);
 
     ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
@@ -183,7 +210,7 @@ class ContainerSailSetupTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("cat " + ContainerSailSetup.STAMP_PATH, "missing")
+            .onFail(PROBE, "missing")
             .onFail(ContainerSailSetup.STAMP_PATH, "read-only filesystem");
 
     assertThrows(IOException.class, () -> ContainerSailSetup.ensureInstalled(shell, CONTAINER));

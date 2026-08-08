@@ -16,8 +16,11 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 class ProjectApplyCommandTest {
@@ -168,6 +171,64 @@ class ProjectApplyCommandTest {
     var exit = cmd.execute("project", "apply", "--all", "-f", "custom.yaml");
 
     assertNotEquals(0, exit);
+  }
+
+  @Test
+  void aDescriptorNameMismatchFailsBeforeAnyContainerWork() {
+    var thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () -> ProjectApplyCommand.requireMatchingName("alpha", "beta", Path.of("sail.yaml")));
+
+    assertTrue(thrown.getMessage().contains("alpha"));
+    assertTrue(thrown.getMessage().contains("beta"));
+    assertTrue(thrown.getMessage().contains("sail.yaml"));
+  }
+
+  @Test
+  void aMatchingOrOmittedNamePassesTheMismatchGate() {
+    ProjectApplyCommand.requireMatchingName("alpha", "alpha", Path.of("sail.yaml"));
+    ProjectApplyCommand.requireMatchingName(null, "beta", null);
+    ProjectApplyCommand.requireMatchingName("", "beta", null);
+  }
+
+  @Test
+  void applyRefusesADescriptorThatRedirectsToAnotherProject(@TempDir Path dir) throws Exception {
+    var yaml = dir.resolve("sail.yaml");
+    Files.writeString(yaml, "name: beta\n");
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit = cmd.execute("project", "apply", "alpha", "-f", yaml.toString());
+
+    assertNotEquals(0, exit, "a descriptor naming a different project must never be applied");
+  }
+
+  @Test
+  void allSummaryLineTurnsRedOnAnyFailure() {
+    assertTrue(ProjectApplyCommand.allSummaryLine(3, 0).contains("bold,green ✓"));
+    assertTrue(ProjectApplyCommand.allSummaryLine(3, 0).contains("Applied 3."));
+    var failing = ProjectApplyCommand.allSummaryLine(2, 1);
+    assertTrue(failing.contains("bold,red ✗"));
+    assertTrue(failing.contains("Applied 2, failed 1."));
+  }
+
+  @Test
+  void applyAllFailsTheCommandWhenAnyProjectFailed() {
+    var thrown =
+        assertThrows(IllegalStateException.class, () -> ProjectApplyCommand.requireAllApplied(2));
+
+    assertTrue(thrown.getMessage().contains("2 project(s)"));
+    ProjectApplyCommand.requireAllApplied(0);
+  }
+
+  @Test
+  void jsonModeDiscardsProgressNarrationFromStdout() {
+    assertEquals(System.out, ProjectApplyCommand.progressOut(false));
+    var jsonOut = ProjectApplyCommand.progressOut(true);
+    assertNotEquals(System.out, jsonOut);
+    jsonOut.println("[apply] progress noise must never precede the JSON document");
+    assertFalse(jsonOut.checkError(), "the discard stream swallows writes without erroring");
   }
 
   @Test
