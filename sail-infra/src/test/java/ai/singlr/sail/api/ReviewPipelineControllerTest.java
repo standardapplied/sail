@@ -59,6 +59,11 @@ class ReviewPipelineControllerTest {
   }
 
   private void createSpec(String id, String status, List<String> repos) {
+    createSpec(id, status, repos, null, null);
+  }
+
+  private void createSpec(
+      String id, String status, List<String> repos, String model, String reasoningEffort) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
@@ -67,8 +72,8 @@ class ReviewPipelineControllerTest {
             SpecStatus.fromWire(status),
             null,
             null,
-            null,
-            null,
+            model,
+            reasoningEffort,
             "feat/test",
             0,
             null,
@@ -924,9 +929,12 @@ class ReviewPipelineControllerTest {
           }
 
           @Override
-          public List<String> ensureCommitted(String project, List<String> repos, String branch) {
-            ensured.set(List.of(project, repos, branch));
-            return List.of("api");
+          public List<Rescue> ensureCommitted(
+              String project, List<String> repos, String branch, String commitMessage) {
+            ensured.set(List.of(project, repos, branch, commitMessage));
+            return List.of(
+                new Rescue("api", List.of("Api.java", "ApiTest.java")),
+                new Rescue("web", List.of("App.tsx")));
           }
         };
 
@@ -939,12 +947,165 @@ class ReviewPipelineControllerTest {
 
       assertEquals(
           List.of("test-project", List.of("api"), "feat/test"),
-          ensured.get(),
+          ensured.get().subList(0, 3),
           "after the fix agent runs, its work is verified committed on the spec branch");
+      assertTrue(
+          ensured.get().get(3).toString().contains("Bad"),
+          "the rescue commit message names the findings the fix addressed, so the PR history"
+              + " explains itself instead of reading 'left uncommitted by the agent'");
       var reason =
           java.util.Objects.toString(captured.events().getFirst().data().get("reason"), "");
       assertTrue(reason.contains("api"), "the guardrail names the contaminated repo");
+      assertTrue(
+          reason.contains("Api.java"),
+          "the guardrail names the files it swept, so debris is visible the moment it happens");
+      assertTrue(
+          reason.contains("web (1 file: App.tsx)"),
+          "every rescued repo is named, joined into one readable line");
     }
+  }
+
+  @Test
+  void theFixLaneCarriesTheSpecBranchReposAndTuningIntoTheGate() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"), "opus-5", "xhigh");
+    var criticalOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]
+        ```
+        """;
+    var fixLaunch = new AtomicReference<List<Object>>();
+    var reviewEffort = new AtomicReference<String>();
+    var calls = new AtomicInteger();
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String prompt, String rid, String cred) {
+            return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+          }
+
+          @Override
+          public String run(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String model,
+              String effort) {
+            reviewEffort.set(effort);
+            return run(p, a, prompt, rid, cred);
+          }
+
+          @Override
+          public String runFix(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String branch,
+              List<String> repos,
+              String model,
+              String effort) {
+            fixLaunch.set(List.of(a, branch, repos, model, effort));
+            return "done";
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          List.of("claude-code", "feat/test", List.of("api"), "opus-5", "xhigh"),
+          fixLaunch.get(),
+          "the fix agent launches as the spec's own agent with the spec's branch, repo scope,"
+              + " model, and reasoning effort — a spec dispatched at xhigh is fixed at xhigh");
+      assertEquals(
+          "xhigh",
+          reviewEffort.get(),
+          "the reviewer judges at the spec's effort; the model stays out of the review lane"
+              + " because model names are agent-specific and the reviewer is the other agent");
+    }
+  }
+
+  @Test
+  void theLoopNarratesVerdictsIntoTheSpecRoom() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var messages = new MessageStore(db);
+    var failedOutput =
+        """
+        ```json
+        [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
+          "line_start": 7, "line_end": 7, "title": "Token logged in plaintext",
+          "description": "d", "confidence": 0.9}]
+        ```
+        """;
+    var passedOutput =
+        """
+        ```json
+        [{"severity": "LOW", "category": "LOGIC", "file": "Pager.java",
+          "line_start": 3, "line_end": 3, "title": "Off-by-one in pager",
+          "description": "d", "confidence": 0.6}]
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? failedOutput : passedOutput;
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+      ctrl.useMessages(messages);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      var room = messages.list("auth", null, 50);
+      assertEquals(
+          2,
+          room.size(),
+          "one message per verdict and nothing else — lifecycle beats ride the event stream;"
+              + " the room carries only what events cannot: the findings themselves");
+      var failed = room.get(0);
+      assertEquals("sail", failed.author());
+      assertTrue(failed.body().contains("Review failed"), failed.body());
+      assertTrue(
+          failed.body().contains("Token logged in plaintext"),
+          "the failed verdict names its findings — the reviewer's next pass reads the room, so"
+              + " this is also the loop's cross-iteration memory");
+      assertTrue(failed.body().contains("Auth.java:7"), failed.body());
+      var passed = room.get(1);
+      assertTrue(passed.body().contains("Review passed"), passed.body());
+      assertTrue(
+          passed.body().contains("Off-by-one in pager"),
+          "sub-gate findings on a passed review deserve eyes before merge, not silence");
+    }
+  }
+
+  @Test
+  void aRoomWriteFailureNeverFailsThePipeline() {
+    createSpec("auth", "in_progress");
+    var brokenDb = Sqlite.open(tempDir.resolve("broken.db"));
+    new SchemaManager(brokenDb).migrate();
+    var brokenMessages = new MessageStore(brokenDb);
+    brokenDb.close();
+
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    ctrl.useMessages(brokenMessages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        SpecStatus.AWAITING_MERGE,
+        specStore.findById("auth").orElseThrow().status(),
+        "narration is best-effort: a dead room store must not strand the verdict");
   }
 
   @Test

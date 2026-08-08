@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ClaudeCodeHookConfig;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
@@ -32,10 +33,13 @@ import java.util.Objects;
  * from the bytes this run appended — parsed via {@link StreamJsonResult} so a streamed reviewer and
  * a plain one are handled uniformly.
  *
- * <p>Run clean: no {@code SAIL_SPEC_ID} and no agent hooks, so the reviewer's own completion never
- * re-enters the pipeline (which would recurse forever). The run credential rides in as a positional
- * shell argument — never interpolated into the script text — and lands in {@code
- * SAIL_RUN_CREDENTIAL}, so the agent's spec commands authenticate as its review run's principal.
+ * <p>Neither lane exports {@code SAIL_SPEC_ID}, so no completion event ever re-enters the pipeline
+ * (which would recurse forever). The reviewer additionally runs hook-free and ungated — it must be
+ * free to stop without committing. The fix lane arms the stop gate (see {@link #runFix}) because it
+ * writes to the spec branch and the commit discipline lives in the gate, not the prompt. The run
+ * credential rides in as a positional shell argument — never interpolated into the script text —
+ * and lands in {@code SAIL_RUN_CREDENTIAL}, so the agent's spec commands authenticate as its review
+ * run's principal.
  */
 final class ContainerReviewAgentRunner implements ReviewAgentRunner {
 
@@ -64,29 +68,100 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
   public String run(
       String project, String agent, String prompt, String reviewId, String runCredential)
       throws Exception {
+    return run(project, agent, prompt, reviewId, runCredential, null, null);
+  }
+
+  @Override
+  public String run(
+      String project,
+      String agent,
+      String prompt,
+      String reviewId,
+      String runCredential,
+      String model,
+      String reasoningEffort)
+      throws Exception {
     var cli = AgentCli.fromYamlName(agent);
+    var unit = stage(project, prompt, reviewId);
+    return launch(project, cli, agent, unit, runCredential, null, null, model, reasoningEffort);
+  }
+
+  /**
+   * The fix lane launches with the stop gate armed: {@code SAIL_RUN_ID} rides in as a positional
+   * argument, the session file carries the spec's branch and repos so the gate checks exactly this
+   * spec's repos, and Claude Code loads the Stop-only settings file. Codex needs no settings flag —
+   * it discovers the global hooks file, armed by the trust bypass every full-permission launch
+   * already passes — so both CLIs gate identically. {@code SAIL_SPEC_ID} stays unset: the gate's
+   * own publishes no-op and the pipeline can never re-enter on the fix agent's stop.
+   */
+  @Override
+  public String runFix(
+      String project,
+      String agent,
+      String prompt,
+      String reviewId,
+      String runCredential,
+      String branch,
+      List<String> repos,
+      String model,
+      String reasoningEffort)
+      throws Exception {
+    var cli = AgentCli.fromYamlName(agent);
+    var unit = stage(project, prompt, reviewId);
+    session.writeSession(project, prompt, branch, "", agent, reviewId, repos, unit);
+    return launch(
+        project,
+        cli,
+        agent,
+        unit,
+        runCredential,
+        ClaudeCodeHookConfig.FIX_SETTINGS_PATH,
+        reviewId,
+        model,
+        reasoningEffort);
+  }
+
+  private AgentUnit stage(String project, String prompt, String reviewId) throws Exception {
     var unit = AgentUnit.forReview(reviewId);
     session.ensureDirectory(project);
     session.writeTaskFile(project, prompt, unit);
+    return unit;
+  }
 
+  private String launch(
+      String project,
+      AgentCli cli,
+      String agent,
+      AgentUnit unit,
+      String runCredential,
+      String claudeSettingsPath,
+      String gateRunId,
+      String model,
+      String reasoningEffort)
+      throws Exception {
     var startOffset = logSize(project, unit);
 
-    var agentCmd = cli.headlessCommand(unit.taskPath(), true, null, null, null, true);
+    var agentCmd =
+        cli.headlessCommand(
+            unit.taskPath(), true, model, reasoningEffort, claudeSettingsPath, true);
+    var gateExport = gateRunId == null ? "" : "export SAIL_RUN_ID=\"$2\"; ";
     var command =
-        "export SAIL_RUN_CREDENTIAL=\"$1\"; cd "
+        "export SAIL_RUN_CREDENTIAL=\"$1\"; "
+            + gateExport
+            + "cd "
             + WORKSPACE
             + " && "
             + agentCmd
             + " >> "
             + unit.logPath()
             + " 2>&1";
-    var result =
-        shell.exec(
-            ContainerExec.asDevUser(
-                project,
-                List.of("bash", "-lc", command, "bash", Objects.toString(runCredential, ""))),
-            null,
-            AGENT_TIMEOUT);
+    var args =
+        new ArrayList<>(
+            List.of("bash", "-lc", command, "bash", Objects.toString(runCredential, "")));
+    if (gateRunId != null) {
+      args.add(gateRunId);
+    }
+    var result = shell.exec(ContainerExec.asDevUser(project, args), null, AGENT_TIMEOUT);
     if (!result.ok()) {
       throw new ReviewAgentExecutionException(
           "Review agent '"
@@ -111,27 +186,45 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
    * fail the pipeline.
    */
   @Override
-  public List<String> ensureCommitted(String project, List<String> repos, String branch)
-      throws Exception {
+  public List<Rescue> ensureCommitted(
+      String project, List<String> repos, String branch, String commitMessage) throws Exception {
     if (branch == null || branch.isBlank()) {
       return List.of();
     }
-    var rescued = new ArrayList<String>();
+    var rescued = new ArrayList<Rescue>();
     for (var repo : repos) {
       var dir = WORKSPACE + "/" + repo;
-      if (!onBranch(project, dir, branch) || git(project, dir, "status", "--porcelain").isBlank()) {
+      if (!onBranch(project, dir, branch)) {
+        continue;
+      }
+      var porcelain = git(project, dir, "status", "--porcelain");
+      if (porcelain.isBlank()) {
         continue;
       }
       git(project, dir, "add", "-A");
-      git(project, dir, "commit", "-m", "fix: review-fix changes left uncommitted by the agent");
+      git(project, dir, "commit", "-m", commitMessage);
       var push = shell.exec(ContainerExec.asDevUser(project, List.of("git", "-C", dir, "push")));
       if (!push.ok()) {
         System.err.println(
             "review-pipeline: push failed for " + dir + " on " + branch + ": " + push.stderr());
       }
-      rescued.add(repo);
+      rescued.add(new Rescue(repo, changedFiles(porcelain)));
     }
     return List.copyOf(rescued);
+  }
+
+  /** Paths from {@code status --porcelain} output; a rename resolves to its new path. */
+  private static List<String> changedFiles(String porcelain) {
+    return porcelain
+        .lines()
+        .filter(line -> !line.isBlank())
+        .map(line -> line.length() > 3 ? line.substring(3) : line.strip())
+        .map(
+            path -> {
+              var arrow = path.lastIndexOf(" -> ");
+              return arrow < 0 ? path : path.substring(arrow + 4);
+            })
+        .toList();
   }
 
   private boolean onBranch(String project, String dir, String branch) throws Exception {

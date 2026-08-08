@@ -376,6 +376,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
       reviewStore.updateReviewStatus(reviewId, "passed");
       advanceSpec(specId, SpecStatus.AWAITING_MERGE);
+      postRoom(specId, passedVerdict(reviewId));
       publishEvent(project, specId, "review_completed", null);
 
     } catch (Exception e) {
@@ -416,14 +417,13 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
-      var room =
-          messageStore == null
-              ? List.<MessageStore.MessageRow>of()
-              : messageStore.list(specId, null, 20);
-      var prompt = ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), room);
+      var prompt =
+          ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), roomMessages(specId));
 
       var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
-      var output = agentRunner.run(project, agent, prompt, stage.reviewId(), credential);
+      var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
+      var output =
+          agentRunner.run(project, agent, prompt, stage.reviewId(), credential, null, effort);
       var parseResult = FindingParser.parse(output);
       if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
         var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
@@ -490,6 +490,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var review = reviewStore.findReview(reviewId);
     if (review.isEmpty()) return;
 
+    var openFindings = reviewStore.openFindingsForReview(reviewId);
+    postRoom(specId, failedVerdict(review.get().iteration(), openFindings));
+
     if (review.get().iteration() >= config.maxIterations()) {
       escalate(
           project,
@@ -499,7 +502,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       return;
     }
 
-    var openFindings = reviewStore.openFindingsForReview(reviewId);
     if (openFindings.isEmpty()) return;
 
     triggerFixIteration(reviewId, specId, openFindings, project);
@@ -520,10 +522,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   /**
    * The fix agent runs under the failed review's identity, appending to that review's log. It runs
-   * hook-free, outside the dispatch lane's stop-readiness gate, so after it finishes {@link
-   * ReviewAgentRunner#ensureCommitted} rescues any work it left uncommitted — otherwise the
-   * re-review judges a branch without the fixes and the shared clone carries the leftovers into the
-   * next dispatch.
+   * with the stop-readiness gate armed ({@link ReviewAgentRunner#runFix}) so it cannot end its turn
+   * with a dirty tree, and {@link ReviewAgentRunner#ensureCommitted} stays as the deterministic
+   * backstop — otherwise the re-review judges a branch without the fixes and the shared clone
+   * carries the leftovers into the next dispatch.
    */
   private void triggerFixIteration(
       String reviewId, String specId, List<Finding> findings, String project) {
@@ -538,13 +540,27 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
           startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
-      agentRunner.run(project, agent, fixTask, reviewId, credential);
-      var rescued = agentRunner.ensureCommitted(project, spec.get().repos(), spec.get().branch());
+      agentRunner.runFix(
+          project,
+          agent,
+          fixTask,
+          reviewId,
+          credential,
+          spec.get().branch(),
+          spec.get().repos(),
+          spec.get().model(),
+          spec.get().reasoningEffort());
+      var rescued =
+          agentRunner.ensureCommitted(
+              project,
+              spec.get().repos(),
+              spec.get().branch(),
+              FixTaskBuilder.commitMessage(findings));
       if (!rescued.isEmpty()) {
         publishGuardrail(
             project,
             specId,
-            "fix agent left uncommitted changes in " + String.join(", ", rescued),
+            "fix agent left uncommitted changes in " + describeRescues(rescued),
             "committed and pushed them to " + spec.get().branch());
       }
     } catch (Exception e) {
@@ -560,6 +576,124 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return reviewStore.reviewsForSpec(specId).stream()
         .filter(r -> !r.superseded() && r.errored() && r.iteration() == iteration)
         .count();
+  }
+
+  /**
+   * Posts the pipeline's own narration to the spec's room. Lifecycle beats (stage started, fix
+   * iteration, guardrail, escalation) already ride the event stream; the room carries only what
+   * events cannot — the findings themselves. This is also the loop's cross-iteration memory: the
+   * reviewer's prompt includes the room's recent messages, so the next pass sees the previous
+   * verdict. Best-effort by design — a room write must never fail the pipeline.
+   */
+  /**
+   * The room's recent messages for the reviewer's prompt. Best-effort like {@link #postRoom}: the
+   * conversation enriches the prompt, it is not a precondition — a dead message store must degrade
+   * the review, never error it.
+   */
+  private List<MessageStore.MessageRow> roomMessages(String specId) {
+    if (messageStore == null) {
+      return List.of();
+    }
+    try {
+      return messageStore.list(specId, null, 20);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());
+      return List.of();
+    }
+  }
+
+  private void postRoom(String specId, String body) {
+    if (messageStore == null) return;
+    try {
+      messageStore.append(specId, Event.SAIL_AGENT, body, null);
+      syncTrigger.run();
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not post to the room of spec " + specId + ": " + e.getMessage());
+    }
+  }
+
+  private static String failedVerdict(int iteration, List<Finding> findings) {
+    return "Review failed (iteration "
+        + iteration
+        + "): "
+        + severitySummary(findings)
+        + "."
+        + findingLines(findings);
+  }
+
+  private String passedVerdict(String reviewId) {
+    var iteration =
+        reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::iteration).orElse(0);
+    var open =
+        reviewStore.findingsForReview(reviewId).stream()
+            .filter(f -> f.resolution() == Finding.Resolution.OPEN)
+            .toList();
+    if (open.isEmpty()) {
+      return "Review passed (iteration " + iteration + "). Awaiting merge.";
+    }
+    return "Review passed (iteration "
+        + iteration
+        + ") with "
+        + severitySummary(open)
+        + " below the gate — worth a look before merge."
+        + findingLines(open)
+        + "\nAwaiting merge.";
+  }
+
+  /** {@code "2 high, 1 low"} in severity order, or {@code "no findings"}. */
+  private static String severitySummary(List<Finding> findings) {
+    var summary =
+        severityCounts(findings).entrySet().stream()
+            .map(e -> e.getValue() + " " + e.getKey())
+            .reduce((a, b) -> a + ", " + b)
+            .orElse("");
+    return summary.isEmpty() ? "no findings" : summary;
+  }
+
+  /** One line per finding, capped so a noisy review stays one readable room message. */
+  private static String findingLines(List<Finding> findings) {
+    if (findings.isEmpty()) {
+      return "";
+    }
+    var shown =
+        findings.stream()
+            .limit(10)
+            .map(
+                f ->
+                    "- ["
+                        + f.severity()
+                        + "] "
+                        + f.title()
+                        + (f.file() == null ? "" : " (" + f.file() + ":" + f.lineStart() + ")"))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+    var more = findings.size() - Math.min(findings.size(), 10);
+    return "\n" + shown + (more > 0 ? "\n- +" + more + " more" : "");
+  }
+
+  /**
+   * Names what each rescue swept — {@code "api (3 files: A.java, B.java, C.java)"} — capped so a
+   * large sweep stays one readable notification line while still revealing debris immediately.
+   */
+  private static String describeRescues(List<ReviewAgentRunner.Rescue> rescued) {
+    return rescued.stream()
+        .map(
+            rescue -> {
+              var files = rescue.files();
+              var shown = files.stream().limit(5).toList();
+              var suffix = files.size() > shown.size() ? ", +" + (files.size() - shown.size()) : "";
+              return "%s (%d file%s: %s%s)"
+                  .formatted(
+                      rescue.repo(),
+                      files.size(),
+                      files.size() == 1 ? "" : "s",
+                      String.join(", ", shown),
+                      suffix);
+            })
+        .reduce((a, b) -> a + ", " + b)
+        .orElse("");
   }
 
   private void publishGuardrail(String project, String specId, String reason, String action) {

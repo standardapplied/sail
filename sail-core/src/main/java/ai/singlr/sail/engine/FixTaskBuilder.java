@@ -17,6 +17,23 @@ public final class FixTaskBuilder {
 
   private FixTaskBuilder() {}
 
+  /**
+   * The commit message for a fix iteration's work — used by the guardrail rescue when the fix agent
+   * leaves the tree dirty, so the PR history explains what the commit addresses instead of only
+   * recording that an agent forgot to commit.
+   */
+  public static String commitMessage(List<Finding> findings) {
+    var subject =
+        "fix: address %d review finding%s"
+            .formatted(findings.size(), findings.size() == 1 ? "" : "s");
+    var body =
+        findings.stream()
+            .map(f -> "- [%s] %s".formatted(f.severity(), f.title()))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+    return body.isEmpty() ? subject : subject + "\n\n" + body;
+  }
+
   public static String build(String specTitle, List<Finding> findings) {
     if (findings.isEmpty()) {
       return "No review findings to address for spec \"%s\".".formatted(specTitle);
