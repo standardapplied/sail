@@ -22,6 +22,14 @@ import java.util.Map;
  */
 public record ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
 
+  public ReviewPipelineConfig {
+    if (stages.stream().map(StageConfig::name).distinct().count() != stages.size()) {
+      throw new IllegalArgumentException(
+          "review_pipeline stage names must be unique — carry-forward is keyed by stage name;"
+              + " rename the duplicate stage in sail.yaml");
+    }
+  }
+
   public record StageConfig(
       String name, StageType type, String agent, List<String> categories, Gate gate) {
 

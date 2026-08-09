@@ -35,6 +35,19 @@ class ReviewPipelineConfigTest {
   }
 
   @Test
+  void duplicateStageNamesAreRejected() {
+    var stages =
+        List.of(
+            Map.<String, Object>of("name", "review", "type", "agent"),
+            Map.<String, Object>of("name", "review", "type", "agent"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ReviewPipelineConfig.fromMap(Map.of("stages", stages)),
+        "carry-forward is keyed by stage name; a duplicate would merge two stages' findings");
+  }
+
+  @Test
   void parseMaxFindingAge() {
     var config =
         ReviewPipelineConfig.fromMap(

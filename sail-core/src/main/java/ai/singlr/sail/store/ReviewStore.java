@@ -372,12 +372,15 @@ public final class ReviewStore implements ConflictResolver {
   }
 
   /**
-   * The findings the next review of the spec must rule on: the open findings of the current
-   * dispatch attempt's latest gate-failed review (errored reviews have no verdict and are skipped),
-   * excluding any already re-attached to {@code currentReviewId} — so a second agent stage in the
-   * same review rules only on what the first stage has not already carried or resolved.
+   * The findings the same-named stage of the next review must rule on: the open findings that
+   * {@code stageName} emitted in the current dispatch attempt's latest gate-failed review (errored
+   * reviews have no verdict and are skipped), excluding any already re-attached to that stage of
+   * {@code currentReviewId}. Scoping by stage keeps every finding facing the categories and gate of
+   * the stage that raised it — a HIGH from a strict later stage can never be laundered through an
+   * earlier stage's looser gate.
    */
-  public List<Finding> carryForwardFindings(String specId, String currentReviewId) {
+  public List<Finding> carryForwardFindings(
+      String specId, String currentReviewId, String stageName) {
     return db.query(
         """
         SELECT %s FROM review_findings f
@@ -387,17 +390,20 @@ public final class ReviewStore implements ConflictResolver {
             WHERE spec_id = ? AND superseded_at IS NULL AND status = 'failed'
                 AND error IS NULL AND id != ?
             ORDER BY created_at DESC, rowid DESC LIMIT 1)
+        AND s.name = ?
         AND f.resolution = 'OPEN'
         AND f.id NOT IN (
             SELECT f2.carried_from FROM review_findings f2
             JOIN review_stages s2 ON s2.id = f2.stage_id
-            WHERE s2.review_id = ? AND f2.carried_from IS NOT NULL)
+            WHERE s2.review_id = ? AND s2.name = ? AND f2.carried_from IS NOT NULL)
         ORDER BY %s"""
             .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
         this::mapFinding,
         specId,
         currentReviewId,
-        currentReviewId);
+        stageName,
+        currentReviewId,
+        stageName);
   }
 
   /**
@@ -597,14 +603,21 @@ public final class ReviewStore implements ConflictResolver {
     return baseRev == null ? null : baseRev.toString();
   }
 
-  /** Adopts main's authoritative aggregate at its exact rev as the new synced ancestor. */
+  /**
+   * Adopts main's authoritative aggregate at its exact rev as the new synced ancestor. When the
+   * adopted content already matches the local aggregate — the normal case on the executing node
+   * after its own successful push — only the revision is linked: rebuilding would delete the
+   * finding rows (which never replicate) that carry-forward and dispute resolution read.
+   */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     db.transaction(
         () -> {
           if (snapshot == null) {
             adoptDeletion(id, rev);
           } else {
-            writeAggregate(id, snapshot);
+            if (!sameContent(aggregateMap(id), snapshot)) {
+              writeAggregate(id, snapshot);
+            }
             recordRevision(id, rev, "sync", false, true);
           }
         });

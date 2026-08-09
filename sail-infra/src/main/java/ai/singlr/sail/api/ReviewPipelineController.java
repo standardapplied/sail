@@ -361,6 +361,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         if (stageConfig.type() == StageType.HUMAN) {
           reviewStore.startStage(stage.id(), "human");
           publishEvent(project, specId, "review_stage_started", stage.name());
+          postRoom(specId, humanVerdict(specId));
           return;
         }
 
@@ -419,7 +420,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
-      var carried = reviewStore.carryForwardFindings(specId, stage.reviewId());
+      var carried = reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
       var prompt =
           ReviewPromptBuilder.build(
               branch, repos, stageConfig.categories(), roomMessages(specId), carried);
@@ -716,6 +717,17 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         + findingLines(open)
         + disputed
         + "\nAwaiting merge.";
+  }
+
+  /**
+   * The room verdict a human stage opens with: the automated stages before it passed, and every
+   * disputed finding the gate excluded is surfaced — argument included — before the human rules.
+   * Deliberately not the passed verdict: the pipeline has not passed, so no "Awaiting merge".
+   */
+  private String humanVerdict(String specId) {
+    return "Automated review stages passed."
+        + disputedLines(reviewStore.disputedFindings(specId))
+        + "\nAwaiting human approval.";
   }
 
   /**

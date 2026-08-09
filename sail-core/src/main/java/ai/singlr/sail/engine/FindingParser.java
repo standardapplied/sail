@@ -104,16 +104,16 @@ public final class FindingParser {
     }
     var verdictsRaw = map.get("verdicts");
     var findingsRaw = map.get("findings");
-    if (!(verdictsRaw instanceof List) && !(findingsRaw instanceof List)) {
+    if (!(verdictsRaw instanceof List) || !(findingsRaw instanceof List)) {
       return new ParseResult.Unparseable(
           List.of(
-              "Not a verdict envelope — expected a JSON object with \"verdicts\" and"
+              "Not a verdict envelope — expected a JSON object with both \"verdicts\" and"
                   + " \"findings\" arrays."));
     }
 
     var warnings = new ArrayList<String>();
     var verdicts = new ArrayList<Verdict>();
-    var verdictEntries = verdictsRaw instanceof List ? (List<Object>) verdictsRaw : List.of();
+    var verdictEntries = (List<Object>) verdictsRaw;
     for (var i = 0; i < verdictEntries.size(); i++) {
       try {
         verdicts.add(Verdict.fromMap((Map<String, Object>) verdictEntries.get(i)));
@@ -122,7 +122,7 @@ public final class FindingParser {
       }
     }
     var findings = new ArrayList<Finding>();
-    var findingEntries = findingsRaw instanceof List ? (List<Object>) findingsRaw : List.of();
+    var findingEntries = (List<Object>) findingsRaw;
     for (var i = 0; i < findingEntries.size(); i++) {
       try {
         findings.add(Finding.fromMap((Map<String, Object>) findingEntries.get(i)));

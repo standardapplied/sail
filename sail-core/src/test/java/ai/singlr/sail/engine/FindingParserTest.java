@@ -136,6 +136,25 @@ class FindingParserTest {
   }
 
   @Test
+  void anEnvelopeMissingVerdictsIsUnparseable() {
+    assertFalse(unparseable("{\"findings\": []}").warnings().isEmpty());
+  }
+
+  @Test
+  void anEnvelopeMissingFindingsIsUnparseable() {
+    assertFalse(unparseable("{\"verdicts\": []}").warnings().isEmpty());
+  }
+
+  @Test
+  void anEnvelopeWhereFindingsIsNotAnArrayIsUnparseable() {
+    var result = unparseable("{\"verdicts\": [], \"findings\": {\"severity\": \"CRITICAL\"}}");
+    assertFalse(
+        result.warnings().isEmpty(),
+        "a malformed findings member must ride the errored-retry lane — resolving carried"
+            + " findings while dropping new ones would launder the new issues");
+  }
+
+  @Test
   void handlesBareEnvelopeWithoutFence() {
     var output =
         """

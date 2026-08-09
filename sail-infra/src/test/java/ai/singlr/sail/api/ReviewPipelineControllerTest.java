@@ -23,6 +23,8 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -674,6 +676,121 @@ class ReviewPipelineControllerTest {
     assertEquals(2, stages.size());
     assertEquals("passed", stages.get(0).status());
     assertEquals("passed", stages.get(1).status());
+  }
+
+  @Test
+  void aCarriedFindingReturnsToItsOwnStageAndFacesItsOwnGate() {
+    createSpec("auth", "in_progress");
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical"),
+                    Map.of(
+                        "name",
+                        "correctness",
+                        "type",
+                        "agent",
+                        "agent",
+                        "claude",
+                        "gate",
+                        "no_critical_or_high"))));
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "LOGIC", "file": "Pager.java",
+          "line_start": 3, "line_end": 3, "title": "Persistent high",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var promptsByAgent = new HashMap<String, List<String>>();
+    ReviewAgentRunner runner =
+        (p, agent, prompt, rid, cred) -> {
+          var prompts = promptsByAgent.computeIfAbsent(agent, k -> new ArrayList<>());
+          prompts.add(prompt);
+          if (agent.equals("claude")) {
+            return prompts.size() == 1 ? highOutput : fixAllCarried(prompt);
+          }
+          return agent.equals("codex") ? CLEAN_REVIEW : "fix applied";
+        };
+    var ctrl = controller(config, runner);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    var codexPrompts = promptsByAgent.get("codex");
+    assertEquals(2, codexPrompts.size());
+    assertTrue(
+        codexPrompts.stream().allMatch(prompt -> ReviewScripts.carriedFromPrompt(prompt).isEmpty()),
+        "a HIGH from the strict later stage must never be re-judged under the first stage's"
+            + " looser gate");
+    var claudePrompts = promptsByAgent.get("claude");
+    assertEquals(2, claudePrompts.size());
+    assertTrue(
+        claudePrompts.get(1).contains("Persistent high"),
+        "the finding returns to the stage that emitted it");
+  }
+
+  @Test
+  void aHumanStageOpensWithTheRoomVerdictListingDisputedFindings() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "human", "type", "human"))));
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
+          "line_start": 7, "line_end": 7, "title": "Unvalidated input",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> highOutput;
+              case 2 -> "fix applied";
+              default -> ReviewScripts.disputeAllCarried(prompt);
+            };
+    var ctrl = controller(config, runner);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("running", review.status());
+    assertEquals("running", reviewStore.stagesForReview(review.id()).get(1).status());
+    var verdict = messages.list("auth", null, 50).getLast();
+    assertTrue(verdict.body().contains("Awaiting human approval"), verdict.body());
+    assertTrue(
+        verdict.body().contains("Unvalidated input"),
+        "the disputed finding the gate excluded must face the human before approval");
+    assertTrue(verdict.body().contains("input is validated upstream"), verdict.body());
   }
 
   @Test

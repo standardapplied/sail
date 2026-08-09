@@ -116,6 +116,25 @@ class ReviewSyncTest {
   }
 
   @Test
+  void aSuccessfulPushLeavesTheExecutingNodesFindingRowsIntact() {
+    var reviewId = node.reviews.createReview("auth", 1);
+    var stageId = node.reviews.createStage(reviewId, "security", "agent");
+    node.reviews.startStage(stageId, "codex");
+    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+    node.reviews.completeStage(stageId, "failed");
+    node.reviews.updateReviewStatus(reviewId, "failed");
+
+    sync(node);
+
+    assertEquals(
+        1,
+        node.reviews.findingsForStage(stageId).size(),
+        "adopting main's identical aggregate after a push must link the revision without"
+            + " rebuilding — the rebuild deletes the finding rows that carry-forward and"
+            + " dispute resolution read");
+  }
+
+  @Test
   void aLaterTransitionOnTheOwningNodePropagates() {
     var reviewId = node.reviews.createReview("auth", 1);
     sync(node);

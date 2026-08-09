@@ -50,6 +50,19 @@ final class ReviewScripts {
     return "{\"verdicts\": [" + verdicts + "], \"findings\": " + findingsJson + "}";
   }
 
+  /** An envelope disputing every carried finding in the prompt, evidence included. */
+  static String disputeAllCarried(String prompt) {
+    var verdicts =
+        carriedFromPrompt(prompt).keySet().stream()
+            .map(
+                id ->
+                    ("{\"finding_id\": \"%s\", \"verdict\": \"disputed\","
+                            + " \"evidence\": \"input is validated upstream\"}")
+                        .formatted(id))
+            .collect(Collectors.joining(", "));
+    return "{\"verdicts\": [" + verdicts + "], \"findings\": []}";
+  }
+
   /** The id of the carried finding with this title, from the prompt's carry-forward section. */
   static String carriedId(String prompt, String title) {
     return carriedFromPrompt(prompt).entrySet().stream()

@@ -575,9 +575,30 @@ class ReviewStoreTest {
     var r2 = store.createReview("auth", 2);
     store.createStage(r2, "security", "agent");
 
-    var carryable = store.carryForwardFindings("auth", r2);
+    var carryable = store.carryForwardFindings("auth", r2, "security");
 
     assertEquals(List.of(open.id()), carryable.stream().map(Finding::id).toList());
+  }
+
+  @Test
+  void carryForwardIsScopedToTheStageThatEmittedTheFinding() {
+    var r1 = store.createReview("auth", 1);
+    var security = store.createStage(r1, "security", "agent");
+    var correctness = store.createStage(r1, "correctness", "agent");
+    var securityFinding = addOpenFinding(security, Finding.Severity.HIGH, "Token leak");
+    var correctnessFinding = addOpenFinding(correctness, Finding.Severity.HIGH, "Off by one");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    store.createStage(r2, "security", "agent");
+    store.createStage(r2, "correctness", "agent");
+
+    assertEquals(
+        List.of(securityFinding.id()),
+        store.carryForwardFindings("auth", r2, "security").stream().map(Finding::id).toList(),
+        "each stage re-judges only its own findings, under its own gate");
+    assertEquals(
+        List.of(correctnessFinding.id()),
+        store.carryForwardFindings("auth", r2, "correctness").stream().map(Finding::id).toList());
   }
 
   @Test
@@ -593,12 +614,12 @@ class ReviewStoreTest {
 
     assertEquals(
         List.of(open.id()),
-        store.carryForwardFindings("auth", r3).stream().map(Finding::id).toList(),
+        store.carryForwardFindings("auth", r3, "security").stream().map(Finding::id).toList(),
         "an errored review has no verdict; the carry set comes from the last real one");
 
     store.carryForward(stage3, open);
     assertTrue(
-        store.carryForwardFindings("auth", r3).isEmpty(),
+        store.carryForwardFindings("auth", r3, "security").isEmpty(),
         "a finding already re-attached to this review is not carried twice");
   }
 
@@ -607,7 +628,7 @@ class ReviewStoreTest {
     var r1 = store.createReview("auth", 1);
     store.createStage(r1, "security", "agent");
 
-    assertTrue(store.carryForwardFindings("auth", r1).isEmpty());
+    assertTrue(store.carryForwardFindings("auth", r1, "security").isEmpty());
   }
 
   @Test
