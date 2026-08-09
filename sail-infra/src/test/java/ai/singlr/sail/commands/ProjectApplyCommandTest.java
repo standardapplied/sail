@@ -234,6 +234,57 @@ class ProjectApplyCommandTest {
   }
 
   @Test
+  void planTargetValidatesTheDescriptorBeforeAnyLifecycleMutation() {
+    var thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                ProjectApplyCommand.planTarget(
+                    "alpha", new ContainerState.Stopped(), "name: beta\n"));
+    assertTrue(
+        thrown.getMessage().contains("beta"),
+        "a bad descriptor must fail before bulk apply starts the container, leaving observed"
+            + " state untouched — the single-project path already behaves this way");
+  }
+
+  @Test
+  void planTargetResolvesActionAndConfigForAValidTarget() {
+    var plan =
+        ProjectApplyCommand.planTarget("alpha", new ContainerState.Stopped(), "name: alpha\n");
+    assertEquals(ProjectApplyCommand.Action.STARTED, plan.action());
+    assertEquals("alpha", plan.config().name());
+
+    var machineryOnly =
+        ProjectApplyCommand.planTarget("legacy", new ContainerState.Running("10.0.0.4"), null);
+    assertEquals(ProjectApplyCommand.Action.CONVERGED, machineryOnly.action());
+    assertEquals(null, machineryOnly.config(), "no descriptor means machinery-only convergence");
+  }
+
+  @Test
+  void rejectsLiteralSailYamlFileWithAll() {
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    var exit = cmd.execute("project", "apply", "--all", "-f", "sail.yaml");
+
+    assertNotEquals(
+        0,
+        exit,
+        "this command's -f has no default, so the literal 'sail.yaml' is an explicit override"
+            + " and must hit the same --all incompatibility as any other path");
+  }
+
+  @Test
+  void anExplicitFileIsNeverReinterpretedAsAbsent() {
+    assertFalse(
+        ProjectApplyCommand.usesCatalog("sail.yaml", "alpha"),
+        "an operator who typed -f sail.yaml named a file; the legacy default-value mapping of"
+            + " older commands must not silently redirect apply to the catalog");
+    assertTrue(ProjectApplyCommand.usesCatalog(null, "alpha"));
+    assertFalse(ProjectApplyCommand.usesCatalog(null, null));
+  }
+
+  @Test
   void allSummaryLineTurnsRedOnAnyFailure() {
     assertTrue(ProjectApplyCommand.allSummaryLine(3, 0).contains("bold,green ✓"));
     assertTrue(ProjectApplyCommand.allSummaryLine(3, 0).contains("Applied 3."));
@@ -258,16 +309,30 @@ class ProjectApplyCommandTest {
             .onOk("incus config device get legacy sail-api-sock source", "/run/sail/api");
     var devices = new IncusDeviceManager(probe);
 
-    assertTrue(ProjectApplyCommand.sailManaged("web", true, devices));
     assertTrue(
-        ProjectApplyCommand.sailManaged("legacy", false, devices),
-        "a descriptor-less container an earlier release provisioned keeps its retrofit");
+        ProjectApplyCommand.sailManaged("legacy", devices),
+        "the API-socket device is the instance-level provenance Sail itself attached");
     assertFalse(
-        ProjectApplyCommand.sailManaged("foreign", false, devices),
+        ProjectApplyCommand.sailManaged("web", devices),
+        "a catalog row is name-level intent, never instance provenance: a stale entry left by"
+            + " destroy-without-purge must not hand a foreign container with a colliding name"
+            + " the API mount and box credential");
+    assertFalse(
+        ProjectApplyCommand.sailManaged("foreign", devices),
         "an unrelated Incus instance must never receive the API mount and box credential");
+  }
+
+  @Test
+  void aCatalogRowWithoutTheDeviceGetsAVisibleWarningNotASilentSkip() {
+    var warning = ProjectApplyCommand.unmanagedSkipWarning("web", true);
+    assertTrue(warning.contains("web"));
     assertTrue(
-        probe.invocations().stream().noneMatch(c -> c.contains("web")),
-        "a catalogued project needs no device probe");
+        warning.contains("sail project apply web"),
+        "the operator is told the explicit single-project escape hatch");
+    assertEquals(
+        null,
+        ProjectApplyCommand.unmanagedSkipWarning("stranger", false),
+        "a foreign container with no catalog row is not Sail's to narrate");
   }
 
   @Test
@@ -275,7 +340,7 @@ class ProjectApplyCommandTest {
     var probe = new ScriptedShellExecutor();
     var devices = new IncusDeviceManager(probe);
 
-    assertFalse(ProjectApplyCommand.sailManaged("Not_A_Project", true, devices));
+    assertFalse(ProjectApplyCommand.sailManaged("Not_A_Project", devices));
     assertTrue(probe.invocations().isEmpty(), "an invalid name must never reach incus");
   }
 

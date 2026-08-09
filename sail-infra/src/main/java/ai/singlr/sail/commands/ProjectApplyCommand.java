@@ -132,7 +132,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
-    if (all && ProjectDefinitions.explicitFile(file) != null) {
+    if (all && file != null) {
       throw new IllegalArgumentException("--file applies to a single project, not --all.");
     }
     if (all) {
@@ -252,27 +252,37 @@ public final class ProjectApplyCommand implements Runnable {
       var project = target.name();
       var definition = definitionFor(project);
       try {
-        if (!sailManaged(project, definition.isPresent(), devices)) {
+        if (!sailManaged(project, devices)) {
+          var warning = unmanagedSkipWarning(project, definition.isPresent());
+          if (warning != null) {
+            if (json) {
+              var row = new LinkedHashMap<String, Object>();
+              row.put("name", project);
+              row.put("skipped", warning);
+              rows.add(row);
+            } else {
+              System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + warning));
+            }
+          }
           continue;
         }
-        var action = plan(target.state());
+        var targetPlan = planTarget(project, target.state(), definition.orElse(null));
+        var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
           mgr.waitUntilReady(project);
         }
         Outcome outcome;
-        if (definition.isPresent()) {
-          var config = ProjectDefinitions.resolveForProvisioning(definition.get());
-          requireMatchingName(project, config.name(), null);
+        if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
           var tracker =
               new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(project), dryRun);
           tracker.load();
           if (tracker.hasIncompleteRun()) {
-            provision(config, sailYamlPath, shell, tracker);
+            provision(targetPlan.config(), sailYamlPath, shell, tracker);
             action = Action.CREATED;
           }
-          outcome = converge(observer, shell, config, sailYamlPath);
+          outcome = converge(observer, shell, targetPlan.config(), sailYamlPath);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
         }
@@ -313,14 +323,51 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /**
-   * The trust gate for {@code --all}: a container is Sail-managed when a definition resolves for
-   * it, or when an earlier Sail release already attached the API-socket device. Anything else is a
-   * foreign Incus instance that must never receive the API mount and box credential.
+   * The trust gate for {@code --all}: a container is Sail-managed only when it carries the
+   * API-socket device Sail itself attached — instance-level provenance. A catalog row is name-level
+   * intent, never provenance: {@code destroy} without {@code --purge} retains the row, and a
+   * foreign container later created under the same name must not inherit the API mount and box
+   * credential from a stale entry. An unmarked container the operator does own is claimed through
+   * explicit single-project apply, where naming it is the authorization.
    */
-  static boolean sailManaged(String project, boolean hasDefinition, IncusDeviceManager devices)
+  static boolean sailManaged(String project, IncusDeviceManager devices)
       throws IOException, InterruptedException, TimeoutException {
     return NameValidator.isValidProjectName(project)
-        && (hasDefinition || devices.currentEventSocketSource(project) != null);
+        && devices.currentEventSocketSource(project) != null;
+  }
+
+  /**
+   * A catalog row pointing at a container the trust gate refused is a disagreement worth narrating,
+   * with the explicit escape hatch; a foreign container with no row is not Sail's to mention.
+   */
+  static String unmanagedSkipWarning(String project, boolean hasDefinition) {
+    if (!hasDefinition) {
+      return null;
+    }
+    return project
+        + ": catalog entry exists but the container carries no sail-api-sock device — possibly a"
+        + " foreign container reusing the name. Skipped; claim it explicitly with 'sail project"
+        + " apply "
+        + project
+        + "' if it is yours.";
+  }
+
+  record TargetPlan(Action action, SailYaml config) {}
+
+  /**
+   * Resolves and validates a bulk-apply target before any lifecycle mutation: a descriptor that
+   * fails to parse or names a different project must fail while the container's observed state is
+   * still untouched — the same fail-fast contract the single-project path keeps. A target without a
+   * descriptor plans a machinery-only convergence ({@code config} null).
+   */
+  static TargetPlan planTarget(String project, ContainerState state, String definitionText) {
+    var action = plan(state);
+    if (definitionText == null) {
+      return new TargetPlan(action, null);
+    }
+    var config = ProjectDefinitions.resolveForProvisioning(definitionText);
+    requireMatchingName(project, config.name(), null);
+    return new TargetPlan(action, config);
   }
 
   private static Optional<String> definitionFor(String project) {
@@ -617,8 +664,18 @@ public final class ProjectApplyCommand implements Runnable {
    * brand-new local authoring), or no name was supplied. The plan always reads the same desired
    * state; only a real apply re-materializes the canonical descriptor from the catalog.
    */
+  /**
+   * Whether apply reads the catalog: only when no {@code -f} was given and a project was named.
+   * This command's {@code -f} has no default value, so any non-null path — including the literal
+   * {@code sail.yaml} that older commands' default-value handling maps to absent — is an explicit
+   * operator override and must win over the catalog.
+   */
+  static boolean usesCatalog(String file, String name) {
+    return file == null && name != null;
+  }
+
   private Definition loadDefinition() throws IOException {
-    if (ProjectDefinitions.explicitFile(file) == null && name != null) {
+    if (usesCatalog(file, name)) {
       NameValidator.requireValidProjectName(name);
       var catalog = ProjectDefinitions.definition(name, null);
       if (catalog.isPresent()) {
