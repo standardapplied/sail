@@ -14,8 +14,13 @@ import java.util.Map;
  * Configurable multi-stage review pipeline. Parsed from the {@code agent.review_pipeline} block in
  * {@code sail.yaml}. Stages execute sequentially; each agent stage produces structured findings
  * evaluated against its gate before advancing.
+ *
+ * @param maxFindingAge how many fix iterations a gate-blocking finding may survive before the loop
+ *     escalates it as stuck — a convergence measure, unlike {@code maxIterations}' blind budget: a
+ *     loop resolving old findings while new ones surface keeps running; a loop replaying the same
+ *     finding stops here
  */
-public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) {
+public record ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
 
   public record StageConfig(
       String name, StageType type, String agent, List<String> categories, Gate gate) {
@@ -56,17 +61,21 @@ public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) 
     }
 
     public boolean passes(List<Finding> findings) {
+      return findings.stream().noneMatch(this::blocks);
+    }
+
+    /**
+     * Whether this single finding trips the gate. Only {@code OPEN} findings block — a disputed
+     * finding is excluded from the gate and surfaces in the room verdict for the human instead.
+     */
+    public boolean blocks(Finding finding) {
+      if (finding.resolution() != Finding.Resolution.OPEN) {
+        return false;
+      }
       return switch (this) {
-        case NO_CRITICAL ->
-            findings.stream()
-                .filter(f -> f.resolution() == Finding.Resolution.OPEN)
-                .noneMatch(f -> f.severity() == Finding.Severity.CRITICAL);
-        case NO_CRITICAL_OR_HIGH ->
-            findings.stream()
-                .filter(f -> f.resolution() == Finding.Resolution.OPEN)
-                .noneMatch(f -> f.severity().isAtLeast(Finding.Severity.HIGH));
-        case ALL_CLEAR ->
-            findings.stream().noneMatch(f -> f.resolution() == Finding.Resolution.OPEN);
+        case NO_CRITICAL -> finding.severity() == Finding.Severity.CRITICAL;
+        case NO_CRITICAL_OR_HIGH -> finding.severity().isAtLeast(Finding.Severity.HIGH);
+        case ALL_CLEAR -> true;
       };
     }
   }
@@ -80,6 +89,7 @@ public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) 
   public static ReviewPipelineConfig mandatoryDefault() {
     return new ReviewPipelineConfig(
         3,
+        2,
         List.of(
             new StageConfig(
                 "review",
@@ -93,9 +103,11 @@ public record ReviewPipelineConfig(int maxIterations, List<StageConfig> stages) 
   public static ReviewPipelineConfig fromMap(Map<String, Object> map) {
     var maxIterations =
         map.containsKey("max_iterations") ? ((Number) map.get("max_iterations")).intValue() : 3;
+    var maxFindingAge =
+        map.containsKey("max_finding_age") ? ((Number) map.get("max_finding_age")).intValue() : 2;
     var stagesList = (List<Map<String, Object>>) map.getOrDefault("stages", List.of());
     var stages = stagesList.stream().map(StageConfig::fromMap).toList();
-    return new ReviewPipelineConfig(maxIterations, stages);
+    return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages);
   }
 
   public List<StageConfig> agentStages() {

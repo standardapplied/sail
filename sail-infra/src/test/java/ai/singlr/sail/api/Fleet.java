@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -264,7 +265,7 @@ public final class Fleet implements AutoCloseable {
               reviews,
               project -> REVIEW,
               project -> "codex",
-              (project, agent, prompt, reviewId, credential) -> "[]",
+              (project, agent, prompt, reviewId, credential) -> CLEAN_REVIEW,
               bus,
               () -> {},
               new DirectExecutorService());

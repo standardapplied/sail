@@ -333,4 +333,48 @@ class SchemaManagerTest {
         "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
         SchemaManager.V1_VERSION);
   }
+
+  @Test
+  void theFindingsRebuildCarriesRowsAndSourceLinksForwardAndAdmitsDisputed() {
+    stageAtBaseline();
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
+    db.execute(
+        "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
+            + " VALUES ('r1', 'auth', 1, 'failed', 't0')");
+    db.execute(
+        "INSERT INTO review_stages (id, review_id, name, stage_type, status)"
+            + " VALUES ('s1', 'r1', 'security', 'agent', 'failed')");
+    db.execute(
+        "INSERT INTO review_findings (id, stage_id, severity, category, title, description,"
+            + " confidence, resolution) VALUES ('f1', 's1', 'HIGH', 'SECURITY', 'Leak', 'D',"
+            + " 0.9, 'OPEN')");
+    db.execute("INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth', 'f1')");
+
+    new SchemaManager(db).migrate();
+
+    var survived =
+        db.queryOne(
+                "SELECT title, resolution, carried_from, resolution_evidence"
+                    + " FROM review_findings WHERE id = 'f1'",
+                r ->
+                    List.of(
+                        r.text(0), r.text(1), String.valueOf(r.text(2)), String.valueOf(r.text(3))))
+            .orElseThrow();
+    assertEquals(List.of("Leak", "OPEN", "null", "null"), survived);
+    assertEquals(
+        1,
+        (int)
+            db.queryOne(
+                    "SELECT COUNT(*) FROM spec_source_findings WHERE finding_id = 'f1'",
+                    r -> (int) r.integer(0))
+                .orElseThrow(),
+        "the rebuild must never cascade the follow-up links away");
+    db.execute("UPDATE review_findings SET resolution = 'DISPUTED' WHERE id = 'f1'");
+    assertEquals(
+        "DISPUTED",
+        db.queryOne("SELECT resolution FROM review_findings WHERE id = 'f1'", r -> r.text(0))
+            .orElseThrow());
+  }
 }

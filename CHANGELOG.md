@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-No unreleased changes.
+- Review findings now have identity, verdicts, and a dispute lane. The re-review receives the
+  previous review's open findings and must rule on every one (`fixed`/`still_open`/`disputed`,
+  evidence required to resolve) inside a verdict envelope — the only reviewer output shape the
+  parser accepts; a bare findings array errors the stage. Unruled findings carry forward as the
+  same finding (a `carried_from` chain), keep failing the gate, and escalate by name once they
+  survive `max_finding_age` fix iterations (default 2). The fix agent disputes a wrong finding by
+  arguing it in the spec room instead of coding around it; the reviewer rules, disputed findings
+  skip the gate but surface in the room verdict for the human. "N open findings" after a pass now
+  means exactly N unresolved sub-gate findings.
 
 ## 0.17.3
 

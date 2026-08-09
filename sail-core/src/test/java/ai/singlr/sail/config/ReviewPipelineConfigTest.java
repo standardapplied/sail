@@ -27,10 +27,24 @@ class ReviewPipelineConfigTest {
             Map.of("stages", List.of(Map.of("name", "security", "type", "agent"))));
 
     assertEquals(3, config.maxIterations());
+    assertEquals(2, config.maxFindingAge(), "a stuck finding escalates after 2 fix iterations");
     assertEquals(1, config.stages().size());
     assertEquals("security", config.stages().getFirst().name());
     assertEquals(StageType.AGENT, config.stages().getFirst().type());
     assertEquals(Gate.NO_CRITICAL, config.stages().getFirst().gate());
+  }
+
+  @Test
+  void parseMaxFindingAge() {
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_finding_age",
+                4,
+                "stages",
+                List.of(Map.of("name", "security", "type", "agent"))));
+
+    assertEquals(4, config.maxFindingAge());
   }
 
   @Test
@@ -149,9 +163,38 @@ class ReviewPipelineConfigTest {
             "",
             null,
             0.9,
-            Finding.Resolution.DISMISSED);
+            Finding.Resolution.DISMISSED,
+            null,
+            null);
 
     assertTrue(Gate.NO_CRITICAL.passes(List.of(dismissed)));
+  }
+
+  @Test
+  void gateExcludesDisputedFindingsAtEverySeverity() {
+    var disputed =
+        new Finding(
+            "id",
+            Finding.Severity.CRITICAL,
+            Finding.Category.SECURITY,
+            "a.java",
+            1,
+            1,
+            "Disputed critical",
+            "",
+            "",
+            null,
+            0.9,
+            Finding.Resolution.DISPUTED,
+            "the reviewer ruled the argument valid",
+            null);
+
+    assertTrue(Gate.NO_CRITICAL.passes(List.of(disputed)));
+    assertTrue(Gate.NO_CRITICAL_OR_HIGH.passes(List.of(disputed)));
+    assertTrue(
+        Gate.ALL_CLEAR.passes(List.of(disputed)),
+        "a disputed finding never counts against any gate — it goes to the human instead");
+    assertFalse(Gate.NO_CRITICAL.blocks(disputed));
   }
 
   @Test
@@ -231,7 +274,9 @@ class ReviewPipelineConfigTest {
             "",
             null,
             0.8,
-            Finding.Resolution.FIXED);
+            Finding.Resolution.FIXED,
+            "commit abc",
+            null);
 
     assertTrue(Gate.ALL_CLEAR.passes(List.of(fixed)));
   }

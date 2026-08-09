@@ -5,13 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 
 /**
- * Builds structured review prompts for review agents. The prompt instructs the agent to output
- * findings as a JSON array with severity, category, file/line references, evidence, and suggested
- * fixes. Every finding must include evidence — unsubstantiated reports are explicitly excluded.
+ * Builds structured review prompts for review agents. The prompt instructs the agent to respond
+ * with the verdict envelope — a ruling on every finding carried forward from the previous review,
+ * plus any newly discovered findings — as one JSON object. Every finding must include evidence;
+ * unsubstantiated reports are explicitly excluded, and a carried finding can only be retired by a
+ * verdict with evidence, never by omission.
  */
 public final class ReviewPromptBuilder {
 
@@ -23,7 +26,7 @@ public final class ReviewPromptBuilder {
    *     repos, and a wrong name sends the reviewer into an unrelated codebase)
    */
   public static String build(String branch, List<String> repos, List<String> categories) {
-    return build(branch, repos, categories, List.of());
+    return build(branch, repos, categories, List.of(), List.of());
   }
 
   public static String build(
@@ -31,6 +34,19 @@ public final class ReviewPromptBuilder {
       List<String> repos,
       List<String> categories,
       List<MessageStore.MessageRow> messages) {
+    return build(branch, repos, categories, messages, List.of());
+  }
+
+  /**
+   * @param carried the previous review's still-open findings, which the reviewer must rule on: one
+   *     verdict per carried finding, alongside (not instead of) any new findings
+   */
+  public static String build(
+      String branch,
+      List<String> repos,
+      List<String> categories,
+      List<MessageStore.MessageRow> messages,
+      List<Finding> carried) {
     var categoryList =
         categories.isEmpty() ? "any relevant category" : String.join(", ", categories);
     var repoList = repos.isEmpty() ? "the repository in the workspace" : String.join(", ", repos);
@@ -44,7 +60,22 @@ public final class ReviewPromptBuilder {
 
         Focus on these categories: %s
 
-        Output your findings as a JSON array. Each finding must have:
+        """
+            .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList)
+        + carryForward(carried)
+        + """
+        Respond with exactly one JSON object — the verdict envelope:
+        {"verdicts": [<one verdict per carried finding>], "findings": [<new findings only>]}
+
+        Each entry in "verdicts" rules on one carried finding listed above and must have:
+        - finding_id: the id exactly as listed above
+        - verdict: "fixed", "still_open", or "disputed"
+        - evidence: required for fixed (cite the commit or current code that resolves it) and
+          for disputed (state why the finding is wrong; an argument posted in the conversation
+          above counts). A fixed or disputed verdict without evidence is treated as still_open.
+        If no carried findings are listed above, "verdicts" must be an empty array.
+
+        Each entry in "findings" reports a NEW issue (never repeat a carried finding) and must have:
         - severity: CRITICAL, HIGH, MEDIUM, or LOW
         - category: one of SECURITY, LOGIC, EDGE_CASE, PERFORMANCE, ERROR_HANDLING, CONCURRENCY, RESOURCE_LEAK, API_CONTRACT
         - file: relative file path
@@ -61,11 +92,47 @@ public final class ReviewPromptBuilder {
         2. Every finding MUST include evidence. If you cannot prove it, do not report it.
         3. Every finding MUST include a concrete suggestion with before/after code.
         4. Focus on correctness, security, and reliability — not formatting.
-        5. If there are no issues, return an empty array: []
+        5. Rule on EVERY carried finding: a carried finding you do not mention is treated as
+           still_open, so silence never resolves anything.
+        6. If there are no new issues, "findings" must be an empty array.
 
-        Begin your response with ```json and end with ```.
+        Begin the JSON object with ```json and end with ```.
+        """;
+  }
+
+  /**
+   * The carry-forward contract: the previous review's open findings, each with the id the verdict
+   * must cite. Rendered before the response-format instructions so the reviewer reads what it must
+   * rule on before it reads how to answer.
+   */
+  private static String carryForward(List<Finding> carried) {
+    if (carried.isEmpty()) {
+      return "";
+    }
+    var lines =
+        carried.stream()
+            .map(
+                f ->
+                    "- finding_id %s [%s] %s%s"
+                        .formatted(f.id(), f.severity(), f.title(), location(f)))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+    return """
+        The previous review left these findings open. Re-examine each one against the current
+        state of the branch and include a verdict for every single one in "verdicts":
+
+        %s
+
         """
-            .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList);
+        .formatted(lines);
+  }
+
+  private static String location(Finding f) {
+    if (f.file() == null) {
+      return "";
+    }
+    var span = f.lineEnd() != f.lineStart() ? "-" + f.lineEnd() : "";
+    return " (" + f.file() + ":" + f.lineStart() + span + ")";
   }
 
   private static String conversation(List<MessageStore.MessageRow> messages) {

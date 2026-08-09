@@ -525,6 +525,142 @@ class ReviewStoreTest {
   }
 
   @Test
+  void carryForwardCreatesALinkedRowAndLeavesThePredecessorOpen() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Stubborn high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+
+    var carried = store.carryForward(stage2, original);
+
+    assertEquals(original.id(), carried.carriedFrom());
+    assertTrue(!carried.id().equals(original.id()), "a carried row is a fresh identity");
+    assertEquals(
+        Finding.Resolution.OPEN, store.findFinding(original.id()).orElseThrow().resolution());
+    assertEquals("Stubborn high", store.findingsForStage(stage2).getFirst().title());
+  }
+
+  @Test
+  void findingChainWalksTheWholeLineageNewestFirst() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Aging high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var second = store.carryForward(stage2, original);
+    var r3 = store.createReview("auth", 3);
+    var stage3 = store.createStage(r3, "security", "agent");
+    var third = store.carryForward(stage3, second);
+
+    var chain = store.findingChain(third.id());
+
+    assertEquals(
+        List.of(third.id(), second.id(), original.id()),
+        chain.stream().map(Finding::id).toList(),
+        "one finding aging across iterations is one chain walk");
+    assertEquals(2, store.findingAge(third.id()));
+    assertEquals(1, store.findingAge(second.id()));
+    assertEquals(0, store.findingAge(original.id()));
+  }
+
+  @Test
+  void carryForwardFindingsReturnsThePreviousFailedReviewsOpenFindings() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var open = addOpenFinding(stage1, Finding.Severity.HIGH, "Open high");
+    var fixed = addOpenFinding(stage1, Finding.Severity.MEDIUM, "Already fixed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED, "commit abc");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    store.createStage(r2, "security", "agent");
+
+    var carryable = store.carryForwardFindings("auth", r2);
+
+    assertEquals(List.of(open.id()), carryable.stream().map(Finding::id).toList());
+  }
+
+  @Test
+  void carryForwardFindingsSkipsErroredReviewsAndAlreadyCarriedRows() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var open = addOpenFinding(stage1, Finding.Severity.HIGH, "Open high");
+    store.updateReviewStatus(r1, "failed");
+    var errored = store.createReview("auth", 2);
+    store.failReviewWithError(errored, "quota exceeded");
+    var r3 = store.createReview("auth", 2);
+    var stage3 = store.createStage(r3, "security", "agent");
+
+    assertEquals(
+        List.of(open.id()),
+        store.carryForwardFindings("auth", r3).stream().map(Finding::id).toList(),
+        "an errored review has no verdict; the carry set comes from the last real one");
+
+    store.carryForward(stage3, open);
+    assertTrue(
+        store.carryForwardFindings("auth", r3).isEmpty(),
+        "a finding already re-attached to this review is not carried twice");
+  }
+
+  @Test
+  void carryForwardFindingsIsEmptyWhenNoPriorFailedReviewExists() {
+    var r1 = store.createReview("auth", 1);
+    store.createStage(r1, "security", "agent");
+
+    assertTrue(store.carryForwardFindings("auth", r1).isEmpty());
+  }
+
+  @Test
+  void resolveFindingRecordsEvidenceForTheResolution() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var finding = addOpenFinding(stageId, Finding.Severity.HIGH, "Ruled fixed");
+
+    store.resolveFinding(finding.id(), Finding.Resolution.FIXED, "commit abc parameterizes it");
+
+    var resolved = store.findFinding(finding.id()).orElseThrow();
+    assertEquals(Finding.Resolution.FIXED, resolved.resolution());
+    assertEquals("commit abc parameterizes it", resolved.resolutionEvidence());
+  }
+
+  @Test
+  void disputedFindingsSpansTheAttemptAndIgnoresSupersededHistory() {
+    var stale = store.createReview("auth", 1);
+    var staleStage = store.createStage(stale, "security", "agent");
+    var oldDispute = addOpenFinding(staleStage, Finding.Severity.HIGH, "Old attempt dispute");
+    store.resolveFinding(oldDispute.id(), Finding.Resolution.DISPUTED, "old argument");
+    store.supersedeForSpec("auth");
+
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var disputed = addOpenFinding(stage1, Finding.Severity.HIGH, "Wrong finding");
+    store.resolveFinding(disputed.id(), Finding.Resolution.DISPUTED, "cap enforced upstream");
+    addOpenFinding(stage1, Finding.Severity.LOW, "Still open");
+
+    var found = store.disputedFindings("auth");
+
+    assertEquals(List.of(disputed.id()), found.stream().map(Finding::id).toList());
+    assertEquals("cap enforced upstream", found.getFirst().resolutionEvidence());
+  }
+
+  @Test
+  void openFindingsAfterPassIgnoresFixedAndDisputed() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var open = addOpenFinding(stageId, Finding.Severity.LOW, "Genuinely open");
+    var fixed = addOpenFinding(stageId, Finding.Severity.HIGH, "Fixed");
+    var disputed = addOpenFinding(stageId, Finding.Severity.MEDIUM, "Disputed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED, "commit abc");
+    store.resolveFinding(disputed.id(), Finding.Resolution.DISPUTED, "argued");
+    store.updateReviewStatus(reviewId, "passed");
+
+    assertEquals(
+        List.of(open.id()),
+        store.openFindingsAfterPass("auth").stream().map(Finding::id).toList(),
+        "open-after-pass means genuinely unresolved, not accumulated history");
+  }
+
+  @Test
   void anErroredReviewRecordsWhyAndIsDistinguishableFromAVerdict() {
     var review = store.createReview("auth", 1);
     var stage = store.createStage(review, "security", "agent");

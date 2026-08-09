@@ -7,21 +7,41 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.FindingParser.ParseResult;
+import ai.singlr.sail.engine.FindingParser.Ruling;
+import ai.singlr.sail.engine.FindingParser.Verdict;
 import ai.singlr.sail.store.Finding;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class FindingParserTest {
 
+  private static ParseResult.Parsed parsed(String output) {
+    var result = FindingParser.parse(output);
+    assertInstanceOf(
+        ParseResult.Parsed.class, result, "expected a parsed envelope, got: " + result);
+    return (ParseResult.Parsed) result;
+  }
+
+  private static ParseResult.Unparseable unparseable(String output) {
+    var result = FindingParser.parse(output);
+    assertInstanceOf(
+        ParseResult.Unparseable.class, result, "expected unparseable output, got: " + result);
+    return (ParseResult.Unparseable) result;
+  }
+
   @Test
-  void parsesJsonBlockWithFindings() {
+  void parsesAnEnvelopeWithFindings() {
     var output =
         """
         Here are my findings:
 
         ```json
-        [
+        {"verdicts": [],
+         "findings": [
           {
             "severity": "HIGH",
             "category": "SECURITY",
@@ -38,12 +58,13 @@ class FindingParserTest {
             },
             "confidence": 0.95
           }
-        ]
+        ]}
         ```
         """;
 
-    var result = FindingParser.parse(output);
+    var result = parsed(output);
     assertEquals(1, result.findings().size());
+    assertTrue(result.verdicts().isEmpty());
     assertTrue(result.warnings().isEmpty());
 
     var finding = result.findings().getFirst();
@@ -56,68 +77,89 @@ class FindingParserTest {
   }
 
   @Test
-  void parsesEmptyArray() {
+  void parsesVerdictsAlongsideNewFindings() {
+    var output =
+        """
+        ```json
+        {"verdicts": [
+          {"finding_id": "f-1", "verdict": "fixed", "evidence": "commit abc123 parameterizes the query"},
+          {"finding_id": "f-2", "verdict": "disputed", "evidence": "the cap is enforced upstream"},
+          {"finding_id": "f-3", "verdict": "still_open"}
+         ],
+         "findings": [
+          {"severity": "LOW", "category": "LOGIC", "title": "New issue", "description": "D"}
+        ]}
+        ```
+        """;
+
+    var result = parsed(output);
+    assertEquals(3, result.verdicts().size());
+    assertEquals(
+        new Verdict("f-1", Ruling.FIXED, "commit abc123 parameterizes the query"),
+        result.verdicts().get(0));
+    assertEquals(Ruling.DISPUTED, result.verdicts().get(1).ruling());
+    assertEquals(Ruling.STILL_OPEN, result.verdicts().get(2).ruling());
+    assertEquals("", result.verdicts().get(2).evidence());
+    assertEquals(1, result.findings().size());
+  }
+
+  @Test
+  void parsesAnEmptyEnvelope() {
     var output =
         """
         No issues found.
 
         ```json
-        []
+        {"verdicts": [], "findings": []}
         ```
         """;
 
-    var result = FindingParser.parse(output);
+    var result = parsed(output);
+    assertTrue(result.verdicts().isEmpty());
     assertTrue(result.findings().isEmpty());
     assertTrue(result.warnings().isEmpty());
   }
 
   @Test
-  void parsesMultipleFindings() {
+  void aBareFindingsArrayIsOffContractAndUnparseable() {
     var output =
         """
         ```json
-        [
-          {"severity": "CRITICAL", "category": "SECURITY", "title": "First", "description": "A"},
-          {"severity": "LOW", "category": "LOGIC", "title": "Second", "description": "B"}
-        ]
+        [{"severity": "MEDIUM", "category": "LOGIC", "title": "Issue", "description": "Desc"}]
         ```
         """;
 
-    var result = FindingParser.parse(output);
-    assertEquals(2, result.findings().size());
-    assertEquals(Finding.Severity.CRITICAL, result.findings().get(0).severity());
-    assertEquals(Finding.Severity.LOW, result.findings().get(1).severity());
+    var result = unparseable(output);
+    assertFalse(
+        result.warnings().isEmpty(),
+        "a bare findings array must error the stage, never silently pass or half-parse");
   }
 
   @Test
-  void handlesBareJsonArray() {
+  void handlesBareEnvelopeWithoutFence() {
     var output =
         """
-        [{"severity": "MEDIUM", "category": "LOGIC", "title": "Issue", "description": "Desc"}]
+        {"verdicts": [], "findings": [{"severity": "MEDIUM", "category": "LOGIC", "title": "Issue", "description": "Desc"}]}
         """;
 
-    var result = FindingParser.parse(output);
+    var result = parsed(output);
     assertEquals(1, result.findings().size());
   }
 
   @Test
   void handlesNullInput() {
-    var result = FindingParser.parse(null);
-    assertTrue(result.findings().isEmpty());
+    var result = unparseable(null);
     assertEquals(1, result.warnings().size());
   }
 
   @Test
   void handlesEmptyInput() {
-    var result = FindingParser.parse("");
-    assertTrue(result.findings().isEmpty());
-    assertFalse(result.warnings().isEmpty());
+    assertFalse(unparseable("").warnings().isEmpty());
   }
 
   @Test
   void handlesNoJsonBlock() {
-    var result = FindingParser.parse("Just some text without JSON.");
-    assertTrue(result.findings().isEmpty());
+    var result = unparseable("Just some text without JSON.");
     assertEquals(1, result.warnings().size());
     assertTrue(result.warnings().getFirst().contains("No JSON block"));
   }
@@ -127,31 +169,62 @@ class FindingParserTest {
     var output =
         """
         ```json
-        [{"severity": "HIGH", "category":
+        {"verdicts": [{"finding_id":
         ```
         """;
 
-    var result = FindingParser.parse(output);
-    assertTrue(result.findings().isEmpty());
-    assertFalse(result.warnings().isEmpty());
+    assertFalse(unparseable(output).warnings().isEmpty());
   }
 
   @Test
-  void handlesMalformedFindingInArray() {
+  void skipsAMalformedFindingAndKeepsTheRest() {
     var output =
         """
         ```json
-        [
+        {"verdicts": [],
+         "findings": [
           {"severity": "INVALID", "category": "SECURITY", "title": "Bad", "description": "X"},
           {"severity": "HIGH", "category": "LOGIC", "title": "Good", "description": "Y"}
-        ]
+        ]}
         ```
         """;
 
-    var result = FindingParser.parse(output);
+    var result = parsed(output);
     assertEquals(1, result.findings().size());
     assertEquals("Good", result.findings().getFirst().title());
     assertEquals(1, result.warnings().size());
+  }
+
+  @Test
+  void skipsAMalformedVerdictAndKeepsTheRest() {
+    var output =
+        """
+        ```json
+        {"verdicts": [
+          {"verdict": "fixed", "evidence": "no finding_id"},
+          {"finding_id": "f-9", "verdict": "banana"},
+          {"finding_id": "f-1", "verdict": "still_open"}
+         ],
+         "findings": []}
+        ```
+        """;
+
+    var result = parsed(output);
+    assertEquals(1, result.verdicts().size());
+    assertEquals("f-1", result.verdicts().getFirst().findingId());
+    assertEquals(2, result.warnings().size());
+  }
+
+  @Test
+  void anEnvelopeWhereNothingParsesIsUnparseableNotACleanPass() {
+    var output =
+        """
+        ```json
+        {"verdicts": [{"bogus": true}], "findings": [{"severity": "NOPE"}]}
+        ```
+        """;
+
+    assertFalse(unparseable(output).warnings().isEmpty());
   }
 
   @Test
@@ -159,12 +232,12 @@ class FindingParserTest {
     var output =
         """
         ```json
-        [{"severity": "LOW", "category": "LOGIC", "title": "Open", "description": "D"}]
+        {"verdicts": [], "findings": []}
         """;
 
     var json = FindingParser.extractJsonBlocks(output);
     assertEquals(1, json.size());
-    assertTrue(json.getFirst().startsWith("["));
+    assertTrue(json.getFirst().startsWith("{"));
   }
 
   @Test
@@ -172,7 +245,7 @@ class FindingParserTest {
     var output =
         """
         ```
-        [{"severity": "LOW", "category": "LOGIC", "title": "Fence", "description": "D"}]
+        {"verdicts": [], "findings": []}
         ```
         """;
 
@@ -181,29 +254,26 @@ class FindingParserTest {
   }
 
   @Test
-  void parsesTheFindingsWhenTheTranscriptEchoesThePromptFence() {
+  void parsesTheEnvelopeWhenTheTranscriptEchoesThePromptFence() {
     var transcript =
         """
-        Rules:
-        5. If there are no issues, return an empty array: []
+        Respond with exactly one JSON object — the verdict envelope:
+        {"verdicts": [<one verdict per carried finding>], "findings": [<new findings only>]}
 
-        Begin your response with ```json and end with ```.
+        Begin the JSON object with ```json and end with ```.
         codex
         I inspected the diff and found one issue.
 
         ```json
-        [{"severity": "MEDIUM", "category": "LOGIC", "file": "a.ts",
+        {"verdicts": [],
+         "findings": [{"severity": "MEDIUM", "category": "LOGIC", "file": "a.ts",
           "line_start": 5, "line_end": 5, "title": "Leaked body",
-          "description": "Response not cancelled.", "confidence": 0.86}]
+          "description": "Response not cancelled.", "confidence": 0.86}]}
         ```
         """;
 
-    var result = FindingParser.parse(transcript);
-
-    assertEquals(
-        1,
-        result.findings().size(),
-        "the prompt echo's fence must not shadow the real findings block: " + result.warnings());
+    var result = parsed(transcript);
+    assertEquals(1, result.findings().size());
     assertEquals("Leaked body", result.findings().getFirst().title());
   }
 
@@ -216,16 +286,13 @@ class FindingParserTest {
         ```
         thinking...
         ```json
-        []
+        {"verdicts": [], "findings": []}
         ```
         """;
 
-    var result = FindingParser.parse(transcript);
-
-    assertEquals(0, result.findings().size());
-    assertTrue(
-        result.warnings().isEmpty(),
-        "a clean empty array is a valid verdict: " + result.warnings());
+    var result = parsed(transcript);
+    assertTrue(result.findings().isEmpty());
+    assertTrue(result.warnings().isEmpty(), "a clean empty envelope is a valid verdict");
   }
 
   @Test
@@ -233,79 +300,118 @@ class FindingParserTest {
     var output =
         """
         ```JSON
-        [{"severity": "LOW", "category": "LOGIC", "title": "Case", "description": "D"}]
+        {"verdicts": [], "findings": [{"severity": "LOW", "category": "LOGIC", "title": "Case", "description": "D"}]}
         ```
         """;
 
-    var result = FindingParser.parse(output);
-
-    assertEquals(
-        1, result.findings().size(), "fence casing is not a verdict: " + result.warnings());
+    var result = parsed(output);
     assertEquals("Case", result.findings().getFirst().title());
   }
 
   @Test
-  void findsTheArrayEmbeddedInProseWithoutAFence() {
+  void findsTheEnvelopeEmbeddedInProseWithoutAFence() {
     var output =
         """
         I reviewed the branch and found one issue.
-        [{"severity": "HIGH", "category": "SECURITY", "title": "Leak", "description": "D"}]
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "title": "Leak", "description": "D"}]}
         Let me know if you need more detail.
         """;
 
-    var result = FindingParser.parse(output);
-
-    assertEquals(1, result.findings().size(), "unfenced JSON is still JSON: " + result.warnings());
+    var result = parsed(output);
+    assertEquals(1, result.findings().size());
     assertEquals("Leak", result.findings().getFirst().title());
   }
 
   @Test
-  void fallsThroughToAnEmbeddedArrayWhenTheOnlyFenceIsThePromptEcho() {
+  void fallsThroughToAnEmbeddedEnvelopeWhenTheOnlyFenceIsThePromptEcho() {
     var output =
         """
-        Begin your response with ```json and end with ```.
+        Begin the JSON object with ```json and end with ```.
         I inspected the diff and found one issue.
-        [{"severity": "MEDIUM", "category": "LOGIC", "title": "Bug", "description": "D"}]
+        {"verdicts": [], "findings": [{"severity": "MEDIUM", "category": "LOGIC", "title": "Bug", "description": "D"}]}
         """;
 
-    var result = FindingParser.parse(output);
-
-    assertEquals(
-        1,
-        result.findings().size(),
-        "an unparseable prompt-echo fence must not hide real findings: " + result.warnings());
+    var result = parsed(output);
+    assertEquals(1, result.findings().size());
     assertEquals("Bug", result.findings().getFirst().title());
   }
 
   @Test
-  void aBareEmptyArrayLineInProseIsACleanVerdict() {
-    var output =
-        """
-        I examined every change on the branch.
-        []
-        No issues worth reporting.
-        """;
+  void thePromptEchoesPlaceholderEnvelopeIsNeverACleanPass() {
+    var result =
+        FindingParser.parse(
+            "Respond with exactly one JSON object — the verdict envelope:\n"
+                + "{\"verdicts\": [<one verdict per carried finding>], \"findings\":"
+                + " [<new findings only>]}");
 
-    var result = FindingParser.parse(output);
-
-    assertTrue(result.findings().isEmpty());
-    assertTrue(result.warnings().isEmpty(), "a bare [] is a verdict: " + result.warnings());
+    assertInstanceOf(
+        ParseResult.Unparseable.class,
+        result,
+        "an echoed placeholder envelope must never count as an empty verdict");
   }
 
   @Test
-  void proseMentioningAnEmptyArrayMidSentenceIsNotAVerdict() {
-    var result = FindingParser.parse("If there are no issues, return an empty array: []");
+  void reconcileDefaultsAnUnmentionedCarriedFindingToStillOpen() {
+    var carried = List.of(finding("Old high"));
 
-    assertTrue(result.findings().isEmpty());
-    assertFalse(result.warnings().isEmpty(), "a prompt echo must never count as a clean pass");
+    var reconciled = FindingParser.reconcile(carried, List.of());
+
+    assertEquals(Ruling.STILL_OPEN, reconciled.rulings().get(carried.getFirst().id()).ruling());
+    assertTrue(reconciled.warnings().isEmpty(), "silence is still_open, not an error");
   }
 
   @Test
-  void reportsAWarningWhenNoBlockParses() {
-    var result = FindingParser.parse("Begin your response with ```json and end with ```.");
+  void reconcileDowngradesFixedWithoutEvidenceToStillOpen() {
+    var carried = List.of(finding("Old high"));
+    var verdicts = List.of(new Verdict(carried.getFirst().id(), Ruling.FIXED, " "));
 
-    assertTrue(result.findings().isEmpty());
-    assertTrue(
-        !result.warnings().isEmpty(), "an unparseable review must say so, never pass silently");
+    var reconciled = FindingParser.reconcile(carried, verdicts);
+
+    assertEquals(Ruling.STILL_OPEN, reconciled.rulings().get(carried.getFirst().id()).ruling());
+    assertEquals(1, reconciled.warnings().size());
+    assertTrue(reconciled.warnings().getFirst().contains("no evidence"));
+  }
+
+  @Test
+  void reconcileDowngradesDisputedWithoutEvidenceToStillOpen() {
+    var carried = List.of(finding("Old high"));
+    var verdicts = List.of(new Verdict(carried.getFirst().id(), Ruling.DISPUTED, ""));
+
+    var reconciled = FindingParser.reconcile(carried, verdicts);
+
+    assertEquals(Ruling.STILL_OPEN, reconciled.rulings().get(carried.getFirst().id()).ruling());
+  }
+
+  @Test
+  void reconcileWarnsOnAnUnknownFindingIdInsteadOfCrashing() {
+    var carried = List.of(finding("Old high"));
+    var verdicts = List.of(new Verdict("ghost", Ruling.FIXED, "evidence"));
+
+    var reconciled = FindingParser.reconcile(carried, verdicts);
+
+    assertEquals(Ruling.STILL_OPEN, reconciled.rulings().get(carried.getFirst().id()).ruling());
+    assertEquals(1, reconciled.warnings().size());
+    assertTrue(reconciled.warnings().getFirst().contains("ghost"));
+  }
+
+  @Test
+  void reconcileAppliesEvidenceBackedRulings() {
+    var fixed = finding("Fixed one");
+    var disputed = finding("Disputed one");
+    var verdicts =
+        List.of(
+            new Verdict(fixed.id(), Ruling.FIXED, "commit abc"),
+            new Verdict(disputed.id(), Ruling.DISPUTED, "wrong assumption"));
+
+    var reconciled = FindingParser.reconcile(List.of(fixed, disputed), verdicts);
+
+    assertEquals(Ruling.FIXED, reconciled.rulings().get(fixed.id()).ruling());
+    assertEquals("commit abc", reconciled.rulings().get(fixed.id()).evidence());
+    assertEquals(Ruling.DISPUTED, reconciled.rulings().get(disputed.id()).ruling());
+  }
+
+  private static Finding finding(String title) {
+    return Finding.create(
+        Finding.Severity.HIGH, Finding.Category.LOGIC, "a.java", 1, 1, title, "d", "e", null, 0.9);
   }
 }

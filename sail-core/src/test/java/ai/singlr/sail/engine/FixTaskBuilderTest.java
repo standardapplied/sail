@@ -16,7 +16,7 @@ class FixTaskBuilderTest {
 
   @Test
   void emptyFindingsReturnsNoActionMessage() {
-    var task = FixTaskBuilder.build("OAuth flow", List.of());
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of());
     assertTrue(task.contains("No review findings"));
     assertTrue(task.contains("OAuth flow"));
   }
@@ -37,7 +37,7 @@ class FixTaskBuilderTest {
                 "db.exec(sql + id)", "db.exec(sql, id)", "Use parameterized queries"),
             0.95);
 
-    var task = FixTaskBuilder.build("OAuth flow", List.of(finding));
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(finding));
 
     assertTrue(task.contains("1 review finding(s)"));
     assertTrue(task.contains("[CRITICAL] SECURITY"));
@@ -64,7 +64,7 @@ class FixTaskBuilderTest {
             new Finding.Suggestion("", "", "Fix the loop bound"),
             0.8);
 
-    var task = FixTaskBuilder.build("Payment", List.of(finding));
+    var task = FixTaskBuilder.build("pay", "Payment", List.of(finding));
     assertTrue(task.contains("Service.java:10-25"));
   }
 
@@ -95,7 +95,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("Spec", List.of(f1, f2));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(f1, f2));
     assertTrue(task.contains("Finding 1"));
     assertTrue(task.contains("Finding 2"));
     assertTrue(task.contains("2 review finding(s)"));
@@ -116,7 +116,7 @@ class FixTaskBuilderTest {
             null,
             0.5);
 
-    var task = FixTaskBuilder.build("Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
     assertFalse(task.contains("File:"));
   }
 
@@ -135,7 +135,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
     assertFalse(task.contains("Fix:"));
   }
 
@@ -154,7 +154,7 @@ class FixTaskBuilderTest {
             null,
             0.9);
 
-    var task = FixTaskBuilder.build("Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
 
     assertTrue(task.contains("commit"), "the fix agent must be told to commit, not just hinted");
     assertTrue(task.contains("push"));
@@ -176,8 +176,36 @@ class FixTaskBuilderTest {
             null,
             0.3);
 
-    var task = FixTaskBuilder.build("Payment Integration", List.of(finding));
+    var task = FixTaskBuilder.build("pay", "Payment Integration", List.of(finding));
     assertTrue(task.contains("\"Payment Integration\""));
+  }
+
+  @Test
+  void taskOpensTheDisputeLaneInsteadOfDemandingBlindCompliance() {
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "a.java",
+            1,
+            1,
+            "Maybe wrong",
+            "Desc",
+            "",
+            null,
+            0.9);
+
+    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding));
+
+    assertTrue(
+        task.contains("spec comment auth-spec"),
+        "the agent is told exactly how to argue a false positive in the open");
+    assertTrue(task.contains("do NOT code around it"));
+    assertTrue(
+        task.contains("never by omission"),
+        "the lane is argue-then-leave-alone, not silently skip");
+    assertTrue(
+        task.contains("Id: " + finding.id()), "each finding carries the id a dispute must cite");
   }
 
   @Test

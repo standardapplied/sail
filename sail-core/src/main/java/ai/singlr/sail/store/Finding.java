@@ -12,6 +12,12 @@ import java.util.Map;
 /**
  * A single reviewable issue discovered by a review agent. Immutable, evidence-based, and
  * actionable. Every finding cites specific code, explains why it matters, and suggests a fix.
+ *
+ * <p>A finding has identity across review iterations: when a re-review rules it {@code still_open},
+ * a fresh row is attached to the new review with {@code carriedFrom} pointing at its predecessor,
+ * so one finding aging across iterations is a single chain walk. A resolution that retires the
+ * finding ({@code FIXED} by the reviewer's verdict, {@code DISPUTED} by a ruled argument) records
+ * its {@code resolutionEvidence} — nothing resolves silently.
  */
 public record Finding(
     String id,
@@ -25,7 +31,9 @@ public record Finding(
     String evidence,
     Suggestion suggestion,
     double confidence,
-    Resolution resolution) {
+    Resolution resolution,
+    String resolutionEvidence,
+    String carriedFrom) {
 
   public enum Severity {
     CRITICAL,
@@ -60,7 +68,8 @@ public record Finding(
   public enum Resolution {
     OPEN,
     FIXED,
-    DISMISSED
+    DISMISSED,
+    DISPUTED
   }
 
   public record Suggestion(String before, String after, String rationale) {
@@ -109,7 +118,32 @@ public record Finding(
         evidence,
         suggestion,
         confidence,
-        Resolution.OPEN);
+        Resolution.OPEN,
+        null,
+        null);
+  }
+
+  /**
+   * The open successor row a {@code still_open} verdict attaches to the next review: a fresh
+   * identity linked to this finding through {@code carriedFrom}, so the chain records every
+   * iteration the finding survived.
+   */
+  public Finding carriedCopy() {
+    return new Finding(
+        DateTimeUtils.newId().toString(),
+        severity,
+        category,
+        file,
+        lineStart,
+        lineEnd,
+        title,
+        description,
+        evidence,
+        suggestion,
+        confidence,
+        Resolution.OPEN,
+        null,
+        id);
   }
 
   @SuppressWarnings("unchecked")
@@ -126,7 +160,9 @@ public record Finding(
         (String) map.getOrDefault("evidence", ""),
         Suggestion.fromMap(map.get("suggestion")),
         doubleValue(map.getOrDefault("confidence", 0.5)),
-        Resolution.OPEN);
+        Resolution.OPEN,
+        null,
+        null);
   }
 
   public Map<String, Object> toMap() {
@@ -143,6 +179,10 @@ public record Finding(
     if (suggestion != null) m.put("suggestion", suggestion.toMap());
     m.put("confidence", confidence);
     m.put("resolution", resolution.name());
+    if (resolutionEvidence != null && !resolutionEvidence.isEmpty()) {
+      m.put("resolution_evidence", resolutionEvidence);
+    }
+    if (carriedFrom != null) m.put("carried_from", carriedFrom);
     return m;
   }
 

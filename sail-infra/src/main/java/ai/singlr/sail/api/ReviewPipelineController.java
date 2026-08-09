@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
@@ -35,6 +36,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Orchestrates the review pipeline when an agent completes a spec. Subscribes to the event bus,
@@ -369,14 +371,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
           return;
         }
         if (outcome instanceof StageOutcome.GateFailed) {
-          handleStageFailure(reviewId, config, project, specId);
+          handleStageFailure(reviewId, config, stageConfig.gate(), project, specId);
           return;
         }
       }
 
       reviewStore.updateReviewStatus(reviewId, "passed");
       advanceSpec(specId, SpecStatus.AWAITING_MERGE);
-      postRoom(specId, passedVerdict(reviewId));
+      postRoom(specId, passedVerdict(reviewId, specId));
       publishEvent(project, specId, "review_completed", null);
 
     } catch (Exception e) {
@@ -417,21 +419,26 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var spec = specStore.findById(specId);
       var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
       var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
+      var carried = reviewStore.carryForwardFindings(specId, stage.reviewId());
       var prompt =
-          ReviewPromptBuilder.build(branch, repos, stageConfig.categories(), roomMessages(specId));
+          ReviewPromptBuilder.build(
+              branch, repos, stageConfig.categories(), roomMessages(specId), carried);
 
       var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
       var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
       var output =
           agentRunner.run(project, agent, prompt, stage.reviewId(), credential, null, effort);
       var parseResult = FindingParser.parse(output);
-      if (parseResult.findings().isEmpty() && !parseResult.warnings().isEmpty()) {
-        var message = "reviewer output unparseable: " + String.join("; ", parseResult.warnings());
+      if (parseResult instanceof FindingParser.ParseResult.Unparseable unparseable) {
+        var message = "reviewer output unparseable: " + String.join("; ", unparseable.warnings());
         reviewStore.completeStage(stage.id(), "failed", message);
         return new StageOutcome.Errored(message);
       }
+      var parsed = (FindingParser.ParseResult.Parsed) parseResult;
+      warn(parsed.warnings());
+      applyVerdicts(stage.id(), carried, parsed.verdicts());
 
-      for (var finding : parseResult.findings()) {
+      for (var finding : parsed.findings()) {
         reviewStore.addFinding(stage.id(), finding);
       }
 
@@ -455,6 +462,35 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       failReviewRun(stage.reviewId(), e);
       return new StageOutcome.Errored(e.getMessage());
     }
+  }
+
+  /**
+   * Applies the reviewer's verdicts to the carried findings, fail-closed: {@code fixed} and {@code
+   * disputed} (both evidence-backed, enforced by {@link FindingParser#reconcile}) resolve the
+   * predecessor row with the evidence recorded; everything else — {@code still_open}, a missing
+   * verdict, a ruling without evidence — re-attaches the finding to this stage as a carried row, so
+   * it keeps aging and keeps facing the gate. A reviewer that stops mentioning last iteration's
+   * finding launders nothing.
+   */
+  private void applyVerdicts(
+      String stageId, List<Finding> carried, List<FindingParser.Verdict> verdicts) {
+    var reconciled = FindingParser.reconcile(carried, verdicts);
+    warn(reconciled.warnings());
+    for (var finding : carried) {
+      var verdict = reconciled.rulings().get(finding.id());
+      switch (verdict.ruling()) {
+        case FIXED ->
+            reviewStore.resolveFinding(finding.id(), Finding.Resolution.FIXED, verdict.evidence());
+        case DISPUTED ->
+            reviewStore.resolveFinding(
+                finding.id(), Finding.Resolution.DISPUTED, verdict.evidence());
+        case STILL_OPEN -> reviewStore.carryForward(stageId, finding);
+      }
+    }
+  }
+
+  private static void warn(List<String> warnings) {
+    warnings.forEach(warning -> System.err.println("review-pipeline: " + warning));
   }
 
   /**
@@ -484,14 +520,35 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   private void handleStageFailure(
-      String reviewId, ReviewPipelineConfig config, String project, String specId) {
+      String reviewId,
+      ReviewPipelineConfig config,
+      ReviewPipelineConfig.Gate gate,
+      String project,
+      String specId) {
     reviewStore.updateReviewStatus(reviewId, "failed");
 
     var review = reviewStore.findReview(reviewId);
     if (review.isEmpty()) return;
 
     var openFindings = reviewStore.openFindingsForReview(reviewId);
-    postRoom(specId, failedVerdict(review.get().iteration(), openFindings));
+    postRoom(
+        specId,
+        failedVerdict(
+            review.get().iteration(), openFindings, reviewStore.disputedFindings(specId)));
+
+    var stuck = stuckFinding(gate, openFindings, config.maxFindingAge());
+    if (stuck != null) {
+      escalate(
+          project,
+          specId,
+          reviewId,
+          "finding \""
+              + stuck.title()
+              + "\" survived "
+              + reviewStore.findingAge(stuck.id())
+              + " fix iterations; the loop is stuck on it — fix or dismiss it, then re-dispatch");
+      return;
+    }
 
     if (review.get().iteration() >= config.maxIterations()) {
       escalate(
@@ -506,6 +563,21 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     triggerFixIteration(reviewId, specId, openFindings, project);
     reReview(config, project, specId, review.get().iteration() + 1);
+  }
+
+  /**
+   * The convergence check: a gate-blocking finding whose {@code carried_from} chain shows it has
+   * already survived {@code maxFindingAge} fix iterations. Sub-gate findings may age freely — they
+   * do not drive the loop — and a loop resolving old blockers while new ones surface never trips
+   * this: that loop is converging and runs to {@code max_iterations} as before.
+   */
+  private Finding stuckFinding(
+      ReviewPipelineConfig.Gate gate, List<Finding> openFindings, int maxFindingAge) {
+    return openFindings.stream()
+        .filter(gate::blocks)
+        .filter(finding -> reviewStore.findingAge(finding.id()) >= maxFindingAge)
+        .findFirst()
+        .orElse(null);
   }
 
   /**
@@ -532,7 +604,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var spec = specStore.findById(specId);
     if (spec.isEmpty()) return;
 
-    var fixTask = FixTaskBuilder.build(spec.get().title(), findings);
+    var fixTask = FixTaskBuilder.build(specId, spec.get().title(), findings);
     advanceSpec(specId, SpecStatus.IN_PROGRESS);
     publishEvent(project, specId, "review_iteration_started", null);
 
@@ -614,24 +686,27 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     }
   }
 
-  private static String failedVerdict(int iteration, List<Finding> findings) {
+  private static String failedVerdict(
+      int iteration, List<Finding> findings, List<Finding> disputed) {
     return "Review failed (iteration "
         + iteration
         + "): "
         + severitySummary(findings)
         + "."
-        + findingLines(findings);
+        + findingLines(findings)
+        + disputedLines(disputed);
   }
 
-  private String passedVerdict(String reviewId) {
+  private String passedVerdict(String reviewId, String specId) {
     var iteration =
         reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::iteration).orElse(0);
     var open =
         reviewStore.findingsForReview(reviewId).stream()
             .filter(f -> f.resolution() == Finding.Resolution.OPEN)
             .toList();
+    var disputed = disputedLines(reviewStore.disputedFindings(specId));
     if (open.isEmpty()) {
-      return "Review passed (iteration " + iteration + "). Awaiting merge.";
+      return "Review passed (iteration " + iteration + ")." + disputed + "\nAwaiting merge.";
     }
     return "Review passed (iteration "
         + iteration
@@ -639,7 +714,37 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         + severitySummary(open)
         + " below the gate — worth a look before merge."
         + findingLines(open)
+        + disputed
         + "\nAwaiting merge.";
+  }
+
+  /**
+   * The disputed findings section of a room verdict: excluded from the gate by a reviewer-ruled
+   * argument, so they are surfaced — argument included — for the human to confirm or overrule. An
+   * agent can silence a finding only by arguing it in the open, never by omission.
+   */
+  private static String disputedLines(List<Finding> disputed) {
+    if (disputed.isEmpty()) {
+      return "";
+    }
+    var shown =
+        disputed.stream()
+            .limit(10)
+            .map(
+                f ->
+                    "- ["
+                        + f.severity()
+                        + "] "
+                        + f.title()
+                        + (f.file() == null ? "" : " (" + f.file() + ":" + f.lineStart() + ")")
+                        + (Strings.isBlank(f.resolutionEvidence())
+                            ? ""
+                            : " — " + f.resolutionEvidence()))
+            .collect(Collectors.joining("\n"));
+    var more = disputed.size() - Math.min(disputed.size(), 10);
+    return "\nDisputed (excluded from the gate — needs your ruling):\n"
+        + shown
+        + (more > 0 ? "\n- +" + more + " more" : "");
   }
 
   /** {@code "2 high, 1 low"} in severity order, or {@code "no findings"}. */

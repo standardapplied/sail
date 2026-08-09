@@ -292,8 +292,8 @@ public final class ReviewStore implements ConflictResolver {
               INSERT INTO review_findings (id, stage_id, severity, category, file,
                   line_start, line_end, title, description, evidence,
                   suggestion_before, suggestion_after, suggestion_rationale,
-                  confidence, resolution)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  confidence, resolution, resolution_evidence, carried_from)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               finding.id(),
               stageId,
               finding.severity().name(),
@@ -308,20 +308,41 @@ public final class ReviewStore implements ConflictResolver {
               finding.suggestion() != null ? finding.suggestion().after() : null,
               finding.suggestion() != null ? finding.suggestion().rationale() : null,
               finding.confidence(),
-              finding.resolution().name());
+              finding.resolution().name(),
+              finding.resolutionEvidence(),
+              finding.carriedFrom());
           journalForStage(stageId);
         });
   }
 
+  /**
+   * Re-attaches a still-open finding from the previous review to the given stage as a fresh row
+   * whose {@code carried_from} points at its predecessor, and returns the new row. The predecessor
+   * stays {@code OPEN} where it is — history is never rewritten; the chain is the identity.
+   */
+  public Finding carryForward(String stageId, Finding predecessor) {
+    var carried = predecessor.carriedCopy();
+    addFinding(stageId, carried);
+    return carried;
+  }
+
+  private static final String FINDING_COLUMNS =
+      "f.id, f.severity, f.category, f.file, f.line_start, f.line_end,"
+          + " f.title, f.description, f.evidence, f.suggestion_before,"
+          + " f.suggestion_after, f.suggestion_rationale, f.confidence, f.resolution,"
+          + " f.resolution_evidence, f.carried_from";
+
+  private static final String SEVERITY_ORDER =
+      "CASE f.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1"
+          + " WHEN 'MEDIUM' THEN 2 ELSE 3 END";
+
   public List<Finding> findingsForStage(String stageId) {
     return db.query(
         """
-        SELECT id, severity, category, file, line_start, line_end, title,
-            description, evidence, suggestion_before, suggestion_after,
-            suggestion_rationale, confidence, resolution
-        FROM review_findings WHERE stage_id = ? ORDER BY
-            CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1
-            WHEN 'MEDIUM' THEN 2 ELSE 3 END""",
+        SELECT %s FROM review_findings f
+        WHERE f.stage_id = ?
+        ORDER BY %s"""
+            .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
         this::mapFinding,
         stageId);
   }
@@ -329,14 +350,11 @@ public final class ReviewStore implements ConflictResolver {
   public List<Finding> findingsForReview(String reviewId) {
     return db.query(
         """
-        SELECT f.id, f.severity, f.category, f.file, f.line_start, f.line_end,
-            f.title, f.description, f.evidence, f.suggestion_before,
-            f.suggestion_after, f.suggestion_rationale, f.confidence, f.resolution
-        FROM review_findings f
+        SELECT %s FROM review_findings f
         JOIN review_stages s ON s.id = f.stage_id
         WHERE s.review_id = ?
-        ORDER BY CASE f.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1
-            WHEN 'MEDIUM' THEN 2 ELSE 3 END""",
+        ORDER BY %s"""
+            .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
         this::mapFinding,
         reviewId);
   }
@@ -344,24 +362,123 @@ public final class ReviewStore implements ConflictResolver {
   public List<Finding> openFindingsForReview(String reviewId) {
     return db.query(
         """
-        SELECT f.id, f.severity, f.category, f.file, f.line_start, f.line_end,
-            f.title, f.description, f.evidence, f.suggestion_before,
-            f.suggestion_after, f.suggestion_rationale, f.confidence, f.resolution
-        FROM review_findings f
+        SELECT %s FROM review_findings f
         JOIN review_stages s ON s.id = f.stage_id
         WHERE s.review_id = ? AND f.resolution = 'OPEN'
-        ORDER BY CASE f.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1
-            WHEN 'MEDIUM' THEN 2 ELSE 3 END""",
+        ORDER BY %s"""
+            .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
         this::mapFinding,
         reviewId);
   }
 
+  /**
+   * The findings the next review of the spec must rule on: the open findings of the current
+   * dispatch attempt's latest gate-failed review (errored reviews have no verdict and are skipped),
+   * excluding any already re-attached to {@code currentReviewId} — so a second agent stage in the
+   * same review rules only on what the first stage has not already carried or resolved.
+   */
+  public List<Finding> carryForwardFindings(String specId, String currentReviewId) {
+    return db.query(
+        """
+        SELECT %s FROM review_findings f
+        JOIN review_stages s ON s.id = f.stage_id
+        WHERE s.review_id = (
+            SELECT id FROM reviews
+            WHERE spec_id = ? AND superseded_at IS NULL AND status = 'failed'
+                AND error IS NULL AND id != ?
+            ORDER BY created_at DESC, rowid DESC LIMIT 1)
+        AND f.resolution = 'OPEN'
+        AND f.id NOT IN (
+            SELECT f2.carried_from FROM review_findings f2
+            JOIN review_stages s2 ON s2.id = f2.stage_id
+            WHERE s2.review_id = ? AND f2.carried_from IS NOT NULL)
+        ORDER BY %s"""
+            .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
+        this::mapFinding,
+        specId,
+        currentReviewId,
+        currentReviewId);
+  }
+
+  /**
+   * Every finding of the current dispatch attempt a reviewer ruled {@code DISPUTED}, newest ruling
+   * first. Disputed findings are excluded from the gate, so the room verdict lists them for the
+   * human — an argument retires a finding only in the open.
+   */
+  public List<Finding> disputedFindings(String specId) {
+    return db.query(
+        """
+        SELECT %s FROM review_findings f
+        JOIN review_stages s ON s.id = f.stage_id
+        JOIN reviews r ON r.id = s.review_id
+        WHERE r.spec_id = ? AND r.superseded_at IS NULL AND f.resolution = 'DISPUTED'
+        ORDER BY r.created_at DESC, %s"""
+            .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
+        this::mapFinding,
+        specId);
+  }
+
+  /**
+   * How many fix iterations the finding has survived: the number of {@code carried_from} hops back
+   * to its first sighting. A cycle (impossible by construction, since every carried row is fresh)
+   * terminates the walk instead of hanging it.
+   */
+  public int findingAge(String findingId) {
+    var visited = new LinkedHashSet<String>();
+    var current = findingId;
+    while (visited.add(current)) {
+      var parent =
+          db.queryOne(
+                  "SELECT COALESCE(carried_from, '') FROM review_findings WHERE id = ?",
+                  row -> row.text(0),
+                  current)
+              .orElse("");
+      if (parent.isBlank()) {
+        return visited.size() - 1;
+      }
+      current = parent;
+    }
+    return visited.size() - 1;
+  }
+
+  /** The finding's full lineage, newest first — the chain a persistent finding ages along. */
+  public List<Finding> findingChain(String findingId) {
+    var chain = new java.util.ArrayList<Finding>();
+    var visited = new LinkedHashSet<String>();
+    var current = findingId;
+    while (current != null && visited.add(current)) {
+      var finding = findFinding(current).orElse(null);
+      if (finding == null) {
+        break;
+      }
+      chain.add(finding);
+      current = finding.carriedFrom();
+    }
+    return List.copyOf(chain);
+  }
+
+  public Optional<Finding> findFinding(String findingId) {
+    return db.queryOne(
+        "SELECT " + FINDING_COLUMNS + " FROM review_findings f WHERE f.id = ?",
+        this::mapFinding,
+        findingId);
+  }
+
   public void resolveFinding(String findingId, Finding.Resolution resolution) {
+    resolveFinding(findingId, resolution, null);
+  }
+
+  /**
+   * Resolves a finding and records the evidence the resolution rests on — the reviewer's proof of
+   * the fix, or the ruled argument that retired a disputed finding.
+   */
+  public void resolveFinding(String findingId, Finding.Resolution resolution, String evidence) {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE review_findings SET resolution = ? WHERE id = ?",
+              "UPDATE review_findings SET resolution = ?, resolution_evidence = ? WHERE id = ?",
               resolution.name(),
+              evidence,
               findingId);
           var reviewId =
               db.queryOne(
@@ -796,6 +913,8 @@ public final class ReviewStore implements ConflictResolver {
         row.text(8),
         new Finding.Suggestion(row.text(9), row.text(10), row.text(11)),
         row.isNull(12) ? 0.0 : Double.parseDouble(row.text(12)),
-        Finding.Resolution.valueOf(row.text(13)));
+        Finding.Resolution.valueOf(row.text(13)),
+        row.text(14),
+        row.text(15));
   }
 }

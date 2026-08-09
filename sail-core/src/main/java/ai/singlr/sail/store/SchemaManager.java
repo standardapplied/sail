@@ -108,7 +108,40 @@ public final class SchemaManager {
               handle TEXT NOT NULL,
               credential_hash TEXT NOT NULL UNIQUE,
               created_at TEXT NOT NULL
-          )""");
+          )""",
+          """
+          CREATE TABLE review_findings_v2 (
+              id TEXT PRIMARY KEY,
+              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
+              severity TEXT NOT NULL,
+              category TEXT NOT NULL,
+              file TEXT,
+              line_start INTEGER,
+              line_end INTEGER,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              evidence TEXT,
+              suggestion_before TEXT,
+              suggestion_after TEXT,
+              suggestion_rationale TEXT,
+              confidence REAL NOT NULL DEFAULT 0.0,
+              resolution TEXT NOT NULL DEFAULT 'OPEN'
+                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED', 'DISPUTED')),
+              resolution_evidence TEXT,
+              carried_from TEXT
+          )""",
+          """
+          INSERT INTO review_findings_v2 (id, stage_id, severity, category, file,
+                  line_start, line_end, title, description, evidence, suggestion_before,
+                  suggestion_after, suggestion_rationale, confidence, resolution)
+              SELECT id, stage_id, severity, category, file,
+                  line_start, line_end, title, description, evidence, suggestion_before,
+                  suggestion_after, suggestion_rationale, confidence, resolution
+              FROM review_findings""",
+          "DROP TABLE review_findings",
+          "ALTER TABLE review_findings_v2 RENAME TO review_findings",
+          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
@@ -476,17 +509,29 @@ public final class SchemaManager {
   /**
    * Applies the post-baseline remainder incrementally: each migration commits with its own version
    * stamp, so an interruption resumes exactly where it left off and a database written by an older
-   * 1.x binary replays only the entries it has not seen.
+   * 1.x binary replays only the entries it has not seen. Foreign-key enforcement is suspended for
+   * the window, exactly as on the on-ramp: the chain contains a table rebuild whose {@code DROP
+   * TABLE} would otherwise fire an implicit delete and cascade child rows away. Integrity is
+   * verified before enforcement is restored.
    */
   private void postBaselineFrom(int current) {
-    for (var next = current + 1; next <= CURRENT_VERSION; next++) {
-      var version = next;
-      var statement = MIGRATIONS.get(version - V1_VERSION - 1);
-      db.transaction(
-          () -> {
-            db.execute(statement);
-            stamp(version);
-          });
+    if (current >= CURRENT_VERSION) {
+      return;
+    }
+    db.execute("PRAGMA foreign_keys = OFF");
+    try {
+      for (var next = current + 1; next <= CURRENT_VERSION; next++) {
+        var version = next;
+        var statement = MIGRATIONS.get(version - V1_VERSION - 1);
+        db.transaction(
+            () -> {
+              db.execute(statement);
+              stamp(version);
+            });
+      }
+      requireForeignKeysIntact();
+    } finally {
+      db.execute("PRAGMA foreign_keys = ON");
     }
   }
 

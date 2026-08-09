@@ -39,9 +39,9 @@ class ReviewAgentLoopTest {
   private static final String CRITICAL_FINDING =
       """
       ```json
-      [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
         "line_start": 1, "line_end": 1, "title": "Bad",
-        "description": "Very bad", "confidence": 0.95}]
+        "description": "Very bad", "confidence": 0.95}]}
       ```
       """;
 
@@ -183,9 +183,14 @@ class ReviewAgentLoopTest {
         return new Result(0, "", "");
       }
       if (joined.contains("tail -c")) {
-        if (lastPrompt.contains("Output your findings")) {
+        if (lastPrompt.contains("Review the changes on branch")) {
           var i = reviewCall++;
-          return new Result(0, i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]", "");
+          return new Result(
+              0,
+              i < reviewOutputs.size()
+                  ? reviewOutputs.get(i)
+                  : ReviewScripts.fixAllCarried(lastPrompt),
+              "");
         }
         return new Result(0, "fix applied", "");
       }
