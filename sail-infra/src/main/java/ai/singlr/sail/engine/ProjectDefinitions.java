@@ -108,7 +108,7 @@ public final class ProjectDefinitions {
 
   /**
    * Resolves placeholders with a caller-supplied value source — e.g. an interactive prompt on the
-   * {@code project create} path — instead of this box's silent identity. Keeps resolution honest:
+   * {@code project apply} path — instead of this box's silent identity. Keeps resolution honest:
    * the source decides where each value comes from, the definition stays identity-free until here.
    */
   public static SailYaml resolveForProvisioning(

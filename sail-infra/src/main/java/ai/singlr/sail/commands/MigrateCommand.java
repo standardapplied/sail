@@ -240,7 +240,7 @@ public final class MigrateCommand implements Runnable {
                 + name
                 + " failed: "
                 + e.getMessage()
-                + ". Converge with 'sudo sail project reconfigure "
+                + ". Converge with 'sudo sail project apply "
                 + name
                 + "'.");
       }

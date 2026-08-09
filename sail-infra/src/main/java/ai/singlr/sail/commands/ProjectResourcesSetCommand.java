@@ -180,7 +180,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
           throw new IllegalStateException(
               "Project '"
                   + name
-                  + "' does not exist. Run 'sail project create "
+                  + "' does not exist. Run 'sail project apply "
                   + name
                   + "' first.");
       case ContainerState.Error e ->

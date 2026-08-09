@@ -13,7 +13,6 @@ import picocli.CommandLine.Command;
     mixinStandardHelpOptions = true,
     subcommands = {
       ProjectInitCommand.class,
-      ProjectCreateCommand.class,
       ProjectApplyCommand.class,
       ProjectEditCommand.class,
       ProjectRenameCommand.class,
@@ -34,7 +33,6 @@ import picocli.CommandLine.Command;
       ProjectDestroyCommand.class,
       ProjectInstallAgentCommand.class,
       ProjectDemoCommand.class,
-      ProjectSyncCommand.class,
       ProjectFilesCommand.class,
     })
 public final class ProjectCommand implements Runnable {

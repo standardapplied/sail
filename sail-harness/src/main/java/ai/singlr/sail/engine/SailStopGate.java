@@ -50,14 +50,6 @@ public final class SailStopGate {
   public static final String SCRIPT_PATH = "/home/dev/.sail/bin/sail-stop-gate";
 
   /**
-   * Marker {@link ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a gate script
-   * written before the session file moved into the run directory, so a stale container is refreshed
-   * on the next dispatch. A literal substring of the run-scoped session assignment, chosen without
-   * {@code $} so the probe's shell never expands it.
-   */
-  public static final String RUN_SESSION_MARKER = "RUN_ID/agent-session.json";
-
-  /**
    * Explicit {@code Stop}-hook timeout in seconds. A timed-out hook is killed and never blocks, so
    * a hung {@code git status} (or anything else) fails open by construction.
    */

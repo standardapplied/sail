@@ -7,151 +7,225 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 class ContainerSailSetupTest {
 
   private static final String CONTAINER = "light-grid";
+  private static final String PROBE = "cmp -s --";
 
   @Test
-  void returnsAlreadyPresentWhenAllFilesExist() throws Exception {
-    // refresh: device present, gets removed + re-added (3 incus calls: get, remove, add)
-    // probe: all three sail files present → OK
+  void aVerifiedContainerIsAlreadyPresentAndRunsNoInstaller() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+            .onOk(PROBE);
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(ContainerSailSetup.Result.ALREADY_PRESENT, result);
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.contains("chmod 0755")),
+        "a current container must cost zero installer shells on the dispatch hot path");
+    assertEquals(
+        1,
+        shell.invocations().stream().filter(c -> c.contains(CONTAINER + " --user 1000")).count(),
+        "the staleness probe is exactly one shell: verify stamp and contents");
+  }
+
+  @Test
+  void theProbeVerifiesObservedContentsNotJustTheStamp() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onOk(PROBE);
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var probe =
+        shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
+    assertTrue(probe.contains(ContainerSailSetup.STAMP_PATH), "the probe must read the stamp");
+    assertTrue(
+        probe.contains(ContainerSailSetup.fingerprint()),
+        "the probe must carry the expected fingerprint");
+    ContainerSailSetup.installedFiles()
+        .forEach(
+            (path, content) -> {
+              assertTrue(probe.contains(path), "the probe must check the installed file " + path);
+              assertTrue(
+                  probe.contains(content),
+                  "the probe must compare " + path + " against this binary's payload");
+            });
+  }
+
+  @Test
+  void theProbeRequiresBinScriptsToStayExecutable() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onOk(PROBE);
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var probe =
+        shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
+    assertTrue(
+        probe.contains("[ -x \"$path\" ]"),
+        "byte-identical scripts with a dropped executable bit are still stale — hooks and the"
+            + " spec CLI fail with EACCES, so the probe must fail and trigger a heal");
+    assertTrue(
+        probe.contains(SpecCliHelper.SCRIPT_DIR),
+        "the executable check must scope to the bin directory the scripts install into");
+  }
+
+  @Test
+  void theSplitOverloadProbesOnTheObserverAndInstallsOnTheMutator() throws Exception {
+    var probe = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail(PROBE, "stale");
+    var mutator =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n");
+
+    var result = ContainerSailSetup.ensureInstalled(probe, mutator, CONTAINER);
+
+    assertEquals(ContainerSailSetup.Result.UPDATED, result);
+    assertTrue(
+        probe.invocations().stream().allMatch(c -> c.contains(PROBE)),
+        "the observer shell must carry only the staleness probe");
+    assertTrue(
+        mutator.invocations().stream().noneMatch(c -> c.contains(PROBE)),
+        "the mutator shell must never carry the probe — a dry-run mutator would blind it");
+    assertTrue(
+        mutator.invocations().stream().anyMatch(c -> c.contains("chmod 0755")),
+        "installers must ride the mutator shell");
+  }
+
+  @Test
+  void aFailedVerificationInstallsEverythingAndStamps() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail(PROBE, "No such file or directory");
+
+    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    assertEquals(ContainerSailSetup.Result.UPDATED, result);
     var commands = shell.invocations();
+    for (var path : ContainerSailSetup.installedFiles().keySet()) {
+      if (path.equals(SpecCliHelper.PROFILE_PATH)) {
+        continue;
+      }
+      assertTrue(
+          commands.stream().anyMatch(c -> c.endsWith(" " + path)),
+          "every sail-owned file must be rewritten, missing: " + path);
+    }
     assertTrue(
-        commands.stream().anyMatch(c -> c.contains("config device remove")),
-        "the bind mount must be removed + re-added on every dispatch to refresh the inode");
+        commands.stream().anyMatch(c -> c.contains(SpecCliHelper.PROFILE_PATH)),
+        "the profile PATH line must be ensured");
     assertTrue(
-        commands.stream().anyMatch(c -> c.contains("config device add")),
-        "the bind mount must be re-added after removal");
+        commands.stream()
+            .anyMatch(
+                c ->
+                    c.contains(ContainerSailSetup.fingerprint())
+                        && c.endsWith(" " + ContainerSailSetup.STAMP_PATH)),
+        "a full install must stamp the current fingerprint");
   }
 
   @Test
-  void aStaleSocketPathInTheScriptForcesAReinstall() throws Exception {
+  void aTamperedPayloadReinstallsAndRestampsEvenWithACurrentStamp() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("grep -qsF /var/lib/sail/run/api.sock", "");
+            .onFail(PROBE, "");
 
     var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     assertEquals(
         ContainerSailSetup.Result.UPDATED,
         result,
-        "a script still pointing at the old socket path is stale and must be rewritten");
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("grep -qsF /var/lib/sail/run/api.sock")),
-        "the probe verifies the spec script references the current socket path, not just exists");
-  }
-
-  @Test
-  void aHookFileMissingTheToolHeartbeatsForcesAReinstall() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("grep -qsF " + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER, "");
-
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    assertEquals(
-        ContainerSailSetup.Result.UPDATED,
-        result,
-        "a claude-settings.json written before the tool hooks existed is stale and must be "
-            + "rewritten, or the stall watcher never sees progress and kills the agent at max_idle");
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("grep -qsF " + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER)),
-        "the probe must verify the hook file carries the tool-progress heartbeats, not just exists");
-  }
-
-  @Test
-  void aSettingsFileMissingTheStopGateForcesAReinstall() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("grep -qsF " + SailStopGate.SCRIPT_PATH, "");
-
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    assertEquals(
-        ContainerSailSetup.Result.UPDATED,
-        result,
-        "a claude-settings.json still wiring the bare Stop publisher is stale and must be "
-            + "rewritten, or premature turn-ends keep stranding dispatched work uncommitted");
-  }
-
-  @Test
-  void aCodexHooksFileMissingTheStopGateForcesAReinstall() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail(
-                "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH, "");
-
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    assertEquals(
-        ContainerSailSetup.Result.UPDATED,
-        result,
-        "a codex hooks.json still wiring the bare Stop publisher is stale and must be rewritten,"
-            + " or premature Codex turn-ends keep stranding dispatched work uncommitted");
+        "observed state that does not match what this binary would install is stale by"
+            + " definition — a matching stamp alone is never proof");
     assertTrue(
         shell.invocations().stream()
             .anyMatch(
                 c ->
-                    c.contains(
-                        "grep -qsF "
-                            + SailStopGate.SCRIPT_PATH
-                            + " "
-                            + CodexHookConfig.SETTINGS_PATH)),
-        "the probe must verify the codex hooks file wires the stop gate, not just exists");
+                    c.contains(ContainerSailSetup.fingerprint())
+                        && c.endsWith(" " + ContainerSailSetup.STAMP_PATH)),
+        "the reinstall must rewrite the stamp to the current fingerprint");
   }
 
   @Test
-  void anEventHelperMissingTheReasonArgForcesAReinstall() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, "/run/sail\n")
-            .onFail("grep -qsF " + SailEventHelper.REASON_MARKER, "");
+  void fingerprintIsDeterministic() {
+    assertEquals(ContainerSailSetup.fingerprint(), ContainerSailSetup.fingerprint());
+    assertEquals(
+        ContainerSailSetup.fingerprint(),
+        ContainerSailSetup.fingerprintOf(ContainerSailSetup.installedFiles()));
+  }
 
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+  @Test
+  void fingerprintChangesWhenAnySinglePayloadChanges() {
+    var baseline = ContainerSailSetup.fingerprint();
+    for (var path : ContainerSailSetup.installedFiles().keySet()) {
+      var mutated = ContainerSailSetup.installedFiles();
+      mutated.put(path, mutated.get(path) + "\n# drift");
+      assertNotEquals(
+          baseline,
+          ContainerSailSetup.fingerprintOf(mutated),
+          "a change to " + path + " must change the fingerprint");
+    }
+  }
+
+  @Test
+  void fingerprintCoversEveryInstalledFile() {
+    var files = ContainerSailSetup.installedFiles();
 
     assertEquals(
-        ContainerSailSetup.Result.UPDATED,
-        result,
-        "a sail-event.sh predating the reason argument would drop the nudge reason from "
-            + "agent_stop_nudged events and must be rewritten");
+        java.util.List.of(
+            SailEventHelper.SCRIPT_PATH,
+            SailStopGate.SCRIPT_PATH,
+            SpecCliHelper.SCRIPT_PATH,
+            SpecCliHelper.PROFILE_PATH,
+            ClaudeCodeHookConfig.SETTINGS_PATH,
+            CodexHookConfig.SETTINGS_PATH),
+        java.util.List.copyOf(files.keySet()),
+        "the fingerprint must cover every sail-owned in-container file, in stable order");
+    files.forEach((path, content) -> assertFalse(content.isBlank(), path + " has no payload"));
+  }
+
+  @Test
+  void fingerprintDependsOnPathOrderAndBoundaries() {
+    var swapped = new LinkedHashMap<String, String>();
+    ContainerSailSetup.installedFiles().reversed().forEach(swapped::put);
+
+    assertNotEquals(
+        ContainerSailSetup.fingerprint(),
+        ContainerSailSetup.fingerprintOf(swapped),
+        "the hash is over ordered (path, content) pairs, so order is part of the content");
   }
 
   @Test
   void refreshHappensEvenWhenSourcePathUnchanged() throws Exception {
-    // Same source path on host and container — the bug class 0.12.5/0.12.6 missed.
-    // refreshEventSocket must still tear down + re-add so the kernel re-resolves the inode.
     var hostDir = SailPaths.apiSocketHostDir().toString();
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, hostDir + "\n")
-            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+            .onOk(PROBE);
 
     ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
     var commands = shell.invocations();
     assertTrue(
         commands.stream().anyMatch(c -> c.contains("config device remove")),
-        "identical source paths must NOT short-circuit the refresh — that was the staleness bug");
+        "identical source paths must NOT short-circuit the refresh — Incus tracks the bind by"
+            + " inode, and the source directory can be recreated under the same path");
+    assertTrue(
+        commands.stream().anyMatch(c -> c.contains("config device add")),
+        "the bind mount must be re-added after removal");
   }
 
   @Test
@@ -159,7 +233,7 @@ class ContainerSailSetupTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("config device get " + CONTAINER, "Device not found")
-            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+            .onOk(PROBE);
 
     ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
@@ -173,75 +247,14 @@ class ContainerSailSetupTest {
   }
 
   @Test
-  void probeCommandChecksEveryHelperFilePath() throws Exception {
+  void aFailedStampWriteFailsLoud() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onFail("config device get " + CONTAINER, "Device not found")
-            .onOk("test -f /home/dev/.sail/bin/sail-event.sh", "");
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail(PROBE, "missing")
+            .onFail(ContainerSailSetup.STAMP_PATH, "read-only filesystem");
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    var probe =
-        shell.invocations().stream().filter(c -> c.contains("test -f")).findFirst().orElseThrow();
-    assertTrue(probe.contains(SailEventHelper.SCRIPT_PATH));
-    assertTrue(probe.contains("test -f " + SailStopGate.SCRIPT_PATH));
-    assertTrue(probe.contains(SpecCliHelper.SCRIPT_PATH));
-    assertTrue(probe.contains(ClaudeCodeHookConfig.SETTINGS_PATH));
-    assertTrue(probe.contains(CodexHookConfig.SETTINGS_PATH));
-    assertTrue(
-        probe.contains(
-            "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + ClaudeCodeHookConfig.SETTINGS_PATH),
-        "the probe must detect a settings file that still wires the bare Stop publisher");
-    assertTrue(
-        probe.contains(
-            "grep -qsF " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH),
-        "the probe must detect a codex hooks file that still wires the bare Stop publisher");
-    assertTrue(
-        probe.contains(
-            "grep -qsF "
-                + ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER
-                + " "
-                + CodexHookConfig.SETTINGS_PATH),
-        "the probe must detect a codex hooks file predating the tool-progress heartbeats");
-    assertTrue(
-        probe.contains(
-            "grep -qsF " + SailEventHelper.REASON_MARKER + " " + SailEventHelper.SCRIPT_PATH),
-        "the probe must detect an event helper predating the reason argument");
-    assertTrue(
-        probe.contains(SpecCliHelper.PROFILE_PATH),
-        "the probe must detect a container missing the spec-CLI PATH entry so reconfigure retrofits it");
-    assertTrue(
-        probe.contains("grep -qsF includeCoAuthoredBy"),
-        "settings files predating the attribution opt-out must be refreshed on the next dispatch");
-  }
-
-  @Test
-  void backfillsHelperFilesWhenMissing() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onFail("config device get " + CONTAINER, "Device not found")
-            .onFail("test -f /home/dev/.sail/bin/sail-event.sh", "missing");
-
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
-
-    assertEquals(ContainerSailSetup.Result.UPDATED, result);
-    var commands = shell.invocations();
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail/bin")),
-        "should re-install sail-event.sh helper");
-    assertTrue(
-        commands.stream()
-            .anyMatch(c -> c.contains(SailStopGate.SCRIPT_PATH) && c.contains("chmod 0755")),
-        "should re-install the sail-stop-gate script");
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("/home/dev/.sail/bin/spec")),
-        "should re-install the spec CLI");
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.sail")),
-        "should re-install claude-settings.json");
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("mkdir -p /home/dev/.codex")),
-        "should re-install codex hooks.json");
+    assertThrows(IOException.class, () -> ContainerSailSetup.ensureInstalled(shell, CONTAINER));
   }
 
   @Test

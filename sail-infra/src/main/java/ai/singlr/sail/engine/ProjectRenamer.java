@@ -33,8 +33,8 @@ import java.util.Objects;
  * (its dev-user session bus, which {@code incus start} does not wait for) before the finishing
  * touches (guest hostname, re-wiring the sail plumbing, regenerating agent context) run against the
  * running instance, which is then stopped again only if it started out stopped. These are
- * best-effort — a failure there is reported and recovered with {@code sail project reconfigure},
- * not rolled back.
+ * best-effort — a failure there is reported and recovered with {@code sail project apply}, not
+ * rolled back.
  */
 public final class ProjectRenamer {
 

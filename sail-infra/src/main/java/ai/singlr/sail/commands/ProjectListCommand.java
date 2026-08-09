@@ -57,7 +57,7 @@ public final class ProjectListCommand implements Runnable {
       System.out.println();
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint No projects found.|@ Create one with: @|bold sail project create|@,"
+              "  @|faint No projects found.|@ Create one with: @|bold sail project apply|@,"
                   + " or pull a team project with: @|bold sail sync|@"));
       System.out.println();
       return;

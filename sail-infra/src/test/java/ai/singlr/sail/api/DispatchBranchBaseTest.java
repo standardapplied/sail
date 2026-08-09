@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
@@ -180,7 +181,7 @@ class DispatchBranchBaseTest {
     /** Every launch reconciles the in-container sail helpers; answer as already installed. */
     RecordingShell() {
       on("incus config device add", "");
-      on("grep -qsF", "");
+      on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
     }
 
     RecordingShell on(String pattern, String stdout) {

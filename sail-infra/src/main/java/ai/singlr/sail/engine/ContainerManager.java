@@ -131,8 +131,7 @@ public final class ContainerManager {
    */
   public boolean setHostname(String name)
       throws IOException, InterruptedException, TimeoutException {
-    var current = shell.exec(List.of("incus", "exec", name, "--", "hostname"));
-    if (current.ok() && current.stdout().strip().equals(name)) {
+    if (hostnameMatches(name)) {
       return false;
     }
     var script =
@@ -149,6 +148,13 @@ public final class ContainerManager {
           "Failed to set hostname for container '" + name + "': " + result.stderr());
     }
     return true;
+  }
+
+  /** Reads the live guest hostname and reports whether it already equals {@code name}. */
+  public boolean hostnameMatches(String name)
+      throws IOException, InterruptedException, TimeoutException {
+    var current = shell.exec(List.of("incus", "exec", name, "--", "hostname"));
+    return current.ok() && current.stdout().strip().equals(name);
   }
 
   /** Applies CPU and memory limits to a container. Throws on failure. */

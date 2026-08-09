@@ -43,7 +43,7 @@ class ProjectMutationsTest {
         assertThrows(
             IllegalStateException.class,
             () -> ProjectMutations.currentDefinition("ghost", dir.resolve("absent.yaml")));
-    assertTrue(error.getMessage().contains("sail project create"));
+    assertTrue(error.getMessage().contains("sail project apply"));
     assertTrue(error.getMessage().contains("sail sync"));
   }
 
@@ -71,7 +71,7 @@ class ProjectMutationsTest {
   @Test
   void notFoundNamesBothRemedies() {
     var message = ProjectMutations.notFound("acme").getMessage();
-    assertTrue(message.contains("sail project create"));
+    assertTrue(message.contains("sail project apply"));
     assertTrue(message.contains("sail sync"));
     assertFalse(message.contains("null"));
   }

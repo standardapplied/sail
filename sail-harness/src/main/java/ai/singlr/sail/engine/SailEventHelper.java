@@ -28,16 +28,6 @@ public final class SailEventHelper {
   /** Container-side parent directory of {@link #SCRIPT_PATH}. */
   public static final String SCRIPT_DIR = "/home/dev/.sail/bin";
 
-  /**
-   * Marker {@link ai.singlr.sail.engine.ContainerSailSetup} greps for to detect a helper script
-   * written before the optional reason argument existed, so a stale container is refreshed on the
-   * next dispatch.
-   */
-  public static final String REASON_MARKER = "REASON=";
-
-  /** Fixed-string marker proving the installed script presents the run credential. */
-  public static final String CREDENTIAL_MARKER = "SAIL_RUN_CREDENTIAL";
-
   private static final String SCRIPT =
       """
       #!/usr/bin/env bash

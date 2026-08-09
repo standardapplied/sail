@@ -19,7 +19,7 @@ import java.util.concurrent.TimeoutException;
  * socket into the container.
  *
  * <p>Operations are idempotent: {@link #ensureEventSocket} checks the existing config and skips,
- * adds, or replaces as needed so {@code sail project sync} can be safely re-run.
+ * adds, or replaces as needed so {@code sail project apply} can be safely re-run.
  */
 public final class IncusDeviceManager {
 

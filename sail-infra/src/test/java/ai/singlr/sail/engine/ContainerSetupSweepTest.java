@@ -39,7 +39,7 @@ class ContainerSetupSweepTest {
   }
 
   @Test
-  void reconcileRefreshesTheMountAndProbesTheHelperMarkers() throws Exception {
+  void reconcileRefreshesTheMountAndProbesTheMachinery() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
     assertTrue(ContainerSetupSweep.reconcile(shell, "acme"));
@@ -49,8 +49,9 @@ class ContainerSetupSweepTest {
         commands.contains("config device"),
         "reconcile must force-refresh the socket bind mount: " + commands);
     assertTrue(
-        commands.contains("grep -qsF"),
-        "reconcile must probe the helper scripts' staleness markers: " + commands);
+        commands.contains(ContainerSailSetup.STAMP_PATH)
+            && commands.contains(ContainerSailSetup.fingerprint()),
+        "reconcile must verify the machinery stamp and contents: " + commands);
   }
 
   @Test

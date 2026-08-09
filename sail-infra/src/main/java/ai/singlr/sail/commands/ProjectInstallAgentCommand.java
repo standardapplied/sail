@@ -69,7 +69,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
               "Project '"
                   + name
                   + "' does not exist."
-                  + "\n  Create it first with: sail project create "
+                  + "\n  Create it first with: sail project apply "
                   + name);
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());

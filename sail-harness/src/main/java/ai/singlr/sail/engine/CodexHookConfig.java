@@ -76,8 +76,7 @@ public final class CodexHookConfig {
    */
   public static String render() {
     var sessionStart = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_started");
-    var toolStarted =
-        hookCommand(SailEventHelper.SCRIPT_PATH, ClaudeCodeHookConfig.PROGRESS_HOOK_MARKER);
+    var toolStarted = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_started");
     var toolFinished = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_tool_finished");
     var stop = stopGateCommand();
 
@@ -94,7 +93,7 @@ public final class CodexHookConfig {
 
   /**
    * Idempotently writes {@link #SETTINGS_PATH} inside the container. Install-once at provision or
-   * {@code sail project sync}; not rewritten per dispatch.
+   * {@code sail project apply}; not rewritten per dispatch.
    */
   public void install(String container) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);

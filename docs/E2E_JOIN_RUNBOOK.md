@@ -155,12 +155,12 @@ sail sync                            # expect convergence; conflicts = 0 afterwa
 **5a — a project definition created on main lands on the node ("pull a project from main" = sync):**
 ```bash
 # MAIN — create a project; this catalogs its definition (and provisions a container on main)
-sail project create testsync --yes
+sail project apply testsync --yes
 # NODE
 sail sync                                      # expect "1 new project(s) synced from main: testsync"
 cat ~/.sail/projects/testsync/sail.yaml        # expect the descriptor, materialized from the catalog
 sail project config testsync                   # reads the catalog (DB-authoritative) — same definition
-sudo sail project create testsync              # (optional) provision the synced definition locally
+sudo sail project apply testsync               # (optional) provision the synced definition locally
 ```
 
 **5b — a definition edited on main propagates (the DB is the source of truth):**

@@ -49,7 +49,7 @@ final class ProjectMutations {
     return new IllegalStateException(
         "No project '"
             + name
-            + "' in the catalog. Create it with 'sail project create', or sync it from main with"
+            + "' in the catalog. Create it with 'sail project apply', or sync it from main with"
             + " 'sail sync'.");
   }
 }

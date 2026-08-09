@@ -60,7 +60,7 @@ public final class ProjectEditCommand implements Runnable {
                     new IllegalStateException(
                         "No project '"
                             + name
-                            + "' to edit. Create it with 'sail project create', or sync it from"
+                            + "' to edit. Create it with 'sail project apply', or sync it from"
                             + " main with 'sail sync'."));
 
     var edited = file != null ? Files.readString(Path.of(file)) : editInEditor(current);

@@ -680,7 +680,7 @@ class LifecycleCommandTest {
 
     assertEquals(0, exitCode);
     var output = sw.toString();
-    assertTrue(output.contains("Apply incremental changes"));
+    assertTrue(output.contains("Make a project match its descriptor"));
     assertTrue(output.contains("--dry-run"));
     assertTrue(output.contains("--json"));
     assertTrue(output.contains("--git-token"));

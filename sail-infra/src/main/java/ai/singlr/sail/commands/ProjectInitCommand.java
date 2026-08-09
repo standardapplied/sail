@@ -85,7 +85,7 @@ public final class ProjectInitCommand implements Runnable {
     out.println(
         ansi.string(
             "    @|faint Next:|@ review the file, then run @|bold "
-                + nextCreateCommand(config.name(), outputPath)
+                + nextApplyCommand(config.name(), outputPath)
                 + "|@"));
   }
 
@@ -93,14 +93,14 @@ public final class ProjectInitCommand implements Runnable {
     return SailPaths.projectDir(name).resolve(SailPaths.PROJECT_DESCRIPTOR);
   }
 
-  static String nextCreateCommand(String name, Path outputPath) {
+  static String nextApplyCommand(String name, Path outputPath) {
     if (outputPath
         .toAbsolutePath()
         .normalize()
         .equals(defaultOutputPath(name).toAbsolutePath().normalize())) {
-      return "sail project create " + name;
+      return "sail project apply " + name;
     }
-    return "sail project create " + name + " -f " + outputPath;
+    return "sail project apply " + name + " -f " + outputPath;
   }
 
   private SailYaml collectInputs(PrintStream out, Ansi ansi) {

@@ -224,7 +224,7 @@ class CliEntryPointTest {
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("project"), "Project usage should be printed");
-    assertTrue(output.contains("create"), "Should list 'create' subcommand");
+    assertTrue(output.contains("apply"), "Should list 'apply' subcommand");
     assertTrue(output.contains("resources"), "Should list 'resources' subcommand");
   }
 
@@ -242,12 +242,12 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectCreateHelpShowsOptions() {
+  void projectApplyHelpShowsOptions() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("project", "create", "--help");
+    var exitCode = cmd.execute("project", "apply", "--help");
 
     assertEquals(0, exitCode);
     var output = sw.toString();
@@ -319,14 +319,14 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectCreateMissingDescriptorFails() {
+  void projectApplyMissingDescriptorFails() {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
     var exitCode =
         cmd.execute(
             "project",
-            "create",
+            "apply",
             "--dry-run",
             "--file",
             tempDir.resolve("nonexistent.yaml").toString());
@@ -337,7 +337,7 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectCreateInvalidNameFails() throws Exception {
+  void projectApplyInvalidNameFails() throws Exception {
     var yamlFile = tempDir.resolve("sail.yaml");
     Files.writeString(
         yamlFile,
@@ -351,7 +351,7 @@ class CliEntryPointTest {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("project", "create", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -359,7 +359,7 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectCreateMissingNameFails() throws Exception {
+  void projectApplyMissingNameFails() throws Exception {
     var yamlFile = tempDir.resolve("sail.yaml");
     Files.writeString(
         yamlFile,
@@ -372,7 +372,7 @@ class CliEntryPointTest {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("project", "create", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -380,7 +380,7 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectCreateMissingResourcesFails() throws Exception {
+  void projectApplyMissingResourcesFails() throws Exception {
     var yamlFile = tempDir.resolve("sail.yaml");
     Files.writeString(
         yamlFile,
@@ -390,32 +390,10 @@ class CliEntryPointTest {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("project", "create", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
     assertTrue(errOutput.contains("resources"), "Should report missing resources");
-  }
-
-  @Test
-  void projectCreateNonDryRunWithoutRootFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: test-proj
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            """);
-    var cmd = new CommandLine(new Sail());
-    cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
-
-    var exitCode = cmd.execute("project", "create", "--file", yamlFile.toString(), "--yes");
-
-    assertNotEquals(0, exitCode);
-    var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("Root privileges required"), "Should require root");
   }
 }

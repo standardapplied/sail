@@ -503,6 +503,19 @@ class ContainerManagerTest {
   }
 
   @Test
+  void hostnameMatchesReadsWithoutWriting() throws Exception {
+    var matching = new ScriptedShellExecutor().onOk("incus exec acme -- hostname", "acme\n");
+    assertTrue(new ContainerManager(matching).hostnameMatches("acme"));
+    assertEquals(1, matching.invocations().size(), "a pure probe: one read, never a write");
+
+    var drifted = new ScriptedShellExecutor().onOk("incus exec acme -- hostname", "stale\n");
+    assertFalse(new ContainerManager(drifted).hostnameMatches("acme"));
+
+    var unreachable = new ScriptedShellExecutor().onFail("hostname", "container not running");
+    assertFalse(new ContainerManager(unreachable).hostnameMatches("acme"));
+  }
+
+  @Test
   void setHostnameThrowsWhenTheWriteFails() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "stale", ""))

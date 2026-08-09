@@ -125,7 +125,7 @@ public final class ProjectProvisioner {
    * Installs the in-container sail machinery — the event-socket bind mount, the {@code
    * sail-event.sh} hook helper, the {@code spec} CLI, and the Claude Code / Codex hook settings —
    * once the {@code dev} user and its home exist (step 6 creates {@code /home/dev}, which these
-   * files live under). Reuses {@link ContainerSailSetup}, the same seam {@code reconfigure} uses,
+   * files live under). Reuses {@link ContainerSailSetup}, the same seam {@code project apply} uses,
    * so provisioning and recovery install identically. Failure is non-fatal: it is logged with the
    * one command that fixes it, and the agent hooks fall back to file-only audit until then.
    */
@@ -138,7 +138,7 @@ public final class ProjectProvisioner {
               + config.name()
               + ": "
               + e.getMessage()
-              + ". Run 'sail project reconfigure "
+              + ". Run 'sail project apply "
               + config.name()
               + "' to retry.");
     }

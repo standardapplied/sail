@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,18 +14,18 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Validates the self-heal that 0.13.101 missed: after the socket moved off {@code /run}, a
- * container whose in-container {@code spec} script still points at the old path must be rewritten
- * to the current path on the next {@link ContainerSailSetup#ensureInstalled} — the call {@code
- * migrate} and {@code reconfigure} both make. Exercises a real container so the content-aware probe
- * is proven against an actual stale script, not a mocked shell.
+ * Validates the content-addressed converge against a real container: a {@code spec} script pointing
+ * at a stale socket path is fully rewritten and stamped on the next {@link
+ * ContainerSailSetup#ensureInstalled} — even when the machinery stamp still matches, because the
+ * probe verifies observed file contents, never the stamp alone — and a stamped, current container
+ * converges as a no-op without an installer running.
  */
 class StaleScriptRewriteIT extends AbstractIncusIT {
 
   private static final String CONTAINER = "sail-it-stale-script";
 
   @Test
-  void reconfigureRewritesASpecScriptLeftOnTheOldSocketPath() throws Exception {
+  void anOldShapeContainerConvergesAndACurrentOneIsANoOp() throws Exception {
     ensureIncusOrSkip();
 
     var currentPath = SailPaths.apiSocketContainerPath().toString();
@@ -41,27 +42,45 @@ class StaleScriptRewriteIT extends AbstractIncusIT {
                       + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev"));
       assertTrue(dev.ok(), "the dev user must exist for the in-container helpers: " + dev.stderr());
 
-      ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+      var first = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+      assertEquals(ContainerSailSetup.Result.UPDATED, first, "first touch installs and stamps");
       assertTrue(
           specScript().contains(currentPath), "a fresh install writes the current socket path");
+
+      var second = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+      assertEquals(
+          ContainerSailSetup.Result.ALREADY_PRESENT,
+          second,
+          "a stamped, current container converges as a no-op");
 
       var corrupt =
           exec(
               CONTAINER,
               List.of(
-                  "sed",
-                  "-i",
-                  "s|" + currentPath + "|/run/sail/api.sock|",
-                  SpecCliHelper.SCRIPT_PATH));
-      assertTrue(corrupt.ok(), "could not stage the stale script: " + corrupt.stderr());
+                  "bash",
+                  "-c",
+                  "sed -i 's|"
+                      + currentPath
+                      + "|/run/sail/api.sock|' "
+                      + SpecCliHelper.SCRIPT_PATH));
+      assertTrue(corrupt.ok(), "could not stage the tampered container: " + corrupt.stderr());
       assertTrue(specScript().contains("/run/sail/api.sock"), "the script is now stale (old path)");
+      var stamp = exec(CONTAINER, List.of("cat", ContainerSailSetup.STAMP_PATH));
+      assertEquals(
+          ContainerSailSetup.fingerprint(),
+          stamp.stdout().strip(),
+          "the stamp still matches — only the script content betrays the tampering");
 
-      ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+      var heal = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
 
+      assertEquals(
+          ContainerSailSetup.Result.UPDATED,
+          heal,
+          "a tampered payload reinstalls everything even though the stamp matches");
       var rewritten = specScript();
       assertTrue(
           rewritten.contains(currentPath),
-          "reconfigure must rewrite a script still on the old path to the current one");
+          "apply must rewrite a script still on the old path to the current one");
       assertFalse(
           rewritten.contains("/run/sail/api.sock"),
           "no stale /run path may remain after the rewrite");

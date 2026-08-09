@@ -83,7 +83,7 @@ public final class ConnectCommand implements Runnable {
               throw new IllegalStateException(
                   "Project '"
                       + name
-                      + "' does not exist. Create it with: sail project create <name>");
+                      + "' does not exist. Create it with: sail project apply <name>");
           case ContainerState.Error e ->
               throw new IllegalStateException("Container error: " + e.message());
         };

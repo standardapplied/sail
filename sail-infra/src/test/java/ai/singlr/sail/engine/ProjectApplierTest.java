@@ -45,6 +45,39 @@ class ProjectApplierTest {
   }
 
   @Test
+  void deltaProbesRideTheProbeShellAndMutationsTheMutator() throws Exception {
+    var probes =
+        new ScriptedShellExecutor()
+            .onFail("podman container inspect postgres", "no such container")
+            .onFail("test -d", "not found")
+            .onFail("which", "not found");
+    var mutator = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var applier = new ProjectApplier(probes, mutator, new PrintStream(new ByteArrayOutputStream()));
+
+    var services =
+        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+    applier.applyServices(CONTAINER, services);
+    applier.applyAgentTools(CONTAINER, List.of("claude-code"));
+
+    assertTrue(
+        probes.invocations().stream().anyMatch(c -> c.contains("podman container inspect")),
+        "existence probes must observe the live container");
+    assertTrue(
+        probes.invocations().stream().anyMatch(c -> c.contains("which")),
+        "tool-presence probes must observe the live container");
+    assertTrue(
+        probes.invocations().stream()
+            .noneMatch(c -> c.contains("podman run") || c.contains("install")),
+        "the probe shell must stay read-only");
+    assertTrue(
+        mutator.invocations().stream().anyMatch(c -> c.contains("podman run")),
+        "mutations must ride the mutator shell, which a dry run swaps for narration");
+    assertTrue(
+        mutator.invocations().stream().noneMatch(c -> c.contains("podman container inspect")),
+        "a dry-run mutator answering probes would report every delta as absent");
+  }
+
+  @Test
   void applyServicesSkipsExistingService() throws Exception {
     var shell = new ScriptedShellExecutor().onOk("podman container inspect postgres");
     var applier = applier(shell);

@@ -49,7 +49,6 @@ class SailEventHelperTest {
         content.contains("REASON=\"$(printf '%s' \"${2:-}\" | tr -d '\\\\\"\\000-\\037')\""),
         "the reason is interpolated into hand-built JSON, so quotes, backslashes, and control"
             + " chars must be stripped first");
-    assertTrue(content.contains(SailEventHelper.REASON_MARKER));
   }
 
   @Test

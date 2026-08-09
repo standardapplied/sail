@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
@@ -185,10 +186,12 @@ class DispatchLaunchCancelRaceTest {
       if (joined.contains("incus list ^acme$")) {
         return new Result(0, RUNNING_JSON, "");
       }
+      if (joined.contains("cat " + ContainerSailSetup.STAMP_PATH)) {
+        return new Result(0, ContainerSailSetup.fingerprint(), "");
+      }
       if (joined.contains("mkdir -p /home/dev/.sail")
           || joined.contains("printf '%s'")
           || joined.contains("incus config device add")
-          || joined.contains("grep -qsF")
           || joined.contains("test -d /home/dev/workspace/app/.git")
           || joined.contains("git -C /home/dev/workspace/app checkout -b sail/auth")
           || joined.contains("claude")) {

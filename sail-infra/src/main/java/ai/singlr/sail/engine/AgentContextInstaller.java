@@ -28,8 +28,8 @@ import java.util.concurrent.TimeoutException;
  * machinery (event socket, {@code spec} CLI, agent hook configs) — that is {@link
  * ContainerSailSetup}'s single responsibility.
  *
- * <p>Shared by {@code agent context regen} and {@code project reconfigure} so both refresh an
- * identical set.
+ * <p>Shared by {@code agent context regen} and {@code project apply} so both refresh an identical
+ * set.
  */
 public final class AgentContextInstaller {
 

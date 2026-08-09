@@ -57,7 +57,6 @@ class CommandTaxonomyTest {
             .containsAll(
                 Set.of(
                     "init",
-                    "create",
                     "apply",
                     "start",
                     "stop",
@@ -71,6 +70,17 @@ class CommandTaxonomyTest {
                     "connect",
                     "snapshot",
                     "resources")));
+  }
+
+  @Test
+  void applyIsTheOneConvergenceVerb() {
+    var project = new CommandLine(new ProjectCommand());
+
+    for (var deleted : Set.of("create", "reconfigure", "sync")) {
+      assertFalse(
+          project.getSubcommands().containsKey(deleted),
+          deleted + " was folded into 'apply' and must no longer parse");
+    }
   }
 
   @Test
