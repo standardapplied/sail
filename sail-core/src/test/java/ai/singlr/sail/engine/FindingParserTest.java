@@ -65,7 +65,6 @@ class FindingParserTest {
     var result = parsed(output);
     assertEquals(1, result.findings().size());
     assertTrue(result.verdicts().isEmpty());
-    assertTrue(result.warnings().isEmpty());
 
     var finding = result.findings().getFirst();
     assertEquals(Finding.Severity.HIGH, finding.severity());
@@ -117,7 +116,6 @@ class FindingParserTest {
     var result = parsed(output);
     assertTrue(result.verdicts().isEmpty());
     assertTrue(result.findings().isEmpty());
-    assertTrue(result.warnings().isEmpty());
   }
 
   @Test
@@ -196,42 +194,39 @@ class FindingParserTest {
   }
 
   @Test
-  void skipsAMalformedFindingAndKeepsTheRest() {
+  void aMalformedFindingEntryRejectsTheWholeEnvelope() {
     var output =
         """
         ```json
-        {"verdicts": [],
+        {"verdicts": [{"finding_id": "f-1", "verdict": "fixed", "evidence": "commit abc"}],
          "findings": [
-          {"severity": "INVALID", "category": "SECURITY", "title": "Bad", "description": "X"},
+          {"severity": "CRITICAL", "category": "SECURTY", "title": "Bad", "description": "X"},
           {"severity": "HIGH", "category": "LOGIC", "title": "Good", "description": "Y"}
         ]}
         ```
         """;
 
-    var result = parsed(output);
-    assertEquals(1, result.findings().size());
-    assertEquals("Good", result.findings().getFirst().title());
-    assertEquals(1, result.warnings().size());
+    var result = unparseable(output);
+    assertFalse(
+        result.warnings().isEmpty(),
+        "an unreadable finding has unknown severity; accepting the rest would resolve the"
+            + " carried blocker while silently dropping a reported issue from the gate");
   }
 
   @Test
-  void skipsAMalformedVerdictAndKeepsTheRest() {
+  void aMalformedVerdictEntryRejectsTheWholeEnvelope() {
     var output =
         """
         ```json
         {"verdicts": [
           {"verdict": "fixed", "evidence": "no finding_id"},
-          {"finding_id": "f-9", "verdict": "banana"},
           {"finding_id": "f-1", "verdict": "still_open"}
          ],
          "findings": []}
         ```
         """;
 
-    var result = parsed(output);
-    assertEquals(1, result.verdicts().size());
-    assertEquals("f-1", result.verdicts().getFirst().findingId());
-    assertEquals(2, result.warnings().size());
+    assertFalse(unparseable(output).warnings().isEmpty());
   }
 
   @Test
@@ -311,7 +306,7 @@ class FindingParserTest {
 
     var result = parsed(transcript);
     assertTrue(result.findings().isEmpty());
-    assertTrue(result.warnings().isEmpty(), "a clean empty envelope is a valid verdict");
+    assertTrue(result.verdicts().isEmpty(), "a clean empty envelope is a valid verdict");
   }
 
   @Test

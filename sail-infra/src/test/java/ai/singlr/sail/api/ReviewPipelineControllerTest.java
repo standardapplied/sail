@@ -33,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -791,6 +793,62 @@ class ReviewPipelineControllerTest {
         verdict.body().contains("Unvalidated input"),
         "the disputed finding the gate excluded must face the human before approval");
     assertTrue(verdict.body().contains("input is validated upstream"), verdict.body());
+  }
+
+  @Test
+  void everyDisputedFindingReachesTheHumanVerdictUntruncated() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "human", "type", "human"))));
+    var elevenHighs =
+        IntStream.rangeClosed(1, 11)
+            .mapToObj(
+                i ->
+                    ("{\"severity\": \"HIGH\", \"category\": \"LOGIC\", \"file\": \"a.java\","
+                            + " \"line_start\": %d, \"line_end\": %d, \"title\": \"Wrong claim"
+                            + " %d\", \"description\": \"d\", \"confidence\": 0.8}")
+                        .formatted(i, i, i))
+            .collect(Collectors.joining(", "));
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> "{\"verdicts\": [], \"findings\": [" + elevenHighs + "]}";
+              case 2 -> "fix applied";
+              default -> ReviewScripts.disputeAllCarried(prompt);
+            };
+    var ctrl = controller(config, runner);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var verdict = messages.list("auth", null, 50).getLast().body();
+    assertTrue(verdict.contains("Awaiting human approval"), verdict);
+    IntStream.rangeClosed(1, 11)
+        .forEach(
+            i ->
+                assertTrue(
+                    verdict.contains("Wrong claim " + i),
+                    "every gate-excluded dispute must face the human with its identity and"
+                        + " argument, never as a count: missing 'Wrong claim "
+                        + i
+                        + "' in: "
+                        + verdict));
+    assertFalse(verdict.contains("more"), verdict);
   }
 
   @Test
@@ -1846,6 +1904,84 @@ class ReviewPipelineControllerTest {
           java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
       assertTrue(detail.contains("Sticky high"), "escalation names the stuck finding: " + detail);
       assertTrue(detail.contains("survived 2 fix iterations"), detail);
+    }
+  }
+
+  @Test
+  void anotherStagesAgedSubGateFindingNeverTripsTheFailingStagesConvergenceCheck()
+      throws Exception {
+    createSpec("auth", "in_progress");
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_iterations",
+                3,
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical"),
+                    Map.of(
+                        "name",
+                        "correctness",
+                        "type",
+                        "agent",
+                        "agent",
+                        "claude",
+                        "gate",
+                        "all_clear"))));
+    var toleratedHigh =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Tolerated high",
+          "description": "d", "confidence": 0.9}]}
+        ```
+        """;
+    var codexCalls = new AtomicInteger();
+    var claudeCalls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, agent, prompt, rid, cred) ->
+            switch (agent) {
+              case "codex" -> codexCalls.incrementAndGet() == 1 ? toleratedHigh : CLEAN_REVIEW;
+              case "claude" ->
+                  ReviewScripts.fixAllCarried(
+                      prompt,
+                      ("[{\"severity\": \"LOW\", \"category\": \"LOGIC\", \"file\": \"b.java\","
+                              + " \"line_start\": 1, \"line_end\": 1, \"title\": \"Fresh low %d\","
+                              + " \"description\": \"d\", \"confidence\": 0.4}]")
+                          .formatted(claudeCalls.incrementAndGet()));
+              default -> "fix applied";
+            };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
+      var ctrl = controller(p -> config, p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          3,
+          reviewStore.reviewsForSpec("auth").size(),
+          "a converging loop — new blocker each round — runs to max_iterations");
+      var detail =
+          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
+      assertTrue(
+          detail.contains("review iterations exhausted"),
+          "the loop exhausts its budget instead of escalating a foreign stage's finding: "
+              + detail);
+      assertFalse(
+          detail.contains("Tolerated high"),
+          "the security stage's aged HIGH passes its own gate; the correctness gate must never"
+              + " judge it: "
+              + detail);
     }
   }
 

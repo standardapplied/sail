@@ -326,6 +326,31 @@ public final class ReviewStore implements ConflictResolver {
     return carried;
   }
 
+  /** One effective ruling on a carried finding: {@code OPEN} carries it forward, else resolves. */
+  public record StageRuling(Finding finding, Finding.Resolution resolution, String evidence) {}
+
+  /**
+   * Applies a reviewer's complete stage result as one atomic write: every ruling on the carried
+   * findings (resolving {@code FIXED}/{@code DISPUTED} predecessors, re-attaching {@code OPEN}
+   * ones) and every newly discovered finding. Any failure — a duplicate finding id, a constraint
+   * violation, a journaling error — rolls the whole result back, so a partially committed verdict
+   * can never retire a carried finding on behalf of a stage that subsequently errors: the retry
+   * still sees it {@code OPEN} and carries it.
+   */
+  public void applyStageResult(String stageId, List<StageRuling> rulings, List<Finding> findings) {
+    db.transaction(
+        () -> {
+          for (var ruling : rulings) {
+            if (ruling.resolution() == Finding.Resolution.OPEN) {
+              carryForward(stageId, ruling.finding());
+            } else {
+              resolveFinding(ruling.finding().id(), ruling.resolution(), ruling.evidence());
+            }
+          }
+          findings.forEach(finding -> addFinding(stageId, finding));
+        });
+  }
+
   private static final String FINDING_COLUMNS =
       "f.id, f.severity, f.category, f.file, f.line_start, f.line_end,"
           + " f.title, f.description, f.evidence, f.suggestion_before,"
@@ -373,11 +398,13 @@ public final class ReviewStore implements ConflictResolver {
 
   /**
    * The findings the same-named stage of the next review must rule on: the open findings that
-   * {@code stageName} emitted in the current dispatch attempt's latest gate-failed review (errored
-   * reviews have no verdict and are skipped), excluding any already re-attached to that stage of
-   * {@code currentReviewId}. Scoping by stage keeps every finding facing the categories and gate of
-   * the stage that raised it — a HIGH from a strict later stage can never be laundered through an
-   * earlier stage's looser gate.
+   * {@code stageName} emitted in the current dispatch attempt's latest gate-failed review <em>in
+   * which that stage actually executed</em> (errored reviews have no verdict and are skipped, and
+   * so is a review where an earlier stage failed before this one ran — its pending stage holds no
+   * rows, and picking it would silently drop the stage's still-open findings from an older review),
+   * excluding any already re-attached to that stage of {@code currentReviewId}. Scoping by stage
+   * keeps every finding facing the categories and gate of the stage that raised it — a HIGH from a
+   * strict later stage can never be laundered through an earlier stage's looser gate.
    */
   public List<Finding> carryForwardFindings(
       String specId, String currentReviewId, String stageName) {
@@ -386,10 +413,13 @@ public final class ReviewStore implements ConflictResolver {
         SELECT %s FROM review_findings f
         JOIN review_stages s ON s.id = f.stage_id
         WHERE s.review_id = (
-            SELECT id FROM reviews
-            WHERE spec_id = ? AND superseded_at IS NULL AND status = 'failed'
-                AND error IS NULL AND id != ?
-            ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            SELECT r.id FROM reviews r
+            JOIN review_stages prior ON prior.review_id = r.id
+            WHERE r.spec_id = ? AND r.superseded_at IS NULL AND r.status = 'failed'
+                AND r.error IS NULL AND r.id != ?
+                AND prior.name = ? AND prior.status IN ('passed', 'failed')
+                AND prior.error IS NULL
+            ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)
         AND s.name = ?
         AND f.resolution = 'OPEN'
         AND f.id NOT IN (
@@ -401,6 +431,7 @@ public final class ReviewStore implements ConflictResolver {
         this::mapFinding,
         specId,
         currentReviewId,
+        stageName,
         stageName,
         currentReviewId,
         stageName);

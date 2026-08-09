@@ -25,8 +25,9 @@ import java.util.Objects;
  * is a newly discovered issue. Anything else — a bare findings array included — is unparseable
  * reviewer output: the reviewer and this parser ship in the same binary, so no legacy shape is
  * tolerated and an off-contract response errors the stage rather than passing as a clean review.
- * Within a valid envelope, malformed entries are skipped with a warning, never crashing the
- * pipeline.
+ * The same fail-closed rule applies inside the envelope: a single malformed entry rejects the whole
+ * response, because an unreadable finding has unknown severity and cannot safely be dropped — the
+ * gate must never rule on a result from which a reported issue was discarded.
  */
 public final class FindingParser {
 
@@ -59,8 +60,7 @@ public final class FindingParser {
   /** A parsed envelope, or the proof that no candidate in the transcript was one. */
   public sealed interface ParseResult {
 
-    record Parsed(List<Verdict> verdicts, List<Finding> findings, List<String> warnings)
-        implements ParseResult {}
+    record Parsed(List<Verdict> verdicts, List<Finding> findings) implements ParseResult {}
 
     record Unparseable(List<String> warnings) implements ParseResult {}
   }
@@ -130,11 +130,10 @@ public final class FindingParser {
         warnings.add("Finding " + i + ": " + e.getMessage());
       }
     }
-    if (verdicts.isEmpty() && findings.isEmpty() && !warnings.isEmpty()) {
+    if (!warnings.isEmpty()) {
       return new ParseResult.Unparseable(List.copyOf(warnings));
     }
-    return new ParseResult.Parsed(
-        List.copyOf(verdicts), List.copyOf(findings), List.copyOf(warnings));
+    return new ParseResult.Parsed(List.copyOf(verdicts), List.copyOf(findings));
   }
 
   /**

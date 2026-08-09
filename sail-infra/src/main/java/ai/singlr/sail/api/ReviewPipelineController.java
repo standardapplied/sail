@@ -372,7 +372,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
           return;
         }
         if (outcome instanceof StageOutcome.GateFailed) {
-          handleStageFailure(reviewId, config, stageConfig.gate(), project, specId);
+          handleStageFailure(reviewId, config, stage.id(), stageConfig.gate(), project, specId);
           return;
         }
       }
@@ -436,12 +436,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         return new StageOutcome.Errored(message);
       }
       var parsed = (FindingParser.ParseResult.Parsed) parseResult;
-      warn(parsed.warnings());
-      applyVerdicts(stage.id(), carried, parsed.verdicts());
-
-      for (var finding : parsed.findings()) {
-        reviewStore.addFinding(stage.id(), finding);
-      }
+      applyStageResult(stage.id(), carried, parsed);
 
       var findings = reviewStore.findingsForStage(stage.id());
       var passed = stageConfig.gate().passes(findings);
@@ -466,28 +461,37 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   /**
-   * Applies the reviewer's verdicts to the carried findings, fail-closed: {@code fixed} and {@code
-   * disputed} (both evidence-backed, enforced by {@link FindingParser#reconcile}) resolve the
-   * predecessor row with the evidence recorded; everything else — {@code still_open}, a missing
-   * verdict, a ruling without evidence — re-attaches the finding to this stage as a carried row, so
-   * it keeps aging and keeps facing the gate. A reviewer that stops mentioning last iteration's
-   * finding launders nothing.
+   * Applies the reviewer's complete result — verdicts and new findings — as one atomic write,
+   * fail-closed on both axes. Verdicts: {@code fixed} and {@code disputed} (both evidence-backed,
+   * enforced by {@link FindingParser#reconcile}) resolve the predecessor row with the evidence
+   * recorded; everything else — {@code still_open}, a missing verdict, a ruling without evidence —
+   * re-attaches the finding to this stage as a carried row, so it keeps aging and keeps facing the
+   * gate. A reviewer that stops mentioning last iteration's finding launders nothing. Atomicity: if
+   * any new finding fails to insert, the resolutions roll back too, so an errored stage retries
+   * with every carried finding still {@code OPEN} instead of silently retired.
    */
-  private void applyVerdicts(
-      String stageId, List<Finding> carried, List<FindingParser.Verdict> verdicts) {
-    var reconciled = FindingParser.reconcile(carried, verdicts);
+  private void applyStageResult(
+      String stageId, List<Finding> carried, FindingParser.ParseResult.Parsed parsed) {
+    var reconciled = FindingParser.reconcile(carried, parsed.verdicts());
     warn(reconciled.warnings());
-    for (var finding : carried) {
-      var verdict = reconciled.rulings().get(finding.id());
-      switch (verdict.ruling()) {
-        case FIXED ->
-            reviewStore.resolveFinding(finding.id(), Finding.Resolution.FIXED, verdict.evidence());
-        case DISPUTED ->
-            reviewStore.resolveFinding(
-                finding.id(), Finding.Resolution.DISPUTED, verdict.evidence());
-        case STILL_OPEN -> reviewStore.carryForward(stageId, finding);
-      }
-    }
+    var rulings =
+        carried.stream()
+            .map(
+                finding -> {
+                  var verdict = reconciled.rulings().get(finding.id());
+                  return new ReviewStore.StageRuling(
+                      finding, resolutionOf(verdict.ruling()), verdict.evidence());
+                })
+            .toList();
+    reviewStore.applyStageResult(stageId, rulings, parsed.findings());
+  }
+
+  private static Finding.Resolution resolutionOf(FindingParser.Ruling ruling) {
+    return switch (ruling) {
+      case FIXED -> Finding.Resolution.FIXED;
+      case DISPUTED -> Finding.Resolution.DISPUTED;
+      case STILL_OPEN -> Finding.Resolution.OPEN;
+    };
   }
 
   private static void warn(List<String> warnings) {
@@ -523,6 +527,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private void handleStageFailure(
       String reviewId,
       ReviewPipelineConfig config,
+      String failedStageId,
       ReviewPipelineConfig.Gate gate,
       String project,
       String specId) {
@@ -537,7 +542,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         failedVerdict(
             review.get().iteration(), openFindings, reviewStore.disputedFindings(specId)));
 
-    var stuck = stuckFinding(gate, openFindings, config.maxFindingAge());
+    var stuck =
+        stuckFinding(gate, reviewStore.findingsForStage(failedStageId), config.maxFindingAge());
     if (stuck != null) {
       escalate(
           project,
@@ -570,11 +576,13 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * The convergence check: a gate-blocking finding whose {@code carried_from} chain shows it has
    * already survived {@code maxFindingAge} fix iterations. Sub-gate findings may age freely — they
    * do not drive the loop — and a loop resolving old blockers while new ones surface never trips
-   * this: that loop is converging and runs to {@code max_iterations} as before.
+   * this: that loop is converging and runs to {@code max_iterations} as before. Scoped to the
+   * failed stage's own findings: a finding is gate-blocking only under the gate of the stage that
+   * owns it, so an aged finding another stage's gate permits never counts as this stage's blocker.
    */
   private Finding stuckFinding(
-      ReviewPipelineConfig.Gate gate, List<Finding> openFindings, int maxFindingAge) {
-    return openFindings.stream()
+      ReviewPipelineConfig.Gate gate, List<Finding> stageFindings, int maxFindingAge) {
+    return stageFindings.stream()
         .filter(gate::blocks)
         .filter(finding -> reviewStore.findingAge(finding.id()) >= maxFindingAge)
         .findFirst()
@@ -732,8 +740,9 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   /**
    * The disputed findings section of a room verdict: excluded from the gate by a reviewer-ruled
-   * argument, so they are surfaced — argument included — for the human to confirm or overrule. An
-   * agent can silence a finding only by arguing it in the open, never by omission.
+   * argument, so every one is surfaced — argument included, never truncated — for the human to
+   * confirm or overrule. An agent can silence a finding only by arguing it in the open, never by
+   * omission, and a dispute the human cannot see is an omission.
    */
   private static String disputedLines(List<Finding> disputed) {
     if (disputed.isEmpty()) {
@@ -741,7 +750,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     }
     var shown =
         disputed.stream()
-            .limit(10)
             .map(
                 f ->
                     "- ["
@@ -753,10 +761,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
                             ? ""
                             : " — " + f.resolutionEvidence()))
             .collect(Collectors.joining("\n"));
-    var more = disputed.size() - Math.min(disputed.size(), 10);
-    return "\nDisputed (excluded from the gate — needs your ruling):\n"
-        + shown
-        + (more > 0 ? "\n- +" + more + " more" : "");
+    return "\nDisputed (excluded from the gate — needs your ruling):\n" + shown;
   }
 
   /** {@code "2 high, 1 low"} in severity order, or {@code "no findings"}. */

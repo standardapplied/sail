@@ -83,6 +83,7 @@ public final class SyncEngine {
       int redetectsLeft) {
     var base = local.base(id);
     var localSnap = local.current(id);
+    var localRev = local.currentRev(id);
     if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
       if (base == null) {
         var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
@@ -99,7 +100,7 @@ public final class SyncEngine {
             id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
         return Outcome.CONFLICT;
       }
-      return push(local, main, id, localSnap, remoteRev, Outcome.PUSHED, redetectsLeft);
+      return push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
     }
     return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
       case ConflictDetector.Converged ignored -> {
@@ -112,11 +113,12 @@ public final class SyncEngine {
       }
       case ConflictDetector.KeepLocal ignored ->
           local.mayPush(id)
-              ? push(local, main, id, localSnap, remoteRev, Outcome.PUSHED, redetectsLeft)
+              ? push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
               : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
       case ConflictDetector.Merged m ->
           local.mayPush(id)
-              ? push(local, main, id, m.result(), remoteRev, Outcome.MERGED, redetectsLeft)
+              ? push(
+                  local, main, id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
               : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
       case ConflictDetector.Conflict c -> {
         local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
@@ -136,22 +138,36 @@ public final class SyncEngine {
     return Outcome.PULLED;
   }
 
+  /**
+   * Commits the offered snapshot to main and, on acceptance, adopts it locally — but only if the
+   * local store still sits at the revision the snapshot was captured from. A local write landing
+   * during the commit round makes the accepted snapshot stale; adopting it would overwrite (and,
+   * for aggregates, delete the non-replicated children of) the newer local state. Instead the
+   * entity is re-reconciled against main's fresh state, so the newer local work pushes, merges, or
+   * parks as a conflict — never silently vanishes.
+   */
   private Outcome push(
       LocalReplica local,
       MainReplica main,
       String id,
       Map<String, Object> snapshot,
+      String offeredLocalRev,
       String expectedRev,
       Outcome onAccepted,
       int redetectsLeft) {
     return switch (main.commit(id, snapshot, expectedRev)) {
       case CommitOutcome.Accepted a -> {
+        if (!Objects.equals(local.currentRev(id), offeredLocalRev)) {
+          yield redetectsLeft <= 0
+              ? recordStaleConflict(local, id, main.current(id))
+              : reconcileEntity(local, main, id, main.current(id), a.rev(), redetectsLeft - 1);
+        }
         local.adopt(id, snapshot, a.rev());
         yield onAccepted;
       }
       case CommitOutcome.Rejected r -> {
         if (redetectsLeft <= 0) {
-          yield recordStaleConflict(local, id, r);
+          yield recordStaleConflict(local, id, r.currentSnapshot());
         }
         yield reconcileEntity(
             local, main, id, r.currentSnapshot(), r.currentRev(), redetectsLeft - 1);
@@ -164,15 +180,14 @@ public final class SyncEngine {
    * the user decides, naming the clashing fields when there are any.
    */
   private static Outcome recordStaleConflict(
-      LocalReplica local, String id, CommitOutcome.Rejected rejected) {
+      LocalReplica local, String id, Map<String, Object> remoteSnap) {
     var base = local.base(id);
     var localSnap = local.current(id);
     var fields =
-        ConflictDetector.detect(base, localSnap, rejected.currentSnapshot())
-                instanceof ConflictDetector.Conflict c
+        ConflictDetector.detect(base, localSnap, remoteSnap) instanceof ConflictDetector.Conflict c
             ? c.fields()
             : List.of(STALE_FIELD);
-    local.recordConflict(id, base, localSnap, rejected.currentSnapshot(), fields);
+    local.recordConflict(id, base, localSnap, remoteSnap, fields);
     return Outcome.CONFLICT;
   }
 

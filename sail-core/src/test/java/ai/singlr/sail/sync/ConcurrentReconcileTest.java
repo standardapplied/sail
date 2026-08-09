@@ -39,6 +39,7 @@ class ConcurrentReconcileTest {
     final Map<String, Map<String, Object>> snapshots = new LinkedHashMap<>();
     final Map<String, String> revs = new LinkedHashMap<>();
     final Deque<CommitOutcome> script = new ArrayDeque<>();
+    Runnable onFirstCommit;
     int minted = 1;
 
     @Override
@@ -68,6 +69,11 @@ class ConcurrentReconcileTest {
 
     @Override
     public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
+      if (onFirstCommit != null) {
+        var hook = onFirstCommit;
+        onFirstCommit = null;
+        hook.run();
+      }
       var outcome = script.isEmpty() ? new CommitOutcome.Accepted("m-" + minted++) : script.poll();
       if (outcome instanceof CommitOutcome.Accepted accepted) {
         snapshots.put(id, snapshot);
@@ -123,6 +129,35 @@ class ConcurrentReconcileTest {
     assertEquals(1, report.conflicts());
     assertEquals(List.of("<stale>"), node.conflicts.pending().getFirst().fields());
     assertEquals("Title from node", node.specs.findById("auth").orElseThrow().title());
+  }
+
+  @Test
+  void aDisjointLocalWriteDuringTheCommitRoundIsReOfferedAndLands() {
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit =
+        () -> node.specs.update(SyncBox.spec("auth", "Title from node", "in_progress"));
+
+    engine.reconcile(node.replica, main);
+
+    assertEquals(
+        "in_progress",
+        node.specs.findById("auth").orElseThrow().status().wire(),
+        "a write landing while the push was in flight must not be overwritten by the"
+            + " accepted-but-stale snapshot");
+    assertEquals("in_progress", main.snapshots.get("auth").get("status"));
+    assertTrue(node.conflicts.pending().isEmpty());
+  }
+
+  @Test
+  void anOverlappingLocalWriteDuringTheCommitRoundParksAConflictAndKeepsLocalWork() {
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit =
+        () -> node.specs.update(SyncBox.spec("auth", "Title during round", "pending"));
+
+    var report = engine.reconcile(node.replica, main);
+
+    assertEquals(1, report.conflicts());
+    assertEquals("Title during round", node.specs.findById("auth").orElseThrow().title());
   }
 
   @Test
