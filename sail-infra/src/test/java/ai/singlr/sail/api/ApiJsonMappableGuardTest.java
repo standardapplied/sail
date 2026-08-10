@@ -46,7 +46,8 @@ class ApiJsonMappableGuardTest {
           "ai.singlr.sail.api.Event",
           "ai.singlr.sail.api.EventBus$Stats",
           "ai.singlr.sail.api.EventBus$SubscriberStats",
-          "ai.singlr.sail.api.WebhookMessage");
+          "ai.singlr.sail.api.WebhookMessage",
+          "ai.singlr.sail.api.RoomRelayDeliveryIT$ScriptResult");
 
   @Test
   void everyResponseRecordImplementsMappable() throws Exception {

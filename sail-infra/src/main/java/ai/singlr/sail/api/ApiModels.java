@@ -871,6 +871,32 @@ record SpecMessagesResponse(String specId, List<SpecMessageView> messages) imple
   }
 }
 
+record RunInboxResponse(
+    String runId, String specId, List<SpecMessageView> messages, boolean hasMore)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("run_id", runId);
+    if (specId != null) {
+      map.put("spec_id", specId);
+    }
+    map.put("messages", messages);
+    map.put("has_more", hasMore);
+    return map;
+  }
+}
+
+record RunAckResponse(String runId, int acked) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("run_id", runId);
+    map.put("acked", acked);
+    return map;
+  }
+}
+
 record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) implements Mappable {
   @Override
   public Map<String, Object> toMap() {

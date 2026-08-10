@@ -76,8 +76,9 @@ public final class SchemaManager {
    * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
    * versions continuing from {@value #V1_VERSION}. Never reorder, edit, or remove an entry; each
    * addition ships with a test that migrates a seeded database and asserts the data survived. The
-   * {@code run_credentials} table is local-only secret material (per-run credential hashes) — it
-   * must never join a sync snapshot.
+   * {@code run_credentials} table is local-only secret material (per-run credential hashes) and
+   * {@code run_delivered_messages} is local-only delivery bookkeeping — neither ever joins a sync
+   * snapshot.
    */
   static final List<String> MIGRATIONS =
       List.of(
@@ -141,7 +142,13 @@ public final class SchemaManager {
           "DROP TABLE review_findings",
           "ALTER TABLE review_findings_v2 RENAME TO review_findings",
           "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)");
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
+          """
+          CREATE TABLE run_delivered_messages (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
+              PRIMARY KEY (run_id, message_id)
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

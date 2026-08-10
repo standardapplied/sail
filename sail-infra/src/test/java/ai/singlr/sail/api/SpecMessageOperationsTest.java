@@ -98,7 +98,7 @@ class SpecMessageOperationsTest {
     assertEquals(posted.message().id(), event.get().data().get("message_id"));
     assertEquals("Progress update", event.get().data().get("preview"));
 
-    var listed = operations.specMessages("room", null, 50).orThrow();
+    var listed = operations.specMessages("room", null, null, 50).orThrow();
     assertEquals(1, listed.messages().size());
     assertEquals(posted.message().id(), listed.messages().getFirst().id());
   }
@@ -119,16 +119,16 @@ class SpecMessageOperationsTest {
             .errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.specMessages("room", "not-a-uuid", 50).asFailure().errorCode());
+        operations.specMessages("room", "not-a-uuid", null, 50).asFailure().errorCode());
     assertEquals(
         ErrorCode.SPEC_NOT_FOUND,
-        operations.specMessages("missing", null, 50).asFailure().errorCode());
+        operations.specMessages("missing", null, null, 50).asFailure().errorCode());
 
     var longMessage = "x".repeat(200);
     operations
         .postSpecMessage("room", new SpecMessageRequest(longMessage, null), member("ada"), "ada")
         .orThrow();
-    assertEquals(1, operations.specMessages("room", null, 50).orThrow().messages().size());
+    assertEquals(1, operations.specMessages("room", null, null, 50).orThrow().messages().size());
   }
 
   @Test
@@ -143,7 +143,7 @@ class SpecMessageOperationsTest {
             .asFailure();
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.errorCode());
-    assertTrue(operations.specMessages("room", null, 50).orThrow().messages().isEmpty());
+    assertTrue(operations.specMessages("room", null, null, 50).orThrow().messages().isEmpty());
 
     var agent = Actor.agentPrincipal("codex/run-1", "ada");
     var posted =

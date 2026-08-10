@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 
 /**
@@ -36,9 +37,21 @@ public final class FixTaskBuilder {
     return body.isEmpty() ? subject : subject + "\n\n" + body;
   }
 
-  public static String build(String specId, String specTitle, List<Finding> findings) {
+  /**
+   * A built fix task and the room messages it rendered in full — the exact set the caller may
+   * acknowledge as delivered at fix launch. Delivery derives from presentation: a message the
+   * budget truncated or omitted is absent here and stays owed a full delivery.
+   */
+  public record Built(String task, List<MessageStore.MessageRow> renderedMessages) {}
+
+  public static Built build(
+      String specId,
+      String specTitle,
+      List<Finding> findings,
+      List<MessageStore.MessageRow> messages) {
     if (findings.isEmpty()) {
-      return "No review findings to address for spec \"%s\".".formatted(specTitle);
+      return new Built(
+          "No review findings to address for spec \"%s\".".formatted(specTitle), List.of());
     }
 
     var sb = new StringBuilder();
@@ -56,6 +69,11 @@ public final class FixTaskBuilder {
 
         """
             .formatted(specId));
+    var conversation = conversation(messages);
+    if (!conversation.text().isEmpty()) {
+      sb.append("Conversation on this spec — it may carry guidance on the findings below:\n\n");
+      sb.append(conversation.text());
+    }
 
     for (var i = 0; i < findings.size(); i++) {
       var f = findings.get(i);
@@ -100,6 +118,12 @@ public final class FixTaskBuilder {
         dispatch in this shared clone.
         """);
 
-    return sb.toString();
+    return new Built(sb.toString(), conversation.fullyRendered());
+  }
+
+  private static PromptConversation.Rendered<MessageStore.MessageRow> conversation(
+      List<MessageStore.MessageRow> messages) {
+    return PromptConversation.renderNewest(
+        messages, message -> message.author() + ": " + message.body() + "\n\n");
   }
 }

@@ -316,6 +316,96 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void afterFilterPassesThroughToTheDeliveryRead() {
+    var response =
+        router.handle(
+            get(
+                "/v1/specs/oauth/messages",
+                Map.of("after", "01900000-0000-7000-8000-000000000001")));
+    assertEquals(200, response.status());
+    assertEquals("01900000-0000-7000-8000-000000000001", ops.lastAfter);
+    assertNull(ops.lastBefore);
+  }
+
+  @Test
+  void aRunReadingItsOwnRoomAcknowledgesExactlyTheMessagesShown() {
+    var response = router.handle(get("/v1/specs/auth/messages", Map.of()));
+
+    assertEquals(200, response.status());
+    assertEquals("run-1", ops.lastAckRunId, "reading the room is a delivery");
+    assertEquals(
+        List.of("01900000-0000-7000-8000-000000000001"),
+        ops.lastDelivered,
+        "the acknowledgement names exactly the page's messages, never more");
+
+    ops.lastAckRunId = null;
+    router.handle(
+        get("/v1/specs/auth/messages", Map.of("before", "01900000-0000-7000-8000-000000000002")));
+    assertEquals(
+        "run-1",
+        ops.lastAckRunId,
+        "a paged self-read still delivers what it showed — identity acks make that safe");
+  }
+
+  @Test
+  void foreignFailedOrEmptyReadsLeaveTheLedgerAlone() {
+    router.handle(get("/v1/specs/oauth/messages", Map.of()));
+    assertNull(ops.lastAckRunId, "another spec's room is not this run's delivery");
+
+    router.handle(
+        new LocalApiRequest("GET", "/v1/specs/auth/messages", Map.of(), boxAuth(), new byte[0]));
+    assertNull(ops.lastAckRunId, "the box credential has no run to deliver to");
+
+    ops.emptyMessages = true;
+    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    assertNull(ops.lastAckRunId, "an empty page delivers nothing");
+
+    ops.emptyMessages = false;
+    ops.failMessages = true;
+    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    assertNull(ops.lastAckRunId, "a failed read delivers nothing");
+  }
+
+  @Test
+  void runMessagesServesTheInboxAndTheAcknowledgementToRunCallersOnly() {
+    var inbox = router.handle(get("/v1/run/messages", Map.of()));
+    assertEquals(200, inbox.status());
+    assertEquals("run-1", inbox.body().get("run_id"));
+    assertEquals(false, inbox.body().get("has_more"));
+    assertEquals("run-1", ops.lastInboxRunId);
+
+    var ack =
+        router.handle(
+            form(
+                "POST",
+                "/v1/run/messages",
+                "delivered=01900000-0000-7000-8000-000000000002,"
+                    + "01900000-0000-7000-8000-000000000003"));
+    assertEquals(200, ack.status());
+    assertEquals("run-1", ops.lastAckRunId, "the credential names the run, never the client");
+    assertEquals(
+        List.of("01900000-0000-7000-8000-000000000002", "01900000-0000-7000-8000-000000000003"),
+        ops.lastDelivered,
+        "a comma-separated ack carries every id shown");
+
+    var boxed =
+        router.handle(
+            new LocalApiRequest("GET", "/v1/run/messages", Map.of(), boxAuth(), new byte[0]));
+    assertEquals(403, boxed.status());
+    assertTrue(boxed.body().get("error").toString().contains("run credential"));
+
+    assertEquals(405, router.handle(form("DELETE", "/v1/run/messages", "")).status());
+
+    var emptyAck = router.handle(form("POST", "/v1/run/messages", "delivered="));
+    assertEquals(200, emptyAck.status());
+    assertEquals(
+        List.of(),
+        ops.lastDelivered,
+        "an ack naming no ids is a no-op, never an error — the relay may fire with nothing to"
+            + " acknowledge");
+  }
+
+  @Test
   void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
     var created =
         router.handle(
@@ -424,7 +514,13 @@ class LocalApiRouterTest {
     private SpecMessageRequest lastMessage;
     private String lastMessageAuthor;
     private String lastBefore;
+    private String lastAfter;
     private int lastMessageLimit;
+    private String lastAckRunId;
+    private List<String> lastDelivered;
+    private String lastInboxRunId;
+    private boolean emptyMessages;
+    private boolean failMessages;
 
     @Override
     public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
@@ -494,10 +590,31 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+    public Result<SpecMessagesResponse> specMessages(
+        String specId, String before, String after, int limit) {
       lastBefore = before;
+      lastAfter = after;
       lastMessageLimit = limit;
-      return super.specMessages(specId, before, limit);
+      if (failMessages) {
+        return Result.failure(ErrorCode.INTERNAL, "boom");
+      }
+      if (emptyMessages) {
+        return Result.success(new SpecMessagesResponse(specId, List.of()));
+      }
+      return super.specMessages(specId, before, after, limit);
+    }
+
+    @Override
+    public Result<RunInboxResponse> runInbox(String runId) {
+      lastInboxRunId = runId;
+      return super.runInbox(runId);
+    }
+
+    @Override
+    public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
+      lastAckRunId = runId;
+      lastDelivered = delivered;
+      return super.ackRunMessages(runId, delivered);
     }
   }
 }

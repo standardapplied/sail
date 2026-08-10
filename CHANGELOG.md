@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Room messages now reach the live run. A new `sail-room-relay` PostToolUse hook delivers replies
+  posted mid-run into the agent's context after its next tool call, on both Claude Code and Codex
+  (both honor `additionalContext` injection). Each run keeps a `run_delivered_messages` ledger —
+  exact message identities, node-local, never synced — seeded with what the dispatch or fix
+  prompt already rendered, so a message that syncs in from another box late is still delivered
+  whatever its id; delivery is run-credential-scoped through the local API's new
+  `/v1/run/messages` inbox (with `has_more` when a batch is capped) and exact-id acknowledgement,
+  so the fix lane gets delivery without `SAIL_SPEC_ID`. The stop gate takes a last look:
+  undelivered messages block the stop once (their bodies are the reason, acknowledged before the
+  block — a failed acknowledgement fails open and retries) under a marker separate from the
+  git-protocol nudge, so each concern blocks at most once. The fix task now renders the room
+  conversation, the dispatch prompt teaches `spec comments` as the read verb, and the spec-room
+  composer states the delivery contract while an agent is working.
+
 - Review findings now have identity, verdicts, and a dispute lane. The re-review receives the
   previous review's open findings and must rule on every one (`fixed`/`still_open`/`disputed`,
   evidence required to resolve) inside a verdict envelope — the only reviewer output shape the

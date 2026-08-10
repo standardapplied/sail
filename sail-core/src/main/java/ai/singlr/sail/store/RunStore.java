@@ -12,6 +12,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -352,6 +353,39 @@ public final class RunStore implements ConflictResolver {
 
   public Optional<RunRow> findById(String id) {
     return db.queryOne("SELECT " + COLUMNS + " FROM runs WHERE id = ?", this::mapRow, id);
+  }
+
+  /**
+   * Records that the run was shown exactly these spec-room messages, one ledger row per (run,
+   * message). Delivery is tracked by identity, never by a high-water id: messages sync between
+   * boxes, so an older-id message can land locally after newer messages were already delivered — it
+   * simply has no ledger row yet and is still owed a delivery. Idempotent ({@code INSERT OR
+   * IGNORE}), so a replayed acknowledgement is a no-op. Node-local operational state mirroring the
+   * local-only {@code run_credentials} table: the ledger never joins {@link #comparableSnapshot}, a
+   * journaled revision, or a sync write, so delivery bookkeeping can never churn revisions or
+   * conflict across boxes.
+   */
+  public void markDelivered(String id, Collection<String> messageIds) {
+    messageIds.forEach(Ids::requireUuid);
+    db.transaction(
+        () -> {
+          for (var messageId : messageIds) {
+            db.execute(
+                "INSERT OR IGNORE INTO run_delivered_messages (run_id, message_id) VALUES (?, ?)",
+                id,
+                messageId);
+          }
+          return null;
+        });
+  }
+
+  /** The run's delivery ledger — see {@link #markDelivered}. */
+  public Set<String> deliveredMessageIds(String id) {
+    return new LinkedHashSet<>(
+        db.query(
+            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? ORDER BY message_id",
+            row -> row.text(0),
+            id));
   }
 
   /**

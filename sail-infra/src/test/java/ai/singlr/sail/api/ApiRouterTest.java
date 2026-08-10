@@ -1502,8 +1502,19 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
-      return new TestOperations().specMessages(specId, before, limit);
+    public Result<SpecMessagesResponse> specMessages(
+        String specId, String before, String after, int limit) {
+      return new TestOperations().specMessages(specId, before, after, limit);
+    }
+
+    @Override
+    public Result<RunInboxResponse> runInbox(String runId) {
+      return new TestOperations().runInbox(runId);
+    }
+
+    @Override
+    public Result<RunAckResponse> ackRunMessages(String runId, java.util.List<String> delivered) {
+      return new TestOperations().ackRunMessages(runId, delivered);
     }
 
     @Override

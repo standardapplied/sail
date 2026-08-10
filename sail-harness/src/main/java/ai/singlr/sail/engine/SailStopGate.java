@@ -34,11 +34,25 @@ import java.util.concurrent.TimeoutException;
  * repos — a missing session file or a non-dispatch launch — every workspace repo is checked, the
  * prior behavior.
  *
- * <p>The gate blocks at most once per run — the first block drops a marker file under {@code
- * ~/.sail/runs/&lt;runId&gt;/} — so the agent keeps its contractual right to stop-and-report
- * failure: the second stop always wins. It fails open on every unexpected condition (unparseable
- * stdin, missing git or python3, unwritable marker, hook timeout): a wrongly-jailed agent is
- * strictly worse than a premature stop. stdout is reserved for the hook-protocol block JSON.
+ * <p>Beyond the git protocol, the gate takes one last look at the spec room: the run's undelivered
+ * messages ({@code GET /v1/run/messages}, run-credential-scoped) block the stop with their bodies
+ * as the reason, so a human reply that raced the turn's end is guaranteed a reading — the relay
+ * covers the middle of the run, this covers its edge. The exact message ids shown are acknowledged
+ * ({@code POST delivered=<ids>}) before the marker is spent or the block emitted; a failed
+ * acknowledgement drops the room block entirely, leaving the messages undelivered for the relay or
+ * a later stop, so delivery state and what the agent saw can never disagree. When the inbox reports
+ * {@code has_more}, the block reason tells the agent to read the rest of the room — the remainder
+ * also reaches it through the relay on its next tool call.
+ *
+ * <p>Each concern blocks at most once per run — the git protocol drops {@code stop-nudged}, the
+ * room last-look its own {@code stop-room-nudged} marker under {@code ~/.sail/runs/&lt;runId&gt;/}
+ * — so the agent keeps its contractual right to stop-and-report failure and a message that arrives
+ * after a git nudge still gets its one block, while neither a storm of messages nor a dirty tree
+ * can wedge a run. It fails open on every unexpected condition (unparseable stdin, missing git or
+ * python3, unwritable marker, absent socket, failed acknowledgement, hook timeout): a
+ * wrongly-jailed agent is strictly worse than a premature stop. stdout is reserved for the
+ * hook-protocol block JSON, which is fed the reason over stdin so even maximum-size room messages
+ * never trip the kernel's per-argument exec limit.
  *
  * <p>The script is CLI-agnostic — stdin JSON in, block JSON out, marker-file loop guard — with
  * Claude Code's {@code stop_hook_active} honored belt-and-braces when present, so Codex hook config
@@ -62,17 +76,23 @@ public final class SailStopGate {
       # Claude Code runs a matcher group's hooks in parallel, so deciding and
       # publishing are sequenced inside this one script, never via hook ordering.
       # Gated sessions (non-blank SAIL_RUN_ID) must have every workspace repo
-      # clean, pushed, and behind a PR before the turn may end; the first
-      # premature stop is blocked with concrete next actions and publishes
-      # agent_stop_nudged, every later stop passes (marker file loop guard).
-      # stdout is reserved for the hook-protocol block JSON. Any unexpected
-      # condition fails open: this gate is a nudge, not a jail.
+      # clean, pushed, and behind a PR before the turn may end, and get one last
+      # look at the spec room: the run's undelivered messages block the stop with
+      # their bodies as the reason. The exact ids shown are acknowledged before
+      # the marker is spent or the block emitted; a failed ack drops the room
+      # block and leaves the messages undelivered for the relay or a later stop.
+      # Each concern blocks at most once via its own marker file (stop-nudged for
+      # the git protocol, stop-room-nudged for the room), so a message that
+      # arrives after a git nudge still gets its one block and neither concern
+      # can wedge a run. stdout is reserved for the hook-protocol block JSON.
+      # Any unexpected condition fails open: this gate is a nudge, not a jail.
       set -u
 
       SAIL_HOME="${HOME:-/home/dev}"
       EVENT_HELPER="$SAIL_HOME/.sail/bin/sail-event.sh"
       WORKSPACE="$SAIL_HOME/workspace"
       RUNS_DIR="$SAIL_HOME/.sail/runs"
+      SOCKET="__SAIL_API_SOCKET__"
 
       publish() {
         if [ -x "$EVENT_HELPER" ]; then
@@ -104,10 +124,15 @@ public final class SailStopGate {
       ' 2>/dev/null || true)"
       [ "$STOP_HOOK_ACTIVE" = "no" ] || allow
 
-      MARKER="$RUNS_DIR/$RUN_ID/stop-nudged"
-      [ ! -f "$MARKER" ] || allow
+      GIT_MARKER="$RUNS_DIR/$RUN_ID/stop-nudged"
+      ROOM_MARKER="$RUNS_DIR/$RUN_ID/stop-room-nudged"
+      if [ -f "$GIT_MARKER" ] && [ -f "$ROOM_MARKER" ]; then
+        allow
+      fi
 
-      REPOS="$(python3 -c '
+      REASONS=""
+      if [ ! -f "$GIT_MARKER" ]; then
+        REPOS="$(python3 -c '
       import json, sys
       try:
           repos = json.load(open(sys.argv[1])).get("repos") or []
@@ -117,56 +142,124 @@ public final class SailStopGate {
           print(r)
       ' "$SESSION" 2>/dev/null || true)"
 
-      in_scope() {
-        [ -n "$REPOS" ] || return 0
-        printf '%s\n' "$REPOS" | grep -qxF "$1"
-      }
+        in_scope() {
+          [ -n "$REPOS" ] || return 0
+          printf '%s\n' "$REPOS" | grep -qxF "$1"
+        }
 
-      REASONS=""
-      note() {
-        if [ -n "$REASONS" ]; then
-          REASONS="$REASONS; $1"
-        else
-          REASONS="$1"
+        note() {
+          if [ -n "$REASONS" ]; then
+            REASONS="$REASONS; $1"
+          else
+            REASONS="$1"
+          fi
+        }
+
+        for repo_dir in "$WORKSPACE"/*/; do
+          [ -e "$repo_dir.git" ] || continue
+          repo="$(basename "$repo_dir")"
+          in_scope "$repo" || continue
+          dirty="$(git -C "$repo_dir" status --porcelain 2>/dev/null || true)"
+          [ -z "$dirty" ] || note "commit your work in $repo (the worktree is dirty)"
+          branch="$(git -C "$repo_dir" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+          [ -n "$branch" ] || continue
+          if upstream="$(git -C "$repo_dir" rev-parse --abbrev-ref "$branch@{upstream}" 2>/dev/null)"; then
+            ahead="$(git -C "$repo_dir" rev-list --count "$upstream..$branch" 2>/dev/null || echo 0)"
+            [ "$ahead" = "0" ] || note "push $branch in $repo ($ahead commits ahead of $upstream)"
+          else
+            note "push $branch in $repo (no upstream; git push -u origin $branch)"
+            continue
+          fi
+          default="$(git -C "$repo_dir" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+          case "$branch" in
+            "${default#origin/}"|main|master) continue ;;
+          esac
+          command -v gh >/dev/null 2>&1 || continue
+          GH_TIMEOUT=""
+          command -v timeout >/dev/null 2>&1 && GH_TIMEOUT="timeout 5"
+          pr_err="$( (cd "$repo_dir" && $GH_TIMEOUT gh pr view "$branch" --json state >/dev/null) 2>&1 || true)"
+          case "$pr_err" in
+            *"no pull requests found"*) note "open a pull request for $branch in $repo" ;;
+          esac
+        done
+      fi
+
+      ROOM_REASON=""
+      ROOM_IDS=""
+      ROOM_MORE=""
+      if [ ! -f "$ROOM_MARKER" ] && [ -n "${SAIL_RUN_CREDENTIAL:-}" ] && [ -S "$SOCKET" ] \\
+        && command -v curl >/dev/null 2>&1; then
+        INBOX="$(curl --silent --max-time 5 \\
+          --unix-socket "$SOCKET" \\
+          -H "Authorization: Bearer ${SAIL_RUN_CREDENTIAL}" \\
+          http://sail/v1/run/messages 2>/dev/null || true)"
+        if [ -n "$INBOX" ]; then
+          ROOM_IDS="$(printf '%s' "$INBOX" | python3 -c '
+      import json, sys
+      try:
+          messages = json.load(sys.stdin).get("messages") or []
+          print(",".join(m["id"] for m in messages if m.get("id")))
+      except Exception:
+          pass
+      ' 2>/dev/null || true)"
         fi
-      }
-
-      for repo_dir in "$WORKSPACE"/*/; do
-        [ -e "$repo_dir.git" ] || continue
-        repo="$(basename "$repo_dir")"
-        in_scope "$repo" || continue
-        dirty="$(git -C "$repo_dir" status --porcelain 2>/dev/null || true)"
-        [ -z "$dirty" ] || note "commit your work in $repo (the worktree is dirty)"
-        branch="$(git -C "$repo_dir" symbolic-ref --short -q HEAD 2>/dev/null || true)"
-        [ -n "$branch" ] || continue
-        if upstream="$(git -C "$repo_dir" rev-parse --abbrev-ref "$branch@{upstream}" 2>/dev/null)"; then
-          ahead="$(git -C "$repo_dir" rev-list --count "$upstream..$branch" 2>/dev/null || echo 0)"
-          [ "$ahead" = "0" ] || note "push $branch in $repo ($ahead commits ahead of $upstream)"
-        else
-          note "push $branch in $repo (no upstream; git push -u origin $branch)"
-          continue
+        if [ -n "$ROOM_IDS" ]; then
+          ROOM_MORE="$(printf '%s' "$INBOX" | python3 -c '
+      import json, sys
+      try:
+          print("yes" if json.load(sys.stdin).get("has_more") else "")
+      except Exception:
+          pass
+      ' 2>/dev/null || true)"
+          ROOM_REASON="$(printf '%s' "$INBOX" | python3 -c '
+      import json, sys
+      try:
+          messages = json.load(sys.stdin).get("messages") or []
+          print("; ".join(
+              "from %s: %s" % (m.get("author", "unknown"), " ".join((m.get("body") or "").split()))
+              for m in messages))
+      except Exception:
+          pass
+      ' 2>/dev/null || true)"
         fi
-        default="$(git -C "$repo_dir" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-        case "$branch" in
-          "${default#origin/}"|main|master) continue ;;
-        esac
-        command -v gh >/dev/null 2>&1 || continue
-        GH_TIMEOUT=""
-        command -v timeout >/dev/null 2>&1 && GH_TIMEOUT="timeout 5"
-        pr_err="$( (cd "$repo_dir" && $GH_TIMEOUT gh pr view "$branch" --json state >/dev/null) 2>&1 || true)"
-        case "$pr_err" in
-          *"no pull requests found"*) note "open a pull request for $branch in $repo" ;;
-        esac
-      done
+        if [ -n "$ROOM_REASON" ]; then
+          ACK="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 \\
+            --unix-socket "$SOCKET" \\
+            -H "Authorization: Bearer ${SAIL_RUN_CREDENTIAL}" \\
+            -X POST --data-urlencode "delivered=$ROOM_IDS" \\
+            http://sail/v1/run/messages 2>/dev/null || true)"
+          if [ "$ACK" = "200" ]; then
+            mkdir -p "$RUNS_DIR/$RUN_ID" 2>/dev/null || true
+            : > "$ROOM_MARKER" 2>/dev/null || true
+          else
+            ROOM_REASON=""
+          fi
+        fi
+      fi
 
-      [ -n "$REASONS" ] || allow
+      if [ -n "$REASONS" ]; then
+        if mkdir -p "$RUNS_DIR/$RUN_ID" 2>/dev/null && : > "$GIT_MARKER" 2>/dev/null; then :; else
+          REASONS=""
+        fi
+      fi
+      if [ -z "$REASONS" ] && [ -z "$ROOM_REASON" ]; then
+        allow
+      fi
 
-      mkdir -p "$RUNS_DIR/$RUN_ID" 2>/dev/null || allow
-      : > "$MARKER" 2>/dev/null || allow
-
-      REASON="Not ready to stop: $REASONS. Finish the dispatch protocol (commit, push, open the PR, watch its checks to green) before ending the turn. If you are genuinely blocked, say so explicitly and stop again."
-      publish agent_stop_nudged "$REASON"
-      python3 -c 'import json, sys; print(json.dumps({"decision": "block", "reason": sys.argv[1]}))' "$REASON"
+      REASON=""
+      if [ -n "$REASONS" ]; then
+        REASON="Not ready to stop: $REASONS. Finish the dispatch protocol (commit, push, open the PR, watch its checks to green) before ending the turn."
+      fi
+      if [ -n "$ROOM_REASON" ]; then
+        REASON="$REASON${REASON:+ }Room messages arrived while you were working — $ROOM_REASON."
+        if [ -n "$ROOM_MORE" ]; then
+          REASON="$REASON More messages are waiting beyond this batch: read the room with spec comments <spec-id> before ending the turn."
+        fi
+        REASON="$REASON Address or acknowledge them (reply with spec comment) before ending the turn."
+      fi
+      REASON="$REASON If you are genuinely blocked, say so explicitly and stop again."
+      publish agent_stop_nudged "$(printf '%.2000s' "$REASON")"
+      printf '%s' "$REASON" | python3 -c 'import json, sys; print(json.dumps({"decision": "block", "reason": sys.stdin.read()}))'
       exit 0
       """;
 
@@ -178,7 +271,7 @@ public final class SailStopGate {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT;
+    return SCRIPT.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
   }
 
   /**

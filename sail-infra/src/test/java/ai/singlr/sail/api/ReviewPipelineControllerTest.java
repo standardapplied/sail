@@ -1221,6 +1221,93 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void theFixTaskCarriesTheRoomAndSeedsTheDeliveryWatermark() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var messages = new MessageStore(db);
+    var runStore = new RunStore(db);
+    var oversized =
+        messages.append(
+            "auth",
+            "uday",
+            "x".repeat(ai.singlr.sail.engine.PromptConversation.MAX_CODE_POINTS + 1_000),
+            null);
+    var guidance = messages.append("auth", "uday", "the retry finding is intentional", null);
+    var criticalOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]}
+        ```
+        """;
+    var fixPrompt = new AtomicReference<String>();
+    var calls = new AtomicInteger();
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String prompt, String rid, String cred) {
+            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
+          }
+
+          @Override
+          public String runFix(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String branch,
+              List<String> repos,
+              String model,
+              String effort) {
+            fixPrompt.set(prompt);
+            return "done";
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl =
+          new ReviewPipelineController(
+              specStore,
+              reviewStore,
+              p -> singleAgentStage("no_critical"),
+              p -> "codex",
+              runner,
+              bus,
+              () -> {},
+              new DirectExecutorService(),
+              runStore,
+              () -> "node-a");
+      ctrl.useMessages(messages);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertTrue(
+          fixPrompt.get().contains("Conversation on this spec"),
+          "the fix task renders the room: " + fixPrompt.get());
+      assertTrue(
+          fixPrompt.get().contains("uday: the retry finding is intentional"),
+          "human guidance on disputed findings reaches the fix turn");
+      var seeded =
+          runStore.listForSpec("auth").stream()
+              .map(run -> runStore.deliveredMessageIds(run.id()))
+              .filter(ids -> !ids.isEmpty())
+              .toList();
+      assertEquals(1, seeded.size(), "exactly the fix run carries a seeded delivery ledger");
+      assertTrue(
+          seeded.getFirst().contains(guidance.id()),
+          "rendered messages count as delivered: the ledger seeds at fix launch");
+      assertFalse(
+          seeded.getFirst().contains(oversized.id()),
+          "delivery derives from presentation: a message the prompt budget truncated was never"
+              + " presented in full and stays owed a delivery through the relay or the stop"
+              + " gate");
+    }
+  }
+
+  @Test
   void theLoopNarratesVerdictsIntoTheSpecRoom() throws Exception {
     createSpec("auth", "in_progress", List.of("api"));
     var messages = new MessageStore(db);

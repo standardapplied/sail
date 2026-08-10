@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,7 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String SPECS = "/v1/specs";
   private static final String EVENTS = "/v1/events";
   private static final String WHOAMI = "/v1/whoami";
+  private static final String RUN_MESSAGES = "/v1/run/messages";
 
   private static final Set<String> AGENT_EVENT_TYPES =
       Set.of(
@@ -114,6 +116,9 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     if (EVENTS.equals(path)) {
       return events(request, caller);
+    }
+    if (RUN_MESSAGES.equals(path)) {
+      return runMessages(request, caller);
     }
     if (SPECS.equals(path)) {
       return specsCollection(request, caller);
@@ -256,10 +261,14 @@ final class LocalApiRouter implements LocalApiHandler {
 
   private ApiResponse messages(LocalApiRequest request, Caller caller, String id) {
     return switch (request.method()) {
-      case "GET" ->
-          ApiResponse.from(
-              operations.specMessages(
-                  id, request.query().get("before"), clampedLimit(request.query().get("limit"))));
+      case "GET" -> {
+        var before = request.query().get("before");
+        var after = request.query().get("after");
+        var result =
+            operations.specMessages(id, before, after, clampedLimit(request.query().get("limit")));
+        markDeliveredOnSelfRead(caller, id, result);
+        yield ApiResponse.from(result);
+      }
       case "POST" -> {
         var form = request.form();
         yield ApiResponse.fromCreated(
@@ -271,6 +280,53 @@ final class LocalApiRouter implements LocalApiHandler {
       }
       default -> problem(405, "messages accepts GET or POST");
     };
+  }
+
+  /**
+   * A run reading a page of its own spec's room is a delivery of exactly what the page showed:
+   * those messages need no mid-run injection or stop-gate last look, so their identities join the
+   * run's delivery ledger — and nothing else does, so a message the page's limit omitted is still
+   * owed its delivery.
+   */
+  private void markDeliveredOnSelfRead(
+      Caller caller, String specId, Result<SpecMessagesResponse> result) {
+    if (!(caller instanceof Caller.Run(var run))
+        || !specId.equals(run.specId())
+        || !(result instanceof Result.Success<SpecMessagesResponse>(var response, var ignored))
+        || response.messages().isEmpty()) {
+      return;
+    }
+    operations.ackRunMessages(
+        run.id(), response.messages().stream().map(SpecMessageView::id).toList());
+  }
+
+  /**
+   * The run-scoped delivery lane: the relay and the stop gate know only their run credential — the
+   * fix lane deliberately carries no {@code SAIL_SPEC_ID} — so the credential names the run and the
+   * run names the spec. {@code GET} reads the undelivered inbox; {@code POST} acknowledges exactly
+   * the messages the caller showed ({@code delivered=<id>[,<id>...]}, idempotent).
+   */
+  private ApiResponse runMessages(LocalApiRequest request, Caller caller) {
+    if (!(caller instanceof Caller.Run(var run))) {
+      return problem(
+          403,
+          "Run message delivery requires a run credential; the box credential has no run"
+              + " to deliver to.");
+    }
+    return switch (request.method()) {
+      case "GET" -> ApiResponse.from(operations.runInbox(run.id()));
+      case "POST" ->
+          ApiResponse.from(
+              operations.ackRunMessages(run.id(), deliveredIds(request.form().get("delivered"))));
+      default -> problem(405, "run messages accepts GET or POST");
+    };
+  }
+
+  private static List<String> deliveredIds(String value) {
+    if (Strings.isBlank(value)) {
+      return List.of();
+    }
+    return Arrays.stream(value.split(",")).map(String::strip).filter(id -> !id.isEmpty()).toList();
   }
 
   private static int clampedLimit(String value) {

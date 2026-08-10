@@ -241,6 +241,20 @@ public final class DispatchOperations {
   }
 
   /**
+   * Seeds the reserved run's delivery ledger with exactly the messages the task prompt rendered in
+   * full — by identity, from the same in-memory snapshot the prompt was built from, never
+   * re-queried and never range-matched. The prompt is the run's first delivery; anything the budget
+   * truncated or omitted, and any message that syncs in at any point — regardless of how its id
+   * sorts — has no ledger row and stays owed a full delivery through the relay or the stop gate.
+   */
+  private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> rendered) {
+    if (runStore == null || rendered.isEmpty()) {
+      return;
+    }
+    runStore.markDelivered(runId, rendered.stream().map(MessageStore.MessageRow::id).toList());
+  }
+
+  /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
    * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
    * target repo set ({@link #reserveRun} — the binding concurrency gate), then claim the spec
@@ -279,8 +293,9 @@ public final class DispatchOperations {
         messageStore == null
             ? List.<MessageStore.MessageRow>of()
             : messageStore.list(nextSpec.id(), null, 20);
-    var task =
+    var built =
         AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room);
+    var task = built.prompt();
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
 
     if (request.dryRun()) {
@@ -326,6 +341,7 @@ public final class DispatchOperations {
             unit,
             loaded.config());
     try {
+      seedRoomDelivery(runId, built.renderedMessages());
       var prepared =
           claimAndPrepare(
               project,

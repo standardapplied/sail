@@ -364,6 +364,7 @@ public final class ApiRouter implements HttpHandler {
                 operations.specMessages(
                     specId,
                     params.get("before"),
+                    params.get("after"),
                     clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
           }
           case POST -> {

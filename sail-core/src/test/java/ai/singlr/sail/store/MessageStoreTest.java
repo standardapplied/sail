@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
 import java.util.List;
@@ -115,5 +116,74 @@ class MessageStoreTest {
 
   private static List<String> ids(List<MessageStore.MessageRow> rows) {
     return rows.stream().map(MessageStore.MessageRow::id).toList();
+  }
+
+  @Test
+  void listAfterReadsForwardPastACursorInMintOrder() {
+    var first = messages.append("room", "ada", "one", null);
+    var second = messages.append("room", "ada", "two", null);
+    var third = messages.append("room", "ada", "three", null);
+
+    assertEquals(
+        List.of(first.id(), second.id(), third.id()), ids(messages.listAfter("room", null, 10)));
+    assertEquals(List.of(second.id(), third.id()), ids(messages.listAfter("room", first.id(), 10)));
+    assertEquals(List.of(second.id()), ids(messages.listAfter("room", first.id(), 1)));
+    assertTrue(messages.listAfter("room", third.id(), 10).isEmpty());
+    assertTrue(messages.listAfter("missing", null, 10).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class, () -> messages.listAfter("room", "not-a-uuid", 10));
+    assertThrows(IllegalArgumentException.class, () -> messages.listAfter("room", null, 0));
+  }
+
+  @Test
+  void newestIdNamesTheRoomsLatestMessage() {
+    assertTrue(messages.newestId("room").isEmpty());
+    messages.append("room", "ada", "one", null);
+    var latest = messages.append("room", "ada", "two", null);
+    assertEquals(latest.id(), messages.newestId("room").orElseThrow());
+  }
+
+  @Test
+  void listUndeliveredExcludesLedgeredAndOwnMessagesByExactIdentity() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "n", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
+    var seen = messages.append("room", "ada", "seen", null);
+    var fresh = messages.append("room", "ada", "fresh", null);
+    var own = messages.append("room", "claude/r1", "my own note", null);
+    runs.markDelivered(runId, List.of(seen.id()));
+
+    assertEquals(
+        List.of(fresh.id()), ids(messages.listUndelivered("room", runId, "claude/r1", 10)));
+    assertEquals(
+        List.of(seen.id(), fresh.id()),
+        ids(messages.listUndelivered("room", "other-run", "claude/r1", 10)),
+        "the ledger is per run");
+    assertTrue(
+        ids(messages.listUndelivered("room", runId, "claude/r1", 10)).stream()
+            .noneMatch(own.id()::equals),
+        "a run is never told its own story");
+    assertThrows(
+        IllegalArgumentException.class, () -> messages.listUndelivered("room", runId, "x", 0));
+  }
+
+  @Test
+  void aLateSyncedMessageWithAnOlderIdIsStillUndelivered() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "n", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
+    var lateId = DateTimeUtils.newId().toString();
+    var newer = messages.append("room", "ada", "delivered first", null);
+    runs.markDelivered(runId, List.of(newer.id()));
+
+    messages.applyRevision(
+        lateId,
+        Map.of("spec_id", "room", "author", "uday", "body", "late arrival", "created_at", "now"),
+        "1-abc");
+
+    assertEquals(
+        List.of(lateId),
+        ids(messages.listUndelivered("room", runId, "claude/r1", 10)),
+        "delivery is identity, not id order: an older id syncing in late is still owed delivery");
   }
 }

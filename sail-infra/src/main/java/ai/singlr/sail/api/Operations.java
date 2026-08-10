@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 import java.util.Optional;
 
 public interface Operations {
@@ -118,7 +119,28 @@ public interface Operations {
   Result<SpecMessageResponse> postSpecMessage(
       String specId, SpecMessageRequest request, Actor actor, String author);
 
-  Result<SpecMessagesResponse> specMessages(String specId, String before, int limit);
+  /**
+   * A page of a spec room: {@code before} pages backward from the newest (the default), {@code
+   * after} reads forward past a known message id. The two are exclusive.
+   */
+  Result<SpecMessagesResponse> specMessages(String specId, String before, String after, int limit);
+
+  /**
+   * The run's undelivered room messages: everything on the run's spec absent from the run's
+   * delivery ledger, minus what the run's own principal authored — a run is never told its own
+   * story. Tracked by exact message identity, so a message that synchronized in late is still owed
+   * a delivery no matter how its id sorts. {@code hasMore} reports that the batch was capped and
+   * another read is due. A run with no spec (ad-hoc) has an empty inbox.
+   */
+  Result<RunInboxResponse> runInbox(String runId);
+
+  /**
+   * Acknowledges exactly {@code delivered} — message ids the caller actually showed the run, each
+   * of which must name a message on the run's own spec. The credential names the run and the run
+   * names the spec, so a caller can never mark another run's ledger or point it off-spec.
+   * Idempotent: a replayed acknowledgement is a no-op.
+   */
+  Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered);
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 

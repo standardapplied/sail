@@ -17,13 +17,19 @@ public final class AgentTaskPrompt {
 
   private AgentTaskPrompt() {}
 
+  /**
+   * A built dispatch prompt and the room messages it rendered in full — the exact set the caller
+   * may acknowledge as delivered at launch. Delivery derives from presentation: a message the
+   * budget truncated or omitted is absent here and stays owed a full delivery.
+   */
+  public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
+
   /** Renders the dispatch prompt for {@code spec}, appending the spec description/body. */
   public static String build(Spec spec, String description) {
-    return build(spec, description, List.of());
+    return build(spec, description, List.of()).prompt();
   }
 
-  public static String build(
-      Spec spec, String description, List<MessageStore.MessageRow> messages) {
+  public static Built build(Spec spec, String description, List<MessageStore.MessageRow> messages) {
     var targetRepos =
         spec.repos().isEmpty()
             ? ""
@@ -38,30 +44,37 @@ public final class AgentTaskPrompt {
         spec.reasoningEffort() == null
             ? ""
             : "\nTarget reasoning effort: " + spec.reasoningEffort() + "\n";
-    return "Your current spec: \""
-        + spec.title()
-        + "\" (id: "
-        + spec.id()
-        + ")."
-        + targetRepos
-        + targetAgent
-        + targetModel
-        + targetReasoning
-        + "\n"
-        + conversation(messages)
-        + description
-        + autonomousProtocol(spec);
+    var conversation = conversation(messages);
+    var prompt =
+        "Your current spec: \""
+            + spec.title()
+            + "\" (id: "
+            + spec.id()
+            + ")."
+            + targetRepos
+            + targetAgent
+            + targetModel
+            + targetReasoning
+            + "\n"
+            + conversationBlock(conversation)
+            + description
+            + autonomousProtocol(spec);
+    return new Built(prompt, conversation.fullyRendered());
   }
 
-  private static String conversation(List<MessageStore.MessageRow> messages) {
-    if (messages.isEmpty()) {
-      return "";
-    }
-    return "## Conversation on this spec\n\n"
-        + PromptConversation.renderNewest(
-            messages,
-            message ->
-                message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n");
+  private static PromptConversation.Rendered<MessageStore.MessageRow> conversation(
+      List<MessageStore.MessageRow> messages) {
+    return PromptConversation.renderNewest(
+        messages,
+        message ->
+            message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n");
+  }
+
+  private static String conversationBlock(
+      PromptConversation.Rendered<MessageStore.MessageRow> conversation) {
+    return conversation.text().isEmpty()
+        ? ""
+        : "## Conversation on this spec\n\n" + conversation.text();
   }
 
   /**
@@ -85,6 +98,12 @@ public final class AgentTaskPrompt {
 
         Post progress, questions, and your final summary to this spec's room with
         `spec comment <id> --body <text>` (or `--body -` for stdin).
+
+        The room is a live channel, not a log: replies posted while you work are delivered into
+        your context automatically after a tool call finishes, and unread messages block your
+        first attempt to stop. When you are blocked on a decision, read the room with
+        `spec comments <id>` rather than guessing; read it once more before posting your final
+        summary, and acknowledge in that summary any guidance it carried.
 
         The spec is not complete until CI is green: after opening the pull request, watch its
         checks with the CLI of the forge hosting the repo (e.g. `gh pr checks <number> --watch`

@@ -188,12 +188,15 @@ class ContainerSailSetupTest {
         java.util.List.of(
             SailEventHelper.SCRIPT_PATH,
             SailStopGate.SCRIPT_PATH,
+            SailRoomRelay.SCRIPT_PATH,
             SpecCliHelper.SCRIPT_PATH,
             SpecCliHelper.PROFILE_PATH,
             ClaudeCodeHookConfig.SETTINGS_PATH,
             CodexHookConfig.SETTINGS_PATH),
         java.util.List.copyOf(files.keySet()),
-        "the fingerprint must cover every sail-owned in-container file, in stable order");
+        "the fingerprint must cover every sail-owned in-container file, in stable order — the"
+            + " relay riding in this list IS its rollout: the fingerprint changes and every"
+            + " container converges on next apply or dispatch");
     files.forEach((path, content) -> assertFalse(content.isBlank(), path + " has no payload"));
   }
 

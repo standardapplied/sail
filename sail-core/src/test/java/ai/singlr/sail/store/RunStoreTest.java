@@ -1331,4 +1331,67 @@ class RunStoreTest {
     assertFalse(
         snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");
   }
+
+  @Test
+  void deliveryLedgerTracksExactIdsIdempotentlyWithoutChurningRevisions() {
+    var id = newRun("backend", "auth");
+    var revBefore = store.latestRev(id);
+    var messages = new MessageStore(db);
+    var first = messages.append("auth", "ada", "one", null).id();
+    var second = messages.append("auth", "ada", "two", null).id();
+
+    store.markDelivered(id, List.of(first, second));
+    store.markDelivered(id, List.of(first));
+
+    assertEquals(
+        java.util.Set.of(first, second),
+        store.deliveredMessageIds(id),
+        "a replayed acknowledgement is a no-op, never an error");
+    assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
+  }
+
+  @Test
+  void deletingARunCascadesAwayItsDeliveryLedger() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var delivered = messages.append("auth", "ada", "seen", null).id();
+    store.markDelivered(id, List.of(delivered));
+
+    store.applyRevision(id, null, "2-gone");
+
+    assertTrue(store.findById(id).isEmpty());
+    assertTrue(
+        store.deliveredMessageIds(id).isEmpty(),
+        "the ledger is local bookkeeping for a run that no longer exists — the foreign key"
+            + " cascade leaves no orphaned rows behind");
+  }
+
+  @Test
+  void deliveryLedgerIsEmptyForUnknownOrUndeliveredRunsAndValidatesIds() {
+    assertTrue(store.deliveredMessageIds("nope").isEmpty());
+    var id = newRun("backend", "auth");
+    assertTrue(store.deliveredMessageIds(id).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class, () -> store.markDelivered(id, List.of("not-a-uuid")));
+  }
+
+  @Test
+  void seedingByExactIdentityNeverSweepsALateSyncingOlderMessage() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var lateId = DateTimeUtils.newId().toString();
+    var rendered = messages.append("auth", "ada", "rendered", null);
+
+    store.markDelivered(id, List.of(rendered.id()));
+    messages.applyRevision(
+        lateId,
+        java.util.Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
+        "1-abc");
+
+    assertEquals(
+        java.util.Set.of(rendered.id()),
+        store.deliveredMessageIds(id),
+        "the seed is the exact ids the prompt rendered — a message syncing in later is never"
+            + " swept, even though its id sorts before the rendered one");
+  }
 }

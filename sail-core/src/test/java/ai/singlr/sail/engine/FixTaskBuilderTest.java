@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,7 @@ class FixTaskBuilderTest {
 
   @Test
   void emptyFindingsReturnsNoActionMessage() {
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of());
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(), List.of()).task();
     assertTrue(task.contains("No review findings"));
     assertTrue(task.contains("OAuth flow"));
   }
@@ -37,7 +38,7 @@ class FixTaskBuilderTest {
                 "db.exec(sql + id)", "db.exec(sql, id)", "Use parameterized queries"),
             0.95);
 
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(finding));
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(finding), List.of()).task();
 
     assertTrue(task.contains("1 review finding(s)"));
     assertTrue(task.contains("[CRITICAL] SECURITY"));
@@ -64,7 +65,7 @@ class FixTaskBuilderTest {
             new Finding.Suggestion("", "", "Fix the loop bound"),
             0.8);
 
-    var task = FixTaskBuilder.build("pay", "Payment", List.of(finding));
+    var task = FixTaskBuilder.build("pay", "Payment", List.of(finding), List.of()).task();
     assertTrue(task.contains("Service.java:10-25"));
   }
 
@@ -95,7 +96,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(f1, f2));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(f1, f2), List.of()).task();
     assertTrue(task.contains("Finding 1"));
     assertTrue(task.contains("Finding 2"));
     assertTrue(task.contains("2 review finding(s)"));
@@ -116,7 +117,7 @@ class FixTaskBuilderTest {
             null,
             0.5);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
     assertFalse(task.contains("File:"));
   }
 
@@ -135,7 +136,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
     assertFalse(task.contains("Fix:"));
   }
 
@@ -154,7 +155,7 @@ class FixTaskBuilderTest {
             null,
             0.9);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding));
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
 
     assertTrue(task.contains("commit"), "the fix agent must be told to commit, not just hinted");
     assertTrue(task.contains("push"));
@@ -176,7 +177,8 @@ class FixTaskBuilderTest {
             null,
             0.3);
 
-    var task = FixTaskBuilder.build("pay", "Payment Integration", List.of(finding));
+    var task =
+        FixTaskBuilder.build("pay", "Payment Integration", List.of(finding), List.of()).task();
     assertTrue(task.contains("\"Payment Integration\""));
   }
 
@@ -195,7 +197,7 @@ class FixTaskBuilderTest {
             null,
             0.9);
 
-    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding));
+    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of()).task();
 
     assertTrue(
         task.contains("spec comment auth-spec"),
@@ -262,5 +264,43 @@ class FixTaskBuilderTest {
     assertTrue(
         FixTaskBuilder.commitMessage(List.of(finding))
             .startsWith("fix: address 1 review finding\n"));
+  }
+
+  @Test
+  void taskCarriesTheRoomConversationSoMidReviewGuidanceReachesTheFix() {
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "a.java",
+            1,
+            1,
+            "Maybe wrong",
+            "Desc",
+            "",
+            null,
+            0.9);
+    var messages =
+        List.of(
+            new MessageStore.MessageRow(
+                "01900000-0000-7000-8000-000000000001",
+                "auth-spec",
+                "uday",
+                "finding 2 is intentional — see the ADR",
+                null,
+                "2026-08-10T00:00:00Z",
+                "1-a",
+                null));
+
+    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), messages).task();
+
+    assertTrue(task.contains("Conversation on this spec"));
+    assertTrue(task.contains("uday: finding 2 is intentional — see the ADR"));
+    assertTrue(
+        task.indexOf("Conversation on this spec") < task.indexOf("--- Finding 1"),
+        "guidance renders before the findings it may argue about");
+
+    var silent = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of()).task();
+    assertFalse(silent.contains("Conversation on this spec"), "a silent room renders no section");
   }
 }

@@ -1128,25 +1128,92 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+  public Result<SpecMessagesResponse> specMessages(
+      String specId, String before, String after, int limit) {
     return safeRead(
         () -> {
+          if (before != null && after != null) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
+          }
           if (specStore.findById(specId).isEmpty()) {
             throw new ApiException(
                 ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
           }
           List<SpecMessageView> messages;
           try {
-            messages =
-                requireMessageStore().list(specId, before, limit).stream()
-                    .map(SpecMessageView::from)
-                    .toList();
+            var store = requireMessageStore();
+            var rows =
+                after != null
+                    ? store.listAfter(specId, after, limit)
+                    : store.list(specId, before, limit);
+            messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
           }
           return new SpecMessagesResponse(specId, messages);
         });
   }
+
+  @Override
+  public Result<RunInboxResponse> runInbox(String runId) {
+    return safeRead(
+        () -> {
+          var run = requireRun(runId);
+          if (Strings.isBlank(run.specId())) {
+            return new RunInboxResponse(runId, null, List.of(), false);
+          }
+          var store = requireMessageStore();
+          var fetched =
+              store.listUndelivered(
+                  run.specId(), runId, Objects.toString(run.principal(), ""), INBOX_LIMIT + 1);
+          var hasMore = fetched.size() > INBOX_LIMIT;
+          var fresh = fetched.stream().limit(INBOX_LIMIT).map(SpecMessageView::from).toList();
+          return new RunInboxResponse(runId, run.specId(), fresh, hasMore);
+        });
+  }
+
+  @Override
+  public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
+    return safeWrite(
+        () -> {
+          var run = requireRun(runId);
+          if (delivered.isEmpty()) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST, "delivered must name at least one message id.");
+          }
+          var store = requireMessageStore();
+          for (var messageId : delivered) {
+            var onSpec =
+                !Strings.isBlank(messageId)
+                    && store
+                        .findById(messageId)
+                        .filter(message -> message.specId().equals(run.specId()))
+                        .isPresent();
+            if (!onSpec) {
+              throw new ApiException(
+                  ErrorCode.BAD_REQUEST,
+                  "delivered must name messages on spec '" + run.specId() + "'.");
+            }
+          }
+          runStore.markDelivered(runId, delivered);
+          return new RunAckResponse(runId, delivered.size());
+        });
+  }
+
+  private RunStore.RunRow requireRun(String runId) {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Run store not available. Start the server with 'sail server start'.");
+    }
+    return runStore
+        .findById(runId)
+        .orElseThrow(
+            () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "Run '" + runId + "' was not found."));
+  }
+
+  private static final int INBOX_LIMIT = 20;
 
   private MessageStore requireMessageStore() {
     if (messageStore == null) {
