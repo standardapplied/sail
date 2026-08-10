@@ -1336,8 +1336,9 @@ class RunStoreTest {
   void deliveryLedgerTracksExactIdsIdempotentlyWithoutChurningRevisions() {
     var id = newRun("backend", "auth");
     var revBefore = store.latestRev(id);
-    var first = DateTimeUtils.newId().toString();
-    var second = DateTimeUtils.newId().toString();
+    var messages = new MessageStore(db);
+    var first = messages.append("auth", "ada", "one", null).id();
+    var second = messages.append("auth", "ada", "two", null).id();
 
     store.markDelivered(id, List.of(first, second));
     store.markDelivered(id, List.of(first));
@@ -1347,6 +1348,22 @@ class RunStoreTest {
         store.deliveredMessageIds(id),
         "a replayed acknowledgement is a no-op, never an error");
     assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
+  }
+
+  @Test
+  void deletingARunCascadesAwayItsDeliveryLedger() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var delivered = messages.append("auth", "ada", "seen", null).id();
+    store.markDelivered(id, List.of(delivered));
+
+    store.applyRevision(id, null, "2-gone");
+
+    assertTrue(store.findById(id).isEmpty());
+    assertTrue(
+        store.deliveredMessageIds(id).isEmpty(),
+        "the ledger is local bookkeeping for a run that no longer exists — the foreign key"
+            + " cascade leaves no orphaned rows behind");
   }
 
   @Test

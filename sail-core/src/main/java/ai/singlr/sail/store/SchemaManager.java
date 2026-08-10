@@ -145,8 +145,8 @@ public final class SchemaManager {
           "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
           """
           CREATE TABLE run_delivered_messages (
-              run_id TEXT NOT NULL,
-              message_id TEXT NOT NULL,
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
               PRIMARY KEY (run_id, message_id)
           )""");
 

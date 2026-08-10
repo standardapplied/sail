@@ -21,25 +21,34 @@ import java.util.concurrent.TimeoutException;
  * (run id, no {@code SAIL_SPEC_ID}) gets delivery while its event publishes stay silent, and
  * reviewer or engineer sessions, which carry no run id, are inert by construction. It asks {@code
  * GET /v1/run/messages} for the run's undelivered messages; the server resolves run → spec from the
- * run credential, so the script never needs a spec id. Fresh messages are acknowledged first by
- * exact id ({@code POST delivered=<ids>}, joining the run's delivery ledger so the stop gate agrees
- * on what was seen) and then emitted as {@code hookSpecificOutput.additionalContext}, framed per
- * message as {@code [Room message from <author>, arrived while you were working]: <body>}. A capped
- * batch simply leaves the rest undelivered for the next interval.
+ * run credential, so the script never needs a spec id. Fresh messages are emitted first as {@code
+ * hookSpecificOutput.additionalContext}, framed per message as {@code [Room message from <author>,
+ * arrived while you were working]: <body>}, and only then acknowledged by exact id ({@code POST
+ * delivered=<ids>}, joining the run's delivery ledger so the stop gate agrees on what was seen).
+ * Emit-then-ack makes delivery at-least-once: a failure or kill before the acknowledgement leaves
+ * the ledger untouched and the batch retries next check, where ack-first would have recorded
+ * messages as delivered that the agent never saw. The worst case is a duplicate delivery, never a
+ * lost one. A capped batch simply leaves the rest undelivered for the next interval.
  *
  * <p>Fail-open and cheap by design: any missing tool, absent socket, API error, or failed
  * acknowledgement exits 0 silently — a chatty room or a down server must never break a build — and
  * an interval stamp under the run directory skips the API round-trip entirely unless {@value
  * #CHECK_INTERVAL_SECONDS} seconds have passed since the last check, so a busy agent costs one
- * {@code date} and one {@code cat} per tool call.
+ * {@code date} and one {@code cat} per tool call. The hook timeout keeps margin beyond the two
+ * {@code curl} deadlines, so a slow-but-healthy server cannot get the relay killed between emit and
+ * acknowledgement.
  */
 public final class SailRoomRelay {
 
   /** Container-side path of the relay script. */
   public static final String SCRIPT_PATH = "/home/dev/.sail/bin/sail-room-relay";
 
-  /** Explicit hook timeout in seconds; a hung relay is killed and the build continues. */
-  public static final int HOOK_TIMEOUT_SECONDS = 10;
+  /**
+   * Explicit hook timeout in seconds; a hung relay is killed and the build continues. Holds margin
+   * beyond the two 5-second {@code curl} deadlines so slow-but-successful requests never get the
+   * relay killed mid-delivery.
+   */
+  public static final int HOOK_TIMEOUT_SECONDS = 15;
 
   /** Minimum seconds between API checks — the cost ceiling of a very busy agent. */
   public static final int CHECK_INTERVAL_SECONDS = 15;
@@ -51,8 +60,10 @@ public final class SailRoomRelay {
       # arrived mid-run into the agent's context via additionalContext. Gates on
       # SAIL_RUN_ID like the stop gate, so only sail-launched gated runs (dispatch
       # and the review fix lane) ever see a delivery; reviewer and engineer
-      # sessions are inert. Messages are acknowledged by exact id before they
-      # are emitted, so the stop gate never re-delivers what landed here.
+      # sessions are inert. Messages are emitted before they are acknowledged:
+      # a failure or kill before the ack leaves the ledger untouched and the
+      # batch retries next check, so the worst case is a duplicate delivery,
+      # never a lost one.
       # Every unexpected condition exits 0 silently: delivery is best-effort and
       # must never break a build. An interval stamp under the run dir keeps the
       # relay to at most one API round-trip per __CHECK_INTERVAL__ seconds.
@@ -93,14 +104,7 @@ public final class SailRoomRelay {
       ' 2>/dev/null || true)"
       [ -n "$IDS" ] || exit 0
 
-      ACK="$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 5 \\
-        --unix-socket "$SOCKET" \\
-        -H "Authorization: Bearer $CREDENTIAL" \\
-        -X POST --data-urlencode "delivered=$IDS" \\
-        http://sail/v1/run/messages 2>/dev/null || true)"
-      [ "$ACK" = "200" ] || exit 0
-
-      printf '%s' "$INBOX" | python3 -c '
+      OUTPUT="$(printf '%s' "$INBOX" | python3 -c '
       import json, sys
       try:
           messages = json.load(sys.stdin).get("messages") or []
@@ -115,7 +119,15 @@ public final class SailRoomRelay {
               "additionalContext": context}}))
       except Exception:
           pass
-      ' 2>/dev/null || true
+      ' 2>/dev/null || true)"
+      [ -n "$OUTPUT" ] || exit 0
+      printf '%s\\n' "$OUTPUT" || exit 0
+
+      curl --silent --output /dev/null --max-time 5 \\
+        --unix-socket "$SOCKET" \\
+        -H "Authorization: Bearer $CREDENTIAL" \\
+        -X POST --data-urlencode "delivered=$IDS" \\
+        http://sail/v1/run/messages 2>/dev/null || true
       exit 0
       """;
 

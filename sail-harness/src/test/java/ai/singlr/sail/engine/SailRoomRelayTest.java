@@ -55,7 +55,7 @@ class SailRoomRelayTest {
   }
 
   @Test
-  void freshMessagesAreDeliveredAsAdditionalContextAfterAcknowledgement() throws Exception {
+  void freshMessagesAreDeliveredAsAdditionalContextBeforeAcknowledgement() throws Exception {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
@@ -133,7 +133,7 @@ class SailRoomRelayTest {
   }
 
   @Test
-  void aFailedAcknowledgementSuppressesDelivery() throws Exception {
+  void aFailedAcknowledgementStillDeliversAndLeavesTheLedgerToRetry() throws Exception {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
@@ -142,11 +142,31 @@ class SailRoomRelayTest {
       var result = runRelay(RUN_ID, CREDENTIAL, fakeCurl(), Map.of("FAKE_ACK", "500"));
 
       assertEquals(0, result.exitCode());
-      assertEquals(
-          "",
-          result.stdout(),
-          "an unacknowledged message is not delivered — it retries next check instead of"
-              + " double-delivering at the stop gate");
+      assertTrue(
+          result.stdout().contains("hello"),
+          "emit-then-ack: the agent sees the message even when the acknowledgement fails —"
+              + " the worst case is a duplicate next check, never a lost message");
+      assertEquals(2, curlLog().size(), "the acknowledgement was attempted after the emit");
+    }
+  }
+
+  @Test
+  void aFailedOutputBuildNeverAcknowledges() throws Exception {
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "hello"}]}""");
+    var bin = fakeCurl();
+    pythonFailingOnSecondCall(bin);
+    try (var bound = bind()) {
+      var result = runRelay(RUN_ID, CREDENTIAL, bin);
+
+      assertEquals(0, result.exitCode());
+      assertEquals("", result.stdout());
+      assertTrue(
+          curlLog().stream().noneMatch(call -> call.contains("-X POST")),
+          "nothing emitted means nothing acknowledged — the batch stays undelivered and"
+              + " retries next check");
     }
   }
 
@@ -242,7 +262,7 @@ class SailRoomRelayTest {
   @Test
   void scriptPathAndTimeoutConstantsMatch() {
     assertEquals("/home/dev/.sail/bin/sail-room-relay", SailRoomRelay.SCRIPT_PATH);
-    assertEquals(10, SailRoomRelay.HOOK_TIMEOUT_SECONDS);
+    assertEquals(15, SailRoomRelay.HOOK_TIMEOUT_SECONDS);
     assertEquals(15, SailRoomRelay.CHECK_INTERVAL_SECONDS);
   }
 
@@ -305,12 +325,25 @@ class SailRoomRelayTest {
         printf '%s\\n' "$*" >> "$HOME/curl.log"
         [ "${FAKE_CURL_EXIT:-0}" = "0" ] || exit "$FAKE_CURL_EXIT"
         case "$*" in
-          *"-X POST"*) printf '%s' "${FAKE_ACK:-200}" ;;
+          *"-X POST"*) [ "${FAKE_ACK:-200}" = "200" ] || exit 22 ;;
           *) cat "$HOME/inbox.json" 2>/dev/null ;;
         esac
         exit 0
         """);
     return bin;
+  }
+
+  private void pythonFailingOnSecondCall(Path bin) throws IOException {
+    writeExecutable(
+        bin.resolve("python3"),
+        """
+        #!/bin/sh
+        if [ -f "$HOME/python.calls" ]; then
+          exit 1
+        fi
+        : > "$HOME/python.calls"
+        exec /usr/bin/python3 "$@"
+        """);
   }
 
   private List<String> curlLog() throws IOException {
@@ -346,7 +379,7 @@ class SailRoomRelayTest {
     process.getOutputStream().close();
     var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the relay must finish well inside its 10s");
+    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the relay must finish well inside its 15s");
     return new RelayResult(process.exitValue(), stdout, stderr);
   }
 
