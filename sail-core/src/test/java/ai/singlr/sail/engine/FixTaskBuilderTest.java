@@ -51,6 +51,54 @@ class FixTaskBuilderTest {
   }
 
   @Test
+  void aCarriedFindingRendersTheReviewersEvidenceAsAReproductionClaim() {
+    var carried =
+        Finding.create(
+                Finding.Severity.HIGH,
+                Finding.Category.CONCURRENCY,
+                "src/Dispatch.java",
+                10,
+                12,
+                "Seed-window race",
+                "Two dispatches can claim one seed.",
+                "Trace of the race",
+                null,
+                0.9)
+            .carriedCopy("restart between reserve and claim still double-seeds");
+
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(carried), List.of()).task();
+
+    assertTrue(
+        task.contains(
+            "Reviewer's evidence that this remains open: restart between reserve and claim"
+                + " still double-seeds"));
+    assertTrue(task.contains("Treat this as a reproduction claim"));
+    assertTrue(task.contains("investigate this exact scenario before"));
+    assertTrue(task.contains("dispute with that analysis"));
+  }
+
+  @Test
+  void aFindingWithoutCarryEvidenceRendersWithoutTheReproductionClaim() {
+    var fresh =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "a.java",
+            1,
+            1,
+            "New issue",
+            "Desc",
+            "Evidence",
+            null,
+            0.8);
+
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(fresh), List.of()).task();
+
+    assertFalse(task.contains("Reviewer's evidence that this remains open"));
+    assertFalse(task.contains("reproduction claim"));
+  }
+
+  @Test
   void multiLineRangeShowsStartAndEnd() {
     var finding =
         Finding.create(

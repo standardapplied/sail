@@ -425,7 +425,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
           ReviewPromptBuilder.build(
               branch, repos, stageConfig.categories(), roomMessages(specId), carried);
 
-      var credential = startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt);
+      var credential =
+          startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt, "review");
       var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
       var output =
           agentRunner.run(project, agent, prompt, stage.reviewId(), credential, null, effort);
@@ -602,11 +603,13 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   /**
-   * The fix agent runs under the failed review's identity, appending to that review's log. It runs
-   * with the stop-readiness gate armed ({@link ReviewAgentRunner#runFix}) so it cannot end its turn
-   * with a dirty tree, and {@link ReviewAgentRunner#ensureCommitted} stays as the deterministic
-   * backstop — otherwise the re-review judges a branch without the fixes and the shared clone
-   * carries the leftovers into the next dispatch.
+   * The fix agent rejoins the failed review's run, appending to that review's log, but acts as
+   * itself: the rejoin stamps {@code <agent>/fix-<reviewId>} on the run row, so the room's audit
+   * trail attributes its posts to the fix lane, never to the reviewer. It runs with the
+   * stop-readiness gate armed ({@link ReviewAgentRunner#runFix}) so it cannot end its turn with a
+   * dirty tree, and {@link ReviewAgentRunner#ensureCommitted} stays as the deterministic backstop —
+   * otherwise the re-review judges a branch without the fixes and the shared clone carries the
+   * leftovers into the next dispatch.
    */
   private void triggerFixIteration(
       String reviewId, String specId, List<Finding> findings, String project) {
@@ -622,7 +625,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     try {
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
-          startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
+          startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask, "fix");
       seedRoomDelivery(reviewId, built.renderedMessages());
       agentRunner.runFix(
           project,
@@ -849,17 +852,28 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
   /**
    * Ensures the review run exists and returns a live plaintext credential for it — created with the
-   * row on the reviewer's first invocation, rotated when the fix lane rejoins the still-open
-   * negotiation (the original plaintext is hashed at rest and unrecoverable). Blank without a run
-   * store, launching the agent without an identity.
+   * row on the reviewer's first invocation, rotated when a later invocation rejoins the still-open
+   * negotiation (the original plaintext is hashed at rest and unrecoverable). The rejoin stamps the
+   * invocation's own identity on the run row — {@code <agent>/fix-<reviewId>} for the fix lane,
+   * {@code <agent>/review-<reviewId>} for a reviewer — so room posts and run views attribute each
+   * write to the lane that made it. Blank without a run store, launching the agent without an
+   * identity.
    */
   private String startReviewRun(
-      String reviewId, String project, String specId, String agent, String branch, String task) {
+      String reviewId,
+      String project,
+      String specId,
+      String agent,
+      String branch,
+      String task,
+      String lane) {
     if (runStore == null) {
       return "";
     }
     if (runStore.findById(reviewId).isPresent()) {
-      return runStore.rotateCredential(reviewId);
+      var credential = runStore.rotateCredential(reviewId, agent, lane);
+      syncTrigger.run();
+      return credential;
     }
     var unit = AgentUnit.forReview(reviewId);
     var owner =

@@ -148,7 +148,8 @@ public final class SchemaManager {
               run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
               message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
               PRIMARY KEY (run_id, message_id)
-          )""");
+          )""",
+          "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

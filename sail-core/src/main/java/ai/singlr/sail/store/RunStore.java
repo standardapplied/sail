@@ -221,14 +221,21 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Rotates the credential of a live run — the seam the review pipeline's fix lane uses to rejoin
-   * its review's identity after the reviewer invocation already created the run. The original
-   * plaintext is unrecoverable by design, so rejoining means a fresh credential; the run holds
-   * exactly one at a time (the schema enforces it), so rotation retires the previous invocation's
-   * credential in the same transaction. Fails loud on a missing or finished run — a dead run's
-   * identity is never resurrected.
+   * Rotates the credential of a live run — the seam the review pipeline's lanes use to rejoin the
+   * run after another invocation already created it (the fix lane rejoining its review's still-open
+   * negotiation, a later stage's reviewer rejoining after it). The original plaintext is
+   * unrecoverable by design, so rejoining means a fresh credential; the run holds exactly one at a
+   * time (the schema enforces it), so rotation retires the previous invocation's credential in the
+   * same transaction. The rejoining invocation also stamps its own identity: the run row's {@code
+   * agent} and {@code principal} become the invocation's ({@code <agent>/fix-<id>} for the fix
+   * lane, {@code <agent>/review-<id>} for a reviewer), journaled so the honest attribution
+   * replicates — rooms and run views read the principal, and the author must be the lane that
+   * wrote. Fails loud on a missing or finished run — a dead run's identity is never resurrected.
+   *
+   * @param lane {@code "fix"} or {@code "review"} — the invocation rejoining the run, which selects
+   *     the principal's marker; the run row's {@code role} stays {@code review}
    */
-  public String rotateCredential(String id) {
+  public String rotateCredential(String id, String agent, String lane) {
     return db.transaction(
         () -> {
           var run =
@@ -241,8 +248,15 @@ public final class RunStore implements ConflictResolver {
             throw new IllegalStateException(
                 "Run " + id + " is " + run.status() + "; only a running run can be credentialed.");
           }
+          db.execute(
+              "UPDATE runs SET agent = ?, principal = ? WHERE id = ?",
+              agent,
+              principalHandle(agent, lane, id),
+              id);
           revokeCredential(id);
-          return mintCredential(id, null);
+          var credential = mintCredential(id, null);
+          recordRevision(id, "local", false);
+          return credential;
         });
   }
 
@@ -425,17 +439,23 @@ public final class RunStore implements ConflictResolver {
 
   /**
    * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the full run id, with review runs marked as such — {@code claude/<run-uuid>}, {@code
-   * claude/review-<run-uuid>}. The whole UUID, never a truncation: the handle is a security
-   * identity compared in ownership checks and audit rows, so it must be exactly as collision-proof
-   * as the run id itself.
+   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
+   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
+   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
+   * it must be exactly as collision-proof as the run id itself.
    */
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
     var base = dash > 0 ? family.substring(0, dash) : family;
     var runId = Objects.requireNonNull(id, "run id");
-    return base + "/" + ("review".equals(role) ? "review-" + runId : runId);
+    var marker =
+        switch (Objects.toString(role, "")) {
+          case "review" -> "review-";
+          case "fix" -> "fix-";
+          default -> "";
+        };
+    return base + "/" + marker + runId;
   }
 
   private String mintCredential(String id, Duration maxDuration) {

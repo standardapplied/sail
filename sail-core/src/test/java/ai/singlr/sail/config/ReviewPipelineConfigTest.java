@@ -178,6 +178,7 @@ class ReviewPipelineConfigTest {
             0.9,
             Finding.Resolution.DISMISSED,
             null,
+            null,
             null);
 
     assertTrue(Gate.NO_CRITICAL.passes(List.of(dismissed)));
@@ -200,6 +201,7 @@ class ReviewPipelineConfigTest {
             0.9,
             Finding.Resolution.DISPUTED,
             "the reviewer ruled the argument valid",
+            null,
             null);
 
     assertTrue(Gate.NO_CRITICAL.passes(List.of(disputed)));
@@ -289,6 +291,7 @@ class ReviewPipelineConfigTest {
             0.8,
             Finding.Resolution.FIXED,
             "commit abc",
+            null,
             null);
 
     assertTrue(Gate.ALL_CLEAR.passes(List.of(fixed)));

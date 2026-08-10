@@ -292,8 +292,8 @@ public final class ReviewStore implements ConflictResolver {
               INSERT INTO review_findings (id, stage_id, severity, category, file,
                   line_start, line_end, title, description, evidence,
                   suggestion_before, suggestion_after, suggestion_rationale,
-                  confidence, resolution, resolution_evidence, carried_from)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  confidence, resolution, resolution_evidence, carried_from, carry_evidence)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               finding.id(),
               stageId,
               finding.severity().name(),
@@ -310,18 +310,21 @@ public final class ReviewStore implements ConflictResolver {
               finding.confidence(),
               finding.resolution().name(),
               finding.resolutionEvidence(),
-              finding.carriedFrom());
+              finding.carriedFrom(),
+              finding.carryEvidence());
           journalForStage(stageId);
         });
   }
 
   /**
    * Re-attaches a still-open finding from the previous review to the given stage as a fresh row
-   * whose {@code carried_from} points at its predecessor, and returns the new row. The predecessor
-   * stays {@code OPEN} where it is — history is never rewritten; the chain is the identity.
+   * whose {@code carried_from} points at its predecessor, storing the carrying ruling's evidence
+   * with it, and returns the new row. The predecessor stays {@code OPEN} where it is — history is
+   * never rewritten; the chain is the identity. Each re-carry stores the latest ruling's evidence —
+   * the newest explanation is the actionable one; the chain walk preserves the older ones.
    */
-  public Finding carryForward(String stageId, Finding predecessor) {
-    var carried = predecessor.carriedCopy();
+  public Finding carryForward(String stageId, Finding predecessor, String evidence) {
+    var carried = predecessor.carriedCopy(evidence);
     addFinding(stageId, carried);
     return carried;
   }
@@ -342,7 +345,7 @@ public final class ReviewStore implements ConflictResolver {
         () -> {
           for (var ruling : rulings) {
             if (ruling.resolution() == Finding.Resolution.OPEN) {
-              carryForward(stageId, ruling.finding());
+              carryForward(stageId, ruling.finding(), ruling.evidence());
             } else {
               resolveFinding(ruling.finding().id(), ruling.resolution(), ruling.evidence());
             }
@@ -355,7 +358,7 @@ public final class ReviewStore implements ConflictResolver {
       "f.id, f.severity, f.category, f.file, f.line_start, f.line_end,"
           + " f.title, f.description, f.evidence, f.suggestion_before,"
           + " f.suggestion_after, f.suggestion_rationale, f.confidence, f.resolution,"
-          + " f.resolution_evidence, f.carried_from";
+          + " f.resolution_evidence, f.carried_from, f.carry_evidence";
 
   private static final String SEVERITY_ORDER =
       "CASE f.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1"
@@ -960,6 +963,7 @@ public final class ReviewStore implements ConflictResolver {
         row.isNull(12) ? 0.0 : Double.parseDouble(row.text(12)),
         Finding.Resolution.valueOf(row.text(13)),
         row.text(14),
-        row.text(15));
+        row.text(15),
+        row.text(16));
   }
 }

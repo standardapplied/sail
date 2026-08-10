@@ -1153,7 +1153,7 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var original = createReview(id);
 
-    var rotated = store.rotateCredential(id);
+    var rotated = store.rotateCredential(id, "claude-code", "fix");
 
     assertEquals(id, store.findByCredential(rotated).orElseThrow().id());
     assertTrue(
@@ -1168,8 +1168,32 @@ class RunStoreTest {
   }
 
   @Test
+  void rotateCredentialStampsTheRejoiningInvocationsIdentityAndJournalsIt() {
+    var id = DateTimeUtils.newId().toString();
+    createReview(id);
+
+    store.rotateCredential(id, "claude-code", "fix");
+
+    var asFix = store.findById(id).orElseThrow();
+    assertEquals("claude-code", asFix.agent());
+    assertEquals("claude/fix-" + id, asFix.principal());
+    assertEquals("review", asFix.role(), "the row stays a review run; only the identity changes");
+    assertEquals(
+        "claude/fix-" + id,
+        store.comparableSnapshot(id).get("principal"),
+        "the honest attribution joins the journaled snapshot and replicates");
+
+    store.rotateCredential(id, "codex", "review");
+
+    var asReviewer = store.findById(id).orElseThrow();
+    assertEquals("codex", asReviewer.agent());
+    assertEquals("codex/review-" + id, asReviewer.principal());
+  }
+
+  @Test
   void rotateCredentialRefusesAMissingOrFinishedRun() {
-    assertThrows(IllegalStateException.class, () -> store.rotateCredential("ghost"));
+    assertThrows(
+        IllegalStateException.class, () -> store.rotateCredential("ghost", "codex", "review"));
 
     var id = DateTimeUtils.newId().toString();
     createReview(id);
@@ -1177,7 +1201,7 @@ class RunStoreTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> store.rotateCredential(id),
+        () -> store.rotateCredential(id, "codex", "review"),
         "a dead run's identity is never resurrected");
   }
 

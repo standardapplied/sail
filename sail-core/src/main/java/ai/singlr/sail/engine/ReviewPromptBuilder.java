@@ -73,6 +73,8 @@ public final class ReviewPromptBuilder {
         - evidence: required for fixed (cite the commit or current code that resolves it) and
           for disputed (state why the finding is wrong; an argument posted in the conversation
           above counts). A fixed or disputed verdict without evidence is treated as still_open.
+          For still_open, describe the exact scenario that is still broken — the next fix
+          iteration reads it as its reproduction target.
         If no carried findings are listed above, "verdicts" must be an empty array.
 
         Each entry in "findings" reports a NEW issue (never repeat a carried finding) and must have:
@@ -102,8 +104,9 @@ public final class ReviewPromptBuilder {
 
   /**
    * The carry-forward contract: the previous review's open findings, each with the id the verdict
-   * must cite. Rendered before the response-format instructions so the reviewer reads what it must
-   * rule on before it reads how to answer.
+   * must cite and the evidence its carrying ruling rested on, so the re-review rules against its
+   * own prior scenario rather than rediscovering it. Rendered before the response-format
+   * instructions so the reviewer reads what it must rule on before it reads how to answer.
    */
   private static String carryForward(List<Finding> carried) {
     if (carried.isEmpty()) {
@@ -113,8 +116,8 @@ public final class ReviewPromptBuilder {
         carried.stream()
             .map(
                 f ->
-                    "- finding_id %s [%s] %s%s"
-                        .formatted(f.id(), f.severity(), f.title(), location(f)))
+                    "- finding_id %s [%s] %s%s%s"
+                        .formatted(f.id(), f.severity(), f.title(), location(f), carryEvidence(f)))
             .reduce((a, b) -> a + "\n" + b)
             .orElse("");
     return """
@@ -125,6 +128,13 @@ public final class ReviewPromptBuilder {
 
         """
         .formatted(lines);
+  }
+
+  private static String carryEvidence(Finding f) {
+    if (f.carryEvidence() == null || f.carryEvidence().isBlank()) {
+      return "";
+    }
+    return "\n  Prior ruling's evidence that it remains open: " + f.carryEvidence();
   }
 
   private static String location(Finding f) {

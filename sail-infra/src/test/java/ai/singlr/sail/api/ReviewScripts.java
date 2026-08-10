@@ -50,6 +50,19 @@ final class ReviewScripts {
     return "{\"verdicts\": [" + verdicts + "], \"findings\": " + findingsJson + "}";
   }
 
+  /** An envelope ruling every carried finding {@code still_open} with the given evidence. */
+  static String stillOpenAllCarried(String prompt, String evidence) {
+    var verdicts =
+        carriedFromPrompt(prompt).keySet().stream()
+            .map(
+                id ->
+                    ("{\"finding_id\": \"%s\", \"verdict\": \"still_open\","
+                            + " \"evidence\": \"%s\"}")
+                        .formatted(id, evidence))
+            .collect(Collectors.joining(", "));
+    return "{\"verdicts\": [" + verdicts + "], \"findings\": []}";
+  }
+
   /** An envelope disputing every carried finding in the prompt, evidence included. */
   static String disputeAllCarried(String prompt) {
     var verdicts =

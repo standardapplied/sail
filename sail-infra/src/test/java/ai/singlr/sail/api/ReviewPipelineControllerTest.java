@@ -1663,7 +1663,8 @@ class ReviewPipelineControllerTest {
     var credentials = new java.util.concurrent.CopyOnWriteArrayList<List<String>>();
     ReviewAgentRunner runner =
         (p, a, pr, rid, cred) -> {
-          credentials.add(List.of(rid, cred));
+          credentials.add(
+              List.of(rid, cred, runs.findByCredential(cred).orElseThrow().principal()));
           return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
         };
     var ctrl =
@@ -1681,20 +1682,119 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    assertTrue(credentials.size() >= 2, "reviewer and fix agent both ran");
+    assertEquals(3, credentials.size(), "reviewer, fix agent, and re-reviewer all ran");
     for (var invocation : credentials) {
-      var reviewId = invocation.get(0);
-      var credential = invocation.get(1);
-      assertFalse(credential.isBlank(), "every review invocation carries a credential");
-      var resolvedAtCallTime = runs.findById(reviewId).orElseThrow();
-      assertEquals(
-          "codex/review-" + reviewId,
-          resolvedAtCallTime.principal(),
-          "the credential's run records the review principal the agent acts as");
+      assertFalse(invocation.get(1).isBlank(), "every review invocation carries a credential");
     }
-    var firstReview = credentials.getFirst();
-    var reviewerRun = runs.findById(firstReview.get(0)).orElseThrow();
-    assertEquals("review", reviewerRun.role());
+    var r1 = credentials.get(0).get(0);
+    var r2 = credentials.get(2).get(0);
+    assertEquals(
+        "codex/review-" + r1,
+        credentials.get(0).get(2),
+        "the reviewer invocation acts as the review principal");
+    assertEquals(
+        "claude/fix-" + r1,
+        credentials.get(1).get(2),
+        "the fix invocation acts as its own fix principal, never the reviewer's");
+    assertEquals("codex/review-" + r2, credentials.get(2).get(2));
+    assertEquals("review", runs.findById(r1).orElseThrow().role());
+  }
+
+  @Test
+  void eachInvocationStampsItsOwnIdentitySoRoomPostsCarryTheHonestAuthor() {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]}
+        ```
+        """;
+    var runs = new RunStore(db);
+    var messages = new MessageStore(db);
+    var calls = new AtomicInteger();
+    var reviewIds = new java.util.concurrent.CopyOnWriteArrayList<String>();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> {
+          reviewIds.add(rid);
+          var principal = runs.findByCredential(cred).orElseThrow().principal();
+          messages.append("auth", principal, "posted by " + principal, null);
+          return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
+        };
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            runner,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runs,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var r1 = reviewIds.get(0);
+    var r2 = reviewIds.get(2);
+    assertEquals(
+        "claude/fix-" + r1,
+        runs.findById(r1).orElseThrow().principal(),
+        "after the fix rejoin the run row reads the fix lane's identity");
+    assertEquals(
+        "codex/review-" + r2,
+        runs.findById(r2).orElseThrow().principal(),
+        "the next reviewer invocation carries the reviewer identity");
+    assertEquals(
+        List.of("codex/review-" + r1, "claude/fix-" + r1, "codex/review-" + r2),
+        messages.listAfter("auth", null, 10).stream().map(MessageStore.MessageRow::author).toList(),
+        "each room post is attributed to the lane that wrote it");
+  }
+
+  @Test
+  void aStillOpenRulingsEvidenceReachesTheNextFixTaskAndTheReReview() {
+    createSpec("auth", "in_progress");
+    var criticalOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "CONCURRENCY", "file": "Dispatch.java",
+          "line_start": 5, "line_end": 9, "title": "Seed-window race",
+          "description": "Two dispatches can claim one seed.", "confidence": 0.9}]}
+        ```
+        """;
+    var evidence = "the seed window in DispatchOperations still races between reserve and claim";
+    var prompts = new ArrayList<String>();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> {
+          prompts.add(pr);
+          return switch (prompts.size()) {
+            case 1 -> criticalOutput;
+            case 3 -> ReviewScripts.stillOpenAllCarried(pr, evidence);
+            case 5 -> fixAllCarried(pr);
+            default -> "fix applied";
+          };
+        };
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(5, prompts.size(), "three reviews with a fix iteration between each");
+    var firstFixTask = prompts.get(1);
+    assertFalse(
+        firstFixTask.contains("Reviewer's evidence that this remains open"),
+        "the first fix task predates any ruling and carries no reproduction claim");
+    var secondFixTask = prompts.get(3);
+    assertTrue(
+        secondFixTask.contains("Reviewer's evidence that this remains open: " + evidence),
+        secondFixTask);
+    assertTrue(secondFixTask.contains("Treat this as a reproduction claim"), secondFixTask);
+    var thirdReviewPrompt = prompts.get(4);
+    assertTrue(
+        thirdReviewPrompt.contains("Prior ruling's evidence that it remains open: " + evidence),
+        "the re-review rules against its own prior scenario");
   }
 
   @Test

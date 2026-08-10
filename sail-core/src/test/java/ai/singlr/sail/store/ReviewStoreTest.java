@@ -533,13 +533,44 @@ class ReviewStoreTest {
     var r2 = store.createReview("auth", 2);
     var stage2 = store.createStage(r2, "security", "agent");
 
-    var carried = store.carryForward(stage2, original);
+    var carried = store.carryForward(stage2, original, "still repros via the seed window");
 
     assertEquals(original.id(), carried.carriedFrom());
     assertTrue(!carried.id().equals(original.id()), "a carried row is a fresh identity");
     assertEquals(
         Finding.Resolution.OPEN, store.findFinding(original.id()).orElseThrow().resolution());
-    assertEquals("Stubborn high", store.findingsForStage(stage2).getFirst().title());
+    var stored = store.findingsForStage(stage2).getFirst();
+    assertEquals("Stubborn high", stored.title());
+    assertEquals(
+        "still repros via the seed window",
+        stored.carryEvidence(),
+        "the ruling's evidence persists on the carried row");
+    assertNull(
+        store.findFinding(original.id()).orElseThrow().carryEvidence(),
+        "the predecessor is history and is never rewritten");
+  }
+
+  @Test
+  void eachReCarryStoresTheLatestRulingsEvidenceAndTheChainKeepsTheOlderOnes() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Stubborn high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var second = store.carryForward(stage2, original, "first scenario");
+    var r3 = store.createReview("auth", 3);
+    var stage3 = store.createStage(r3, "security", "agent");
+
+    var third = store.carryForward(stage3, second, "sharper second scenario");
+
+    assertEquals(
+        "sharper second scenario",
+        store.findFinding(third.id()).orElseThrow().carryEvidence(),
+        "the newest ruling's explanation is the actionable one");
+    assertEquals(
+        "first scenario",
+        store.findFinding(second.id()).orElseThrow().carryEvidence(),
+        "the chain walk preserves every prior ruling's evidence");
   }
 
   @Test
@@ -549,10 +580,10 @@ class ReviewStoreTest {
     var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Aging high");
     var r2 = store.createReview("auth", 2);
     var stage2 = store.createStage(r2, "security", "agent");
-    var second = store.carryForward(stage2, original);
+    var second = store.carryForward(stage2, original, null);
     var r3 = store.createReview("auth", 3);
     var stage3 = store.createStage(r3, "security", "agent");
-    var third = store.carryForward(stage3, second);
+    var third = store.carryForward(stage3, second, null);
 
     var chain = store.findingChain(third.id());
 
@@ -622,7 +653,7 @@ class ReviewStoreTest {
         store.carryForwardFindings("auth", r3, "security").stream().map(Finding::id).toList(),
         "an errored review has no verdict; the carry set comes from the last real one");
 
-    store.carryForward(stage3, open);
+    store.carryForward(stage3, open, null);
     assertTrue(
         store.carryForwardFindings("auth", r3, "security").isEmpty(),
         "a finding already re-attached to this review is not carried twice");
@@ -714,20 +745,23 @@ class ReviewStoreTest {
         stage2,
         List.of(
             new ReviewStore.StageRuling(fixed, Finding.Resolution.FIXED, "commit abc"),
-            new ReviewStore.StageRuling(stubborn, Finding.Resolution.OPEN, "")),
+            new ReviewStore.StageRuling(
+                stubborn, Finding.Resolution.OPEN, "the seed window still races")),
         List.of(fresh));
 
-    assertEquals(
-        Finding.Resolution.FIXED, store.findFinding(fixed.id()).orElseThrow().resolution());
+    var resolved = store.findFinding(fixed.id()).orElseThrow();
+    assertEquals(Finding.Resolution.FIXED, resolved.resolution());
+    assertEquals("commit abc", resolved.resolutionEvidence());
+    assertNull(resolved.carryEvidence(), "a resolving ruling stores its evidence as resolution");
     var stageFindings = store.findingsForStage(stage2);
     assertEquals(2, stageFindings.size());
+    var carried =
+        stageFindings.stream().filter(f -> f.carriedFrom() != null).findFirst().orElseThrow();
+    assertEquals(stubborn.id(), carried.carriedFrom());
     assertEquals(
-        stubborn.id(),
-        stageFindings.stream()
-            .filter(f -> f.carriedFrom() != null)
-            .findFirst()
-            .orElseThrow()
-            .carriedFrom());
+        "the seed window still races",
+        carried.carryEvidence(),
+        "the still_open ruling's evidence travels on the carried row");
   }
 
   @Test
@@ -753,6 +787,7 @@ class ReviewStoreTest {
             null,
             0.9,
             Finding.Resolution.OPEN,
+            null,
             null,
             null);
 
