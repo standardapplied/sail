@@ -280,11 +280,14 @@ public final class MessageStore {
     var ownsAuthor =
         peer.equals(author)
             || db.queryOne(
-                    "SELECT 1 FROM runs WHERE principal = ? AND owner = ? AND spec_id = ? LIMIT 1",
+                    "SELECT 1 FROM runs r WHERE r.owner = ? AND r.spec_id = ?"
+                        + " AND (r.principal = ? OR EXISTS (SELECT 1 FROM run_principals rp"
+                        + " WHERE rp.run_id = r.id AND rp.principal = ?)) LIMIT 1",
                     row -> true,
-                    author,
                     peer,
-                    specId)
+                    specId,
+                    author,
+                    author)
                 .orElse(false);
     if (!ownsAuthor) {
       return false;

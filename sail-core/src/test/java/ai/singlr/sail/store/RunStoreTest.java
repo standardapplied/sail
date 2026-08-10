@@ -1400,6 +1400,41 @@ class RunStoreTest {
   }
 
   @Test
+  void rotationAppendsToTheReplicatedPrincipalHistory() {
+    var id = newRun("backend", "auth");
+    var first = store.findById(id).orElseThrow().principal();
+
+    store.rotateCredential(id, "claude-code", "fix");
+
+    var rotated = store.findById(id).orElseThrow().principal();
+    assertTrue(rotated.contains("fix"), "the live row shows the current lane's identity");
+    assertEquals(
+        List.of(first, rotated).stream().sorted().toList(),
+        store.principals(id),
+        "history is append-only: rotation never erases the identity earlier messages were"
+            + " authored under");
+    var snapshot = store.comparableSnapshot(id);
+    assertEquals(
+        store.principals(id),
+        snapshot.get("principals"),
+        "the history replicates with the run, so main can authenticate late-syncing messages");
+  }
+
+  @Test
+  void adoptingAnOldShapeSnapshotDerivesTheHistoryFromItsPrincipal() {
+    var id = newRun("backend", "auth");
+    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot(id));
+    var principal = (String) snapshot.get("principal");
+    snapshot.remove("principals");
+
+    store.applyRevision(id, snapshot, "2-remote");
+
+    assertTrue(
+        store.principals(id).contains(principal),
+        "a snapshot without a history list still records its current principal as a member");
+  }
+
+  @Test
   void seedingByExactIdentityNeverSweepsALateSyncingOlderMessage() {
     var id = newRun("backend", "auth");
     var messages = new MessageStore(db);

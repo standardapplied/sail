@@ -526,6 +526,31 @@ class ReviewStoreTest {
   }
 
   @Test
+  void aBlankRulingPreservesThePredecessorsCarryEvidence() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Stubborn high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var carried = store.carryForward(stage2, original, "still repros via the seed window");
+    var r3 = store.createReview("auth", 3);
+    var stage3 = store.createStage(r3, "security", "agent");
+
+    var recarried = store.carryForward(stage3, carried, "");
+
+    assertEquals(
+        "still repros via the seed window",
+        recarried.carryEvidence(),
+        "fail-closed defaulting synthesizes blank-evidence still_open rulings — a blank ruling"
+            + " must preserve the last actionable reproduction target, never erase it");
+    var overwritten = store.carryForward(stage3, carried, "sharper scenario");
+    assertEquals(
+        "sharper scenario",
+        overwritten.carryEvidence(),
+        "a genuine newer explanation still replaces the previous one");
+  }
+
+  @Test
   void carryForwardCreatesALinkedRowAndLeavesThePredecessorOpen() {
     var r1 = store.createReview("auth", 1);
     var stage1 = store.createStage(r1, "security", "agent");

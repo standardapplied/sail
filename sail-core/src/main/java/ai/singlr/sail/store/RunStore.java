@@ -188,6 +188,7 @@ public final class RunStore implements ConflictResolver {
               unit,
               principalHandle(agent, role, id),
               owner);
+          recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
           return credential;
@@ -253,6 +254,7 @@ public final class RunStore implements ConflictResolver {
               agent,
               principalHandle(agent, lane, id),
               id);
+          recordPrincipal(id, principalHandle(agent, lane, id));
           revokeCredential(id);
           var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
@@ -359,6 +361,7 @@ public final class RunStore implements ConflictResolver {
               YamlUtil.dumpJson(reserved),
               principalHandle(agent, role, id),
               owner);
+          recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, maxDuration);
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
@@ -444,6 +447,33 @@ public final class RunStore implements ConflictResolver {
    * truncation: the handle is a security identity compared in ownership checks and audit rows, so
    * it must be exactly as collision-proof as the run id itself.
    */
+  /**
+   * The run's replicated, append-only principal history: every identity a legitimate invocation of
+   * this run has ever posted under. The runs row keeps only the current principal for honest live
+   * attribution; message authorization on main checks membership here, so a room message authored
+   * before a lane rotation still authenticates when it synchronizes late. Never pruned while the
+   * run exists; cascades away with it.
+   */
+  public List<String> principals(String id) {
+    return db.query(
+        "SELECT principal FROM run_principals WHERE run_id = ? ORDER BY principal",
+        row -> row.text(0),
+        id);
+  }
+
+  private void recordPrincipal(String id, String principal) {
+    if (Strings.isBlank(principal)) {
+      return;
+    }
+    db.execute(
+        "INSERT OR IGNORE INTO run_principals (run_id, principal) VALUES (?, ?)", id, principal);
+  }
+
+  private void recordPrincipals(String id, Map<String, Object> snapshot) {
+    stringList(snapshot, "principals").forEach(principal -> recordPrincipal(id, principal));
+    recordPrincipal(id, text(snapshot, "principal"));
+  }
+
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
@@ -749,7 +779,14 @@ public final class RunStore implements ConflictResolver {
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
-    return findById(id).map(RunStore::comparable).orElse(null);
+    return findById(id)
+        .map(
+            run -> {
+              var map = snapshotMap(run);
+              map.put("principals", principals(id));
+              return comparable(map);
+            })
+        .orElse(null);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -797,6 +834,7 @@ public final class RunStore implements ConflictResolver {
             adoptDeletion(id, rev);
           } else {
             writeRow(rowFrom(id, snapshot));
+            recordPrincipals(id, snapshot);
             recordRevision(id, rev, "sync", false, true);
           }
         });
@@ -819,6 +857,7 @@ public final class RunStore implements ConflictResolver {
             return new PushOutcome.Accepted(rev);
           }
           writeRow(rowFrom(id, snapshot));
+          recordPrincipals(id, snapshot);
           return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
         });
   }
@@ -845,6 +884,7 @@ public final class RunStore implements ConflictResolver {
       return adoptBaseDeletion(id);
     }
     writeRow(rowFrom(id, remote));
+    recordPrincipals(id, remote);
     return recordRevision(id, null, "sync", false, true);
   }
 
@@ -871,6 +911,7 @@ public final class RunStore implements ConflictResolver {
       return rev;
     }
     writeRow(rowFrom(id, chosen));
+    recordPrincipals(id, chosen);
     return recordRevision(id, null, "resolve", false, false);
   }
 
@@ -895,6 +936,7 @@ public final class RunStore implements ConflictResolver {
       return null;
     }
     var map = snapshotMap(run);
+    map.put("principals", principals(id));
     if (deleted) {
       map.put("_base_rev", rawBaseRev(id));
     }

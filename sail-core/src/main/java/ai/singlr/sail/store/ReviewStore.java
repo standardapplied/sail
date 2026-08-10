@@ -321,10 +321,15 @@ public final class ReviewStore implements ConflictResolver {
    * whose {@code carried_from} points at its predecessor, storing the carrying ruling's evidence
    * with it, and returns the new row. The predecessor stays {@code OPEN} where it is — history is
    * never rewritten; the chain is the identity. Each re-carry stores the latest ruling's evidence —
-   * the newest explanation is the actionable one; the chain walk preserves the older ones.
+   * the newest explanation is the actionable one; the chain walk preserves the older ones. A blank
+   * ruling preserves the predecessor's evidence instead: fail-closed reconciliation synthesizes
+   * blank-evidence {@code still_open} rulings for omitted or unsupported verdicts, and defaulting
+   * must never erase the last actionable reproduction target.
    */
   public Finding carryForward(String stageId, Finding predecessor, String evidence) {
-    var carried = predecessor.carriedCopy(evidence);
+    var carried =
+        predecessor.carriedCopy(
+            Strings.isNotBlank(evidence) ? evidence : predecessor.carryEvidence());
     addFinding(stageId, carried);
     return carried;
   }
