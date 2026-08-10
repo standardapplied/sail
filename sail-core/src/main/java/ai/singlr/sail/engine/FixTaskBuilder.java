@@ -12,9 +12,12 @@ import java.util.List;
 /**
  * Generates a structured fix task from review findings for the coding agent. Each finding is
  * presented with its id, severity, category, file/line reference, evidence, and concrete
- * suggestion. The agent receives actionable instructions, not vague feedback — and a dispute lane:
- * a finding it believes is wrong is argued in the spec room for the re-review to rule on, never
- * coded around and never silently skipped.
+ * suggestion. A carried finding also presents the {@code still_open} ruling's evidence as a
+ * reproduction claim, so a fix agent that believes the finding already fixed must answer the
+ * reviewer's exact scenario — with code or a dispute argument, never a bare re-claim. The agent
+ * receives actionable instructions, not vague feedback — and a dispute lane: a finding it believes
+ * is wrong is argued in the spec room for the re-review to rule on, never coded around and never
+ * silently skipped.
  */
 public final class FixTaskBuilder {
 
@@ -95,6 +98,17 @@ public final class FixTaskBuilder {
 
       if (f.evidence() != null && !f.evidence().isEmpty()) {
         sb.append("Evidence: %s\n".formatted(f.evidence()));
+      }
+
+      if (f.carryEvidence() != null && !f.carryEvidence().isBlank()) {
+        sb.append(
+            """
+            Reviewer's evidence that this remains open: %s
+            Treat this as a reproduction claim — investigate this exact scenario before
+            re-claiming it fixed; if your investigation shows the scenario cannot occur,
+            dispute with that analysis.
+            """
+                .formatted(f.carryEvidence()));
       }
 
       if (f.suggestion() != null && !f.suggestion().rationale().isEmpty()) {

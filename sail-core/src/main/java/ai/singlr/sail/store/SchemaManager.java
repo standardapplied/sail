@@ -144,11 +144,19 @@ public final class SchemaManager {
           "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
           "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
           """
+          CREATE TABLE run_principals (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              principal TEXT NOT NULL,
+              PRIMARY KEY (run_id, principal)
+          )""",
+          "INSERT INTO run_principals SELECT id, principal FROM runs WHERE principal IS NOT NULL",
+          """
           CREATE TABLE run_delivered_messages (
               run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
               message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
               PRIMARY KEY (run_id, message_id)
-          )""");
+          )""",
+          "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

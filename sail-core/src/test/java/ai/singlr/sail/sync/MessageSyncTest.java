@@ -105,6 +105,30 @@ class MessageSyncTest {
   }
 
   @Test
+  void aMessageAuthoredBeforePrincipalRotationStillSyncs() {
+    var reviewId = "019fee00-0000-7000-8000-0000000000aa";
+    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    runs.createReview(reviewId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
+    var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
+    runs.rotateCredential(reviewId, "claude-code", "fix");
+
+    var accepted =
+        SyncPeer.with(
+            "node",
+            () ->
+                main.messages.commitRevision(
+                    "019fee00-0000-7000-8000-0000000000ab",
+                    snapshot(reviewerPrincipal, "room"),
+                    null));
+
+    assertTrue(
+        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        "a reviewer-authored message that synchronizes after the fix lane rotated the run's"
+            + " principal authenticates against the replicated history, never wedging sync");
+  }
+
+  @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
     var messageId = "00000000-0000-7000-8000-000000000001";
 

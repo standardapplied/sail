@@ -362,13 +362,17 @@ class SchemaManagerTest {
 
     var survived =
         db.queryOne(
-                "SELECT title, resolution, carried_from, resolution_evidence"
+                "SELECT title, resolution, carried_from, resolution_evidence, carry_evidence"
                     + " FROM review_findings WHERE id = 'f1'",
                 r ->
                     List.of(
-                        r.text(0), r.text(1), String.valueOf(r.text(2)), String.valueOf(r.text(3))))
+                        r.text(0),
+                        r.text(1),
+                        String.valueOf(r.text(2)),
+                        String.valueOf(r.text(3)),
+                        String.valueOf(r.text(4))))
             .orElseThrow();
-    assertEquals(List.of("Leak", "OPEN", "null", "null"), survived);
+    assertEquals(List.of("Leak", "OPEN", "null", "null", "null"), survived);
     assertEquals(
         1,
         (int)

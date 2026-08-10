@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A `still_open` ruling's evidence now travels with the finding instead of being discarded. The
+  carried row stores the ruling's evidence (`carry_evidence`, newest ruling wins; the
+  `carried_from` chain keeps the older ones), the next fix task renders it as a reproduction
+  claim the agent must answer — with code or a dispute argument, never a bare "already fixed" —
+  and the re-review prompt shows each carried finding alongside its own prior scenario. The
+  review prompt now asks `still_open` verdicts to describe the exact residual scenario.
+- Fix-lane room posts are attributed honestly. Rejoining a review run stamps the invocation's
+  own identity on the run row (`<agent>/fix-<reviewId>` for the fix lane,
+  `<reviewer>/review-<reviewId>` for a reviewer), journaled so it replicates — the room's audit
+  trail names the lane that wrote each post instead of crediting the fix agent's work to the
+  reviewer's principal.
+
 - Room messages now reach the live run. A new `sail-room-relay` PostToolUse hook delivers replies
   posted mid-run into the agent's context after its next tool call, on both Claude Code and Codex
   (both honor `additionalContext` injection). Each run keeps a `run_delivered_messages` ledger —

@@ -188,6 +188,7 @@ public final class RunStore implements ConflictResolver {
               unit,
               principalHandle(agent, role, id),
               owner);
+          recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
           return credential;
@@ -221,14 +222,21 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * Rotates the credential of a live run — the seam the review pipeline's fix lane uses to rejoin
-   * its review's identity after the reviewer invocation already created the run. The original
-   * plaintext is unrecoverable by design, so rejoining means a fresh credential; the run holds
-   * exactly one at a time (the schema enforces it), so rotation retires the previous invocation's
-   * credential in the same transaction. Fails loud on a missing or finished run — a dead run's
-   * identity is never resurrected.
+   * Rotates the credential of a live run — the seam the review pipeline's lanes use to rejoin the
+   * run after another invocation already created it (the fix lane rejoining its review's still-open
+   * negotiation, a later stage's reviewer rejoining after it). The original plaintext is
+   * unrecoverable by design, so rejoining means a fresh credential; the run holds exactly one at a
+   * time (the schema enforces it), so rotation retires the previous invocation's credential in the
+   * same transaction. The rejoining invocation also stamps its own identity: the run row's {@code
+   * agent} and {@code principal} become the invocation's ({@code <agent>/fix-<id>} for the fix
+   * lane, {@code <agent>/review-<id>} for a reviewer), journaled so the honest attribution
+   * replicates — rooms and run views read the principal, and the author must be the lane that
+   * wrote. Fails loud on a missing or finished run — a dead run's identity is never resurrected.
+   *
+   * @param lane {@code "fix"} or {@code "review"} — the invocation rejoining the run, which selects
+   *     the principal's marker; the run row's {@code role} stays {@code review}
    */
-  public String rotateCredential(String id) {
+  public String rotateCredential(String id, String agent, String lane) {
     return db.transaction(
         () -> {
           var run =
@@ -241,8 +249,16 @@ public final class RunStore implements ConflictResolver {
             throw new IllegalStateException(
                 "Run " + id + " is " + run.status() + "; only a running run can be credentialed.");
           }
+          db.execute(
+              "UPDATE runs SET agent = ?, principal = ? WHERE id = ?",
+              agent,
+              principalHandle(agent, lane, id),
+              id);
+          recordPrincipal(id, principalHandle(agent, lane, id));
           revokeCredential(id);
-          return mintCredential(id, null);
+          var credential = mintCredential(id, null);
+          recordRevision(id, "local", false);
+          return credential;
         });
   }
 
@@ -345,6 +361,7 @@ public final class RunStore implements ConflictResolver {
               YamlUtil.dumpJson(reserved),
               principalHandle(agent, role, id),
               owner);
+          recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, maxDuration);
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
@@ -425,17 +442,50 @@ public final class RunStore implements ConflictResolver {
 
   /**
    * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the full run id, with review runs marked as such — {@code claude/<run-uuid>}, {@code
-   * claude/review-<run-uuid>}. The whole UUID, never a truncation: the handle is a security
-   * identity compared in ownership checks and audit rows, so it must be exactly as collision-proof
-   * as the run id itself.
+   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
+   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
+   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
+   * it must be exactly as collision-proof as the run id itself.
    */
+  /**
+   * The run's replicated, append-only principal history: every identity a legitimate invocation of
+   * this run has ever posted under. The runs row keeps only the current principal for honest live
+   * attribution; message authorization on main checks membership here, so a room message authored
+   * before a lane rotation still authenticates when it synchronizes late. Never pruned while the
+   * run exists; cascades away with it.
+   */
+  public List<String> principals(String id) {
+    return db.query(
+        "SELECT principal FROM run_principals WHERE run_id = ? ORDER BY principal",
+        row -> row.text(0),
+        id);
+  }
+
+  private void recordPrincipal(String id, String principal) {
+    if (Strings.isBlank(principal)) {
+      return;
+    }
+    db.execute(
+        "INSERT OR IGNORE INTO run_principals (run_id, principal) VALUES (?, ?)", id, principal);
+  }
+
+  private void recordPrincipals(String id, Map<String, Object> snapshot) {
+    stringList(snapshot, "principals").forEach(principal -> recordPrincipal(id, principal));
+    recordPrincipal(id, text(snapshot, "principal"));
+  }
+
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
     var base = dash > 0 ? family.substring(0, dash) : family;
     var runId = Objects.requireNonNull(id, "run id");
-    return base + "/" + ("review".equals(role) ? "review-" + runId : runId);
+    var marker =
+        switch (Objects.toString(role, "")) {
+          case "review" -> "review-";
+          case "fix" -> "fix-";
+          default -> "";
+        };
+    return base + "/" + marker + runId;
   }
 
   private String mintCredential(String id, Duration maxDuration) {
@@ -729,7 +779,14 @@ public final class RunStore implements ConflictResolver {
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
-    return findById(id).map(RunStore::comparable).orElse(null);
+    return findById(id)
+        .map(
+            run -> {
+              var map = snapshotMap(run);
+              map.put("principals", principals(id));
+              return comparable(map);
+            })
+        .orElse(null);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -777,6 +834,7 @@ public final class RunStore implements ConflictResolver {
             adoptDeletion(id, rev);
           } else {
             writeRow(rowFrom(id, snapshot));
+            recordPrincipals(id, snapshot);
             recordRevision(id, rev, "sync", false, true);
           }
         });
@@ -799,6 +857,7 @@ public final class RunStore implements ConflictResolver {
             return new PushOutcome.Accepted(rev);
           }
           writeRow(rowFrom(id, snapshot));
+          recordPrincipals(id, snapshot);
           return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
         });
   }
@@ -825,6 +884,7 @@ public final class RunStore implements ConflictResolver {
       return adoptBaseDeletion(id);
     }
     writeRow(rowFrom(id, remote));
+    recordPrincipals(id, remote);
     return recordRevision(id, null, "sync", false, true);
   }
 
@@ -851,6 +911,7 @@ public final class RunStore implements ConflictResolver {
       return rev;
     }
     writeRow(rowFrom(id, chosen));
+    recordPrincipals(id, chosen);
     return recordRevision(id, null, "resolve", false, false);
   }
 
@@ -875,6 +936,7 @@ public final class RunStore implements ConflictResolver {
       return null;
     }
     var map = snapshotMap(run);
+    map.put("principals", principals(id));
     if (deleted) {
       map.put("_base_rev", rawBaseRev(id));
     }

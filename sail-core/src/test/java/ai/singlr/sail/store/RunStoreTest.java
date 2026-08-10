@@ -1153,7 +1153,7 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var original = createReview(id);
 
-    var rotated = store.rotateCredential(id);
+    var rotated = store.rotateCredential(id, "claude-code", "fix");
 
     assertEquals(id, store.findByCredential(rotated).orElseThrow().id());
     assertTrue(
@@ -1168,8 +1168,32 @@ class RunStoreTest {
   }
 
   @Test
+  void rotateCredentialStampsTheRejoiningInvocationsIdentityAndJournalsIt() {
+    var id = DateTimeUtils.newId().toString();
+    createReview(id);
+
+    store.rotateCredential(id, "claude-code", "fix");
+
+    var asFix = store.findById(id).orElseThrow();
+    assertEquals("claude-code", asFix.agent());
+    assertEquals("claude/fix-" + id, asFix.principal());
+    assertEquals("review", asFix.role(), "the row stays a review run; only the identity changes");
+    assertEquals(
+        "claude/fix-" + id,
+        store.comparableSnapshot(id).get("principal"),
+        "the honest attribution joins the journaled snapshot and replicates");
+
+    store.rotateCredential(id, "codex", "review");
+
+    var asReviewer = store.findById(id).orElseThrow();
+    assertEquals("codex", asReviewer.agent());
+    assertEquals("codex/review-" + id, asReviewer.principal());
+  }
+
+  @Test
   void rotateCredentialRefusesAMissingOrFinishedRun() {
-    assertThrows(IllegalStateException.class, () -> store.rotateCredential("ghost"));
+    assertThrows(
+        IllegalStateException.class, () -> store.rotateCredential("ghost", "codex", "review"));
 
     var id = DateTimeUtils.newId().toString();
     createReview(id);
@@ -1177,7 +1201,7 @@ class RunStoreTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> store.rotateCredential(id),
+        () -> store.rotateCredential(id, "codex", "review"),
         "a dead run's identity is never resurrected");
   }
 
@@ -1373,6 +1397,41 @@ class RunStoreTest {
     assertTrue(store.deliveredMessageIds(id).isEmpty());
     assertThrows(
         IllegalArgumentException.class, () -> store.markDelivered(id, List.of("not-a-uuid")));
+  }
+
+  @Test
+  void rotationAppendsToTheReplicatedPrincipalHistory() {
+    var id = newRun("backend", "auth");
+    var first = store.findById(id).orElseThrow().principal();
+
+    store.rotateCredential(id, "claude-code", "fix");
+
+    var rotated = store.findById(id).orElseThrow().principal();
+    assertTrue(rotated.contains("fix"), "the live row shows the current lane's identity");
+    assertEquals(
+        List.of(first, rotated).stream().sorted().toList(),
+        store.principals(id),
+        "history is append-only: rotation never erases the identity earlier messages were"
+            + " authored under");
+    var snapshot = store.comparableSnapshot(id);
+    assertEquals(
+        store.principals(id),
+        snapshot.get("principals"),
+        "the history replicates with the run, so main can authenticate late-syncing messages");
+  }
+
+  @Test
+  void adoptingAnOldShapeSnapshotDerivesTheHistoryFromItsPrincipal() {
+    var id = newRun("backend", "auth");
+    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot(id));
+    var principal = (String) snapshot.get("principal");
+    snapshot.remove("principals");
+
+    store.applyRevision(id, snapshot, "2-remote");
+
+    assertTrue(
+        store.principals(id).contains(principal),
+        "a snapshot without a history list still records its current principal as a member");
   }
 
   @Test

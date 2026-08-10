@@ -74,6 +74,60 @@ class ReviewPromptBuilderTest {
   }
 
   @Test
+  void carryForwardSectionRendersThePriorRulingsEvidence() {
+    var carried =
+        Finding.create(
+                Finding.Severity.HIGH,
+                Finding.Category.CONCURRENCY,
+                "src/Worker.java",
+                10,
+                14,
+                "Non-atomic target selection",
+                "d",
+                "e",
+                null,
+                0.9)
+            .carriedCopy("the seed window still races between reserve and claim");
+
+    var prompt =
+        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+
+    assertTrue(
+        prompt.contains(
+            "Prior ruling's evidence that it remains open: the seed window still races"
+                + " between reserve and claim"),
+        prompt);
+  }
+
+  @Test
+  void aCarriedFindingWithoutCarryEvidenceRendersItsLineAlone() {
+    var carried =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.CONCURRENCY,
+            "src/Worker.java",
+            10,
+            14,
+            "Non-atomic target selection",
+            "d",
+            "e",
+            null,
+            0.9);
+
+    var prompt =
+        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+
+    assertTrue(!prompt.contains("Prior ruling's evidence"), prompt);
+  }
+
+  @Test
+  void asksForTheResidualScenarioOnStillOpenVerdicts() {
+    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    assertTrue(prompt.contains("For still_open, describe the exact scenario"));
+    assertTrue(prompt.contains("reproduction target"));
+  }
+
+  @Test
   void carriedFindingWithoutFileRendersWithoutLocation() {
     var carried =
         Finding.create(

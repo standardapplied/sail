@@ -15,9 +15,12 @@ import java.util.Map;
  *
  * <p>A finding has identity across review iterations: when a re-review rules it {@code still_open},
  * a fresh row is attached to the new review with {@code carriedFrom} pointing at its predecessor,
- * so one finding aging across iterations is a single chain walk. A resolution that retires the
- * finding ({@code FIXED} by the reviewer's verdict, {@code DISPUTED} by a ruled argument) records
- * its {@code resolutionEvidence} — nothing resolves silently.
+ * so one finding aging across iterations is a single chain walk. The carried row also keeps the
+ * ruling that carried it: {@code carryEvidence} is the {@code still_open} verdict's evidence — the
+ * reviewer's sharpest explanation of what remains broken — which the next fix task and re-review
+ * render. A resolution that retires the finding ({@code FIXED} by the reviewer's verdict, {@code
+ * DISPUTED} by a ruled argument) records its {@code resolutionEvidence} — nothing resolves
+ * silently.
  */
 public record Finding(
     String id,
@@ -33,7 +36,8 @@ public record Finding(
     double confidence,
     Resolution resolution,
     String resolutionEvidence,
-    String carriedFrom) {
+    String carriedFrom,
+    String carryEvidence) {
 
   public enum Severity {
     CRITICAL,
@@ -120,15 +124,17 @@ public record Finding(
         confidence,
         Resolution.OPEN,
         null,
+        null,
         null);
   }
 
   /**
    * The open successor row a {@code still_open} verdict attaches to the next review: a fresh
    * identity linked to this finding through {@code carriedFrom}, so the chain records every
-   * iteration the finding survived.
+   * iteration the finding survived. {@code carryEvidence} is that verdict's evidence — each carry
+   * stores the latest ruling's explanation, the chain preserving the older ones.
    */
-  public Finding carriedCopy() {
+  public Finding carriedCopy(String carryEvidence) {
     return new Finding(
         DateTimeUtils.newId().toString(),
         severity,
@@ -143,7 +149,8 @@ public record Finding(
         confidence,
         Resolution.OPEN,
         null,
-        id);
+        id,
+        carryEvidence);
   }
 
   @SuppressWarnings("unchecked")
@@ -161,6 +168,7 @@ public record Finding(
         Suggestion.fromMap(map.get("suggestion")),
         doubleValue(map.getOrDefault("confidence", 0.5)),
         Resolution.OPEN,
+        null,
         null,
         null);
   }
@@ -183,6 +191,7 @@ public record Finding(
       m.put("resolution_evidence", resolutionEvidence);
     }
     if (carriedFrom != null) m.put("carried_from", carriedFrom);
+    if (carryEvidence != null && !carryEvidence.isEmpty()) m.put("carry_evidence", carryEvidence);
     return m;
   }
 

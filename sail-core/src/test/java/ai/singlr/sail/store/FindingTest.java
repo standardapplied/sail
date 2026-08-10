@@ -156,6 +156,34 @@ class FindingTest {
   }
 
   @Test
+  void carriedCopyStoresTheCarryingRulingsEvidenceOnAFreshIdentity() {
+    var original =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.CONCURRENCY,
+            "src/Dispatch.java",
+            10,
+            15,
+            "Seed-window race",
+            "Desc",
+            "Evidence",
+            null,
+            0.9);
+
+    var carried = original.carriedCopy("the seed window still races on restart");
+
+    assertNotEquals(original.id(), carried.id());
+    assertEquals(original.id(), carried.carriedFrom());
+    assertEquals("the seed window still races on restart", carried.carryEvidence());
+    assertNull(original.carryEvidence());
+    assertEquals(
+        "the seed window still races on restart",
+        carried.toMap().get("carry_evidence"),
+        "the carried evidence joins the serialized view");
+    assertFalse(original.toMap().containsKey("carry_evidence"));
+  }
+
+  @Test
   void severityParseCaseInsensitive() {
     assertEquals(Finding.Severity.CRITICAL, Finding.Severity.parse("critical"));
     assertEquals(Finding.Severity.HIGH, Finding.Severity.parse(" HIGH "));
