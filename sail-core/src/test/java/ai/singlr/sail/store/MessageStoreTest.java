@@ -116,4 +116,29 @@ class MessageStoreTest {
   private static List<String> ids(List<MessageStore.MessageRow> rows) {
     return rows.stream().map(MessageStore.MessageRow::id).toList();
   }
+
+  @Test
+  void listAfterReadsForwardPastACursorInMintOrder() {
+    var first = messages.append("room", "ada", "one", null);
+    var second = messages.append("room", "ada", "two", null);
+    var third = messages.append("room", "ada", "three", null);
+
+    assertEquals(
+        List.of(first.id(), second.id(), third.id()), ids(messages.listAfter("room", null, 10)));
+    assertEquals(List.of(second.id(), third.id()), ids(messages.listAfter("room", first.id(), 10)));
+    assertEquals(List.of(second.id()), ids(messages.listAfter("room", first.id(), 1)));
+    assertTrue(messages.listAfter("room", third.id(), 10).isEmpty());
+    assertTrue(messages.listAfter("missing", null, 10).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class, () -> messages.listAfter("room", "not-a-uuid", 10));
+    assertThrows(IllegalArgumentException.class, () -> messages.listAfter("room", null, 0));
+  }
+
+  @Test
+  void newestIdNamesTheRoomsLatestMessage() {
+    assertTrue(messages.newestId("room").isEmpty());
+    messages.append("room", "ada", "one", null);
+    var latest = messages.append("room", "ada", "two", null);
+    assertEquals(latest.id(), messages.newestId("room").orElseThrow());
+  }
 }

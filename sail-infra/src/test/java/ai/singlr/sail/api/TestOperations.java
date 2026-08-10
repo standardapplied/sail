@@ -340,7 +340,8 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+  public Result<SpecMessagesResponse> specMessages(
+      String specId, String before, String after, int limit) {
     return Result.success(
         new SpecMessagesResponse(
             specId,
@@ -352,6 +353,28 @@ class TestOperations implements Operations {
                     "hello",
                     null,
                     "2026-07-28T00:00:00Z"))));
+  }
+
+  @Override
+  public Result<RunInboxResponse> runInbox(String runId) {
+    return Result.success(
+        new RunInboxResponse(
+            runId,
+            "auth",
+            List.of(
+                new SpecMessageView(
+                    "01900000-0000-7000-8000-000000000002",
+                    "auth",
+                    "uday",
+                    "please also update the docs",
+                    null,
+                    "2026-07-28T00:01:00Z")),
+            "01900000-0000-7000-8000-000000000002"));
+  }
+
+  @Override
+  public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
+    return Result.success(new RunWatermarkResponse(runId, delivered));
   }
 
   @Override

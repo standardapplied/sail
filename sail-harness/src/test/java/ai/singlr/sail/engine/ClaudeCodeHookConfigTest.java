@@ -173,4 +173,22 @@ class ClaudeCodeHookConfigTest {
     var writer = new ClaudeCodeHookConfig(new ScriptedShellExecutor());
     assertThrows(Exception.class, () -> writer.install("../bad"));
   }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void renderWiresTheRoomRelayBesideThePostToolUseHeartbeat() {
+    var json = ClaudeCodeHookConfig.render();
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
+    var postGroups = (List<Map<String, Object>>) hooks.get("PostToolUse");
+    assertEquals(1, postGroups.size(), "one matcher group: heartbeat and relay run in parallel");
+    var postHooks = (List<Map<String, Object>>) postGroups.get(0).get("hooks");
+    assertEquals(2, postHooks.size());
+    assertEquals(
+        SailEventHelper.SCRIPT_PATH + " agent_tool_finished", postHooks.get(0).get("command"));
+    assertEquals(
+        SailRoomRelay.SCRIPT_PATH,
+        postHooks.get(1).get("command"),
+        "the relay rides beside the heartbeat, which prints nothing — stdout stays the relay's");
+    assertEquals(SailRoomRelay.HOOK_TIMEOUT_SECONDS, postHooks.get(1).get("timeout"));
+  }
 }

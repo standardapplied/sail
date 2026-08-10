@@ -141,7 +141,8 @@ public final class SchemaManager {
           "DROP TABLE review_findings",
           "ALTER TABLE review_findings_v2 RENAME TO review_findings",
           "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)");
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
+          "ALTER TABLE runs ADD COLUMN delivered_message_id TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

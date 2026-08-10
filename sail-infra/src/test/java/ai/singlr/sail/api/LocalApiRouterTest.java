@@ -316,6 +316,81 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void afterFilterPassesThroughToTheDeliveryRead() {
+    var response =
+        router.handle(
+            get(
+                "/v1/specs/oauth/messages",
+                Map.of("after", "01900000-0000-7000-8000-000000000001")));
+    assertEquals(200, response.status());
+    assertEquals("01900000-0000-7000-8000-000000000001", ops.lastAfter);
+    assertNull(ops.lastBefore);
+  }
+
+  @Test
+  void aRunReadingItsOwnRoomsNewestPageAdvancesTheWatermark() {
+    var response = router.handle(get("/v1/specs/auth/messages", Map.of()));
+
+    assertEquals(200, response.status());
+    assertEquals("run-1", ops.lastWatermarkRunId, "reading the room is a delivery");
+    assertEquals(
+        "01900000-0000-7000-8000-000000000001",
+        ops.lastDelivered,
+        "the watermark lands on the newest message the page showed");
+  }
+
+  @Test
+  void pagedForeignFailedOrEmptyReadsLeaveTheWatermarkAlone() {
+    router.handle(get("/v1/specs/oauth/messages", Map.of()));
+    assertNull(ops.lastWatermarkRunId, "another spec's room is not this run's delivery");
+
+    router.handle(
+        get("/v1/specs/auth/messages", Map.of("before", "01900000-0000-7000-8000-000000000001")));
+    assertNull(ops.lastWatermarkRunId, "a backward page is history, not delivery");
+
+    router.handle(
+        get("/v1/specs/auth/messages", Map.of("after", "01900000-0000-7000-8000-000000000001")));
+    assertNull(ops.lastWatermarkRunId, "a forward page is the relay's lane, acked explicitly");
+
+    router.handle(
+        new LocalApiRequest("GET", "/v1/specs/auth/messages", Map.of(), boxAuth(), new byte[0]));
+    assertNull(ops.lastWatermarkRunId, "the box credential has no run to deliver to");
+
+    ops.emptyMessages = true;
+    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    assertNull(ops.lastWatermarkRunId, "an empty page delivers nothing");
+
+    ops.emptyMessages = false;
+    ops.failMessages = true;
+    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    assertNull(ops.lastWatermarkRunId, "a failed read delivers nothing");
+  }
+
+  @Test
+  void runMessagesServesTheInboxAndTheAcknowledgementToRunCallersOnly() {
+    var inbox = router.handle(get("/v1/run/messages", Map.of()));
+    assertEquals(200, inbox.status());
+    assertEquals("run-1", inbox.body().get("run_id"));
+    assertEquals("01900000-0000-7000-8000-000000000002", inbox.body().get("latest"));
+    assertEquals("run-1", ops.lastInboxRunId);
+
+    var ack =
+        router.handle(
+            form("POST", "/v1/run/messages", "delivered=01900000-0000-7000-8000-000000000002"));
+    assertEquals(200, ack.status());
+    assertEquals("run-1", ops.lastWatermarkRunId, "the credential names the run, never the client");
+    assertEquals("01900000-0000-7000-8000-000000000002", ops.lastDelivered);
+
+    var boxed =
+        router.handle(
+            new LocalApiRequest("GET", "/v1/run/messages", Map.of(), boxAuth(), new byte[0]));
+    assertEquals(403, boxed.status());
+    assertTrue(boxed.body().get("error").toString().contains("run credential"));
+
+    assertEquals(405, router.handle(form("DELETE", "/v1/run/messages", "")).status());
+  }
+
+  @Test
   void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
     var created =
         router.handle(
@@ -424,7 +499,13 @@ class LocalApiRouterTest {
     private SpecMessageRequest lastMessage;
     private String lastMessageAuthor;
     private String lastBefore;
+    private String lastAfter;
     private int lastMessageLimit;
+    private String lastWatermarkRunId;
+    private String lastDelivered;
+    private String lastInboxRunId;
+    private boolean emptyMessages;
+    private boolean failMessages;
 
     @Override
     public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
@@ -494,10 +575,31 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+    public Result<SpecMessagesResponse> specMessages(
+        String specId, String before, String after, int limit) {
       lastBefore = before;
+      lastAfter = after;
       lastMessageLimit = limit;
-      return super.specMessages(specId, before, limit);
+      if (failMessages) {
+        return Result.failure(ErrorCode.INTERNAL, "boom");
+      }
+      if (emptyMessages) {
+        return Result.success(new SpecMessagesResponse(specId, List.of()));
+      }
+      return super.specMessages(specId, before, after, limit);
+    }
+
+    @Override
+    public Result<RunInboxResponse> runInbox(String runId) {
+      lastInboxRunId = runId;
+      return super.runInbox(runId);
+    }
+
+    @Override
+    public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
+      lastWatermarkRunId = runId;
+      lastDelivered = delivered;
+      return super.advanceRunWatermark(runId, delivered);
     }
   }
 }

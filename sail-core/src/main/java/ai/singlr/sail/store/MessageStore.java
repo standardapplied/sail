@@ -108,6 +108,43 @@ public final class MessageStore {
     return List.copyOf(oldest);
   }
 
+  /**
+   * Messages of {@code specId} strictly newer than {@code after} (a message id, or null for all),
+   * oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id > ?} is mint-time
+   * order — the primitive behind the run delivery watermark.
+   */
+  public List<MessageRow> listAfter(String specId, String after, int limit) {
+    if (after != null) {
+      Ids.requireUuid(after);
+    }
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    if (after == null) {
+      return db.query(
+          "SELECT " + COLUMNS + " FROM spec_messages WHERE spec_id = ? ORDER BY id ASC LIMIT ?",
+          MessageStore::map,
+          specId,
+          limit);
+    }
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM spec_messages WHERE spec_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+        MessageStore::map,
+        specId,
+        after,
+        limit);
+  }
+
+  /** The id of the room's newest message, or empty for a silent room. */
+  public Optional<String> newestId(String specId) {
+    return db.queryOne(
+        "SELECT id FROM spec_messages WHERE spec_id = ? ORDER BY id DESC LIMIT 1",
+        row -> row.text(0),
+        specId);
+  }
+
   /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
   public Map<String, String> latestBySpec() {
     var latest = new LinkedHashMap<String, String>();

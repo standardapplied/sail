@@ -425,7 +425,7 @@ public final class Fleet implements AutoCloseable {
     }
 
     public List<SpecMessageView> listMessages(String specId) {
-      return operations.specMessages(specId, null, 50).orThrow().messages();
+      return operations.specMessages(specId, null, null, 50).orThrow().messages();
     }
 
     public void assertSpecStatus(String id, SpecStatus status) {

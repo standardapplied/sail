@@ -45,6 +45,7 @@ class SailStopGateTest {
   private static final String RUN_ID = "run-1";
 
   @TempDir Path home;
+  private Path socket;
 
   private Path gate;
 
@@ -53,7 +54,11 @@ class SailStopGateTest {
   @BeforeEach
   void installGateUnderFakeHome() throws Exception {
     gate = home.resolve("sail-stop-gate");
-    writeExecutable(gate, SailStopGate.scriptContent());
+    socket = home.resolve("api.sock");
+    writeExecutable(
+        gate,
+        SailStopGate.scriptContent()
+            .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
     var helper = home.resolve(".sail/bin/sail-event.sh");
     Files.createDirectories(helper.getParent());
     writeExecutable(helper, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/events.log\"\n");
@@ -379,12 +384,21 @@ class SailStopGateTest {
   }
 
   private GateResult runGate(String stdin, String runId, Path pathPrefix) throws Exception {
+    return runGate(stdin, runId, pathPrefix, null);
+  }
+
+  private GateResult runGate(String stdin, String runId, Path pathPrefix, String credential)
+      throws Exception {
     var pb = new ProcessBuilder("/bin/sh", gate.toString());
     var env = pb.environment();
     env.put("HOME", home.toString());
     env.remove("SAIL_RUN_ID");
+    env.remove("SAIL_RUN_CREDENTIAL");
     if (runId != null) {
       env.put("SAIL_RUN_ID", runId);
+    }
+    if (credential != null) {
+      env.put("SAIL_RUN_CREDENTIAL", credential);
     }
     if (pathPrefix != null) {
       env.put("PATH", pathPrefix + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
@@ -450,5 +464,137 @@ class SailStopGateTest {
   private static void writeExecutable(Path path, String content) throws IOException {
     Files.writeString(path, content);
     Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwxr-xr-x"));
+  }
+
+  @Test
+  void undeliveredRoomMessagesBlockOnceWithTheirBodiesAndAreAcknowledged() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "please  rename\\nthe flag"}], "latest": "m1"}""");
+    try (var bound = bind()) {
+      var first = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      var reason = blockReason(first);
+      assertTrue(reason.contains("Room messages arrived while you were working"), reason);
+      assertTrue(
+          reason.contains("from uday: please rename the flag"),
+          "the bodies are the reason, whitespace collapsed: " + reason);
+      assertFalse(reason.contains("Not ready to stop"), "a clean tree adds no git protocol text");
+      assertTrue(Files.exists(roomMarker()), "the room concern spends its own marker");
+      assertFalse(Files.exists(marker()), "the git marker belongs to the git concern alone");
+      var calls = Files.readAllLines(home.resolve("curl.log"));
+      assertTrue(calls.get(1).contains("delivered=m1"), "blocking IS delivery: the gate acks");
+
+      var second = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+      assertEquals("", second.stdout(), "the room blocks at most once per run");
+    }
+  }
+
+  @Test
+  void aMessageArrivingAfterAGitNudgeStillGetsItsOneBlock() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    Files.createDirectories(marker().getParent());
+    Files.writeString(marker(), "");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m2", "author": "ada", "body": "wait, hold the merge"}], "latest": "m2"}""");
+    try (var bound = bind()) {
+      var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      var reason = blockReason(result);
+      assertTrue(reason.contains("from ada: wait, hold the merge"), reason);
+    }
+  }
+
+  @Test
+  void aDirtyRepoAndAFreshMessageBlockTogetherAndSpendBothMarkers() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m3", "author": "uday", "body": "check the retries"}], "latest": "m3"}""");
+    try (var bound = bind()) {
+      var first = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      var reason = blockReason(first);
+      assertTrue(reason.contains("Not ready to stop"), reason);
+      assertTrue(reason.contains("commit your work in api"), reason);
+      assertTrue(reason.contains("from uday: check the retries"), reason);
+      assertTrue(Files.exists(marker()));
+      assertTrue(Files.exists(roomMarker()));
+
+      var second = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+      assertEquals(
+          "", second.stdout(), "both concerns spent: even a still-dirty tree passes the retry");
+    }
+  }
+
+  @Test
+  void anEmptyInboxNeverBlocksNorSpendsTheRoomMarker() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    inbox("{\"run_id\": \"run-1\", \"spec_id\": \"auth\", \"messages\": []}");
+    try (var bound = bind()) {
+      var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      assertEquals("", result.stdout());
+      assertFalse(
+          Files.exists(roomMarker()),
+          "no block, no spent marker: a later message still gets its one look");
+    }
+  }
+
+  @Test
+  void theRoomCheckIsSkippedWithoutACredentialOrSocket() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m4", "author": "uday", "body": "anyone there?"}], "latest": "m4"}""");
+
+    var withoutCredential = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), null);
+    assertEquals("", withoutCredential.stdout(), "no credential, no room check: fail open");
+
+    var withoutSocket = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+    assertEquals("", withoutSocket.stdout(), "no socket, no room check: fail open");
+    assertFalse(Files.exists(home.resolve("curl.log")), "the API is never called");
+  }
+
+  private Path roomMarker() {
+    return home.resolve(".sail/runs/" + RUN_ID + "/stop-room-nudged");
+  }
+
+  private void inbox(String json) throws IOException {
+    Files.writeString(home.resolve("inbox.json"), json);
+  }
+
+  private java.io.Closeable bind() throws IOException {
+    var channel = java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX);
+    channel.bind(java.net.UnixDomainSocketAddress.of(socket));
+    return channel;
+  }
+
+  private Path fakeRoomCurl() throws Exception {
+    var bin = home.resolve("fakebin");
+    Files.createDirectories(bin);
+    writeExecutable(
+        bin.resolve("curl"),
+        """
+        #!/bin/sh
+        printf '%s\\n' "$*" >> "$HOME/curl.log"
+        case "$*" in
+          *"-X POST"*) ;;
+          *) cat "$HOME/inbox.json" 2>/dev/null ;;
+        esac
+        exit 0
+        """);
+    return bin;
   }
 }

@@ -241,6 +241,18 @@ public final class DispatchOperations {
   }
 
   /**
+   * Seeds the reserved run's room-delivery watermark with the newest message the task prompt
+   * rendered: the prompt is the run's first delivery, so nothing shown at launch is ever injected
+   * or stop-gated at it again.
+   */
+  private void initDeliveryWatermark(String runId, List<MessageStore.MessageRow> room) {
+    if (runStore == null || room.isEmpty()) {
+      return;
+    }
+    runStore.advanceDeliveredMessage(runId, room.getLast().id());
+  }
+
+  /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
    * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
    * target repo set ({@link #reserveRun} — the binding concurrency gate), then claim the spec
@@ -325,6 +337,7 @@ public final class DispatchOperations {
             task,
             unit,
             loaded.config());
+    initDeliveryWatermark(runId, room);
     try {
       var prepared =
           claimAndPrepare(

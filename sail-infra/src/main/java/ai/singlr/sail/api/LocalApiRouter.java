@@ -35,6 +35,7 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String SPECS = "/v1/specs";
   private static final String EVENTS = "/v1/events";
   private static final String WHOAMI = "/v1/whoami";
+  private static final String RUN_MESSAGES = "/v1/run/messages";
 
   private static final Set<String> AGENT_EVENT_TYPES =
       Set.of(
@@ -114,6 +115,9 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     if (EVENTS.equals(path)) {
       return events(request, caller);
+    }
+    if (RUN_MESSAGES.equals(path)) {
+      return runMessages(request, caller);
     }
     if (SPECS.equals(path)) {
       return specsCollection(request, caller);
@@ -256,10 +260,14 @@ final class LocalApiRouter implements LocalApiHandler {
 
   private ApiResponse messages(LocalApiRequest request, Caller caller, String id) {
     return switch (request.method()) {
-      case "GET" ->
-          ApiResponse.from(
-              operations.specMessages(
-                  id, request.query().get("before"), clampedLimit(request.query().get("limit"))));
+      case "GET" -> {
+        var before = request.query().get("before");
+        var after = request.query().get("after");
+        var result =
+            operations.specMessages(id, before, after, clampedLimit(request.query().get("limit")));
+        markDeliveredOnSelfRead(caller, id, before, after, result);
+        yield ApiResponse.from(result);
+      }
       case "POST" -> {
         var form = request.form();
         yield ApiResponse.fromCreated(
@@ -270,6 +278,51 @@ final class LocalApiRouter implements LocalApiHandler {
                 caller.author()));
       }
       default -> problem(405, "messages accepts GET or POST");
+    };
+  }
+
+  /**
+   * A run reading the newest page of its own spec's room is a delivery: everything the page showed
+   * needs no mid-run injection or stop-gate last look, so the watermark advances to the newest
+   * message returned. Paged reads ({@code before}/{@code after}) are not the newest page and leave
+   * the watermark alone.
+   */
+  private void markDeliveredOnSelfRead(
+      Caller caller,
+      String specId,
+      String before,
+      String after,
+      Result<SpecMessagesResponse> result) {
+    if (!(caller instanceof Caller.Run(var run))
+        || before != null
+        || after != null
+        || !specId.equals(run.specId())
+        || !(result instanceof Result.Success<SpecMessagesResponse>(var response, var ignored))
+        || response.messages().isEmpty()) {
+      return;
+    }
+    operations.advanceRunWatermark(run.id(), response.messages().getLast().id());
+  }
+
+  /**
+   * The run-scoped delivery lane: the relay and the stop gate know only their run credential — the
+   * fix lane deliberately carries no {@code SAIL_SPEC_ID} — so the credential names the run and the
+   * run names the spec. {@code GET} reads the undelivered inbox; {@code POST} acknowledges it by
+   * advancing the delivery watermark ({@code delivered=<message-id>}, forward-only).
+   */
+  private ApiResponse runMessages(LocalApiRequest request, Caller caller) {
+    if (!(caller instanceof Caller.Run(var run))) {
+      return problem(
+          403,
+          "Run message delivery requires a run credential; the box credential has no run"
+              + " to deliver to.");
+    }
+    return switch (request.method()) {
+      case "GET" -> ApiResponse.from(operations.runInbox(run.id()));
+      case "POST" ->
+          ApiResponse.from(
+              operations.advanceRunWatermark(run.id(), request.form().get("delivered")));
+      default -> problem(405, "run messages accepts GET or POST");
     };
   }
 

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 
 /**
@@ -36,7 +37,11 @@ public final class FixTaskBuilder {
     return body.isEmpty() ? subject : subject + "\n\n" + body;
   }
 
-  public static String build(String specId, String specTitle, List<Finding> findings) {
+  public static String build(
+      String specId,
+      String specTitle,
+      List<Finding> findings,
+      List<MessageStore.MessageRow> messages) {
     if (findings.isEmpty()) {
       return "No review findings to address for spec \"%s\".".formatted(specTitle);
     }
@@ -56,6 +61,7 @@ public final class FixTaskBuilder {
 
         """
             .formatted(specId));
+    sb.append(conversation(messages));
 
     for (var i = 0; i < findings.size(); i++) {
       var f = findings.get(i);
@@ -101,5 +107,14 @@ public final class FixTaskBuilder {
         """);
 
     return sb.toString();
+  }
+
+  private static String conversation(List<MessageStore.MessageRow> messages) {
+    if (messages.isEmpty()) {
+      return "";
+    }
+    return "Conversation on this spec — it may carry guidance on the findings below:\n\n"
+        + PromptConversation.renderNewest(
+            messages, message -> message.author() + ": " + message.body() + "\n\n");
   }
 }

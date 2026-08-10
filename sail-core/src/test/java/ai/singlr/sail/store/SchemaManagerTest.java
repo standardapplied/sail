@@ -281,12 +281,17 @@ class SchemaManagerTest {
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
     var row =
         db.queryOne(
-                "SELECT project, status, principal, owner FROM runs WHERE id = 'r1'",
+                "SELECT project, status, principal, owner, delivered_message_id"
+                    + " FROM runs WHERE id = 'r1'",
                 r ->
                     List.of(
-                        r.text(0), r.text(1), String.valueOf(r.text(2)), String.valueOf(r.text(3))))
+                        r.text(0),
+                        r.text(1),
+                        String.valueOf(r.text(2)),
+                        String.valueOf(r.text(3)),
+                        String.valueOf(r.text(4))))
             .orElseThrow();
-    assertEquals(List.of("acme", "running", "null", "null"), row);
+    assertEquals(List.of("acme", "running", "null", "null", "null"), row);
     assertTrue(
         db.query(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'run_credentials'",

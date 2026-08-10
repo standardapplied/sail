@@ -355,6 +355,38 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
+   * The run's room-delivery watermark: the id of the newest spec-room message this run has been
+   * shown, or empty when nothing was ever delivered. Node-local operational state — the column
+   * never joins {@link #comparableSnapshot}, a journaled revision, or a sync write, mirroring the
+   * local-only {@code run_credentials} table, so delivery bookkeeping can never churn revisions or
+   * conflict across boxes.
+   */
+  public Optional<String> deliveredMessageId(String id) {
+    return db.queryOne(
+            "SELECT delivered_message_id FROM runs WHERE id = ?",
+            row -> Objects.toString(row.text(0), ""),
+            id)
+        .filter(value -> !Strings.isBlank(value));
+  }
+
+  /**
+   * Advances the delivery watermark to {@code messageId}, forward-only: message ids are UUIDv7
+   * strings whose lexicographic order is mint order, so the guarded UPDATE is a compare-and-set
+   * that ignores stale or replayed acks. Returns whether the watermark moved. Records no revision —
+   * see {@link #deliveredMessageId}.
+   */
+  public boolean advanceDeliveredMessage(String id, String messageId) {
+    Ids.requireUuid(messageId);
+    db.execute(
+        "UPDATE runs SET delivered_message_id = ? WHERE id = ?"
+            + " AND (delivered_message_id IS NULL OR delivered_message_id < ?)",
+        messageId,
+        id,
+        messageId);
+    return db.changes() > 0;
+  }
+
+  /**
    * Headroom a credential keeps past its run's configured hard stop, covering the watcher's kill
    * and the missed-stop reconciler's sweep. Revocation on every run finisher is the real terminator
    * — the expiry only bounds a credential whose run's finishers all failed to fire, and the

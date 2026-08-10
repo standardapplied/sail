@@ -200,6 +200,14 @@ class DispatchCommandTest {
         "generated work must not carry AI attribution");
     assertFalse(prompt.contains("handoff.md"), "no context-handoff cruft");
     assertTrue(prompt.contains("spec comment <id> --body <text>"));
+    assertTrue(
+        prompt.contains("delivered into\nyour context automatically after a tool call finishes"),
+        "the prompt states the real delivery contract: both supported CLIs inject room replies"
+            + " via the PostToolUse relay");
+    assertTrue(
+        prompt.contains("read the room with\n`spec comments <id>`"),
+        "the read verb is the portable floor: check when blocked, and before the final summary");
+    assertTrue(prompt.contains("unread messages block your\nfirst attempt to stop"));
   }
 
   @Test

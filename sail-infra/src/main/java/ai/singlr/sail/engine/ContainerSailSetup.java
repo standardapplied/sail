@@ -80,6 +80,7 @@ public final class ContainerSailSetup {
     }
     new SailEventHelper(shell).install(container);
     new SailStopGate(shell).install(container);
+    new SailRoomRelay(shell).install(container);
     new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
@@ -116,6 +117,7 @@ public final class ContainerSailSetup {
     var files = new LinkedHashMap<String, String>();
     files.put(SailEventHelper.SCRIPT_PATH, SailEventHelper.scriptContent());
     files.put(SailStopGate.SCRIPT_PATH, SailStopGate.scriptContent());
+    files.put(SailRoomRelay.SCRIPT_PATH, SailRoomRelay.scriptContent());
     files.put(SpecCliHelper.SCRIPT_PATH, SpecCliHelper.scriptContent());
     files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
     files.put(ClaudeCodeHookConfig.SETTINGS_PATH, ClaudeCodeHookConfig.render());

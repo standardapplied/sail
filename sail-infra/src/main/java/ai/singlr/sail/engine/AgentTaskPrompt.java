@@ -86,6 +86,12 @@ public final class AgentTaskPrompt {
         Post progress, questions, and your final summary to this spec's room with
         `spec comment <id> --body <text>` (or `--body -` for stdin).
 
+        The room is a live channel, not a log: replies posted while you work are delivered into
+        your context automatically after a tool call finishes, and unread messages block your
+        first attempt to stop. When you are blocked on a decision, read the room with
+        `spec comments <id>` rather than guessing; read it once more before posting your final
+        summary, and acknowledge in that summary any guidance it carried.
+
         The spec is not complete until CI is green: after opening the pull request, watch its
         checks with the CLI of the forge hosting the repo (e.g. `gh pr checks <number> --watch`
         on GitHub, `glab ci status --live` on GitLab, or the equivalent on your forge), and if any

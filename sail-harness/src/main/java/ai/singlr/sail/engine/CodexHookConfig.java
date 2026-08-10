@@ -34,7 +34,11 @@ import java.util.concurrent.TimeoutException;
  * <ul>
  *   <li>{@code SessionStart} → {@code agent_session_started}
  *   <li>{@code PreToolUse} → {@code agent_tool_started}
- *   <li>{@code PostToolUse} → {@code agent_tool_finished}
+ *   <li>{@code PostToolUse} → {@code agent_tool_finished}, plus {@link SailRoomRelay} beside it:
+ *       Codex's {@code PostToolUse} honors {@code hookSpecificOutput.additionalContext} exactly as
+ *       Claude Code does (injected as a developer message before the next model call), so the one
+ *       relay script gives both CLIs the same mid-run room delivery. Do not move the relay to
+ *       {@code PreToolUse}: Codex parses but rejects {@code additionalContext} there.
  *   <li>{@code Stop} → {@link SailStopGate}, which publishes {@code agent_session_stopped} when it
  *       allows the stop or {@code agent_stop_nudged} when it blocks a premature one. It must be the
  *       only {@code Stop} hook: matching hooks run concurrently, so a bare publisher beside the
@@ -83,7 +87,7 @@ public final class CodexHookConfig {
     var hooks = new LinkedHashMap<String, Object>();
     hooks.put("SessionStart", List.of(matcherGroup(sessionStart)));
     hooks.put("PreToolUse", List.of(matcherGroup(toolStarted)));
-    hooks.put("PostToolUse", List.of(matcherGroup(toolFinished)));
+    hooks.put("PostToolUse", List.of(matcherGroup(toolFinished, roomRelayCommand())));
     hooks.put("Stop", List.of(matcherGroup(stop)));
 
     var root = new LinkedHashMap<String, Object>();
@@ -117,9 +121,10 @@ public final class CodexHookConfig {
     }
   }
 
-  private static Map<String, Object> matcherGroup(Map<String, Object> hook) {
+  @SafeVarargs
+  private static Map<String, Object> matcherGroup(Map<String, Object>... hooks) {
     var group = new LinkedHashMap<String, Object>();
-    group.put("hooks", List.of(hook));
+    group.put("hooks", List.of(hooks));
     return group;
   }
 
@@ -136,6 +141,14 @@ public final class CodexHookConfig {
     hook.put("type", "command");
     hook.put("command", SailStopGate.SCRIPT_PATH);
     hook.put("timeout", SailStopGate.HOOK_TIMEOUT_SECONDS);
+    return hook;
+  }
+
+  private static Map<String, Object> roomRelayCommand() {
+    var hook = new LinkedHashMap<String, Object>();
+    hook.put("type", "command");
+    hook.put("command", SailRoomRelay.SCRIPT_PATH);
+    hook.put("timeout", SailRoomRelay.HOOK_TIMEOUT_SECONDS);
     return hook;
   }
 }

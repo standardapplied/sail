@@ -1331,4 +1331,48 @@ class RunStoreTest {
     assertFalse(
         snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");
   }
+
+  @Test
+  void deliveredMessageAdvancesForwardOnlyWithoutChurningRevisions() {
+    var id = newRun("backend", "auth");
+    var revBefore = store.latestRev(id);
+    var first = DateTimeUtils.newId().toString();
+    var second = DateTimeUtils.newId().toString();
+    assertTrue(second.compareTo(first) > 0, "UUIDv7 ids must order by mint time");
+
+    assertTrue(store.advanceDeliveredMessage(id, first));
+    assertEquals(first, store.deliveredMessageId(id).orElseThrow());
+    assertTrue(store.advanceDeliveredMessage(id, second));
+    assertFalse(
+        store.advanceDeliveredMessage(id, first), "a stale ack never moves the watermark back");
+    assertEquals(second, store.deliveredMessageId(id).orElseThrow());
+
+    assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
+    assertFalse(
+        store.comparableSnapshot(id).containsKey("delivered_message_id"),
+        "the watermark is node-local operational state and never joins the sync snapshot");
+  }
+
+  @Test
+  void deliveredMessageIsEmptyForUnknownOrUndeliveredRunsAndValidatesIds() {
+    assertTrue(store.deliveredMessageId("nope").isEmpty());
+    var id = newRun("backend", "auth");
+    assertTrue(store.deliveredMessageId(id).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class, () -> store.advanceDeliveredMessage(id, "not-a-uuid"));
+  }
+
+  @Test
+  void deliveredMessageSurvivesSyncAdoptionOfTheSameRun() {
+    var id = newRun("backend", "auth");
+    var mid = DateTimeUtils.newId().toString();
+    store.advanceDeliveredMessage(id, mid);
+
+    store.applyRevision(id, store.comparableSnapshot(id), "2-remote");
+
+    assertEquals(
+        mid,
+        store.deliveredMessageId(id).orElseThrow(),
+        "a sync adoption converges the shared fields without clobbering local delivery state");
+  }
 }

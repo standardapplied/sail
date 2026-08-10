@@ -1128,25 +1128,88 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<SpecMessagesResponse> specMessages(String specId, String before, int limit) {
+  public Result<SpecMessagesResponse> specMessages(
+      String specId, String before, String after, int limit) {
     return safeRead(
         () -> {
+          if (before != null && after != null) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
+          }
           if (specStore.findById(specId).isEmpty()) {
             throw new ApiException(
                 ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
           }
           List<SpecMessageView> messages;
           try {
-            messages =
-                requireMessageStore().list(specId, before, limit).stream()
-                    .map(SpecMessageView::from)
-                    .toList();
+            var store = requireMessageStore();
+            var rows =
+                after != null
+                    ? store.listAfter(specId, after, limit)
+                    : store.list(specId, before, limit);
+            messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
           }
           return new SpecMessagesResponse(specId, messages);
         });
   }
+
+  @Override
+  public Result<RunInboxResponse> runInbox(String runId) {
+    return safeRead(
+        () -> {
+          var run = requireRun(runId);
+          if (Strings.isBlank(run.specId())) {
+            return new RunInboxResponse(runId, null, List.of(), null);
+          }
+          var store = requireMessageStore();
+          var watermark = runStore.deliveredMessageId(runId).orElse(null);
+          var batch = store.listAfter(run.specId(), watermark, INBOX_LIMIT);
+          var fresh =
+              batch.stream()
+                  .filter(row -> !row.author().equals(run.principal()))
+                  .map(SpecMessageView::from)
+                  .toList();
+          var latest = batch.isEmpty() ? null : batch.getLast().id();
+          return new RunInboxResponse(runId, run.specId(), fresh, latest);
+        });
+  }
+
+  @Override
+  public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
+    return safeWrite(
+        () -> {
+          var run = requireRun(runId);
+          var onSpec =
+              !Strings.isBlank(delivered)
+                  && requireMessageStore()
+                      .findById(delivered)
+                      .filter(message -> message.specId().equals(run.specId()))
+                      .isPresent();
+          if (!onSpec) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST,
+                "delivered must name a message on spec '" + run.specId() + "'.");
+          }
+          runStore.advanceDeliveredMessage(runId, delivered);
+          return new RunWatermarkResponse(runId, runStore.deliveredMessageId(runId).orElse(null));
+        });
+  }
+
+  private RunStore.RunRow requireRun(String runId) {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "Run store not available. Start the server with 'sail server start'.");
+    }
+    return runStore
+        .findById(runId)
+        .orElseThrow(
+            () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "Run '" + runId + "' was not found."));
+  }
+
+  private static final int INBOX_LIMIT = 20;
 
   private MessageStore requireMessageStore() {
     if (messageStore == null) {

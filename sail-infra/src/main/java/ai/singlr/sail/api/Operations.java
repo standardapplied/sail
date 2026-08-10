@@ -118,7 +118,27 @@ public interface Operations {
   Result<SpecMessageResponse> postSpecMessage(
       String specId, SpecMessageRequest request, Actor actor, String author);
 
-  Result<SpecMessagesResponse> specMessages(String specId, String before, int limit);
+  /**
+   * A page of a spec room: {@code before} pages backward from the newest (the default), {@code
+   * after} reads forward past a known message id — the delivery lane's view. The two are exclusive.
+   */
+  Result<SpecMessagesResponse> specMessages(String specId, String before, String after, int limit);
+
+  /**
+   * The run's undelivered room messages: everything on the run's spec newer than its delivery
+   * watermark, minus what the run's own principal authored — a run is never told its own story.
+   * {@code latest} names the newest message the read considered, own-authored included, so the
+   * caller can acknowledge the whole batch. A run with no spec (ad-hoc) has an empty inbox.
+   */
+  Result<RunInboxResponse> runInbox(String runId);
+
+  /**
+   * Advances the run's delivery watermark to {@code delivered}, which must name a message on the
+   * run's own spec — the credential names the run, the run names the spec, so a caller can never
+   * move another run's watermark or point it off-spec. Forward-only: a stale or replayed ack is a
+   * no-op that still reports the current watermark.
+   */
+  Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered);
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 

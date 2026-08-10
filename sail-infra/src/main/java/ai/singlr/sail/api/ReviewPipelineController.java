@@ -613,7 +613,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var spec = specStore.findById(specId);
     if (spec.isEmpty()) return;
 
-    var fixTask = FixTaskBuilder.build(specId, spec.get().title(), findings);
+    var room = roomMessages(specId);
+    var fixTask = FixTaskBuilder.build(specId, spec.get().title(), findings, room);
     advanceSpec(specId, SpecStatus.IN_PROGRESS);
     publishEvent(project, specId, "review_iteration_started", null);
 
@@ -621,6 +622,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
           startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
+      initDeliveryWatermark(reviewId, room);
       agentRunner.runFix(
           project,
           agent,
@@ -682,6 +684,18 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
           "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());
       return List.of();
     }
+  }
+
+  /**
+   * Seeds the fix run's room-delivery watermark with the newest message its task rendered: the fix
+   * prompt's conversation section is that run's first delivery, so launch-time messages are never
+   * injected or stop-gated at it again. Forward-only, so a later fix iteration only moves it ahead.
+   */
+  private void initDeliveryWatermark(String reviewId, List<MessageStore.MessageRow> room) {
+    if (runStore == null || room.isEmpty()) {
+      return;
+    }
+    runStore.advanceDeliveredMessage(reviewId, room.getLast().id());
   }
 
   private void postRoom(String specId, String body) {
