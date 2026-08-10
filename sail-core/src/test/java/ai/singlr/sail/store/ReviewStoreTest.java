@@ -629,6 +629,26 @@ class ReviewStoreTest {
   }
 
   @Test
+  void aStageCompletedBeforeALaterStageErroredStillCarriesItsFindings() {
+    var r1 = store.createReview("auth", 1);
+    var security1 = store.createStage(r1, "security", "agent");
+    var blocker = addOpenFinding(security1, Finding.Severity.HIGH, "Token leak");
+    store.completeStage(security1, "failed");
+    var correctness1 = store.createStage(r1, "correctness", "agent");
+    store.completeStage(correctness1, "failed", "agent runner crashed");
+    store.failReviewWithError(r1, "agent runner crashed");
+
+    var r2 = store.createReview("auth", 1);
+    store.createStage(r2, "security", "agent");
+
+    assertEquals(
+        List.of(blocker.id()),
+        store.carryForwardFindings("auth", r2, "security").stream().map(Finding::id).toList(),
+        "validity is per stage: a stage that completed before a later stage errored the review"
+            + " keeps its findings in the carry set");
+  }
+
+  @Test
   void carryForwardReachesPastAReviewWhereAnEarlierStageFailedBeforeThisOneRan() {
     var r1 = store.createReview("auth", 1);
     var security1 = store.createStage(r1, "security", "agent");

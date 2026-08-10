@@ -398,13 +398,14 @@ public final class ReviewStore implements ConflictResolver {
 
   /**
    * The findings the same-named stage of the next review must rule on: the open findings that
-   * {@code stageName} emitted in the current dispatch attempt's latest gate-failed review <em>in
-   * which that stage actually executed</em> (errored reviews have no verdict and are skipped, and
-   * so is a review where an earlier stage failed before this one ran — its pending stage holds no
-   * rows, and picking it would silently drop the stage's still-open findings from an older review),
-   * excluding any already re-attached to that stage of {@code currentReviewId}. Scoping by stage
-   * keeps every finding facing the categories and gate of the stage that raised it — a HIGH from a
-   * strict later stage can never be laundered through an earlier stage's looser gate.
+   * {@code stageName} emitted in the current dispatch attempt's latest failed review <em>in which
+   * that stage actually executed</em>, excluding any already re-attached to that stage of {@code
+   * currentReviewId}. Validity is per stage, not per review: a stage that errored — or never ran
+   * because an earlier stage failed first — holds no verdict and is skipped, but a stage that
+   * completed cleanly before a <em>later</em> stage errored the review still carries its findings;
+   * skipping the whole review would silently drop them from the eventual passed review. Scoping by
+   * stage keeps every finding facing the categories and gate of the stage that raised it — a HIGH
+   * from a strict later stage can never be laundered through an earlier stage's looser gate.
    */
   public List<Finding> carryForwardFindings(
       String specId, String currentReviewId, String stageName) {
@@ -416,7 +417,7 @@ public final class ReviewStore implements ConflictResolver {
             SELECT r.id FROM reviews r
             JOIN review_stages prior ON prior.review_id = r.id
             WHERE r.spec_id = ? AND r.superseded_at IS NULL AND r.status = 'failed'
-                AND r.error IS NULL AND r.id != ?
+                AND r.id != ?
                 AND prior.name = ? AND prior.status IN ('passed', 'failed')
                 AND prior.error IS NULL
             ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)

@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Adapts a box's {@link ReviewStore} to the sync roles, exactly as {@link RunReplica} does for
@@ -61,6 +62,11 @@ public final class ReviewReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return reviews.syncEntityIds();
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

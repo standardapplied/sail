@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Adapts one box's {@link FileStore} to the sync roles, so the {@link SyncEngine} reconciles shared
@@ -53,6 +54,11 @@ public final class FileReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return files.syncEntityIds();
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

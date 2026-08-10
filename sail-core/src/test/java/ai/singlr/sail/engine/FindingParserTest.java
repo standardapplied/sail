@@ -365,6 +365,66 @@ class FindingParserTest {
   }
 
   @Test
+  void aMalformedFinalFencedEnvelopeIsNeverReplacedByAnEarlierCleanOne() {
+    var transcript =
+        """
+        ```json
+        {"verdicts": [], "findings": []}
+        ```
+        Refining my findings...
+        ```json
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURTY", "title": "Injection", "description": "D"}]}
+        ```
+        """;
+
+    var result = unparseable(transcript);
+
+    assertTrue(
+        result.warnings().getFirst().contains("Finding 0"),
+        "the final fenced response is authoritative: a malformed gate-blocking finding must"
+            + " error the stage, not vanish behind an earlier clean envelope");
+  }
+
+  @Test
+  void duplicateVerdictsForOneFindingRejectTheEnvelope() {
+    var output =
+        """
+        ```json
+        {"verdicts": [
+          {"finding_id": "f-1", "verdict": "still_open"},
+          {"finding_id": "f-1", "verdict": "fixed", "evidence": "commit abc"}],
+         "findings": []}
+        ```
+        """;
+
+    var result = unparseable(output);
+
+    assertTrue(
+        result.warnings().getFirst().contains("f-1"),
+        "one verdict per carried finding: conflicting duplicates are ambiguous and must reject"
+            + " the response instead of resolving by entry order");
+  }
+
+  @Test
+  void reconcileForcesConflictingDuplicateVerdictsToStillOpenInEitherOrder() {
+    var carried = List.of(finding("Old critical"));
+    var id = carried.getFirst().id();
+    var open = new Verdict(id, Ruling.STILL_OPEN, "");
+    var fixed = new Verdict(id, Ruling.FIXED, "commit abc");
+
+    for (var verdicts : List.of(List.of(open, fixed), List.of(fixed, open))) {
+      var reconciled = FindingParser.reconcile(carried, verdicts);
+
+      assertEquals(
+          Ruling.STILL_OPEN,
+          reconciled.rulings().get(id).ruling(),
+          "duplicate verdicts are an ambiguous ruling; the finding must stay open regardless"
+              + " of entry order");
+      assertFalse(reconciled.warnings().isEmpty());
+    }
+  }
+
+  @Test
   void reconcileDefaultsAnUnmentionedCarriedFindingToStillOpen() {
     var carried = List.of(finding("Old high"));
 

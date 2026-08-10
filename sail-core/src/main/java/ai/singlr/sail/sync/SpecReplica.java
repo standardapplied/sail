@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Adapts a single box's spec stores to the sync roles. The same box can act as the node ({@link
@@ -55,6 +56,11 @@ public final class SpecReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return specs.syncEntityIds();
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

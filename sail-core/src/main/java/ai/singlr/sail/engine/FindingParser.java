@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.Finding;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -21,13 +22,14 @@ import java.util.Objects;
  *
  * <pre>{@code {"verdicts": [...], "findings": [...]}}</pre>
  *
- * where each verdict rules on a finding carried forward from the previous review and each finding
- * is a newly discovered issue. Anything else — a bare findings array included — is unparseable
- * reviewer output: the reviewer and this parser ship in the same binary, so no legacy shape is
- * tolerated and an off-contract response errors the stage rather than passing as a clean review.
- * The same fail-closed rule applies inside the envelope: a single malformed entry rejects the whole
- * response, because an unreadable finding has unknown severity and cannot safely be dropped — the
- * gate must never rule on a result from which a reported issue was discarded.
+ * where each verdict rules on a finding carried forward from the previous review — exactly one
+ * verdict per finding — and each finding is a newly discovered issue. Anything else — a bare
+ * findings array included — is unparseable reviewer output: the reviewer and this parser ship in
+ * the same binary, so no legacy shape is tolerated and an off-contract response errors the stage
+ * rather than passing as a clean review. The same fail-closed rule applies inside the envelope: a
+ * single malformed entry — or a duplicate verdict, whose effective ruling would be ambiguous —
+ * rejects the whole response, because an unreadable finding has unknown severity and cannot safely
+ * be dropped — the gate must never rule on a result from which a reported issue was discarded.
  */
 public final class FindingParser {
 
@@ -66,26 +68,28 @@ public final class FindingParser {
   }
 
   /**
-   * Parses the verdict envelope out of a review agent's raw transcript. Transcripts are noisy: the
-   * agent may echo the prompt (which itself names the {@code ```json} convention) and may emit
-   * fenced blocks mid-reasoning, so candidates are tried <em>last to first</em> and the last block
-   * that parses as an envelope wins — the response convention puts the verdict at the end. Fenced
-   * blocks are tried first; when none parses, the transcript is scanned for an unfenced JSON object
-   * before giving up — the format instruction is a request, not a guarantee, and an envelope
-   * without its fence is still a verdict. The hardening locates the envelope in noisy output; it
-   * does not admit alternative formats.
+   * Parses the verdict envelope out of a review agent's raw transcript. The response convention
+   * puts the verdict at the end, so the last fenced JSON object is the response — and it is
+   * authoritative: when it is malformed the whole transcript is unparseable and the stage errors,
+   * never silently replaced by an earlier draft or echoed envelope that could retire a
+   * gate-blocking finding. Only when no fenced candidate exists is the transcript scanned for an
+   * unfenced JSON object before giving up — the format instruction is a request, not a guarantee,
+   * and an envelope without its fence is still a verdict. The hardening locates the envelope in
+   * noisy output; it does not admit alternative formats.
    */
   public static ParseResult parse(String agentOutput) {
+    var fenced = extractJsonBlocks(agentOutput);
+    if (!fenced.isEmpty()) {
+      return parseEnvelope(fenced.getLast());
+    }
     var warnings = new ArrayList<String>();
-    for (var candidates :
-        List.of(extractJsonBlocks(agentOutput), extractEmbeddedObjects(agentOutput))) {
-      for (var i = candidates.size() - 1; i >= 0; i--) {
-        switch (parseEnvelope(candidates.get(i))) {
-          case ParseResult.Parsed parsed -> {
-            return parsed;
-          }
-          case ParseResult.Unparseable rejected -> warnings.addAll(rejected.warnings());
+    var embedded = extractEmbeddedObjects(agentOutput);
+    for (var i = embedded.size() - 1; i >= 0; i--) {
+      switch (parseEnvelope(embedded.get(i))) {
+        case ParseResult.Parsed parsed -> {
+          return parsed;
         }
+        case ParseResult.Unparseable rejected -> warnings.addAll(rejected.warnings());
       }
     }
     if (warnings.isEmpty()) {
@@ -130,6 +134,12 @@ public final class FindingParser {
         warnings.add("Finding " + i + ": " + e.getMessage());
       }
     }
+    var ruledIds = new HashSet<String>();
+    for (var verdict : verdicts) {
+      if (!ruledIds.add(verdict.findingId())) {
+        warnings.add("Duplicate verdict for finding " + verdict.findingId() + ".");
+      }
+    }
     if (!warnings.isEmpty()) {
       return new ParseResult.Unparseable(List.copyOf(warnings));
     }
@@ -140,8 +150,10 @@ public final class FindingParser {
    * Fail-closed reconciliation of the reviewer's verdicts against the carried findings it was asked
    * to rule on: every carried finding gets exactly one effective ruling. A carried finding missing
    * from the verdicts defaults to {@code still_open}; {@code fixed} or {@code disputed} without
-   * evidence downgrades to {@code still_open}; a verdict naming an unknown finding is a warning,
-   * never a crash. Incomplete-answer semantics — a finding can never resolve by omission.
+   * evidence downgrades to {@code still_open}; duplicate verdicts for one finding are an ambiguous
+   * ruling and force {@code still_open} regardless of order; a verdict naming an unknown finding is
+   * a warning, never a crash. Incomplete-answer semantics — a finding can never resolve by
+   * omission, and never by the entry order of a malformed answer.
    */
   public static Reconciled reconcile(List<Finding> carried, List<Verdict> verdicts) {
     var warnings = new ArrayList<String>();
@@ -149,9 +161,16 @@ public final class FindingParser {
     for (var finding : carried) {
       rulings.put(finding.id(), new Verdict(finding.id(), Ruling.STILL_OPEN, ""));
     }
+    var ruled = new HashSet<String>();
     for (var verdict : verdicts) {
       if (!rulings.containsKey(verdict.findingId())) {
         warnings.add("Verdict for unknown finding " + verdict.findingId() + " ignored.");
+        continue;
+      }
+      if (!ruled.add(verdict.findingId())) {
+        rulings.put(verdict.findingId(), new Verdict(verdict.findingId(), Ruling.STILL_OPEN, ""));
+        warnings.add(
+            "Conflicting verdicts for finding " + verdict.findingId() + "; treated as still_open.");
         continue;
       }
       if (verdict.ruling() != Ruling.STILL_OPEN && Strings.isBlank(verdict.evidence())) {
@@ -189,8 +208,10 @@ public final class FindingParser {
   /**
    * Every marker occurrence starts an independent candidate (advancing past the marker, not the
    * closing fence): a prompt echo's mid-sentence marker would otherwise swallow the real block's
-   * opening fence as its terminator. Overlap is harmless — candidates are validated by parsing.
-   * Markers match case-insensitively, so a {@code ```JSON} fence is not mistaken for prose.
+   * opening fence as its terminator. A candidate that does not open a JSON object is extraction
+   * noise — a mid-sentence marker's trailing prose, not a response — and is dropped, so it can
+   * never stand in as the authoritative final block. Markers match case-insensitively, so a {@code
+   * ```JSON} fence is not mistaken for prose.
    */
   private static void collectBlocks(String output, String marker, List<String> blocks) {
     var haystack = output.toLowerCase(Locale.ROOT);
@@ -203,8 +224,11 @@ public final class FindingParser {
       if (contentStart < 0) return;
       contentStart++;
       var end = output.indexOf("```", contentStart);
-      blocks.add(
-          (end < 0 ? output.substring(contentStart) : output.substring(contentStart, end)).strip());
+      var candidate =
+          (end < 0 ? output.substring(contentStart) : output.substring(contentStart, end)).strip();
+      if (candidate.startsWith("{")) {
+        blocks.add(candidate);
+      }
     }
   }
 

@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Append-only revision journal for synced entities — the durability spine of the DB-sync design.
@@ -38,6 +39,15 @@ public final class ChangeLog {
       boolean deleted,
       String snapshot,
       String peer) {}
+
+  /**
+   * Runs {@code work} in one transaction on the journal's database, excluding every concurrent
+   * writer for the whole scope. The atomicity primitive behind {@code capture}/{@code
+   * adoptIfCurrent} in the sync replicas, which share this database with their stores.
+   */
+  public <T> T transaction(Supplier<T> work) {
+    return db.transaction(work);
+  }
 
   /** Appends a revision. {@code snapshot} is the entity's full state as JSON at this revision. */
   public void append(

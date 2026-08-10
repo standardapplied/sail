@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Adapts a box's {@link RunStore} to the sync roles, exactly as {@link SpecReplica} does for specs:
@@ -87,6 +88,11 @@ public final class RunReplica implements LocalReplica, MainReplica {
     return runs.findById(entityId)
         .map(run -> run.node() == null || run.node().isBlank() || handle.equals(run.node()))
         .orElse(true);
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

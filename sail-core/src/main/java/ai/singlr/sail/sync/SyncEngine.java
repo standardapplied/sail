@@ -82,15 +82,16 @@ public final class SyncEngine {
       String remoteRev,
       int redetectsLeft) {
     var base = local.base(id);
-    var localSnap = local.current(id);
-    var localRev = local.currentRev(id);
+    var captured = local.capture(id);
+    var localSnap = captured.snapshot();
+    var localRev = captured.rev();
     if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
       if (base == null) {
-        var changed = localSnap != null || !Objects.equals(local.currentRev(id), remoteRev);
-        if (changed) {
-          local.adopt(id, null, remoteRev);
+        if (localSnap == null && Objects.equals(localRev, remoteRev)) {
+          return Outcome.CONVERGED;
         }
-        return changed ? Outcome.PULLED : Outcome.CONVERGED;
+        return adoptOrRedetect(
+            local, main, id, localRev, null, remoteRev, Outcome.PULLED, redetectsLeft);
       }
       remoteSnap = null;
     }
@@ -103,23 +104,32 @@ public final class SyncEngine {
       return push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
     }
     return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
-      case ConflictDetector.Converged ignored -> {
-        linkSharedRevision(local, id, remoteSnap, remoteRev);
-        yield Outcome.CONVERGED;
-      }
-      case ConflictDetector.TakeRemote ignored -> {
-        local.adopt(id, remoteSnap, remoteRev);
-        yield Outcome.PULLED;
-      }
+      case ConflictDetector.Converged ignored ->
+          remoteRev == null || Objects.equals(localRev, remoteRev)
+              ? Outcome.CONVERGED
+              : adoptOrRedetect(
+                  local,
+                  main,
+                  id,
+                  localRev,
+                  remoteSnap,
+                  remoteRev,
+                  Outcome.CONVERGED,
+                  redetectsLeft);
+      case ConflictDetector.TakeRemote ignored ->
+          adoptOrRedetect(
+              local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
       case ConflictDetector.KeepLocal ignored ->
           local.mayPush(id)
               ? push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
-              : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
+              : adoptOrRedetect(
+                  local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
       case ConflictDetector.Merged m ->
           local.mayPush(id)
               ? push(
                   local, main, id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
-              : pullInsteadOfPush(local, id, remoteSnap, remoteRev);
+              : adoptOrRedetect(
+                  local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
       case ConflictDetector.Conflict c -> {
         local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
         yield Outcome.CONFLICT;
@@ -128,24 +138,33 @@ public final class SyncEngine {
   }
 
   /**
-   * The local diverged on an entity it may not push — a run it did not author. Discard the local
-   * divergence and adopt main's authoritative version, so a reader box converges instead of
-   * offering an un-owned push main would only reject.
-   */
-  private static Outcome pullInsteadOfPush(
-      LocalReplica local, String id, Map<String, Object> remoteSnap, String remoteRev) {
-    local.adopt(id, remoteSnap, remoteRev);
-    return Outcome.PULLED;
-  }
-
-  /**
-   * Commits the offered snapshot to main and, on acceptance, adopts it locally — but only if the
-   * local store still sits at the revision the snapshot was captured from. A local write landing
-   * during the commit round makes the accepted snapshot stale; adopting it would overwrite (and,
+   * Adopts an authoritative state, but only if the local row still sits at the revision the round's
+   * snapshot was captured from — check and adoption are one atomic replica operation. A local write
+   * landing anywhere in the round makes the adoption stale; adopting anyway would overwrite (and,
    * for aggregates, delete the non-replicated children of) the newer local state. Instead the
    * entity is re-reconciled against main's fresh state, so the newer local work pushes, merges, or
-   * parks as a conflict — never silently vanishes.
+   * parks as a conflict — never silently vanishes. The retry is bounded; past the budget the entity
+   * parks as a stale conflict with the local row untouched.
    */
+  private Outcome adoptOrRedetect(
+      LocalReplica local,
+      MainReplica main,
+      String id,
+      String expectedLocalRev,
+      Map<String, Object> snapshot,
+      String rev,
+      Outcome onAdopted,
+      int redetectsLeft) {
+    if (local.adoptIfCurrent(id, expectedLocalRev, snapshot, rev)) {
+      return onAdopted;
+    }
+    return redetectsLeft <= 0
+        ? recordStaleConflict(local, id, main.current(id))
+        : reconcileEntity(
+            local, main, id, main.current(id), main.currentRev(id), redetectsLeft - 1);
+  }
+
+  /** Commits the offered snapshot to main and, on acceptance, adopts it via the stale guard. */
   private Outcome push(
       LocalReplica local,
       MainReplica main,
@@ -156,15 +175,9 @@ public final class SyncEngine {
       Outcome onAccepted,
       int redetectsLeft) {
     return switch (main.commit(id, snapshot, expectedRev)) {
-      case CommitOutcome.Accepted a -> {
-        if (!Objects.equals(local.currentRev(id), offeredLocalRev)) {
-          yield redetectsLeft <= 0
-              ? recordStaleConflict(local, id, main.current(id))
-              : reconcileEntity(local, main, id, main.current(id), a.rev(), redetectsLeft - 1);
-        }
-        local.adopt(id, snapshot, a.rev());
-        yield onAccepted;
-      }
+      case CommitOutcome.Accepted a ->
+          adoptOrRedetect(
+              local, main, id, offeredLocalRev, snapshot, a.rev(), onAccepted, redetectsLeft);
       case CommitOutcome.Rejected r -> {
         if (redetectsLeft <= 0) {
           yield recordStaleConflict(local, id, r.currentSnapshot());
@@ -189,17 +202,5 @@ public final class SyncEngine {
             : List.of(STALE_FIELD);
     local.recordConflict(id, base, localSnap, remoteSnap, fields);
     return Outcome.CONFLICT;
-  }
-
-  /**
-   * When local and main already agree but local has not yet recorded main's revision (e.g. they
-   * independently reached identical content), adopt main's rev so both share a merge base going
-   * forward. A no-op once the revisions are linked, so it never churns.
-   */
-  private static void linkSharedRevision(
-      LocalReplica local, String id, Map<String, Object> remoteSnap, String remoteRev) {
-    if (remoteRev != null && !Objects.equals(local.currentRev(id), remoteRev)) {
-      local.adopt(id, remoteSnap, remoteRev);
-    }
   }
 }

@@ -154,6 +154,31 @@ class ReviewSyncTest {
             + " aggregate — the rebuild deletes the non-replicated finding rows");
   }
 
+  @Test
+  void syncRoundsRacingAConcurrentLocalWriterNeverLoseFindingRows() throws InterruptedException {
+    var reviewId = node.reviews.createReview("auth", 1);
+    var stageId = node.reviews.createStage(reviewId, "security", "agent");
+    node.reviews.startStage(stageId, "codex");
+    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+
+    var rounds = 25;
+    for (var round = 0; round < rounds; round++) {
+      var writer =
+          new Thread(() -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL)));
+      writer.start();
+      sync(node);
+      writer.join();
+    }
+    sync(node);
+
+    assertEquals(
+        1 + rounds,
+        node.reviews.findingsForStage(stageId).size(),
+        "snapshot capture and adoption must be atomic against concurrent local writes — a torn"
+            + " snapshot/revision pair or a write between the revision check and adoption"
+            + " rebuilds the aggregate and deletes the non-replicated finding rows");
+  }
+
   private MainReplica racingMain(Runnable onFirstCommit) {
     return new MainReplica() {
       private Runnable pending = onFirstCommit;
