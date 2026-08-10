@@ -224,7 +224,7 @@ class DispatchCommandTest {
             "1-a",
             null);
 
-    var prompt = AgentTaskPrompt.build(spec, "Implement the flow", List.of(message));
+    var prompt = AgentTaskPrompt.build(spec, "Implement the flow", List.of(message)).prompt();
 
     assertTrue(prompt.contains("## Conversation on this spec"));
     assertTrue(prompt.indexOf("Use PKCE") < prompt.indexOf("Implement the flow"));

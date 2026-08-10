@@ -241,16 +241,17 @@ public final class DispatchOperations {
   }
 
   /**
-   * Seeds the reserved run's delivery ledger with every message present at launch up to the newest
-   * one the task prompt rendered: the prompt is the run's first delivery, so nothing shown at
-   * launch is ever injected or stop-gated at it again — while a message that syncs in later stays
-   * owed a delivery regardless of how its id sorts.
+   * Seeds the reserved run's delivery ledger with exactly the messages the task prompt rendered in
+   * full — by identity, from the same in-memory snapshot the prompt was built from, never
+   * re-queried and never range-matched. The prompt is the run's first delivery; anything the budget
+   * truncated or omitted, and any message that syncs in at any point — regardless of how its id
+   * sorts — has no ledger row and stays owed a full delivery through the relay or the stop gate.
    */
-  private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> room) {
-    if (runStore == null || room.isEmpty()) {
+  private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> rendered) {
+    if (runStore == null || rendered.isEmpty()) {
       return;
     }
-    runStore.markDeliveredThrough(runId, room.getLast().specId(), room.getLast().id());
+    runStore.markDelivered(runId, rendered.stream().map(MessageStore.MessageRow::id).toList());
   }
 
   /**
@@ -292,8 +293,9 @@ public final class DispatchOperations {
         messageStore == null
             ? List.<MessageStore.MessageRow>of()
             : messageStore.list(nextSpec.id(), null, 20);
-    var task =
+    var built =
         AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room);
+    var task = built.prompt();
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
 
     if (request.dryRun()) {
@@ -339,7 +341,7 @@ public final class DispatchOperations {
             unit,
             loaded.config());
     try {
-      seedRoomDelivery(runId, room);
+      seedRoomDelivery(runId, built.renderedMessages());
       var prepared =
           claimAndPrepare(
               project,

@@ -1225,6 +1225,12 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress", List.of("api"));
     var messages = new MessageStore(db);
     var runStore = new RunStore(db);
+    var oversized =
+        messages.append(
+            "auth",
+            "uday",
+            "x".repeat(ai.singlr.sail.engine.PromptConversation.MAX_CODE_POINTS + 1_000),
+            null);
     var guidance = messages.append("auth", "uday", "the retry finding is intentional", null);
     var criticalOutput =
         """
@@ -1293,6 +1299,11 @@ class ReviewPipelineControllerTest {
       assertTrue(
           seeded.getFirst().contains(guidance.id()),
           "rendered messages count as delivered: the ledger seeds at fix launch");
+      assertFalse(
+          seeded.getFirst().contains(oversized.id()),
+          "delivery derives from presentation: a message the prompt budget truncated was never"
+              + " presented in full and stays owed a delivery through the relay or the stop"
+              + " gate");
     }
   }
 

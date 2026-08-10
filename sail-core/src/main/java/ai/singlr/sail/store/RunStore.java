@@ -379,22 +379,6 @@ public final class RunStore implements ConflictResolver {
         });
   }
 
-  /**
-   * Seeds the ledger at launch: every message of {@code specId} already present locally and minted
-   * at or before {@code messageId} — the newest message the launch prompt rendered — counts as
-   * delivered. A message that syncs in after this runs is absent from the ledger regardless of its
-   * mint time, so it still gets its mid-run delivery.
-   */
-  public void markDeliveredThrough(String id, String specId, String messageId) {
-    Ids.requireUuid(messageId);
-    db.execute(
-        "INSERT OR IGNORE INTO run_delivered_messages (run_id, message_id)"
-            + " SELECT ?, id FROM spec_messages WHERE spec_id = ? AND id <= ?",
-        id,
-        specId,
-        messageId);
-  }
-
   /** The run's delivery ledger — see {@link #markDelivered}. */
   public Set<String> deliveredMessageIds(String id) {
     return new LinkedHashSet<>(

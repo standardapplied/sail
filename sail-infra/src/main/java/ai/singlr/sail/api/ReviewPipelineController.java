@@ -614,7 +614,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     if (spec.isEmpty()) return;
 
     var room = roomMessages(specId);
-    var fixTask = FixTaskBuilder.build(specId, spec.get().title(), findings, room);
+    var built = FixTaskBuilder.build(specId, spec.get().title(), findings, room);
+    var fixTask = built.task();
     advanceSpec(specId, SpecStatus.IN_PROGRESS);
     publishEvent(project, specId, "review_iteration_started", null);
 
@@ -622,7 +623,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
           startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
-      seedRoomDelivery(reviewId, room);
+      seedRoomDelivery(reviewId, built.renderedMessages());
       agentRunner.runFix(
           project,
           agent,
@@ -687,17 +688,17 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   /**
-   * Seeds the fix run's delivery ledger with every message present at launch up to the newest one
-   * its task rendered: the fix prompt's conversation section is that run's first delivery, so
-   * launch-time messages are never injected or stop-gated at it again — while a message that syncs
-   * in later stays owed a delivery regardless of how its id sorts. Idempotent, so a later fix
-   * iteration only adds what is new.
+   * Seeds the fix run's delivery ledger with exactly the messages its task rendered in full — by
+   * identity, from the same in-memory snapshot the task was built from, never re-queried and never
+   * range-matched. Anything truncated, omitted, or synced in at any point — regardless of id order
+   * — has no ledger row and stays owed a full delivery. Idempotent, so a later fix iteration only
+   * adds what is new.
    */
-  private void seedRoomDelivery(String reviewId, List<MessageStore.MessageRow> room) {
-    if (runStore == null || room.isEmpty()) {
+  private void seedRoomDelivery(String reviewId, List<MessageStore.MessageRow> rendered) {
+    if (runStore == null || rendered.isEmpty()) {
       return;
     }
-    runStore.markDeliveredThrough(reviewId, room.getLast().specId(), room.getLast().id());
+    runStore.markDelivered(reviewId, rendered.stream().map(MessageStore.MessageRow::id).toList());
   }
 
   private void postRoom(String specId, String body) {

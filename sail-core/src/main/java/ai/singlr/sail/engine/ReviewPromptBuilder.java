@@ -141,6 +141,7 @@ public final class ReviewPromptBuilder {
     }
     return "Conversation on this spec:\n\n"
         + PromptConversation.renderNewest(
-            messages, message -> message.author() + ": " + message.body() + "\n\n");
+                messages, message -> message.author() + ": " + message.body() + "\n\n")
+            .text();
   }
 }

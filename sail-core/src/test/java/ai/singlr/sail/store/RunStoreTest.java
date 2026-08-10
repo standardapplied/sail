@@ -1376,38 +1376,22 @@ class RunStoreTest {
   }
 
   @Test
-  void markDeliveredThroughSeedsOnlyMessagesAlreadyPresentOnTheSpec() {
-    var id = newRun("backend", "auth");
-    var messages = new MessageStore(db);
-    var early = messages.append("auth", "ada", "one", null);
-    var rendered = messages.append("auth", "ada", "two", null);
-    messages.append("other", "ada", "elsewhere", null);
-    var afterPrompt = messages.append("auth", "ada", "three", null);
-
-    store.markDeliveredThrough(id, "auth", rendered.id());
-
-    assertEquals(
-        java.util.Set.of(early.id(), rendered.id()),
-        store.deliveredMessageIds(id),
-        "the seed covers the rendered room only: never another spec, never newer messages");
-    assertFalse(store.deliveredMessageIds(id).contains(afterPrompt.id()));
-  }
-
-  @Test
-  void aMessageSyncingInLateIsNotSweptIntoAnEarlierSeed() {
+  void seedingByExactIdentityNeverSweepsALateSyncingOlderMessage() {
     var id = newRun("backend", "auth");
     var messages = new MessageStore(db);
     var lateId = DateTimeUtils.newId().toString();
     var rendered = messages.append("auth", "ada", "rendered", null);
 
-    store.markDeliveredThrough(id, "auth", rendered.id());
+    store.markDelivered(id, List.of(rendered.id()));
     messages.applyRevision(
         lateId,
         java.util.Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
         "1-abc");
 
-    assertFalse(
-        store.deliveredMessageIds(id).contains(lateId),
-        "a message that arrives after the seed ran is still owed its delivery, whatever its id");
+    assertEquals(
+        java.util.Set.of(rendered.id()),
+        store.deliveredMessageIds(id),
+        "the seed is the exact ids the prompt rendered — a message syncing in later is never"
+            + " swept, even though its id sorts before the rendered one");
   }
 }
