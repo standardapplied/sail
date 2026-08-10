@@ -241,15 +241,16 @@ public final class DispatchOperations {
   }
 
   /**
-   * Seeds the reserved run's room-delivery watermark with the newest message the task prompt
-   * rendered: the prompt is the run's first delivery, so nothing shown at launch is ever injected
-   * or stop-gated at it again.
+   * Seeds the reserved run's delivery ledger with every message present at launch up to the newest
+   * one the task prompt rendered: the prompt is the run's first delivery, so nothing shown at
+   * launch is ever injected or stop-gated at it again — while a message that syncs in later stays
+   * owed a delivery regardless of how its id sorts.
    */
-  private void initDeliveryWatermark(String runId, List<MessageStore.MessageRow> room) {
+  private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> room) {
     if (runStore == null || room.isEmpty()) {
       return;
     }
-    runStore.advanceDeliveredMessage(runId, room.getLast().id());
+    runStore.markDeliveredThrough(runId, room.getLast().specId(), room.getLast().id());
   }
 
   /**
@@ -337,8 +338,8 @@ public final class DispatchOperations {
             task,
             unit,
             loaded.config());
-    initDeliveryWatermark(runId, room);
     try {
+      seedRoomDelivery(runId, room);
       var prepared =
           claimAndPrepare(
               project,

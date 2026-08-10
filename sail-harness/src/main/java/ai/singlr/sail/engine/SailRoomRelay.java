@@ -20,11 +20,12 @@ import java.util.concurrent.TimeoutException;
  * <p>The relay gates on {@code SAIL_RUN_ID} alone — the stop gate's env contract — so the fix lane
  * (run id, no {@code SAIL_SPEC_ID}) gets delivery while its event publishes stay silent, and
  * reviewer or engineer sessions, which carry no run id, are inert by construction. It asks {@code
- * GET /v1/run/messages} for messages newer than its run's delivery watermark; the server resolves
- * run → spec from the run credential, so the script never needs a spec id. Fresh messages are
- * acknowledged first ({@code POST delivered=<latest>}, advancing the watermark so the stop gate
- * agrees on what was seen) and then emitted as {@code hookSpecificOutput.additionalContext}, framed
- * per message as {@code [Room message from <author>, arrived while you were working]: <body>}.
+ * GET /v1/run/messages} for the run's undelivered messages; the server resolves run → spec from the
+ * run credential, so the script never needs a spec id. Fresh messages are acknowledged first by
+ * exact id ({@code POST delivered=<ids>}, joining the run's delivery ledger so the stop gate agrees
+ * on what was seen) and then emitted as {@code hookSpecificOutput.additionalContext}, framed per
+ * message as {@code [Room message from <author>, arrived while you were working]: <body>}. A capped
+ * batch simply leaves the rest undelivered for the next interval.
  *
  * <p>Fail-open and cheap by design: any missing tool, absent socket, API error, or failed
  * acknowledgement exits 0 silently — a chatty room or a down server must never break a build — and
@@ -50,8 +51,8 @@ public final class SailRoomRelay {
       # arrived mid-run into the agent's context via additionalContext. Gates on
       # SAIL_RUN_ID like the stop gate, so only sail-launched gated runs (dispatch
       # and the review fix lane) ever see a delivery; reviewer and engineer
-      # sessions are inert. Messages are acknowledged (watermark advance) before
-      # they are emitted, so the stop gate never re-delivers what landed here.
+      # sessions are inert. Messages are acknowledged by exact id before they
+      # are emitted, so the stop gate never re-delivers what landed here.
       # Every unexpected condition exits 0 silently: delivery is best-effort and
       # must never break a build. An interval stamp under the run dir keeps the
       # relay to at most one API round-trip per __CHECK_INTERVAL__ seconds.
@@ -82,19 +83,20 @@ public final class SailRoomRelay {
         http://sail/v1/run/messages 2>/dev/null || true)"
       [ -n "$INBOX" ] || exit 0
 
-      LATEST="$(printf '%s' "$INBOX" | python3 -c '
+      IDS="$(printf '%s' "$INBOX" | python3 -c '
       import json, sys
       try:
-          print(json.load(sys.stdin).get("latest") or "")
+          messages = json.load(sys.stdin).get("messages") or []
+          print(",".join(m["id"] for m in messages if m.get("id")))
       except Exception:
           pass
       ' 2>/dev/null || true)"
-      [ -n "$LATEST" ] || exit 0
+      [ -n "$IDS" ] || exit 0
 
       ACK="$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 5 \\
         --unix-socket "$SOCKET" \\
         -H "Authorization: Bearer $CREDENTIAL" \\
-        -X POST --data-urlencode "delivered=$LATEST" \\
+        -X POST --data-urlencode "delivered=$IDS" \\
         http://sail/v1/run/messages 2>/dev/null || true)"
       [ "$ACK" = "200" ] || exit 0
 

@@ -12,6 +12,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -355,35 +356,52 @@ public final class RunStore implements ConflictResolver {
   }
 
   /**
-   * The run's room-delivery watermark: the id of the newest spec-room message this run has been
-   * shown, or empty when nothing was ever delivered. Node-local operational state — the column
-   * never joins {@link #comparableSnapshot}, a journaled revision, or a sync write, mirroring the
-   * local-only {@code run_credentials} table, so delivery bookkeeping can never churn revisions or
+   * Records that the run was shown exactly these spec-room messages, one ledger row per (run,
+   * message). Delivery is tracked by identity, never by a high-water id: messages sync between
+   * boxes, so an older-id message can land locally after newer messages were already delivered — it
+   * simply has no ledger row yet and is still owed a delivery. Idempotent ({@code INSERT OR
+   * IGNORE}), so a replayed acknowledgement is a no-op. Node-local operational state mirroring the
+   * local-only {@code run_credentials} table: the ledger never joins {@link #comparableSnapshot}, a
+   * journaled revision, or a sync write, so delivery bookkeeping can never churn revisions or
    * conflict across boxes.
    */
-  public Optional<String> deliveredMessageId(String id) {
-    return db.queryOne(
-            "SELECT delivered_message_id FROM runs WHERE id = ?",
-            row -> Objects.toString(row.text(0), ""),
-            id)
-        .filter(value -> !Strings.isBlank(value));
+  public void markDelivered(String id, Collection<String> messageIds) {
+    messageIds.forEach(Ids::requireUuid);
+    db.transaction(
+        () -> {
+          for (var messageId : messageIds) {
+            db.execute(
+                "INSERT OR IGNORE INTO run_delivered_messages (run_id, message_id) VALUES (?, ?)",
+                id,
+                messageId);
+          }
+          return null;
+        });
   }
 
   /**
-   * Advances the delivery watermark to {@code messageId}, forward-only: message ids are UUIDv7
-   * strings whose lexicographic order is mint order, so the guarded UPDATE is a compare-and-set
-   * that ignores stale or replayed acks. Returns whether the watermark moved. Records no revision —
-   * see {@link #deliveredMessageId}.
+   * Seeds the ledger at launch: every message of {@code specId} already present locally and minted
+   * at or before {@code messageId} — the newest message the launch prompt rendered — counts as
+   * delivered. A message that syncs in after this runs is absent from the ledger regardless of its
+   * mint time, so it still gets its mid-run delivery.
    */
-  public boolean advanceDeliveredMessage(String id, String messageId) {
+  public void markDeliveredThrough(String id, String specId, String messageId) {
     Ids.requireUuid(messageId);
     db.execute(
-        "UPDATE runs SET delivered_message_id = ? WHERE id = ?"
-            + " AND (delivered_message_id IS NULL OR delivered_message_id < ?)",
-        messageId,
+        "INSERT OR IGNORE INTO run_delivered_messages (run_id, message_id)"
+            + " SELECT ?, id FROM spec_messages WHERE spec_id = ? AND id <= ?",
         id,
+        specId,
         messageId);
-    return db.changes() > 0;
+  }
+
+  /** The run's delivery ledger — see {@link #markDelivered}. */
+  public Set<String> deliveredMessageIds(String id) {
+    return new LinkedHashSet<>(
+        db.query(
+            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? ORDER BY message_id",
+            row -> row.text(0),
+            id));
   }
 
   /**

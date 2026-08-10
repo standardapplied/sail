@@ -622,7 +622,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
           startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask);
-      initDeliveryWatermark(reviewId, room);
+      seedRoomDelivery(reviewId, room);
       agentRunner.runFix(
           project,
           agent,
@@ -687,15 +687,17 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   /**
-   * Seeds the fix run's room-delivery watermark with the newest message its task rendered: the fix
-   * prompt's conversation section is that run's first delivery, so launch-time messages are never
-   * injected or stop-gated at it again. Forward-only, so a later fix iteration only moves it ahead.
+   * Seeds the fix run's delivery ledger with every message present at launch up to the newest one
+   * its task rendered: the fix prompt's conversation section is that run's first delivery, so
+   * launch-time messages are never injected or stop-gated at it again — while a message that syncs
+   * in later stays owed a delivery regardless of how its id sorts. Idempotent, so a later fix
+   * iteration only adds what is new.
    */
-  private void initDeliveryWatermark(String reviewId, List<MessageStore.MessageRow> room) {
+  private void seedRoomDelivery(String reviewId, List<MessageStore.MessageRow> room) {
     if (runStore == null || room.isEmpty()) {
       return;
     }
-    runStore.advanceDeliveredMessage(reviewId, room.getLast().id());
+    runStore.markDeliveredThrough(reviewId, room.getLast().specId(), room.getLast().id());
   }
 
   private void postRoom(String specId, String body) {

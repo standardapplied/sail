@@ -1286,13 +1286,13 @@ class ReviewPipelineControllerTest {
           "human guidance on disputed findings reaches the fix turn");
       var seeded =
           runStore.listForSpec("auth").stream()
-              .map(run -> runStore.deliveredMessageId(run.id()))
-              .flatMap(java.util.Optional::stream)
+              .map(run -> runStore.deliveredMessageIds(run.id()))
+              .filter(ids -> !ids.isEmpty())
               .toList();
-      assertEquals(1, seeded.size(), "exactly the fix run carries a seeded watermark");
+      assertEquals(1, seeded.size(), "exactly the fix run carries a seeded delivery ledger");
       assertTrue(
-          seeded.getFirst().compareTo(guidance.id()) >= 0,
-          "rendered messages count as delivered: the watermark seeds at fix launch");
+          seeded.getFirst().contains(guidance.id()),
+          "rendered messages count as delivered: the ledger seeds at fix launch");
     }
   }
 

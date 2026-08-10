@@ -28,8 +28,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The run-delivery lane on real stores: the inbox is the spec room minus what the run was already
- * shown and what it said itself, and the watermark only ever moves forward, scoped by the run's own
- * spec.
+ * shown and what it said itself, tracked by exact message identity and scoped by the run's own spec
+ * — so a message that synchronizes in late is still delivered, whatever its id.
  */
 class RunDeliveryOperationsTest {
 
@@ -101,21 +101,21 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
-  void inboxListsUndeliveredForeignMessagesAndNamesTheNewestConsidered() {
+  void inboxListsUndeliveredForeignMessagesOnly() {
     var fromAda = messages.append("room", "ada", "please rename the flag", null);
-    var own = messages.append("room", principal, "on it", null);
+    messages.append("room", principal, "on it", null);
 
     var inbox = operations.runInbox(runId).orThrow();
 
     assertEquals(runId, inbox.runId());
     assertEquals("room", inbox.specId());
     assertEquals(List.of(fromAda.id()), inbox.messages().stream().map(m -> m.id()).toList());
-    assertEquals(own.id(), inbox.latest(), "own posts count toward the ack, never the delivery");
+    assertFalse(inbox.hasMore());
 
     var map = inbox.toMap();
     assertEquals(runId, map.get("run_id"));
     assertEquals("room", map.get("spec_id"));
-    assertEquals(own.id(), map.get("latest"));
+    assertEquals(false, map.get("has_more"));
   }
 
   @Test
@@ -123,8 +123,48 @@ class RunDeliveryOperationsTest {
     var inbox = operations.runInbox(runId).orThrow();
 
     assertTrue(inbox.messages().isEmpty());
-    assertNull(inbox.latest());
-    assertFalse(inbox.toMap().containsKey("latest"));
+    assertFalse(inbox.hasMore());
+  }
+
+  @Test
+  void aCappedInboxReportsThatMoreRemainAndLaterPagesFollowAcknowledgement() {
+    for (var i = 0; i < 21; i++) {
+      messages.append("room", "ada", "message " + i, null);
+    }
+
+    var first = operations.runInbox(runId).orThrow();
+    assertEquals(20, first.messages().size());
+    assertTrue(first.hasMore(), "the 21st message must be visible as more-to-read, never lost");
+
+    operations.ackRunMessages(runId, first.messages().stream().map(m -> m.id()).toList()).orThrow();
+
+    var second = operations.runInbox(runId).orThrow();
+    assertEquals(1, second.messages().size());
+    assertFalse(second.hasMore());
+    assertEquals("message 20", second.messages().getFirst().body());
+  }
+
+  @Test
+  void aMessageSyncingInWithAnOlderIdIsStillDelivered() {
+    var oldId = DateTimeUtils.newId().toString();
+    var newer = messages.append("room", "ada", "delivered first", null);
+    operations.ackRunMessages(runId, List.of(newer.id())).orThrow();
+    assertTrue(operations.runInbox(runId).orThrow().messages().isEmpty());
+
+    messages.applyRevision(
+        oldId,
+        java.util.Map.of(
+            "spec_id", "room",
+            "author", "ada",
+            "body", "minted before, synced after",
+            "created_at", "now"),
+        "1-abc");
+
+    var inbox = operations.runInbox(runId).orThrow();
+    assertEquals(
+        List.of(oldId),
+        inbox.messages().stream().map(m -> m.id()).toList(),
+        "delivery is identity, not id order: a late-synced older message is still owed a reading");
   }
 
   @Test
@@ -158,37 +198,46 @@ class RunDeliveryOperationsTest {
         ErrorCode.RUN_NOT_FOUND, operations.runInbox("missing-run").asFailure().errorCode());
     assertEquals(
         ErrorCode.RUN_NOT_FOUND,
-        operations.advanceRunWatermark("missing-run", "x").asFailure().errorCode());
+        operations.ackRunMessages("missing-run", List.of("x")).asFailure().errorCode());
   }
 
   @Test
-  void acknowledgingAdvancesTheWatermarkAndEmptiesTheInbox() {
+  void acknowledgingExactIdsEmptiesTheInboxAndReplaysAreNoOps() {
     var first = messages.append("room", "ada", "one", null);
     var second = messages.append("room", "ada", "two", null);
 
-    var acked = operations.advanceRunWatermark(runId, second.id()).orThrow();
-    assertEquals(second.id(), acked.delivered());
-    assertEquals(second.id(), acked.toMap().get("delivered"));
+    var acked = operations.ackRunMessages(runId, List.of(first.id(), second.id())).orThrow();
+    assertEquals(2, acked.acked());
+    assertEquals(2, acked.toMap().get("acked"));
 
     assertTrue(operations.runInbox(runId).orThrow().messages().isEmpty());
 
-    var stale = operations.advanceRunWatermark(runId, first.id()).orThrow();
-    assertEquals(
-        second.id(), stale.delivered(), "a stale ack is an idempotent no-op, never a rewind");
+    var replay = operations.ackRunMessages(runId, List.of(first.id())).orThrow();
+    assertEquals(1, replay.acked(), "a replayed ack is an idempotent no-op, never an error");
+    assertTrue(operations.runInbox(runId).orThrow().messages().isEmpty());
   }
 
   @Test
-  void theWatermarkOnlyAcceptsMessagesOnTheRunsOwnSpec() {
+  void theAcknowledgementOnlyAcceptsMessagesOnTheRunsOwnSpec() {
     var foreign = messages.append("other", "ada", "wrong room", null);
+    var own = messages.append("room", "ada", "right room", null);
 
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.advanceRunWatermark(runId, foreign.id()).asFailure().errorCode());
-    assertEquals(
-        ErrorCode.BAD_REQUEST, operations.advanceRunWatermark(runId, null).asFailure().errorCode());
+        operations.ackRunMessages(runId, List.of(foreign.id())).asFailure().errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.advanceRunWatermark(runId, "not-a-message").asFailure().errorCode());
+        operations.ackRunMessages(runId, List.of(own.id(), foreign.id())).asFailure().errorCode(),
+        "one off-spec id refuses the whole batch");
+    assertEquals(
+        ErrorCode.BAD_REQUEST, operations.ackRunMessages(runId, List.of()).asFailure().errorCode());
+    assertEquals(
+        ErrorCode.BAD_REQUEST,
+        operations.ackRunMessages(runId, List.of("not-a-message")).asFailure().errorCode());
+    assertEquals(
+        1,
+        operations.runInbox(runId).orThrow().messages().size(),
+        "a refused batch marks nothing delivered");
   }
 
   @Test

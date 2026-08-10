@@ -369,12 +369,12 @@ class TestOperations implements Operations {
                     "please also update the docs",
                     null,
                     "2026-07-28T00:01:00Z")),
-            "01900000-0000-7000-8000-000000000002"));
+            false));
   }
 
   @Override
-  public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
-    return Result.success(new RunWatermarkResponse(runId, delivered));
+  public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
+    return Result.success(new RunAckResponse(runId, delivered.size()));
   }
 
   @Override

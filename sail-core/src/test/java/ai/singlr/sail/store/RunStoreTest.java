@@ -1333,46 +1333,64 @@ class RunStoreTest {
   }
 
   @Test
-  void deliveredMessageAdvancesForwardOnlyWithoutChurningRevisions() {
+  void deliveryLedgerTracksExactIdsIdempotentlyWithoutChurningRevisions() {
     var id = newRun("backend", "auth");
     var revBefore = store.latestRev(id);
     var first = DateTimeUtils.newId().toString();
     var second = DateTimeUtils.newId().toString();
-    assertTrue(second.compareTo(first) > 0, "UUIDv7 ids must order by mint time");
 
-    assertTrue(store.advanceDeliveredMessage(id, first));
-    assertEquals(first, store.deliveredMessageId(id).orElseThrow());
-    assertTrue(store.advanceDeliveredMessage(id, second));
-    assertFalse(
-        store.advanceDeliveredMessage(id, first), "a stale ack never moves the watermark back");
-    assertEquals(second, store.deliveredMessageId(id).orElseThrow());
-
-    assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
-    assertFalse(
-        store.comparableSnapshot(id).containsKey("delivered_message_id"),
-        "the watermark is node-local operational state and never joins the sync snapshot");
-  }
-
-  @Test
-  void deliveredMessageIsEmptyForUnknownOrUndeliveredRunsAndValidatesIds() {
-    assertTrue(store.deliveredMessageId("nope").isEmpty());
-    var id = newRun("backend", "auth");
-    assertTrue(store.deliveredMessageId(id).isEmpty());
-    assertThrows(
-        IllegalArgumentException.class, () -> store.advanceDeliveredMessage(id, "not-a-uuid"));
-  }
-
-  @Test
-  void deliveredMessageSurvivesSyncAdoptionOfTheSameRun() {
-    var id = newRun("backend", "auth");
-    var mid = DateTimeUtils.newId().toString();
-    store.advanceDeliveredMessage(id, mid);
-
-    store.applyRevision(id, store.comparableSnapshot(id), "2-remote");
+    store.markDelivered(id, List.of(first, second));
+    store.markDelivered(id, List.of(first));
 
     assertEquals(
-        mid,
-        store.deliveredMessageId(id).orElseThrow(),
-        "a sync adoption converges the shared fields without clobbering local delivery state");
+        java.util.Set.of(first, second),
+        store.deliveredMessageIds(id),
+        "a replayed acknowledgement is a no-op, never an error");
+    assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
+  }
+
+  @Test
+  void deliveryLedgerIsEmptyForUnknownOrUndeliveredRunsAndValidatesIds() {
+    assertTrue(store.deliveredMessageIds("nope").isEmpty());
+    var id = newRun("backend", "auth");
+    assertTrue(store.deliveredMessageIds(id).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class, () -> store.markDelivered(id, List.of("not-a-uuid")));
+  }
+
+  @Test
+  void markDeliveredThroughSeedsOnlyMessagesAlreadyPresentOnTheSpec() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var early = messages.append("auth", "ada", "one", null);
+    var rendered = messages.append("auth", "ada", "two", null);
+    messages.append("other", "ada", "elsewhere", null);
+    var afterPrompt = messages.append("auth", "ada", "three", null);
+
+    store.markDeliveredThrough(id, "auth", rendered.id());
+
+    assertEquals(
+        java.util.Set.of(early.id(), rendered.id()),
+        store.deliveredMessageIds(id),
+        "the seed covers the rendered room only: never another spec, never newer messages");
+    assertFalse(store.deliveredMessageIds(id).contains(afterPrompt.id()));
+  }
+
+  @Test
+  void aMessageSyncingInLateIsNotSweptIntoAnEarlierSeed() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var lateId = DateTimeUtils.newId().toString();
+    var rendered = messages.append("auth", "ada", "rendered", null);
+
+    store.markDeliveredThrough(id, "auth", rendered.id());
+    messages.applyRevision(
+        lateId,
+        java.util.Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
+        "1-abc");
+
+    assertFalse(
+        store.deliveredMessageIds(id).contains(lateId),
+        "a message that arrives after the seed ran is still owed its delivery, whatever its id");
   }
 }

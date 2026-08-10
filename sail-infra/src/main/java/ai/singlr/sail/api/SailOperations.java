@@ -1161,39 +1161,43 @@ public final class SailOperations implements Operations {
         () -> {
           var run = requireRun(runId);
           if (Strings.isBlank(run.specId())) {
-            return new RunInboxResponse(runId, null, List.of(), null);
+            return new RunInboxResponse(runId, null, List.of(), false);
           }
           var store = requireMessageStore();
-          var watermark = runStore.deliveredMessageId(runId).orElse(null);
-          var batch = store.listAfter(run.specId(), watermark, INBOX_LIMIT);
-          var fresh =
-              batch.stream()
-                  .filter(row -> !row.author().equals(run.principal()))
-                  .map(SpecMessageView::from)
-                  .toList();
-          var latest = batch.isEmpty() ? null : batch.getLast().id();
-          return new RunInboxResponse(runId, run.specId(), fresh, latest);
+          var fetched =
+              store.listUndelivered(
+                  run.specId(), runId, Objects.toString(run.principal(), ""), INBOX_LIMIT + 1);
+          var hasMore = fetched.size() > INBOX_LIMIT;
+          var fresh = fetched.stream().limit(INBOX_LIMIT).map(SpecMessageView::from).toList();
+          return new RunInboxResponse(runId, run.specId(), fresh, hasMore);
         });
   }
 
   @Override
-  public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
+  public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
     return safeWrite(
         () -> {
           var run = requireRun(runId);
-          var onSpec =
-              !Strings.isBlank(delivered)
-                  && requireMessageStore()
-                      .findById(delivered)
-                      .filter(message -> message.specId().equals(run.specId()))
-                      .isPresent();
-          if (!onSpec) {
+          if (delivered.isEmpty()) {
             throw new ApiException(
-                ErrorCode.BAD_REQUEST,
-                "delivered must name a message on spec '" + run.specId() + "'.");
+                ErrorCode.BAD_REQUEST, "delivered must name at least one message id.");
           }
-          runStore.advanceDeliveredMessage(runId, delivered);
-          return new RunWatermarkResponse(runId, runStore.deliveredMessageId(runId).orElse(null));
+          var store = requireMessageStore();
+          for (var messageId : delivered) {
+            var onSpec =
+                !Strings.isBlank(messageId)
+                    && store
+                        .findById(messageId)
+                        .filter(message -> message.specId().equals(run.specId()))
+                        .isPresent();
+            if (!onSpec) {
+              throw new ApiException(
+                  ErrorCode.BAD_REQUEST,
+                  "delivered must name messages on spec '" + run.specId() + "'.");
+            }
+          }
+          runStore.markDelivered(runId, delivered);
+          return new RunAckResponse(runId, delivered.size());
         });
   }
 

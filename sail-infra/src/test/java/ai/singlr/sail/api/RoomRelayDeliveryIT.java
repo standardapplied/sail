@@ -126,9 +126,8 @@ class RoomRelayDeliveryIT {
                 "[Room message from ada, arrived while you were working]: also update the docs,"
                     + " please"),
         relay.stdout());
-    assertEquals(
-        posted.id(),
-        runStore.deliveredMessageId(runId).orElseThrow(),
+    assertTrue(
+        runStore.deliveredMessageIds(runId).contains(posted.id()),
         "the relay acknowledged what it delivered");
 
     var gate = runScript(gateScript(), "{\"stop_hook_active\": false}");
@@ -147,7 +146,7 @@ class RoomRelayDeliveryIT {
 
     assertEquals(0, relay.exitCode(), "a down API must never break a build");
     assertEquals("", relay.stdout());
-    assertTrue(runStore.deliveredMessageId(runId).isEmpty(), "nothing was delivered");
+    assertTrue(runStore.deliveredMessageIds(runId).isEmpty(), "nothing was delivered");
   }
 
   private Path relayScript() throws IOException {

@@ -1513,8 +1513,8 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RunWatermarkResponse> advanceRunWatermark(String runId, String delivered) {
-      return new TestOperations().advanceRunWatermark(runId, delivered);
+    public Result<RunAckResponse> ackRunMessages(String runId, java.util.List<String> delivered) {
+      return new TestOperations().ackRunMessages(runId, delivered);
     }
 
     @Override

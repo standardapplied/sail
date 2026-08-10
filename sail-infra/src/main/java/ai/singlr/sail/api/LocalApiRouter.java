@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -265,7 +266,7 @@ final class LocalApiRouter implements LocalApiHandler {
         var after = request.query().get("after");
         var result =
             operations.specMessages(id, before, after, clampedLimit(request.query().get("limit")));
-        markDeliveredOnSelfRead(caller, id, before, after, result);
+        markDeliveredOnSelfRead(caller, id, result);
         yield ApiResponse.from(result);
       }
       case "POST" -> {
@@ -282,33 +283,28 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * A run reading the newest page of its own spec's room is a delivery: everything the page showed
-   * needs no mid-run injection or stop-gate last look, so the watermark advances to the newest
-   * message returned. Paged reads ({@code before}/{@code after}) are not the newest page and leave
-   * the watermark alone.
+   * A run reading a page of its own spec's room is a delivery of exactly what the page showed:
+   * those messages need no mid-run injection or stop-gate last look, so their identities join the
+   * run's delivery ledger — and nothing else does, so a message the page's limit omitted is still
+   * owed its delivery.
    */
   private void markDeliveredOnSelfRead(
-      Caller caller,
-      String specId,
-      String before,
-      String after,
-      Result<SpecMessagesResponse> result) {
+      Caller caller, String specId, Result<SpecMessagesResponse> result) {
     if (!(caller instanceof Caller.Run(var run))
-        || before != null
-        || after != null
         || !specId.equals(run.specId())
         || !(result instanceof Result.Success<SpecMessagesResponse>(var response, var ignored))
         || response.messages().isEmpty()) {
       return;
     }
-    operations.advanceRunWatermark(run.id(), response.messages().getLast().id());
+    operations.ackRunMessages(
+        run.id(), response.messages().stream().map(SpecMessageView::id).toList());
   }
 
   /**
    * The run-scoped delivery lane: the relay and the stop gate know only their run credential — the
    * fix lane deliberately carries no {@code SAIL_SPEC_ID} — so the credential names the run and the
-   * run names the spec. {@code GET} reads the undelivered inbox; {@code POST} acknowledges it by
-   * advancing the delivery watermark ({@code delivered=<message-id>}, forward-only).
+   * run names the spec. {@code GET} reads the undelivered inbox; {@code POST} acknowledges exactly
+   * the messages the caller showed ({@code delivered=<id>[,<id>...]}, idempotent).
    */
   private ApiResponse runMessages(LocalApiRequest request, Caller caller) {
     if (!(caller instanceof Caller.Run(var run))) {
@@ -321,9 +317,16 @@ final class LocalApiRouter implements LocalApiHandler {
       case "GET" -> ApiResponse.from(operations.runInbox(run.id()));
       case "POST" ->
           ApiResponse.from(
-              operations.advanceRunWatermark(run.id(), request.form().get("delivered")));
+              operations.ackRunMessages(run.id(), deliveredIds(request.form().get("delivered"))));
       default -> problem(405, "run messages accepts GET or POST");
     };
+  }
+
+  private static List<String> deliveredIds(String value) {
+    if (Strings.isBlank(value)) {
+      return List.of();
+    }
+    return Arrays.stream(value.split(",")).map(String::strip).filter(id -> !id.isEmpty()).toList();
   }
 
   private static int clampedLimit(String value) {

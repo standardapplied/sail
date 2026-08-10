@@ -871,7 +871,8 @@ record SpecMessagesResponse(String specId, List<SpecMessageView> messages) imple
   }
 }
 
-record RunInboxResponse(String runId, String specId, List<SpecMessageView> messages, String latest)
+record RunInboxResponse(
+    String runId, String specId, List<SpecMessageView> messages, boolean hasMore)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -881,21 +882,17 @@ record RunInboxResponse(String runId, String specId, List<SpecMessageView> messa
       map.put("spec_id", specId);
     }
     map.put("messages", messages);
-    if (latest != null) {
-      map.put("latest", latest);
-    }
+    map.put("has_more", hasMore);
     return map;
   }
 }
 
-record RunWatermarkResponse(String runId, String delivered) implements Mappable {
+record RunAckResponse(String runId, int acked) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("run_id", runId);
-    if (delivered != null) {
-      map.put("delivered", delivered);
-    }
+    map.put("acked", acked);
     return map;
   }
 }

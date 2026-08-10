@@ -494,6 +494,71 @@ class SailStopGateTest {
   }
 
   @Test
+  void aFailedAcknowledgementNeverBlocksNorSpendsTheMarkerAndRetriesLater() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "still there?"}]}""");
+    Files.writeString(home.resolve("ack.code"), "500");
+    try (var bound = bind()) {
+      var failed = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      assertEquals("", failed.stdout(), "an unacknowledged message must not block: fail open");
+      assertFalse(
+          Files.exists(roomMarker()),
+          "a failed ack spends nothing — delivery state and the block must never disagree");
+
+      Files.deleteIfExists(home.resolve("ack.code"));
+      var retried = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+      var reason = blockReason(retried);
+      assertTrue(reason.contains("from uday: still there?"), reason);
+      assertTrue(Files.exists(roomMarker()), "the successful retry delivers and blocks once");
+    }
+  }
+
+  @Test
+  void anOverflowingInboxTellsTheAgentToReadTheRestOfTheRoom() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "first of many"}], "has_more": true}""");
+    try (var bound = bind()) {
+      var reason = blockReason(runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test"));
+
+      assertTrue(reason.contains("from uday: first of many"), reason);
+      assertTrue(
+          reason.contains("More messages are waiting beyond this batch"),
+          "a capped inbox must never read as fully delivered: " + reason);
+    }
+  }
+
+  @Test
+  void maximumSizeRoomMessagesStillEmitTheBlockJson() throws Exception {
+    var repo = repo("api");
+    pushToFreshOrigin(repo, "main");
+    var body = "x".repeat(65536);
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "%s"},
+          {"id": "m2", "author": "ada", "body": "%s"}]}"""
+            .formatted(body, body));
+    try (var bound = bind()) {
+      var reason = blockReason(runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test"));
+
+      assertTrue(
+          reason.length() > 131072,
+          "two max-size bodies exceed the kernel's per-argument exec limit; the block JSON must"
+              + " survive them via stdin");
+      assertTrue(reason.contains("from uday: " + body.substring(0, 64)), "bodies stay intact");
+    }
+  }
+
+  @Test
   void aMessageArrivingAfterAGitNudgeStillGetsItsOneBlock() throws Exception {
     var repo = repo("api");
     pushToFreshOrigin(repo, "main");
@@ -502,7 +567,7 @@ class SailStopGateTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m2", "author": "ada", "body": "wait, hold the merge"}], "latest": "m2"}""");
+          {"id": "m2", "author": "ada", "body": "wait, hold the merge"}]}""");
     try (var bound = bind()) {
       var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
 
@@ -518,7 +583,7 @@ class SailStopGateTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m3", "author": "uday", "body": "check the retries"}], "latest": "m3"}""");
+          {"id": "m3", "author": "uday", "body": "check the retries"}]}""");
     try (var bound = bind()) {
       var first = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
 
@@ -557,7 +622,7 @@ class SailStopGateTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m4", "author": "uday", "body": "anyone there?"}], "latest": "m4"}""");
+          {"id": "m4", "author": "uday", "body": "anyone there?"}]}""");
 
     var withoutCredential = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), null);
     assertEquals("", withoutCredential.stdout(), "no credential, no room check: fail open");
@@ -590,7 +655,7 @@ class SailStopGateTest {
         #!/bin/sh
         printf '%s\\n' "$*" >> "$HOME/curl.log"
         case "$*" in
-          *"-X POST"*) ;;
+          *"-X POST"*) cat "$HOME/ack.code" 2>/dev/null || printf '%s' "200" ;;
           *) cat "$HOME/inbox.json" 2>/dev/null ;;
         esac
         exit 0

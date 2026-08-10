@@ -60,8 +60,7 @@ class SailRoomRelayTest {
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
           {"id": "m1", "author": "uday", "body": "please also update the docs"},
-          {"id": "m2", "author": "ada", "body": "and rename the flag"}],
-         "latest": "m2"}""");
+          {"id": "m2", "author": "ada", "body": "and rename the flag"}]}""");
     try (var bound = bind()) {
       var result = runRelay(RUN_ID, CREDENTIAL, fakeCurl());
 
@@ -85,7 +84,9 @@ class SailRoomRelayTest {
       assertEquals(2, calls.size(), "one inbox read, one acknowledgement");
       assertFalse(calls.get(0).contains("-X POST"));
       assertTrue(calls.get(1).contains("-X POST"));
-      assertTrue(calls.get(1).contains("delivered=m2"), "the ack names the newest id considered");
+      assertTrue(
+          calls.get(1).contains("delivered=m1,m2"),
+          "the ack names exactly the ids delivered, never more");
       assertTrue(
           Files.exists(runDir().resolve("room-relay-checked")),
           "the interval stamp records the check");
@@ -93,14 +94,19 @@ class SailRoomRelayTest {
   }
 
   @Test
-  void anInboxOfOnlyOwnAuthoredMessagesIsAcknowledgedSilently() throws Exception {
-    inbox("{\"run_id\": \"run-1\", \"spec_id\": \"auth\", \"messages\": [], \"latest\": \"m9\"}");
+  void aCappedBatchDeliversAndAcksOnlyItsOwnIds() throws Exception {
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "first of many"}], "has_more": true}""");
     try (var bound = bind()) {
       var result = runRelay(RUN_ID, CREDENTIAL, fakeCurl());
 
       assertEquals(0, result.exitCode());
-      assertEquals("", result.stdout(), "nothing to say: a run is never told its own story");
-      assertTrue(curlLog().get(1).contains("delivered=m9"), "the watermark still passes own posts");
+      assertTrue(result.stdout().contains("first of many"), result.stdout());
+      assertTrue(
+          curlLog().get(1).contains("delivered=m1"),
+          "the rest stays undelivered for the next interval");
     }
   }
 
@@ -112,7 +118,7 @@ class SailRoomRelayTest {
 
       assertEquals(0, result.exitCode());
       assertEquals("", result.stdout());
-      assertEquals(1, curlLog().size(), "no latest means nothing to acknowledge");
+      assertEquals(1, curlLog().size(), "no fresh ids means nothing to acknowledge");
     }
   }
 
@@ -131,7 +137,7 @@ class SailRoomRelayTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m1", "author": "uday", "body": "hello"}], "latest": "m1"}""");
+          {"id": "m1", "author": "uday", "body": "hello"}]}""");
     try (var bound = bind()) {
       var result = runRelay(RUN_ID, CREDENTIAL, fakeCurl(), Map.of("FAKE_ACK", "500"));
 
@@ -160,7 +166,7 @@ class SailRoomRelayTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m1", "author": "uday", "body": "hello"}], "latest": "m1"}""");
+          {"id": "m1", "author": "uday", "body": "hello"}]}""");
     Files.createDirectories(runDir());
     Files.writeString(
         runDir().resolve("room-relay-checked"), Long.toString(Instant.now().getEpochSecond()));
@@ -191,7 +197,7 @@ class SailRoomRelayTest {
     inbox(
         """
         {"run_id": "run-1", "spec_id": "auth", "messages": [
-          {"id": "m1", "author": "uday", "body": "hello"}], "latest": "m1"}""");
+          {"id": "m1", "author": "uday", "body": "hello"}]}""");
     try (var bound = bind()) {
       var result = runRelay(null, CREDENTIAL, fakeCurl());
 

@@ -111,7 +111,8 @@ public final class MessageStore {
   /**
    * Messages of {@code specId} strictly newer than {@code after} (a message id, or null for all),
    * oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id > ?} is mint-time
-   * order — the primitive behind the run delivery watermark.
+   * order — a forward paging cursor for room reads. Not a delivery primitive: mint order is not
+   * arrival order across synced boxes, so delivery goes through {@link #listUndelivered}.
    */
   public List<MessageRow> listAfter(String specId, String after, int limit) {
     if (after != null) {
@@ -134,6 +135,31 @@ public final class MessageStore {
         MessageStore::map,
         specId,
         after,
+        limit);
+  }
+
+  /**
+   * Messages of {@code specId} absent from {@code runId}'s delivery ledger and not authored by
+   * {@code excludeAuthor} (a run is never told its own story), oldest first, capped at {@code
+   * limit}. Delivery is by exact identity, so a message that synchronized in with an older id after
+   * newer messages were already delivered still appears here.
+   */
+  public List<MessageRow> listUndelivered(
+      String specId, String runId, String excludeAuthor, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM spec_messages WHERE spec_id = ? AND author != ?"
+            + " AND NOT EXISTS (SELECT 1 FROM run_delivered_messages"
+            + " WHERE run_id = ? AND message_id = spec_messages.id)"
+            + " ORDER BY id ASC LIMIT ?",
+        MessageStore::map,
+        specId,
+        excludeAuthor,
+        runId,
         limit);
   }
 
