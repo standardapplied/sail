@@ -395,6 +395,14 @@ class LocalApiRouterTest {
     assertTrue(boxed.body().get("error").toString().contains("run credential"));
 
     assertEquals(405, router.handle(form("DELETE", "/v1/run/messages", "")).status());
+
+    var emptyAck = router.handle(form("POST", "/v1/run/messages", "delivered="));
+    assertEquals(200, emptyAck.status());
+    assertEquals(
+        List.of(),
+        ops.lastDelivered,
+        "an ack naming no ids is a no-op, never an error — the relay may fire with nothing to"
+            + " acknowledge");
   }
 
   @Test
