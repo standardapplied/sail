@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -522,6 +523,306 @@ class ReviewStoreTest {
 
     assertTrue(store.stagesForReview(reviewId).isEmpty());
     assertTrue(store.findingsForStage(stageId).isEmpty());
+  }
+
+  @Test
+  void carryForwardCreatesALinkedRowAndLeavesThePredecessorOpen() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Stubborn high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+
+    var carried = store.carryForward(stage2, original);
+
+    assertEquals(original.id(), carried.carriedFrom());
+    assertTrue(!carried.id().equals(original.id()), "a carried row is a fresh identity");
+    assertEquals(
+        Finding.Resolution.OPEN, store.findFinding(original.id()).orElseThrow().resolution());
+    assertEquals("Stubborn high", store.findingsForStage(stage2).getFirst().title());
+  }
+
+  @Test
+  void findingChainWalksTheWholeLineageNewestFirst() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var original = addOpenFinding(stage1, Finding.Severity.HIGH, "Aging high");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var second = store.carryForward(stage2, original);
+    var r3 = store.createReview("auth", 3);
+    var stage3 = store.createStage(r3, "security", "agent");
+    var third = store.carryForward(stage3, second);
+
+    var chain = store.findingChain(third.id());
+
+    assertEquals(
+        List.of(third.id(), second.id(), original.id()),
+        chain.stream().map(Finding::id).toList(),
+        "one finding aging across iterations is one chain walk");
+    assertEquals(2, store.findingAge(third.id()));
+    assertEquals(1, store.findingAge(second.id()));
+    assertEquals(0, store.findingAge(original.id()));
+  }
+
+  @Test
+  void carryForwardFindingsReturnsThePreviousFailedReviewsOpenFindings() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var open = addOpenFinding(stage1, Finding.Severity.HIGH, "Open high");
+    var fixed = addOpenFinding(stage1, Finding.Severity.MEDIUM, "Already fixed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED, "commit abc");
+    store.completeStage(stage1, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    store.createStage(r2, "security", "agent");
+
+    var carryable = store.carryForwardFindings("auth", r2, "security");
+
+    assertEquals(List.of(open.id()), carryable.stream().map(Finding::id).toList());
+  }
+
+  @Test
+  void carryForwardIsScopedToTheStageThatEmittedTheFinding() {
+    var r1 = store.createReview("auth", 1);
+    var security = store.createStage(r1, "security", "agent");
+    var correctness = store.createStage(r1, "correctness", "agent");
+    var securityFinding = addOpenFinding(security, Finding.Severity.HIGH, "Token leak");
+    var correctnessFinding = addOpenFinding(correctness, Finding.Severity.HIGH, "Off by one");
+    store.completeStage(security, "failed");
+    store.completeStage(correctness, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    store.createStage(r2, "security", "agent");
+    store.createStage(r2, "correctness", "agent");
+
+    assertEquals(
+        List.of(securityFinding.id()),
+        store.carryForwardFindings("auth", r2, "security").stream().map(Finding::id).toList(),
+        "each stage re-judges only its own findings, under its own gate");
+    assertEquals(
+        List.of(correctnessFinding.id()),
+        store.carryForwardFindings("auth", r2, "correctness").stream().map(Finding::id).toList());
+  }
+
+  @Test
+  void carryForwardFindingsSkipsErroredReviewsAndAlreadyCarriedRows() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var open = addOpenFinding(stage1, Finding.Severity.HIGH, "Open high");
+    store.completeStage(stage1, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var errored = store.createReview("auth", 2);
+    store.failReviewWithError(errored, "quota exceeded");
+    var r3 = store.createReview("auth", 2);
+    var stage3 = store.createStage(r3, "security", "agent");
+
+    assertEquals(
+        List.of(open.id()),
+        store.carryForwardFindings("auth", r3, "security").stream().map(Finding::id).toList(),
+        "an errored review has no verdict; the carry set comes from the last real one");
+
+    store.carryForward(stage3, open);
+    assertTrue(
+        store.carryForwardFindings("auth", r3, "security").isEmpty(),
+        "a finding already re-attached to this review is not carried twice");
+  }
+
+  @Test
+  void aStageCompletedBeforeALaterStageErroredStillCarriesItsFindings() {
+    var r1 = store.createReview("auth", 1);
+    var security1 = store.createStage(r1, "security", "agent");
+    var blocker = addOpenFinding(security1, Finding.Severity.HIGH, "Token leak");
+    store.completeStage(security1, "failed");
+    var correctness1 = store.createStage(r1, "correctness", "agent");
+    store.completeStage(correctness1, "failed", "agent runner crashed");
+    store.failReviewWithError(r1, "agent runner crashed");
+
+    var r2 = store.createReview("auth", 1);
+    store.createStage(r2, "security", "agent");
+
+    assertEquals(
+        List.of(blocker.id()),
+        store.carryForwardFindings("auth", r2, "security").stream().map(Finding::id).toList(),
+        "validity is per stage: a stage that completed before a later stage errored the review"
+            + " keeps its findings in the carry set");
+  }
+
+  @Test
+  void carryForwardReachesPastAReviewWhereAnEarlierStageFailedBeforeThisOneRan() {
+    var r1 = store.createReview("auth", 1);
+    var security1 = store.createStage(r1, "security", "agent");
+    store.completeStage(security1, "passed");
+    var correctness1 = store.createStage(r1, "correctness", "agent");
+    var blocker = addOpenFinding(correctness1, Finding.Severity.HIGH, "Off by one");
+    store.completeStage(correctness1, "failed");
+    store.updateReviewStatus(r1, "failed");
+
+    var r2 = store.createReview("auth", 2);
+    var security2 = store.createStage(r2, "security", "agent");
+    var securityBlocker = addOpenFinding(security2, Finding.Severity.CRITICAL, "Token leak");
+    store.completeStage(security2, "failed");
+    store.createStage(r2, "correctness", "agent");
+    store.updateReviewStatus(r2, "failed");
+
+    var r3 = store.createReview("auth", 3);
+    store.createStage(r3, "security", "agent");
+    store.createStage(r3, "correctness", "agent");
+
+    assertEquals(
+        List.of(blocker.id()),
+        store.carryForwardFindings("auth", r3, "correctness").stream().map(Finding::id).toList(),
+        "a stage that never ran in the latest failed review still carries its open findings"
+            + " from the last review where it did run");
+    assertEquals(
+        List.of(securityBlocker.id()),
+        store.carryForwardFindings("auth", r3, "security").stream().map(Finding::id).toList());
+  }
+
+  @Test
+  void carryForwardFindingsIsEmptyWhenNoPriorFailedReviewExists() {
+    var r1 = store.createReview("auth", 1);
+    store.createStage(r1, "security", "agent");
+
+    assertTrue(store.carryForwardFindings("auth", r1, "security").isEmpty());
+  }
+
+  @Test
+  void applyStageResultAppliesRulingsAndNewFindingsTogether() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var fixed = addOpenFinding(stage1, Finding.Severity.HIGH, "Now fixed");
+    var stubborn = addOpenFinding(stage1, Finding.Severity.MEDIUM, "Still there");
+    store.completeStage(stage1, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var fresh =
+        Finding.create(
+            Finding.Severity.LOW,
+            Finding.Category.LOGIC,
+            "b.java",
+            1,
+            1,
+            "New issue",
+            "",
+            "",
+            null,
+            0.6);
+
+    store.applyStageResult(
+        stage2,
+        List.of(
+            new ReviewStore.StageRuling(fixed, Finding.Resolution.FIXED, "commit abc"),
+            new ReviewStore.StageRuling(stubborn, Finding.Resolution.OPEN, "")),
+        List.of(fresh));
+
+    assertEquals(
+        Finding.Resolution.FIXED, store.findFinding(fixed.id()).orElseThrow().resolution());
+    var stageFindings = store.findingsForStage(stage2);
+    assertEquals(2, stageFindings.size());
+    assertEquals(
+        stubborn.id(),
+        stageFindings.stream()
+            .filter(f -> f.carriedFrom() != null)
+            .findFirst()
+            .orElseThrow()
+            .carriedFrom());
+  }
+
+  @Test
+  void applyStageResultRollsBackRulingsWhenAFindingInsertFails() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var blocker = addOpenFinding(stage1, Finding.Severity.HIGH, "Blocker");
+    store.completeStage(stage1, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var colliding =
+        new Finding(
+            blocker.id(),
+            Finding.Severity.CRITICAL,
+            Finding.Category.SECURITY,
+            "b.java",
+            1,
+            1,
+            "Colliding id",
+            "",
+            "",
+            null,
+            0.9,
+            Finding.Resolution.OPEN,
+            null,
+            null);
+
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            store.applyStageResult(
+                stage2,
+                List.of(new ReviewStore.StageRuling(blocker, Finding.Resolution.FIXED, "claimed")),
+                List.of(colliding)));
+
+    assertEquals(
+        Finding.Resolution.OPEN,
+        store.findFinding(blocker.id()).orElseThrow().resolution(),
+        "a stage result that fails to commit fully must not retire any carried finding");
+    assertTrue(store.findingsForStage(stage2).isEmpty());
+    assertEquals(
+        List.of(blocker.id()),
+        store.carryForwardFindings("auth", r2, "security").stream().map(Finding::id).toList(),
+        "the retry still sees the finding open and carries it");
+  }
+
+  @Test
+  void resolveFindingRecordsEvidenceForTheResolution() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var finding = addOpenFinding(stageId, Finding.Severity.HIGH, "Ruled fixed");
+
+    store.resolveFinding(finding.id(), Finding.Resolution.FIXED, "commit abc parameterizes it");
+
+    var resolved = store.findFinding(finding.id()).orElseThrow();
+    assertEquals(Finding.Resolution.FIXED, resolved.resolution());
+    assertEquals("commit abc parameterizes it", resolved.resolutionEvidence());
+  }
+
+  @Test
+  void disputedFindingsSpansTheAttemptAndIgnoresSupersededHistory() {
+    var stale = store.createReview("auth", 1);
+    var staleStage = store.createStage(stale, "security", "agent");
+    var oldDispute = addOpenFinding(staleStage, Finding.Severity.HIGH, "Old attempt dispute");
+    store.resolveFinding(oldDispute.id(), Finding.Resolution.DISPUTED, "old argument");
+    store.supersedeForSpec("auth");
+
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var disputed = addOpenFinding(stage1, Finding.Severity.HIGH, "Wrong finding");
+    store.resolveFinding(disputed.id(), Finding.Resolution.DISPUTED, "cap enforced upstream");
+    addOpenFinding(stage1, Finding.Severity.LOW, "Still open");
+
+    var found = store.disputedFindings("auth");
+
+    assertEquals(List.of(disputed.id()), found.stream().map(Finding::id).toList());
+    assertEquals("cap enforced upstream", found.getFirst().resolutionEvidence());
+  }
+
+  @Test
+  void openFindingsAfterPassIgnoresFixedAndDisputed() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var open = addOpenFinding(stageId, Finding.Severity.LOW, "Genuinely open");
+    var fixed = addOpenFinding(stageId, Finding.Severity.HIGH, "Fixed");
+    var disputed = addOpenFinding(stageId, Finding.Severity.MEDIUM, "Disputed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED, "commit abc");
+    store.resolveFinding(disputed.id(), Finding.Resolution.DISPUTED, "argued");
+    store.updateReviewStatus(reviewId, "passed");
+
+    assertEquals(
+        List.of(open.id()),
+        store.openFindingsAfterPass("auth").stream().map(Finding::id).toList(),
+        "open-after-pass means genuinely unresolved, not accumulated history");
   }
 
   @Test

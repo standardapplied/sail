@@ -7,7 +7,9 @@ package ai.singlr.sail.sync;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The node (local replica) side of a sync round. Tracks the merge base it last synced from main,
@@ -29,6 +31,41 @@ public interface LocalReplica {
    */
   default boolean mayPush(String id) {
     return true;
+  }
+
+  /** A comparable snapshot paired with the exact revision it was read at. */
+  record Captured(Map<String, Object> snapshot, String rev) {}
+
+  /**
+   * Runs {@code work} in one atomic scope on the local store, excluding every concurrent local
+   * writer for the whole scope.
+   */
+  <T> T atomically(Supplier<T> work);
+
+  /**
+   * Samples the current snapshot and its revision as one atomic read, so a local write landing
+   * mid-sample can never pair an old snapshot with a newer revision — the torn pair that would
+   * later defeat the stale-adoption guard and overwrite the newer work.
+   */
+  default Captured capture(String id) {
+    return atomically(() -> new Captured(current(id), currentRev(id)));
+  }
+
+  /**
+   * Adopts an authoritative state only if the local row still sits at {@code expectedRev}. The
+   * check and the adoption are one atomic step, so a local write can never land between them and be
+   * overwritten. Returns {@code false} when the row moved; the caller re-reconciles instead.
+   */
+  default boolean adoptIfCurrent(
+      String id, String expectedRev, Map<String, Object> snapshot, String rev) {
+    return atomically(
+        () -> {
+          if (!Objects.equals(currentRev(id), expectedRev)) {
+            return false;
+          }
+          adopt(id, snapshot, rev);
+          return true;
+        });
   }
 
   /** Current comparable state; {@code null} if deleted or absent. */

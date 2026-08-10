@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /** Sync adapter for immutable, append-only spec messages. */
 public final class MessageReplica implements LocalReplica, MainReplica {
@@ -48,6 +49,11 @@ public final class MessageReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return messages.syncEntityIds();
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

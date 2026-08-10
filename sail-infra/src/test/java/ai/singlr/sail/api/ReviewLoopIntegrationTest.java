@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
+import static ai.singlr.sail.api.ReviewScripts.fixAllCarried;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -92,9 +94,9 @@ class ReviewLoopIntegrationTest {
   private static final String CRITICAL_FINDING =
       """
       ```json
-      [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
         "line_start": 1, "line_end": 1, "title": "Bad",
-        "description": "Very bad", "confidence": 0.95}]
+        "description": "Very bad", "confidence": 0.95}]}
       ```
       """;
 
@@ -106,9 +108,9 @@ class ReviewLoopIntegrationTest {
   private static ReviewAgentRunner cyclingRunner(java.util.List<String> reviewOutputs) {
     var reviewCall = new AtomicInteger();
     return (project, agent, prompt, reviewId, credential) -> {
-      if (prompt.contains("Output your findings")) {
+      if (prompt.contains("Review the changes on branch")) {
         var i = reviewCall.getAndIncrement();
-        return i < reviewOutputs.size() ? reviewOutputs.get(i) : "[]";
+        return i < reviewOutputs.size() ? reviewOutputs.get(i) : fixAllCarried(prompt);
       }
       return "fix applied";
     };
@@ -162,7 +164,7 @@ class ReviewLoopIntegrationTest {
   void aCleanStopPublishedToTheBusAdvancesTheSpecToAwaitingMerge() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
     bus.publish(stop("auth"));
 
@@ -175,7 +177,7 @@ class ReviewLoopIntegrationTest {
   void aHookTurnEndStopThroughTheBusDoesNotTriggerReview() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
     bus.publish(hookTurnEndStop("auth"));
 
@@ -220,7 +222,7 @@ class ReviewLoopIntegrationTest {
   void aNonZeroExitPublishedToTheBusSkipsReview() throws Exception {
     createSpec("auth");
     var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> "[]", latch);
+    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
     bus.publish(stop("auth", 137));
 

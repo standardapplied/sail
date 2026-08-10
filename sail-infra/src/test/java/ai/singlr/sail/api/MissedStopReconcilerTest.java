@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -581,7 +582,7 @@ class MissedStopReconcilerTest {
             reviewStore,
             p -> config,
             p -> "codex",
-            (p, a, pr, rid, cred) -> "[]",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
             bus,
             () -> {},
             new DirectExecutorService());

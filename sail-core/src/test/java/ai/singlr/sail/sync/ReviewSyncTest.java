@@ -16,6 +16,8 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +115,110 @@ class ReviewSyncTest {
     sync(other);
     var otherStage = other.reviews.stagesForReview(reviewId).getFirst();
     assertEquals(2, other.reviews.findingCountsForStage(otherStage.id()).get("HIGH"));
+  }
+
+  @Test
+  void aSuccessfulPushLeavesTheExecutingNodesFindingRowsIntact() {
+    var reviewId = node.reviews.createReview("auth", 1);
+    var stageId = node.reviews.createStage(reviewId, "security", "agent");
+    node.reviews.startStage(stageId, "codex");
+    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+    node.reviews.completeStage(stageId, "failed");
+    node.reviews.updateReviewStatus(reviewId, "failed");
+
+    sync(node);
+
+    assertEquals(
+        1,
+        node.reviews.findingsForStage(stageId).size(),
+        "adopting main's identical aggregate after a push must link the revision without"
+            + " rebuilding — the rebuild deletes the finding rows that carry-forward and"
+            + " dispute resolution read");
+  }
+
+  @Test
+  void aFindingAddedWhileThePushIsInFlightSurvivesTheAcceptedSnapshot() {
+    var reviewId = node.reviews.createReview("auth", 1);
+    var stageId = node.reviews.createStage(reviewId, "security", "agent");
+    node.reviews.startStage(stageId, "codex");
+    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+
+    var racing =
+        racingMain(() -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL)));
+    engine.reconcile(node.replica, racing);
+
+    assertEquals(
+        2,
+        node.reviews.findingsForStage(stageId).size(),
+        "adopting a snapshot accepted while a local write landed must never rebuild the"
+            + " aggregate — the rebuild deletes the non-replicated finding rows");
+  }
+
+  @Test
+  void syncRoundsRacingAConcurrentLocalWriterNeverLoseFindingRows() throws InterruptedException {
+    var reviewId = node.reviews.createReview("auth", 1);
+    var stageId = node.reviews.createStage(reviewId, "security", "agent");
+    node.reviews.startStage(stageId, "codex");
+    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+
+    var rounds = 25;
+    for (var round = 0; round < rounds; round++) {
+      var writer =
+          new Thread(() -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL)));
+      writer.start();
+      sync(node);
+      writer.join();
+    }
+    sync(node);
+
+    assertEquals(
+        1 + rounds,
+        node.reviews.findingsForStage(stageId).size(),
+        "snapshot capture and adoption must be atomic against concurrent local writes — a torn"
+            + " snapshot/revision pair or a write between the revision check and adoption"
+            + " rebuilds the aggregate and deletes the non-replicated finding rows");
+  }
+
+  private MainReplica racingMain(Runnable onFirstCommit) {
+    return new MainReplica() {
+      private Runnable pending = onFirstCommit;
+
+      @Override
+      public String id() {
+        return main.replica.id();
+      }
+
+      @Override
+      public Set<String> entityIds() {
+        return main.replica.entityIds();
+      }
+
+      @Override
+      public Map<String, Object> current(String entityId) {
+        return main.replica.current(entityId);
+      }
+
+      @Override
+      public String currentRev(String entityId) {
+        return main.replica.currentRev(entityId);
+      }
+
+      @Override
+      public long maxSeq() {
+        return main.replica.maxSeq();
+      }
+
+      @Override
+      public CommitOutcome commit(
+          String entityId, Map<String, Object> snapshot, String expectedRev) {
+        if (pending != null) {
+          var hook = pending;
+          pending = null;
+          hook.run();
+        }
+        return main.replica.commit(entityId, snapshot, expectedRev);
+      }
+    };
   }
 
   @Test

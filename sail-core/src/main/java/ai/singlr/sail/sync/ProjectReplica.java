@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Adapts a box's {@link ProjectStore} to the sync roles, exactly as {@link SpecReplica} does for
@@ -55,6 +56,11 @@ public final class ProjectReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> entityIds() {
     return projects.syncEntityIds();
+  }
+
+  @Override
+  public <T> T atomically(Supplier<T> work) {
+    return changeLog.transaction(work);
   }
 
   @Override

@@ -10,8 +10,10 @@ import java.util.List;
 
 /**
  * Generates a structured fix task from review findings for the coding agent. Each finding is
- * presented with its severity, category, file/line reference, evidence, and concrete suggestion.
- * The agent receives actionable instructions, not vague feedback.
+ * presented with its id, severity, category, file/line reference, evidence, and concrete
+ * suggestion. The agent receives actionable instructions, not vague feedback — and a dispute lane:
+ * a finding it believes is wrong is argued in the spec room for the re-review to rule on, never
+ * coded around and never silently skipped.
  */
 public final class FixTaskBuilder {
 
@@ -34,7 +36,7 @@ public final class FixTaskBuilder {
     return body.isEmpty() ? subject : subject + "\n\n" + body;
   }
 
-  public static String build(String specTitle, List<Finding> findings) {
+  public static String build(String specId, String specTitle, List<Finding> findings) {
     if (findings.isEmpty()) {
       return "No review findings to address for spec \"%s\".".formatted(specTitle);
     }
@@ -43,11 +45,22 @@ public final class FixTaskBuilder {
     sb.append(
         "Your implementation for spec \"%s\" received %d review finding(s).%n"
             .formatted(specTitle, findings.size()));
-    sb.append("Address each finding below. The reviewer will re-check after you commit.\n\n");
+    sb.append("Address each finding below. The reviewer will re-check after you commit.\n");
+    sb.append(
+        """
+        Fix what is real. If you believe a finding is wrong, do NOT code around it and do NOT
+        silently skip it: post your argument to the spec room (spec comment %s --body "...")
+        naming the finding's id, and leave that code alone. The re-review reads the room and
+        rules fixed, still_open, or disputed with your argument as evidence — a finding is
+        retired by argument in the open, never by omission.
+
+        """
+            .formatted(specId));
 
     for (var i = 0; i < findings.size(); i++) {
       var f = findings.get(i);
       sb.append("--- Finding %d [%s] %s ---\n".formatted(i + 1, f.severity(), f.category()));
+      sb.append("Id: %s\n".formatted(f.id()));
       sb.append("Title: %s\n".formatted(f.title()));
 
       if (f.file() != null) {

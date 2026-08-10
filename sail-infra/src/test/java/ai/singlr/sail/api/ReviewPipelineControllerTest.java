@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
+import static ai.singlr.sail.api.ReviewScripts.fixAllCarried;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,6 +23,8 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -221,7 +227,7 @@ class ReviewPipelineControllerTest {
             reviewStore,
             p -> singleAgentStage("no_critical"),
             p -> "codex",
-            (p, a, pr, rid, cred) -> "[]",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
             null,
             syncs::incrementAndGet,
             new DirectExecutorService());
@@ -235,7 +241,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aSyncDerivedStopNeverStartsAPipelineTheWorkLivesOnAnotherBox() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(
         Event.of(
@@ -253,7 +259,7 @@ class ReviewPipelineControllerTest {
   @Test
   void anAuthoritativeStopStillKicksOffReviewWhenStatusWasClobberedToReview() {
     createSpec("auth", "review");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -266,7 +272,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void messageStoreWiringIsFluent() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     assertEquals(ctrl, ctrl.useMessages(new MessageStore(db)));
   }
@@ -276,7 +282,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "review");
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(reviewId, "running");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -286,7 +292,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aTerminalSpecStatusIgnoresTheStop() {
     createSpec("auth", "awaiting_merge");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -296,7 +302,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void skipsAnUnknownSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("ghost"));
 
@@ -310,7 +316,7 @@ class ReviewPipelineControllerTest {
     ReviewAgentRunner capturing =
         (p, a, prompt, rid, cred) -> {
           capturedAgent.set(a);
-          return "[]";
+          return CLEAN_REVIEW;
         };
     var ctrl =
         controller(p -> singleStageNoAgent("no_critical"), p -> "claude-code", capturing, null);
@@ -325,7 +331,10 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var ctrl =
         controller(
-            p -> singleStageNoAgent("no_critical"), p -> null, (p, a, pr, rid, cred) -> "[]", null);
+            p -> singleStageNoAgent("no_critical"),
+            p -> null,
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
+            null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -335,7 +344,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void reusesOneExecutorAcrossEventsAndShutsItDownOnClose() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     createSpec("auth", "in_progress");
     createSpec("billing", "in_progress");
 
@@ -350,21 +359,21 @@ class ReviewPipelineControllerTest {
 
   @Test
   void filterAcceptsAgentSessionStoppedWithSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     var event = agentStoppedEvent("auth");
     assertTrue(ctrl.filter().test(event));
   }
 
   @Test
   void filterRejectsEventsWithoutSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     var event = Event.of("proj", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "sail", "h");
     assertFalse(ctrl.filter().test(event));
   }
 
   @Test
   void filterRejectsUnrelatedEventTypes() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     var event = Event.of("proj", "spec", "spec_dispatched", "sail", "h");
     assertFalse(ctrl.filter().test(event));
   }
@@ -372,7 +381,7 @@ class ReviewPipelineControllerTest {
   @Test
   void skipsSpecNotInProgress() {
     createSpec("auth", "pending");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -382,7 +391,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void skipsUnknownSpec() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     ctrl.onEvent(agentStoppedEvent("nonexistent"));
 
     assertTrue(reviewStore.reviewsForSpec("nonexistent").isEmpty());
@@ -391,7 +400,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aStopArrivingAfterAnOperatorCancelNeverKicksAReview() {
     createSpec("auth", "cancelled");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -402,7 +411,7 @@ class ReviewPipelineControllerTest {
   @Test
   void ignoresAStopForASpecAlreadyAwaitingMerge() {
     createSpec("auth", "awaiting_merge");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -413,7 +422,7 @@ class ReviewPipelineControllerTest {
   @Test
   void transitionsSpecToReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -424,7 +433,7 @@ class ReviewPipelineControllerTest {
   @Test
   void cleanReviewPassesAndParksSpecAwaitingMerge() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -445,7 +454,7 @@ class ReviewPipelineControllerTest {
             singleAgentStage("no_critical"),
             (p, a, pr, rid, cred) -> {
               specStore.updateStatus("auth", SpecStatus.CANCELLED);
-              return "[]";
+              return CLEAN_REVIEW;
             });
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -459,7 +468,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aWatcherStopAndAReconcilerReplayBackToBackProduceExactlyOneReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     ctrl.onEvent(reconcilerStoppedEvent("auth"));
@@ -477,7 +486,7 @@ class ReviewPipelineControllerTest {
             singleAgentStage("no_critical"),
             (p, a, pr, rid, cred) -> {
               ctrl.get().onEvent(reconcilerStoppedEvent("auth"));
-              return "[]";
+              return CLEAN_REVIEW;
             }));
 
     ctrl.get().onEvent(agentStoppedEvent("auth"));
@@ -502,9 +511,9 @@ class ReviewPipelineControllerTest {
     var agentOutput =
         """
         ```json
-        [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
           "line_start": 42, "line_end": 42, "title": "SQL injection",
-          "description": "User input in query", "confidence": 0.9}]
+          "description": "User input in query", "confidence": 0.9}]}
         ```
         """;
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
@@ -569,7 +578,8 @@ class ReviewPipelineControllerTest {
     assertEquals(1, reviewStore.latestReviewForSpec("auth").orElseThrow().iteration());
 
     specStore.updateStatus("auth", SpecStatus.IN_PROGRESS);
-    var healthy = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var healthy =
+        controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     healthy.onEvent(agentStoppedEvent("auth"));
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
@@ -588,9 +598,9 @@ class ReviewPipelineControllerTest {
     var agentOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
           "line_start": 1, "line_end": 1, "title": "Critical issue",
-          "description": "Very bad", "confidence": 0.95}]
+          "description": "Very bad", "confidence": 0.95}]}
         ```
         """;
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
@@ -607,7 +617,7 @@ class ReviewPipelineControllerTest {
     var exhausted = reviewStore.createReview("auth", 3);
     reviewStore.updateReviewStatus(exhausted, "escalated");
     reviewStore.supersedeForSpec("auth");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -623,7 +633,7 @@ class ReviewPipelineControllerTest {
     var interrupted = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(interrupted, "running");
     reviewStore.supersedeForSpec("auth");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -639,9 +649,9 @@ class ReviewPipelineControllerTest {
     var agentOutput =
         """
         ```json
-        [{"severity": "MEDIUM", "category": "LOGIC", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "MEDIUM", "category": "LOGIC", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Minor issue",
-          "description": "Not great", "confidence": 0.5}]
+          "description": "Not great", "confidence": 0.5}]}
         ```
         """;
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
@@ -655,7 +665,9 @@ class ReviewPipelineControllerTest {
   @Test
   void twoStagesPipelineBothPass() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> twoAgentStages(), p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
+    var ctrl =
+        controller(
+            p -> twoAgentStages(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -669,9 +681,182 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aCarriedFindingReturnsToItsOwnStageAndFacesItsOwnGate() {
+    createSpec("auth", "in_progress");
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical"),
+                    Map.of(
+                        "name",
+                        "correctness",
+                        "type",
+                        "agent",
+                        "agent",
+                        "claude",
+                        "gate",
+                        "no_critical_or_high"))));
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "LOGIC", "file": "Pager.java",
+          "line_start": 3, "line_end": 3, "title": "Persistent high",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var promptsByAgent = new HashMap<String, List<String>>();
+    ReviewAgentRunner runner =
+        (p, agent, prompt, rid, cred) -> {
+          var prompts = promptsByAgent.computeIfAbsent(agent, k -> new ArrayList<>());
+          prompts.add(prompt);
+          if (agent.equals("claude")) {
+            return prompts.size() == 1 ? highOutput : fixAllCarried(prompt);
+          }
+          return agent.equals("codex") ? CLEAN_REVIEW : "fix applied";
+        };
+    var ctrl = controller(config, runner);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    var codexPrompts = promptsByAgent.get("codex");
+    assertEquals(2, codexPrompts.size());
+    assertTrue(
+        codexPrompts.stream().allMatch(prompt -> ReviewScripts.carriedFromPrompt(prompt).isEmpty()),
+        "a HIGH from the strict later stage must never be re-judged under the first stage's"
+            + " looser gate");
+    var claudePrompts = promptsByAgent.get("claude");
+    assertEquals(2, claudePrompts.size());
+    assertTrue(
+        claudePrompts.get(1).contains("Persistent high"),
+        "the finding returns to the stage that emitted it");
+  }
+
+  @Test
+  void aHumanStageOpensWithTheRoomVerdictListingDisputedFindings() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "human", "type", "human"))));
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
+          "line_start": 7, "line_end": 7, "title": "Unvalidated input",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> highOutput;
+              case 2 -> "fix applied";
+              default -> ReviewScripts.disputeAllCarried(prompt);
+            };
+    var ctrl = controller(config, runner);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("running", review.status());
+    assertEquals("running", reviewStore.stagesForReview(review.id()).get(1).status());
+    var verdict = messages.list("auth", null, 50).getLast();
+    assertTrue(verdict.body().contains("Awaiting human approval"), verdict.body());
+    assertTrue(
+        verdict.body().contains("Unvalidated input"),
+        "the disputed finding the gate excluded must face the human before approval");
+    assertTrue(verdict.body().contains("input is validated upstream"), verdict.body());
+  }
+
+  @Test
+  void everyDisputedFindingReachesTheHumanVerdictUntruncated() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "human", "type", "human"))));
+    var elevenHighs =
+        IntStream.rangeClosed(1, 11)
+            .mapToObj(
+                i ->
+                    ("{\"severity\": \"HIGH\", \"category\": \"LOGIC\", \"file\": \"a.java\","
+                            + " \"line_start\": %d, \"line_end\": %d, \"title\": \"Wrong claim"
+                            + " %d\", \"description\": \"d\", \"confidence\": 0.8}")
+                        .formatted(i, i, i))
+            .collect(Collectors.joining(", "));
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> "{\"verdicts\": [], \"findings\": [" + elevenHighs + "]}";
+              case 2 -> "fix applied";
+              default -> ReviewScripts.disputeAllCarried(prompt);
+            };
+    var ctrl = controller(config, runner);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var verdict = messages.list("auth", null, 50).getLast().body();
+    assertTrue(verdict.contains("Awaiting human approval"), verdict);
+    IntStream.rangeClosed(1, 11)
+        .forEach(
+            i ->
+                assertTrue(
+                    verdict.contains("Wrong claim " + i),
+                    "every gate-excluded dispute must face the human with its identity and"
+                        + " argument, never as a count: missing 'Wrong claim "
+                        + i
+                        + "' in: "
+                        + verdict));
+    assertFalse(verdict.contains("more"), verdict);
+  }
+
+  @Test
   void humanStageStopsAndWaits() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> agentThenHuman(), p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
+    var ctrl =
+        controller(
+            p -> agentThenHuman(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -688,7 +873,7 @@ class ReviewPipelineControllerTest {
   @Test
   void noPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid, cred) -> "[]", null);
+    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -700,7 +885,7 @@ class ReviewPipelineControllerTest {
   void emptyPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
     var emptyConfig = ReviewPipelineConfig.fromMap(Map.of());
-    var ctrl = controller(emptyConfig, (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(emptyConfig, (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -725,7 +910,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void subscriberNameIsReviewPipeline() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     assertEquals("review-pipeline", ctrl.name());
   }
 
@@ -736,7 +921,7 @@ class ReviewPipelineControllerTest {
     ReviewAgentRunner capturing =
         (p, a, prompt, rid, cred) -> {
           capturedPrompt.set(prompt);
-          return "[]";
+          return CLEAN_REVIEW;
         };
     var ctrl = controller(singleAgentStage("no_critical"), capturing);
 
@@ -752,17 +937,17 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
           "description": "Very bad", "confidence": 0.9,
-          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]
+          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]}
         ```
         """;
     var callCount = new AtomicInteger(0);
     ReviewAgentRunner runner =
         (p, a, prompt, rid, cred) -> {
           var call = callCount.incrementAndGet();
-          return call == 1 ? criticalOutput : "[]";
+          return call == 1 ? criticalOutput : fixAllCarried(prompt);
         };
     var ctrl = controller(singleAgentStage("no_critical"), runner);
 
@@ -779,17 +964,17 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
           "description": "Very bad", "confidence": 0.9,
-          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]
+          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]}
         ```
         """;
     var reviewIds = new java.util.ArrayList<String>();
     ReviewAgentRunner runner =
         (p, a, prompt, rid, cred) -> {
           reviewIds.add(rid);
-          return reviewIds.size() == 1 ? criticalOutput : "[]";
+          return reviewIds.size() == 1 ? criticalOutput : fixAllCarried(prompt);
         };
     var ctrl = controller(singleAgentStage("no_critical"), runner);
 
@@ -816,9 +1001,9 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Persistent issue",
-          "description": "Cannot fix", "confidence": 0.95}]
+          "description": "Cannot fix", "confidence": 0.95}]}
         ```
         """;
     var config =
@@ -914,9 +1099,9 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]
+          "description": "Very bad", "confidence": 0.9}]}
         ```
         """;
     var ensured = new AtomicReference<List<Object>>();
@@ -925,7 +1110,7 @@ class ReviewPipelineControllerTest {
         new ReviewAgentRunner() {
           @Override
           public String run(String p, String a, String prompt, String rid, String cred) {
-            return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
           }
 
           @Override
@@ -971,9 +1156,9 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]
+          "description": "Very bad", "confidence": 0.9}]}
         ```
         """;
     var fixLaunch = new AtomicReference<List<Object>>();
@@ -983,7 +1168,7 @@ class ReviewPipelineControllerTest {
         new ReviewAgentRunner() {
           @Override
           public String run(String p, String a, String prompt, String rid, String cred) {
-            return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
           }
 
           @Override
@@ -1042,22 +1227,22 @@ class ReviewPipelineControllerTest {
     var failedOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "Auth.java",
           "line_start": 7, "line_end": 7, "title": "Token logged in plaintext",
-          "description": "d", "confidence": 0.9}]
+          "description": "d", "confidence": 0.9}]}
         ```
         """;
-    var passedOutput =
+    var lowFinding =
         """
-        ```json
         [{"severity": "LOW", "category": "LOGIC", "file": "Pager.java",
           "line_start": 3, "line_end": 3, "title": "Off-by-one in pager",
-          "description": "d", "confidence": 0.6}]
-        ```
-        """;
+          "description": "d", "confidence": 0.6}]""";
     var calls = new AtomicInteger();
     ReviewAgentRunner runner =
-        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? failedOutput : passedOutput;
+        (p, a, pr, rid, cred) ->
+            calls.incrementAndGet() == 1
+                ? failedOutput
+                : ReviewScripts.fixAllCarried(pr, lowFinding);
 
     try (var bus = new EventBus()) {
       var captured = captureEvents(bus, Set.of("review_completed"), 1);
@@ -1097,7 +1282,7 @@ class ReviewPipelineControllerTest {
     var brokenMessages = new MessageStore(brokenDb);
     brokenDb.close();
 
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     ctrl.useMessages(brokenMessages);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1121,7 +1306,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid, cred) -> "[]",
+              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
               bus);
 
       ctrl.executePipeline(reviewId, singleAgentStage("no_critical"), "test-project", "auth");
@@ -1136,7 +1321,7 @@ class ReviewPipelineControllerTest {
     var agentOutput =
         """
         ```json
-        [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
           "line_start": 1, "line_end": 1, "title": "SQL injection",
           "description": "d", "confidence": 0.9},
          {"severity": "HIGH", "category": "SECURITY", "file": "Auth.java",
@@ -1144,7 +1329,7 @@ class ReviewPipelineControllerTest {
           "description": "d", "confidence": 0.9},
          {"severity": "LOW", "category": "LOGIC", "file": "Auth.java",
           "line_start": 3, "line_end": 3, "title": "Naming",
-          "description": "d", "confidence": 0.9}]
+          "description": "d", "confidence": 0.9}]}
         ```
         """;
 
@@ -1176,7 +1361,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid, cred) -> "[]",
+              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
               bus);
 
       ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1246,7 +1431,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid, cred) -> "[]",
+              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
               bus);
       db.close();
 
@@ -1264,7 +1449,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.updateReviewStatus(reviewId, "running");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1280,7 +1465,7 @@ class ReviewPipelineControllerTest {
         (p, a, pr, rid, cred) -> {
           started.countDown();
           await(release);
-          return "[]";
+          return CLEAN_REVIEW;
         };
     var ctrl =
         new ReviewPipelineController(
@@ -1310,7 +1495,7 @@ class ReviewPipelineControllerTest {
         (p, a, pr, rid, cred) -> {
           started.countDown();
           await(release);
-          return "[]";
+          return CLEAN_REVIEW;
         };
     var runs = new RunStore(db);
     var ctrl =
@@ -1380,10 +1565,10 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
           "description": "Very bad", "confidence": 0.9,
-          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]
+          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]}
         ```
         """;
     var runs = new RunStore(db);
@@ -1392,7 +1577,7 @@ class ReviewPipelineControllerTest {
     ReviewAgentRunner runner =
         (p, a, pr, rid, cred) -> {
           credentials.add(List.of(rid, cred));
-          return calls.incrementAndGet() == 1 ? criticalOutput : "[]";
+          return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
         };
     var ctrl =
         new ReviewPipelineController(
@@ -1431,9 +1616,9 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]
+          "description": "Very bad", "confidence": 0.9}]}
         ```
         """;
     var runs = new RunStore(db);
@@ -1444,7 +1629,7 @@ class ReviewPipelineControllerTest {
           if (calls.incrementAndGet() == 2) {
             fixResolved.set(runs.findByCredential(cred).orElse(null));
           }
-          return calls.get() == 1 ? criticalOutput : "[]";
+          return calls.get() == 1 ? criticalOutput : fixAllCarried(pr);
         };
     var ctrl =
         new ReviewPipelineController(
@@ -1472,7 +1657,7 @@ class ReviewPipelineControllerTest {
   @Test
   void closeAwaitsInFlightPipelines() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
     ctrl.close();
@@ -1483,7 +1668,7 @@ class ReviewPipelineControllerTest {
 
   @Test
   void awaitCompletionWithNoInFlightReturnsImmediately() throws Exception {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     ctrl.awaitCompletion(1000);
   }
 
@@ -1516,7 +1701,7 @@ class ReviewPipelineControllerTest {
             new ReviewStore(errDb),
             p -> singleAgentStage("no_critical"),
             p -> "codex",
-            (p, a, pr, rid, cred) -> "[]",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
             null,
             () -> {},
             new DirectExecutorService());
@@ -1528,7 +1713,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aHookTurnEndStopIsIgnoredUntilTheAuthoritativeStopArrives() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(hookTurnEndEvent("auth"));
 
@@ -1539,7 +1724,7 @@ class ReviewPipelineControllerTest {
   @Test
   void nonZeroExitSkipsReviewAndLeavesSpecInProgress() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth", 137));
 
@@ -1555,7 +1740,7 @@ class ReviewPipelineControllerTest {
           controller(
               p -> singleAgentStage("no_critical"),
               p -> "codex",
-              (p, a, pr, rid, cred) -> "[]",
+              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
               bus);
 
       ctrl.onEvent(agentStoppedEvent("auth", 1));
@@ -1567,7 +1752,7 @@ class ReviewPipelineControllerTest {
   @Test
   void zeroExitStillRunsReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth", 0));
 
@@ -1579,7 +1764,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var reviewId = reviewStore.createReview("auth", 3);
     reviewStore.updateReviewStatus(reviewId, "failed");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "[]");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1592,9 +1777,9 @@ class ReviewPipelineControllerTest {
     var criticalOutput =
         """
         ```json
-        [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
           "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]
+          "description": "Very bad", "confidence": 0.9}]}
         ```
         """;
     var calls = new AtomicInteger(0);
@@ -1614,6 +1799,362 @@ class ReviewPipelineControllerTest {
       latch.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  private ReviewPipelineConfig noHighGate(int maxIterations) {
+    return ReviewPipelineConfig.fromMap(
+        Map.of(
+            "max_iterations",
+            maxIterations,
+            "stages",
+            List.of(
+                Map.of(
+                    "name",
+                    "security",
+                    "type",
+                    "agent",
+                    "agent",
+                    "codex",
+                    "gate",
+                    "no_critical_or_high"))));
+  }
+
+  private static final String HIGH_FINDING =
+      """
+      ```json
+      {"verdicts": [], "findings": [{"severity": "HIGH", "category": "CONCURRENCY", "file": "Worker.java",
+        "line_start": 9, "line_end": 9, "title": "Sticky high",
+        "description": "d", "confidence": 0.9}]}
+      ```
+      """;
+
+  @Test
+  void aBareFindingsArrayIsOffContractAndErrorsTheStage() {
+    createSpec("auth", "in_progress");
+    var legacyArray =
+        """
+        ```json
+        [{"severity": "HIGH", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad", "description": "d", "confidence": 0.9}]
+        ```
+        """;
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> legacyArray);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", review.status());
+    assertTrue(
+        review.errored(),
+        "a bare findings array is off-contract reviewer output — it rides the errored-retry"
+            + " lane, never burning an iteration and never passing as a verdict");
+    assertTrue(review.error().contains("unparseable"), review.error());
+  }
+
+  @Test
+  void aCarriedOpenHighFailsTheGateEvenWhenTheNewFindingsListIsClean() {
+    createSpec("auth", "in_progress");
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? HIGH_FINDING : CLEAN_REVIEW;
+    var ctrl = controller(p -> noHighGate(2), p -> "codex", runner, null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var reviews = reviewStore.reviewsForSpec("auth");
+    assertEquals(2, reviews.size());
+    var carried = reviewStore.findingsForReview(reviews.get(1).id());
+    assertEquals(1, carried.size(), "the unruled high re-attaches to the re-review");
+    assertEquals("Sticky high", carried.getFirst().title());
+    assertEquals(
+        reviewStore.findingsForReview(reviews.get(0).id()).getFirst().id(),
+        carried.getFirst().carriedFrom(),
+        "the carried row chains to its predecessor — one finding, one lineage");
+    assertEquals(
+        "escalated",
+        reviews.get(1).status(),
+        "a reviewer that stops mentioning last iteration's high launders nothing — the high"
+            + " stays open and keeps failing the gate");
+    assertEquals(
+        Finding.Resolution.OPEN,
+        reviewStore.findingsForReview(reviews.get(0).id()).getFirst().resolution(),
+        "history is never rewritten; the predecessor row stays open where it was found");
+  }
+
+  @Test
+  void aGateBlockingFindingStillOpenTwiceEscalatesWithTheFindingNamed() throws Exception {
+    createSpec("auth", "in_progress");
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? HIGH_FINDING : CLEAN_REVIEW;
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
+      var ctrl = controller(p -> noHighGate(5), p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          3,
+          reviewStore.reviewsForSpec("auth").size(),
+          "the stuck loop is caught after 2 fix iterations, not after max_iterations=5");
+      var detail =
+          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
+      assertTrue(detail.contains("Sticky high"), "escalation names the stuck finding: " + detail);
+      assertTrue(detail.contains("survived 2 fix iterations"), detail);
+    }
+  }
+
+  @Test
+  void anotherStagesAgedSubGateFindingNeverTripsTheFailingStagesConvergenceCheck()
+      throws Exception {
+    createSpec("auth", "in_progress");
+    var config =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_iterations",
+                3,
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "type",
+                        "agent",
+                        "agent",
+                        "codex",
+                        "gate",
+                        "no_critical"),
+                    Map.of(
+                        "name",
+                        "correctness",
+                        "type",
+                        "agent",
+                        "agent",
+                        "claude",
+                        "gate",
+                        "all_clear"))));
+    var toleratedHigh =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Tolerated high",
+          "description": "d", "confidence": 0.9}]}
+        ```
+        """;
+    var codexCalls = new AtomicInteger();
+    var claudeCalls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, agent, prompt, rid, cred) ->
+            switch (agent) {
+              case "codex" -> codexCalls.incrementAndGet() == 1 ? toleratedHigh : CLEAN_REVIEW;
+              case "claude" ->
+                  ReviewScripts.fixAllCarried(
+                      prompt,
+                      ("[{\"severity\": \"LOW\", \"category\": \"LOGIC\", \"file\": \"b.java\","
+                              + " \"line_start\": 1, \"line_end\": 1, \"title\": \"Fresh low %d\","
+                              + " \"description\": \"d\", \"confidence\": 0.4}]")
+                          .formatted(claudeCalls.incrementAndGet()));
+              default -> "fix applied";
+            };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
+      var ctrl = controller(p -> config, p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          3,
+          reviewStore.reviewsForSpec("auth").size(),
+          "a converging loop — new blocker each round — runs to max_iterations");
+      var detail =
+          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
+      assertTrue(
+          detail.contains("review iterations exhausted"),
+          "the loop exhausts its budget instead of escalating a foreign stage's finding: "
+              + detail);
+      assertFalse(
+          detail.contains("Tolerated high"),
+          "the security stage's aged HIGH passes its own gate; the correctness gate must never"
+              + " judge it: "
+              + detail);
+    }
+  }
+
+  @Test
+  void subGateFindingsMayAgeFreelyWithoutTrippingTheConvergenceEscalation() {
+    createSpec("auth", "in_progress");
+    var lowOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "LOW", "category": "LOGIC", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Aging low",
+          "description": "d", "confidence": 0.4}]}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? lowOutput : CLEAN_REVIEW;
+    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(
+        "passed",
+        reviewStore.latestReviewForSpec("auth").orElseThrow().status(),
+        "a sub-gate low never fails the gate, so it ages without escalating anything");
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void passWithExplicitFixedVerdictsResolvesExactlyThoseAndToleratesUnknownIds() {
+    createSpec("auth", "in_progress");
+    var firstOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [
+          {"severity": "HIGH", "category": "SECURITY", "file": "a.java",
+           "line_start": 1, "line_end": 1, "title": "Real bug", "description": "d", "confidence": 0.9},
+          {"severity": "LOW", "category": "LOGIC", "file": "b.java",
+           "line_start": 2, "line_end": 2, "title": "Nit", "description": "d", "confidence": 0.4}]}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, pr, rid, cred) -> {
+          if (calls.incrementAndGet() == 1) {
+            return firstOutput;
+          }
+          if (!pr.contains("Review the changes on branch")) {
+            return "fix applied";
+          }
+          return """
+              {"verdicts": [
+                {"finding_id": "%s", "verdict": "fixed", "evidence": "commit abc removes the leak"},
+                {"finding_id": "ghost", "verdict": "fixed", "evidence": "e"}
+              ], "findings": []}"""
+              .formatted(ReviewScripts.carriedId(pr, "Real bug"));
+        };
+    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, null);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var reviews = reviewStore.reviewsForSpec("auth");
+    assertEquals("passed", reviews.get(1).status());
+    var firstReviewFindings = reviewStore.findingsForReview(reviews.get(0).id());
+    var realBug =
+        firstReviewFindings.stream()
+            .filter(f -> f.title().equals("Real bug"))
+            .findFirst()
+            .orElseThrow();
+    var nit =
+        firstReviewFindings.stream().filter(f -> f.title().equals("Nit")).findFirst().orElseThrow();
+    assertEquals(Finding.Resolution.FIXED, realBug.resolution());
+    assertEquals("commit abc removes the leak", realBug.resolutionEvidence());
+    assertEquals(Finding.Resolution.OPEN, nit.resolution(), "only explicit fixed verdicts resolve");
+    var openAfterPass = reviewStore.openFindingsAfterPass("auth");
+    assertEquals(
+        List.of("Nit"),
+        openAfterPass.stream().map(Finding::title).toList(),
+        "open-after-pass counts exactly the unresolved sub-gate findings, not history");
+    assertEquals(
+        nit.id(),
+        openAfterPass.getFirst().carriedFrom(),
+        "the surviving nit is the same finding aging across iterations, visible as a chain");
+  }
+
+  @Test
+  void theDisputeNegotiationRetiresAFalsePositiveInTheOpenAndPassesTheGate() throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var messages = new MessageStore(db);
+    var argument = "Worker cap is enforced upstream in Dispatcher.acquire; the finding is wrong";
+    var firstOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [
+          {"severity": "HIGH", "category": "CONCURRENCY", "file": "Worker.java",
+           "line_start": 4, "line_end": 4, "title": "Worker cap ignored", "description": "d", "confidence": 0.8},
+          {"severity": "HIGH", "category": "LOGIC", "file": "Snapshot.java",
+           "line_start": 8, "line_end": 8, "title": "Snapshot race", "description": "d", "confidence": 0.9}]}
+        ```
+        """;
+    var reReviewPrompt = new AtomicReference<String>();
+    var calls = new AtomicInteger();
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String pr, String rid, String cred) {
+            if (calls.incrementAndGet() == 1) {
+              return firstOutput;
+            }
+            reReviewPrompt.set(pr);
+            return """
+                {"verdicts": [
+                  {"finding_id": "%s", "verdict": "disputed", "evidence": "%s"},
+                  {"finding_id": "%s", "verdict": "fixed", "evidence": "commit def serializes the snapshot"}
+                ], "findings": []}"""
+                .formatted(
+                    ReviewScripts.carriedId(pr, "Worker cap ignored"),
+                    argument,
+                    ReviewScripts.carriedId(pr, "Snapshot race"));
+          }
+
+          @Override
+          public String runFix(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String branch,
+              List<String> repos,
+              String model,
+              String effort) {
+            messages.append("auth", "codex/fix", argument, null);
+            return "fixed the race, disputed the cap";
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_completed"), 1);
+      var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, bus);
+      ctrl.useMessages(messages);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      var reviews = reviewStore.reviewsForSpec("auth");
+      assertEquals("passed", reviews.get(1).status(), "the negotiation converges in one round");
+      assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+
+      var disputed = reviewStore.disputedFindings("auth");
+      assertEquals(List.of("Worker cap ignored"), disputed.stream().map(Finding::title).toList());
+      assertEquals(argument, disputed.getFirst().resolutionEvidence());
+      assertTrue(
+          reReviewPrompt.get().contains(argument),
+          "the re-review sees the fix agent's argument — the room rides the prompt");
+
+      var room = messages.list("auth", null, 50);
+      assertEquals(3, room.size(), "failed verdict, the dispute argument, passed verdict");
+      assertTrue(room.get(0).body().contains("Review failed"), room.get(0).body());
+      assertEquals(argument, room.get(1).body());
+      var passedBody = room.get(2).body();
+      assertTrue(passedBody.contains("Review passed"), passedBody);
+      assertTrue(
+          passedBody.contains("Disputed"),
+          "disputed findings are listed in the pass verdict for the human to confirm: "
+              + passedBody);
+      assertTrue(passedBody.contains("Worker cap ignored"), passedBody);
+      assertTrue(
+          passedBody.contains(argument),
+          "the ruled argument travels with the verdict so the human sees both sides");
+      assertTrue(
+          reviewStore.openFindingsAfterPass("auth").isEmpty(),
+          "a false positive retired by argument leaves nothing open — without a human dismiss");
     }
   }
 }

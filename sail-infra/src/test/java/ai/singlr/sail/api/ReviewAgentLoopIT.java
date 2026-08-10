@@ -55,14 +55,18 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         while [ -f "$HOME/.sail/review-hold" ]; do sleep 0.1; done
       fi
       case "$*" in
-        *"Output your findings"*)
+        *"Review the changes on branch"*)
           n_file="$HOME/.sail/review-count"
           n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
           printf '%s' "$n" > "$n_file"
           if [ "$n" -eq 1 ]; then
-            printf '```json\\n[{"severity":"CRITICAL","category":"SECURITY","file":"a.java","line_start":1,"line_end":1,"title":"Bad","description":"Very bad","evidence":"trace","confidence":0.95}]\\n```\\n'
+            printf '```json\\n{"verdicts": [], "findings": [{"severity":"CRITICAL","category":"SECURITY","file":"a.java","line_start":1,"line_end":1,"title":"Bad","description":"Very bad","evidence":"trace","confidence":0.95}]}\\n```\\n'
           else
-            printf '[]\\n'
+            v=""
+            for id in $(printf '%s' "$*" | grep -o 'finding_id [^ ]*' | cut -d' ' -f2); do
+              v="$v{\\"finding_id\\": \\"$id\\", \\"verdict\\": \\"fixed\\", \\"evidence\\": \\"commit abc\\"},"
+            done
+            printf '```json\\n{"verdicts": [%s], "findings": []}\\n```\\n' "${v%,}"
           fi
           ;;
         *)
@@ -108,11 +112,12 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 ai.singlr.sail.common.DateTimeUtils.newId().toString(),
                 "sailrun_it");
 
-    var parsed = FindingParser.parse(output);
-    assertEquals(
-        1,
-        parsed.findings().size(),
-        "findings must be parsed from real container output: " + output);
+    var result = FindingParser.parse(output);
+    assertTrue(
+        result instanceof FindingParser.ParseResult.Parsed,
+        "the envelope must be parsed from real container output: " + output);
+    var parsed = (FindingParser.ParseResult.Parsed) result;
+    assertEquals(1, parsed.findings().size());
     assertEquals(Finding.Severity.CRITICAL, parsed.findings().getFirst().severity());
   }
 

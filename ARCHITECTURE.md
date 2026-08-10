@@ -416,6 +416,19 @@ stage's gate fails, a fix agent addresses the open findings on the same branch a
 reviewer runs again, bounded by `max_iterations`, after which the spec `escalates` and parks
 in `review` for a human.
 
+Findings have identity across iterations. The re-review receives the previous review's open
+findings and must return a verdict envelope — `{"verdicts": [...], "findings": [...]}`, the
+only response shape the parser admits — ruling each carried finding `fixed`, `still_open`, or
+`disputed`, with evidence required for `fixed` and `disputed`. Fail-closed: an unmentioned
+carried finding defaults to `still_open` and re-attaches to the new review as a fresh row
+chained through `carried_from`, so the gate keeps failing on a high the reviewer stopped
+mentioning, and a passed review resolves nothing implicitly. The fix agent has a dispute lane:
+it argues a wrong finding in the spec room instead of coding around it, the re-review rules on
+the argument, and a `disputed` finding is excluded from the gate but listed in the room verdict
+for the human. A gate-blocking finding still open after `max_finding_age` fix iterations
+(default 2) escalates by name — a convergence measure that catches a stuck loop long before
+`max_iterations` burns down.
+
 A gate pass is not completion: the PR is still open on whatever forge hosts the repo, so the
 spec parks in `awaiting_merge`. Sail never talks to the forge — the FDE reviews and merges
 the PR there, then closes the loop with `sail spec update <id> --status done`. Deciding about

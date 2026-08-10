@@ -384,6 +384,7 @@ public record SailYaml(
             "review_pipeline",
             Map.of(
                 "max_iterations", reviewPipeline.maxIterations(),
+                "max_finding_age", reviewPipeline.maxFindingAge(),
                 "stages", reviewPipeline.stages()));
       return map;
     }
