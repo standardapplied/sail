@@ -32,7 +32,10 @@ import java.util.concurrent.TimeoutException;
  * stamps with the spec's resolved repos. A repo the spec does not target (dirtied by a concurrent
  * or previous dispatch in the shared container) never nudges this run. When the session lists no
  * repos — a missing session file or a non-dispatch launch — every workspace repo is checked, the
- * prior behavior.
+ * prior behavior. A {@code room}-role run (the wake lane's chat sessions, marked by {@code role} in
+ * the session file) skips the git protocol entirely: a chat owns no repos, so a dirty tree in the
+ * shared container is never its concern — but it keeps the room last-look below, so a human reply
+ * racing the chat's end is still guaranteed a reading.
  *
  * <p>Beyond the git protocol, the gate takes one last look at the spec room: the run's undelivered
  * messages ({@code GET /v1/run/messages}, run-credential-scoped) block the stop with their bodies
@@ -85,6 +88,9 @@ public final class SailStopGate {
       # the git protocol, stop-room-nudged for the room), so a message that
       # arrives after a git nudge still gets its one block and neither concern
       # can wedge a run. stdout is reserved for the hook-protocol block JSON.
+      # A room-role run (role "room" in its session file) skips the git protocol
+      # entirely — a chat owns no repos and must never be nudged about other
+      # runs' trees — while keeping the room last-look.
       # Any unexpected condition fails open: this gate is a nudge, not a jail.
       set -u
 
@@ -130,8 +136,16 @@ public final class SailStopGate {
         allow
       fi
 
+      RUN_ROLE="$(python3 -c '
+      import json, sys
+      try:
+          print(json.load(open(sys.argv[1])).get("role") or "")
+      except Exception:
+          pass
+      ' "$SESSION" 2>/dev/null || true)"
+
       REASONS=""
-      if [ ! -f "$GIT_MARKER" ]; then
+      if [ "$RUN_ROLE" != "room" ] && [ ! -f "$GIT_MARKER" ]; then
         REPOS="$(python3 -c '
       import json, sys
       try:

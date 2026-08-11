@@ -81,6 +81,7 @@ public final class SpecCliHelper {
             --priority)         FIELDS+=(--data-urlencode "priority=$2"); shift 2;;
             --depends-on)       FIELDS+=(--data-urlencode "depends_on=$2"); shift 2;;
             --repos)            FIELDS+=(--data-urlencode "repos=$2"); shift 2;;
+            --wake)             FIELDS+=(--data-urlencode "wake=$2"); shift 2;;
             --body-file)        FIELDS+=(--data-urlencode "body@$2"); shift 2;;
             --plan-file)        FIELDS+=(--data-urlencode "plan@$2"); shift 2;;
             --id)               FIELDS+=(--data-urlencode "id=$2"); shift 2;;
@@ -101,7 +102,8 @@ public final class SpecCliHelper {
         spec create --id <id> --title <title> [--body-file F] [--status pending]
                     [--depends-on a,b] [--repos a,b] [--agent A] [--model M]
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
-        spec update <id> [--status S] [--title T] [--assignee H] [--force] [...]  (alias: edit)
+        spec update <id> [--status S] [--title T] [--assignee H] [--wake on|mention|off]
+                    [--force] [...]  (alias: edit)
         spec content <id> --body-file F [--plan-file F]   revise the body
         spec comment <id> --body <text>|- [--reply-to <message-id>]
         spec comments <id> [--before <message-id>] [--limit N]

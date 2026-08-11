@@ -55,6 +55,52 @@ class AgentCliTest {
   private static final String TASK = "/home/dev/.sail/agent-task.txt";
 
   @Test
+  void headlessResumeCommandClaudeCodeResumesTheRecordedSession() {
+    var cmd =
+        AgentCli.CLAUDE_CODE.headlessResumeCommand(
+            "sess-42", TASK, true, null, null, "/home/dev/.sail/claude-settings.json", true);
+
+    assertTrue(cmd.startsWith("claude --print"), cmd);
+    assertTrue(cmd.contains("--output-format stream-json --verbose"), cmd);
+    assertTrue(cmd.contains("--settings /home/dev/.sail/claude-settings.json"), cmd);
+    assertTrue(cmd.contains("--dangerously-skip-permissions"), cmd);
+    assertTrue(cmd.contains("--resume sess-42 -p \"$(cat " + TASK + ")\""), cmd);
+  }
+
+  @Test
+  void headlessResumeCommandCodexUsesExecResumeWithTheTaskAsPrompt() {
+    var cmd =
+        AgentCli.CODEX.headlessResumeCommand("sess-42", TASK, true, "gpt-5", "high", null, true);
+
+    assertTrue(cmd.startsWith("codex exec resume"), cmd);
+    assertTrue(cmd.contains("--dangerously-bypass-approvals-and-sandbox"), cmd);
+    assertTrue(cmd.contains("--dangerously-bypass-hook-trust"), cmd);
+    assertTrue(cmd.contains("--model gpt-5"), cmd);
+    assertTrue(cmd.contains("model_reasoning_effort"), cmd);
+    assertTrue(cmd.endsWith(" sess-42 \"$(cat " + TASK + ")\""), cmd);
+  }
+
+  @Test
+  void headlessResumeCommandRefusesAMalformedSessionId() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AgentCli.CLAUDE_CODE.headlessResumeCommand(
+                "$(rm -rf ~)", TASK, true, null, null, null, true));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentCli.CODEX.headlessResumeCommand(null, TASK, true, null, null, null, true));
+  }
+
+  @Test
+  void isSafeSessionIdAcceptsUuidsAndRejectsShellMetacharacters() {
+    assertTrue(AgentCli.isSafeSessionId("0195a2f0-0000-7000-8000-000000000001"));
+    assertFalse(AgentCli.isSafeSessionId("a; rm -rf /"));
+    assertFalse(AgentCli.isSafeSessionId(""));
+    assertFalse(AgentCli.isSafeSessionId(null));
+  }
+
+  @Test
   void headlessCommandClaudeCodeWithPermissions() {
     var cmd = AgentCli.CLAUDE_CODE.headlessCommand(TASK, true);
 

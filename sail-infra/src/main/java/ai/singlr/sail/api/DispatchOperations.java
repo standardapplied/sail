@@ -13,6 +13,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
@@ -21,6 +22,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -35,6 +37,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -436,6 +439,8 @@ public final class DispatchOperations {
               background,
               unit,
               runId,
+              null,
+              "adhoc",
               null));
       return new AdhocSession(runId, null, null, Optional.empty());
     }
@@ -460,7 +465,9 @@ public final class DispatchOperations {
               background,
               unit,
               runId,
-              credential);
+              credential,
+              "adhoc",
+              null);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
         throw launchLostToCancel(runId, project, unit);
@@ -477,6 +484,251 @@ public final class DispatchOperations {
       releaseIfAbsent(runId, project, unit);
       throw e;
     }
+  }
+
+  /**
+   * Launches a room wake — the chat lane: a real run minted through the same reservation machinery
+   * as dispatch, role {@code room} with an empty repo set (the gate serializes it only against runs
+   * of its own spec), principal {@code <agent>/room-<runId>}, run credential, watcher, and
+   * guardrail ceiling. The spec is never claimed, no branch is checked out, no snapshot is taken —
+   * a chat owns no working tree. When the spec's latest run recorded a resumable session for the
+   * chosen agent, the launch resumes that conversation with the wake prompt as its next turn;
+   * otherwise a fresh session is primed like dispatch (spec body + room tail). The prompt's
+   * rendered messages seed the run's delivery ledger, and each target repo's HEAD is recorded so
+   * {@link #guardRoomRun} can tell whether the chat somehow moved a tree. Returns the run id.
+   */
+  public String startRoomRun(String project, String specId, String localHandle) {
+    var loaded = projects.loadRunning(project);
+    var config = loaded.config();
+    if (config.agent() == null) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
+    }
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box keeps no run aggregate, so a room wake cannot be reserved or tracked.");
+    }
+    var spec =
+        specStore
+            .findById(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    var agentType = spec.agent() != null ? spec.agent() : config.agent().type();
+    var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
+    var room =
+        messageStore == null
+            ? List.<MessageStore.MessageRow>of()
+            : messageStore.list(specId, null, 20);
+    var resumeSessionId = resumableSessionId(specId, agentType);
+    var built =
+        RoomWakePrompt.build(
+            spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null);
+    var task = built.prompt();
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    RunStore.Reservation reservation;
+    try {
+      reservation =
+          runStore.reserveDispatch(
+              runId,
+              project,
+              specId,
+              localHandle,
+              Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
+              "room",
+              List.of(),
+              agentType,
+              null,
+              task,
+              unit.logPath(),
+              unit.unitName(),
+              configuredMaxDuration(config));
+    } catch (RuntimeException e) {
+      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the room wake run.", e);
+    }
+    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
+      throw overlapRefusal(conflicted.conflict());
+    }
+    var credential = ((RunStore.Reservation.Reserved) reservation).credential();
+    try {
+      seedRoomDelivery(runId, built.renderedMessages());
+      captureRoomHeads(project, config, unit);
+      var launch =
+          launchSession(
+              project,
+              config,
+              "/home/" + config.sshUser() + "/workspace",
+              true,
+              spec.model(),
+              spec.reasoningEffort(),
+              specId,
+              agentType,
+              task,
+              "",
+              List.of(),
+              true,
+              unit,
+              runId,
+              credential,
+              "room",
+              resumeSessionId);
+      var status = querySession(new AgentSession(shell), project, unit);
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
+      if (status != null && status.running()) {
+        publishAgentSessionStarted(
+            project, specId, agentType, status.pid(), runId, launch.watcher());
+      }
+      return runId;
+    } catch (RuntimeException e) {
+      releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+  }
+
+  /**
+   * The spec's most recent resumable conversation for {@code agentType}: the latest run that
+   * recorded a session id, restricted to the same agent (a Claude session cannot resume under
+   * Codex) and to ids safe to place in an argv — session ids are hook-reported, replicated data.
+   */
+  private String resumableSessionId(String specId, String agentType) {
+    return runStore.listForSpec(specId).stream()
+        .filter(run -> Strings.isNotBlank(run.sessionId()))
+        .filter(run -> agentType.equals(run.agent()))
+        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
+        .findFirst()
+        .map(RunStore.RunRow::sessionId)
+        .orElse(null);
+  }
+
+  private static String roomHeadsPath(AgentUnit unit) {
+    return AgentUnit.runDir(unit.unitName().substring(AgentUnit.RUN_UNIT_PREFIX.length()))
+        + "/room-heads.json";
+  }
+
+  /**
+   * Records each configured repo's current HEAD into the run directory before the chat launches.
+   * Best-effort bookkeeping: a failure degrades the commit guard, never the wake.
+   */
+  private void captureRoomHeads(String project, SailYaml config, AgentUnit unit) {
+    try {
+      var heads = new LinkedHashMap<String, Object>();
+      for (var repo : config.repos()) {
+        var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
+        var head =
+            exec(
+                ContainerExec.asDevUser(
+                    project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
+        if (head.ok() && !head.stdout().isBlank()) {
+          heads.put(repo.path(), head.stdout().trim());
+        }
+      }
+      if (heads.isEmpty()) {
+        return;
+      }
+      var result =
+          exec(
+              ContainerExec.asDevUser(
+                  project,
+                  List.of(
+                      "bash",
+                      "-c",
+                      "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
+                      "bash",
+                      YamlUtil.dumpJson(heads),
+                      roomHeadsPath(unit))));
+      if (!result.ok()) {
+        System.err.println(
+            "  [room-wake] Warning: could not record repo heads: " + result.stderr());
+      }
+    } catch (RuntimeException e) {
+      System.err.println("  [room-wake] Warning: could not record repo heads: " + e.getMessage());
+    }
+  }
+
+  /**
+   * The read-only contract's backstop, run when a room run stops: any repo whose HEAD moved since
+   * the wake launched — and that no other live run of the project reserves, so a concurrent build's
+   * commits are never misattributed — is published as a loud {@code guardrail_triggered} event with
+   * the changed file list. Never a review: the pipeline ignores {@code room} stops structurally,
+   * and this guard is how a worktree-writing chat surfaces instead. The recorded heads file is
+   * consumed on first read, so a replayed stop checks nothing twice.
+   */
+  public void guardRoomRun(String project, String runId) {
+    var unit = AgentUnit.forRun(runId);
+    var headsPath = roomHeadsPath(unit);
+    var recorded = exec(ContainerExec.asDevUser(project, List.of("cat", headsPath)));
+    if (!recorded.ok() || recorded.stdout().isBlank()) {
+      return;
+    }
+    exec(ContainerExec.asDevUser(project, List.of("rm", "-f", headsPath)));
+    var run = runStore == null ? null : runStore.findById(runId).orElse(null);
+    var specId = run != null ? run.specId() : null;
+    var heads = YamlUtil.parseMap(recorded.stdout());
+    var others =
+        runStore == null
+            ? List.<RunStore.RunRow>of()
+            : runStore.listForProject(project).stream()
+                .filter(DispatchOperations::ownsLiveAgent)
+                .filter(candidate -> !candidate.id().equals(runId))
+                .toList();
+    if (others.stream().anyMatch(candidate -> candidate.repos().isEmpty())) {
+      return;
+    }
+    var reserved =
+        others.stream()
+            .flatMap(candidate -> candidate.repos().stream())
+            .collect(Collectors.toSet());
+    var moved = new ArrayList<String>();
+    var config = projects.loadRunning(project).config();
+    for (var entry : heads.entrySet()) {
+      var repo = entry.getKey();
+      if (reserved.contains(repo)) {
+        continue;
+      }
+      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo;
+      var current =
+          exec(
+              ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
+      if (!current.ok() || current.stdout().isBlank()) {
+        continue;
+      }
+      var head = current.stdout().trim();
+      var before = Objects.toString(entry.getValue(), "");
+      if (head.equals(before)) {
+        continue;
+      }
+      var files =
+          exec(
+              ContainerExec.asDevUser(
+                  project,
+                  List.of("git", "-C", repoDir, "diff", "--name-only", before, head, "--")));
+      var fileList =
+          files.ok() && !files.stdout().isBlank()
+              ? String.join(", ", files.stdout().trim().split("\n"))
+              : "unknown files";
+      moved.add(repo + " (" + fileList + ")");
+    }
+    if (moved.isEmpty()) {
+      return;
+    }
+    publish(
+        project,
+        specId,
+        Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
+        Map.of(
+            "reason",
+            "room run "
+                + runId
+                + " modified "
+                + String.join("; ", moved)
+                + " — a chat session must never change code",
+            "action",
+            "recorded; the branch keeps the commits — review them by hand"));
   }
 
   private static void prepare(AdhocPreparer preparer) {
@@ -810,7 +1062,9 @@ public final class DispatchOperations {
         background,
         unit,
         runId,
-        runCredential);
+        runCredential,
+        "build",
+        null);
   }
 
   /**
@@ -834,7 +1088,9 @@ public final class DispatchOperations {
       boolean background,
       AgentUnit unit,
       String runId,
-      String runCredential) {
+      String runCredential,
+      String role,
+      String resumeSessionId) {
     try {
       ensureSailSetup(project);
       var session = new AgentSession(shell);
@@ -847,6 +1103,7 @@ public final class DispatchOperations {
           specId,
           agentType,
           runId,
+          role,
           repoPaths,
           unit);
       var command =
@@ -862,7 +1119,9 @@ public final class DispatchOperations {
               background,
               unit,
               runId,
-              runCredential);
+              runCredential,
+              role,
+              resumeSessionId);
       listener.launching(background, redactCredential(command, runCredential));
       var exitCode = launcher.launch(command);
       if (background) {
@@ -906,7 +1165,9 @@ public final class DispatchOperations {
       boolean background,
       AgentUnit unit,
       String runId,
-      String runCredential) {
+      String runCredential,
+      String role,
+      String resumeSessionId) {
     var agentCli = AgentCli.fromYamlName(agentType);
     return background
         ? AgentSession.buildBackgroundLaunchCommand(
@@ -921,7 +1182,9 @@ public final class DispatchOperations {
             agentType,
             unit.logPath(),
             runId,
-            runCredential)
+            runCredential,
+            role,
+            resumeSessionId)
         : AgentSession.buildForegroundTaskCommand(
             project,
             config.sshUser(),
@@ -934,7 +1197,8 @@ public final class DispatchOperations {
             agentType,
             unit.logPath(),
             runId,
-            runCredential);
+            runCredential,
+            role);
   }
 
   /**
@@ -966,7 +1230,7 @@ public final class DispatchOperations {
    */
   private void requireNoRepoOverlap(
       String project, String localHandle, String specId, List<String> targetRepos) {
-    DispatchGate.decide(specId, targetRepos, runningLocalRuns(project, localHandle))
+    DispatchGate.decide(specId, "build", targetRepos, runningLocalRuns(project, localHandle))
         .ifPresent(
             conflict -> {
               throw overlapRefusal(conflict);
@@ -1008,7 +1272,7 @@ public final class DispatchOperations {
     return runStore.listForProject(project).stream()
         .filter(DispatchOperations::ownsLiveAgent)
         .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
-        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
+        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.role(), run.repos()))
         .toList();
   }
 

@@ -30,8 +30,14 @@ public final class DispatchGate {
 
   private DispatchGate() {}
 
-  /** One running local run of the project: its id, the spec it works, and its reserved repos. */
-  public record RunningRun(String runId, String specId, List<String> repos) {}
+  /** The chat lane: a run that reserves no repos and conflicts only with runs of its own spec. */
+  public static final String ROOM_ROLE = "room";
+
+  /**
+   * One running local run of the project: its id, the spec it works, its role, and its reserved
+   * repos.
+   */
+  public record RunningRun(String runId, String specId, String role, List<String> repos) {}
 
   /**
    * The blocking run and the repos both sides claim; empty {@code overlap} means one side works the
@@ -43,18 +49,27 @@ public final class DispatchGate {
    * The first running run that blocks the dispatch, or empty to allow. A run of {@code
    * targetSpecId} itself always blocks, even on disjoint repos: a spec has one lifecycle and one
    * review pipeline, so a second live execution — reachable via restart with a repo override —
-   * would race the first over shared spec state. Any other run blocks only on repo overlap.
+   * would race the first over shared spec state. Any other run blocks only on repo overlap, and a
+   * {@link #ROOM_ROLE} run on either side never overlaps anything: a chat reserves no repos, so its
+   * empty repo set must not carry the whole-container meaning the working lanes give it — a wake
+   * never blocks another spec's build, and a build never blocks another spec's wake.
    */
   public static Optional<Conflict> decide(
-      String targetSpecId, List<String> targetRepos, List<RunningRun> running) {
+      String targetSpecId, String targetRole, List<String> targetRepos, List<RunningRun> running) {
     return running.stream()
         .map(
             run ->
                 sameSpec(run.specId(), targetSpecId)
                     ? Optional.of(new Conflict(run, List.of()))
-                    : conflictWith(targetRepos, run))
+                    : roomLane(targetRole, run.role())
+                        ? Optional.<Conflict>empty()
+                        : conflictWith(targetRepos, run))
         .flatMap(Optional::stream)
         .findFirst();
+  }
+
+  private static boolean roomLane(String targetRole, String runRole) {
+    return ROOM_ROLE.equals(targetRole) || ROOM_ROLE.equals(runRole);
   }
 
   /**

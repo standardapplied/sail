@@ -118,20 +118,20 @@ public record AgentUnit(
   }
 
   /**
-   * Resolves a run row's recorded role to its run-scoped log path — {@code agent.log} for the build
-   * and ad-hoc session roles, {@code review.log} for reviews — so the log endpoints share one
-   * mapping instead of hardcoding a second path. The path derives from the canonical run id, never
-   * a persisted path: run rows replicate over sync, so a stored path is untrusted input that must
-   * never select a file. Throws {@link IllegalArgumentException} for any other role.
+   * Resolves a run row's recorded role to its run-scoped log path — {@code agent.log} for the
+   * build, ad-hoc, and room session roles, {@code review.log} for reviews — so the log endpoints
+   * share one mapping instead of hardcoding a second path. The path derives from the canonical run
+   * id, never a persisted path: run rows replicate over sync, so a stored path is untrusted input
+   * that must never select a file. Throws {@link IllegalArgumentException} for any other role.
    */
   public static String logPathForRole(String role, String runId) {
     var id = Ids.requireUuid(runId);
     return switch (role) {
-      case "build", "adhoc" -> runDir(id) + "/agent.log";
+      case "build", "adhoc", "room" -> runDir(id) + "/agent.log";
       case "review" -> REVIEW.runLogPath(id);
       default ->
           throw new IllegalArgumentException(
-              "Unknown role: " + role + " (expected build, adhoc, or review)");
+              "Unknown role: " + role + " (expected build, adhoc, room, or review)");
     };
   }
 }

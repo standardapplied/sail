@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -164,6 +165,28 @@ class GlobalSpecOperationsTest {
 
     assertNull(updated.spec().model(), "an empty model clears the column back to null");
     assertEquals("high", updated.spec().reasoningEffort(), "reasoning_effort is untouched");
+  }
+
+  @Test
+  void updateSetsClearsAndRejectsTheWakeMode() {
+    ops.create(createReq(Map.of()));
+
+    var set = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "mention")), ADMIN);
+    assertEquals("mention", set.spec().wake());
+    assertEquals("mention", set.spec().toMap().get("wake"));
+
+    var untouched = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "T2")), ADMIN);
+    assertEquals("mention", untouched.spec().wake(), "an unrelated edit never wipes the mode");
+
+    var cleared = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "")), ADMIN);
+    assertNull(cleared.spec().wake(), "an empty wake clears the mode back to the default");
+    assertFalse(cleared.spec().toMap().containsKey("wake"));
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "loud")), ADMIN));
+    assertTrue(refusal.getMessage().contains("on, mention, or off"));
   }
 
   @Test

@@ -539,6 +539,7 @@ record SpecUpdateRequest(
     Integer priority,
     List<String> dependsOn,
     List<String> repos,
+    String wake,
     String updatedBy,
     boolean force) {
 
@@ -556,6 +557,7 @@ record SpecUpdateRequest(
         map.containsKey("priority") ? ((Number) map.get("priority")).intValue() : null,
         map.containsKey("depends_on") ? (List<String>) map.get("depends_on") : null,
         map.containsKey("repos") ? (List<String>) map.get("repos") : null,
+        (String) map.get("wake"),
         null,
         Boolean.TRUE.equals(map.get("force")));
   }
@@ -577,6 +579,7 @@ record SpecUpdateRequest(
         priority,
         dependsOn,
         repos,
+        wake,
         actor,
         force);
   }
@@ -683,6 +686,7 @@ record GlobalSpecView(
     int priority,
     List<String> dependsOn,
     List<String> repos,
+    String wake,
     String createdBy,
     String createdAt,
     String updatedAt,
@@ -702,6 +706,7 @@ record GlobalSpecView(
         row.priority(),
         row.dependsOn(),
         row.repos(),
+        row.wake(),
         row.createdBy(),
         row.createdAt(),
         row.updatedAt(),
@@ -723,6 +728,7 @@ record GlobalSpecView(
     m.put("priority", priority);
     if (!dependsOn.isEmpty()) m.put("depends_on", dependsOn);
     if (!repos.isEmpty()) m.put("repos", repos);
+    if (wake != null) m.put("wake", wake);
     if (createdBy != null) m.put("created_by", createdBy);
     m.put("created_at", createdAt);
     m.put("updated_at", updatedAt);

@@ -342,6 +342,16 @@ public final class SailOperations implements Operations {
             : null;
   }
 
+  /** Launches a room wake through the shared dispatch executor — see {@code startRoomRun} there. */
+  public String startRoomRun(String project, String specId, String localHandle) {
+    return dispatchOps.startRoomRun(project, specId, localHandle);
+  }
+
+  /** Runs the room commit guard through the shared dispatch executor. */
+  public void guardRoomRun(String project, String runId) {
+    dispatchOps.guardRoomRun(project, runId);
+  }
+
   private void publishOnBus(Event event) {
     if (eventBus != null) {
       eventBus.publish(event);

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- A room message now wakes the agent when no run is live. A new `room-wake` reactor on
+  `spec_message_posted` (local and sync-arrived alike) runs on the dispatch-owning box — the one
+  whose handle is the spec's assignee, so the fleet has exactly one waker per spec — and launches
+  a real run through the same reservation machinery as dispatch: run role `room`, principal
+  `<agent>/room-<runId>`, run credential, watcher, and guardrail ceiling. The gate learns the
+  chat lane explicitly: a `room` run reserves no repos and conflicts only with runs of its own
+  spec, so a wake and a dispatch on one spec serialize while a chat never blocks another spec's
+  build. Timing is time-based only — a 30s debounce batches messages into one wake, a 10-minute
+  post-finish cooldown kills the thank-you refire and covers the review loop's inter-iteration
+  gaps, and any live run suppresses the wake outright (the relay owns delivery then). Wake
+  policy is the per-spec synced `wake` field (`on` | `mention` | `off`, default `on` once
+  dispatched; `spec update --wake`, shown by `spec show`); only human authors ever wake — agent
+  and `sail` posts are structurally excluded, so no storm loops. The wake resumes the spec's
+  most recent recorded conversation when one exists (`claude --print --resume` /
+  `codex exec resume`, session ids validated before touching an argv) and otherwise primes a
+  fresh session with the spec body and room tail; either way the prompt's rendered messages seed
+  the delivery ledger. The chat is read-only by contract and structurally excluded from review:
+  stop signals now carry `run_role` (env, session file, watcher, reconciler), the pipeline and
+  the lifecycle reactor ignore `room` stops even on a spec parked in `review`, the stop gate
+  skips the git protocol for the chat while keeping the room last-look, and a wake turn that
+  somehow moved a repo's HEAD surfaces as a loud `guardrail_triggered` event with the changed
+  files — never a review.
+
 - Every run now knows its agent session. A new `sail-session-report` SessionStart hook (both
   CLIs; Codex's payload verified to carry the same `session_id`/`transcript_path` fields) posts
   the conversation's identity to the run row over the run-credential lane

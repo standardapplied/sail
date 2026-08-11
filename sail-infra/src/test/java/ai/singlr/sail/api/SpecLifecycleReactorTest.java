@@ -73,6 +73,22 @@ class SpecLifecycleReactorTest {
   }
 
   @Test
+  void aRoomStopNeverAdvancesTheSpec() {
+    seed("auth", "in_progress");
+    var roomStop =
+        Event.of(
+            "acme",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            java.util.Map.of(Event.WellKnownData.RUN_ROLE, Event.WellKnownData.RUN_ROLE_ROOM));
+
+    assertFalse(reactor.filter().test(roomStop), "a chat's turn end is not a build finishing");
+    assertTrue(reactor.filter().test(stopped("auth")), "a role-less stop keeps the old behavior");
+  }
+
+  @Test
   void nameIsSpecLifecycle() {
     assertEquals("spec-lifecycle", reactor.name());
   }

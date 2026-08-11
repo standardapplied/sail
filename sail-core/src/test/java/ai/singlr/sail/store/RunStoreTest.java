@@ -809,6 +809,75 @@ class RunStoreTest {
     assertTrue(reserveAdhoc(DateTimeUtils.newId().toString(), "node-a").isEmpty());
   }
 
+  private java.util.Optional<DispatchGate.Conflict> reserveRoom(
+      String id, String specId, String node) {
+    return conflictOf(
+        store.reserveDispatch(
+            id,
+            "backend",
+            specId,
+            node,
+            node,
+            "room",
+            java.util.List.of(),
+            "claude-code",
+            null,
+            "answer in the room",
+            "/home/dev/.sail/runs/" + id + "/agent.log",
+            "sail-agent-" + id));
+  }
+
+  @Test
+  void aRoomReservationMintsItsMarkedPrincipalAndSessionRole() {
+    var id = DateTimeUtils.newId().toString();
+
+    var conflict = reserveRoom(id, "auth", "node-a");
+
+    assertTrue(conflict.isEmpty());
+    var run = store.findById(id).orElseThrow();
+    assertEquals("room", run.role());
+    assertEquals("claude/room-" + id, run.principal());
+    assertTrue(run.roomRole());
+    assertTrue(run.sessionRole(), "room runs join the stop/status/reaper lanes");
+    assertEquals(java.util.List.of("claude/room-" + id), store.principals(id));
+  }
+
+  @Test
+  void aRoomReservationNeverBlocksADisjointSpecsDispatchAndViceVersa() {
+    reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
+
+    assertTrue(
+        reserve(
+                store,
+                DateTimeUtils.newId().toString(),
+                "other",
+                "node-a",
+                java.util.List.of("app"))
+            .isEmpty(),
+        "a chat never blocks another spec's build");
+
+    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "third", "node-a").isEmpty());
+  }
+
+  @Test
+  void aRoomReservationSerializesWithItsOwnSpecsRuns() {
+    reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
+
+    assertTrue(
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+            .isPresent(),
+        "a wake and a dispatch on one spec serialize");
+    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isPresent());
+  }
+
+  @Test
+  void aLiveBuildBlocksItsOwnSpecsRoomReservation() {
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+
+    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isPresent());
+    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "other", "node-a").isEmpty());
+  }
+
   @Test
   void aLegacyNullSpecRunningRunStillGatesReservationsWithoutBlowingUp() {
     var id = DateTimeUtils.newId().toString();

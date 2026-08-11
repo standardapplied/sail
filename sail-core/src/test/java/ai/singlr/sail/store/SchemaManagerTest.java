@@ -341,6 +341,76 @@ class SchemaManagerTest {
   }
 
   @Test
+  void theRunsRebuildCarriesRowsAndChildLedgersForwardAndAdmitsRoomRuns() {
+    stageAtBaseline();
+    var priorEntries = SchemaManager.MIGRATIONS.size() - 7;
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, priorEntries).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + priorEntries);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, agent, status, started_at, role, principal,"
+            + " owner, session_id) VALUES ('r1', 'acme', 'auth', 'claude-code', 'completed',"
+            + " 't0', 'build', 'claude/r1', 'uday', 'sess-1')");
+    db.execute("INSERT INTO run_principals (run_id, principal) VALUES ('r1', 'claude/r1')");
+    db.execute(
+        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev)"
+            + " VALUES ('0195a2f0-0000-7000-8000-000000000001', 'auth', 'uday', 'hi', 't0', '1-a')");
+    db.execute(
+        "INSERT INTO run_delivered_messages (run_id, message_id)"
+            + " VALUES ('r1', '0195a2f0-0000-7000-8000-000000000001')");
+
+    new SchemaManager(db).migrate();
+
+    var survived =
+        db.queryOne(
+                "SELECT project, role, principal, owner, session_id FROM runs WHERE id = 'r1'",
+                r -> List.of(r.text(0), r.text(1), r.text(2), r.text(3), r.text(4)))
+            .orElseThrow();
+    assertEquals(List.of("acme", "build", "claude/r1", "uday", "sess-1"), survived);
+    assertEquals(
+        1,
+        (int)
+            db.queryOne(
+                    "SELECT COUNT(*) FROM run_principals WHERE run_id = 'r1'",
+                    r -> (int) r.integer(0))
+                .orElseThrow(),
+        "the rebuild must never cascade the principal history away");
+    assertEquals(
+        1,
+        (int)
+            db.queryOne(
+                    "SELECT COUNT(*) FROM run_delivered_messages WHERE run_id = 'r1'",
+                    r -> (int) r.integer(0))
+                .orElseThrow(),
+        "the rebuild must never cascade the delivery ledger away");
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role)"
+            + " VALUES ('r2', 'acme', 'claude-code', 'running', 't1', 'room')");
+    assertEquals(
+        "room", db.queryOne("SELECT role FROM runs WHERE id = 'r2'", r -> r.text(0)).orElseThrow());
+  }
+
+  @Test
+  void theWakeColumnAdmitsItsThreeModesAndRejectsGarbage() {
+    new SchemaManager(db).migrate();
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at, wake)"
+            + " VALUES ('auth', 'T', 'pending', 't0', 't0', 'mention')");
+    assertEquals(
+        "mention",
+        db.queryOne("SELECT wake FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
+    assertThrows(
+        SqliteException.class,
+        () -> db.execute("UPDATE specs SET wake = 'loud' WHERE id = 'auth'"));
+  }
+
+  @Test
   void theFindingsRebuildCarriesRowsAndSourceLinksForwardAndAdmitsDisputed() {
     stageAtBaseline();
     db.execute(

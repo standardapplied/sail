@@ -197,7 +197,7 @@ class AgentWatchCommandTest {
 
   @Test
   void syntheticStopCarriesExitCodeSpecAndAgent() {
-    var exit = new AgentSession.ExitState(false, 137, "scrum-12", "claude-code", "run-12");
+    var exit = new AgentSession.ExitState(false, 137, "scrum-12", "claude-code", "run-12", "build");
 
     var event = AgentWatchCommand.syntheticStop("acme", exit);
 
@@ -208,20 +208,31 @@ class AgentWatchCommandTest {
     assertEquals(137, event.data().get("exit_code"));
     assertEquals("watcher", event.data().get("source"));
     assertEquals("run-12", event.data().get("run_id"));
+    assertEquals("build", event.data().get("run_role"));
+  }
+
+  @Test
+  void syntheticStopCarriesTheRoomRoleSoThePipelineCanIgnoreTheChat() {
+    var exit = new AgentSession.ExitState(false, 0, "scrum-12", "claude-code", "run-12", "room");
+
+    var event = AgentWatchCommand.syntheticStop("acme", exit);
+
+    assertEquals("room", event.data().get("run_role"));
   }
 
   @Test
   void syntheticStopOmitsRunIdWhenTheSessionHadNone() {
-    var exit = new AgentSession.ExitState(false, 0, "scrum-12", "claude-code", "");
+    var exit = new AgentSession.ExitState(false, 0, "scrum-12", "claude-code", "", "");
 
     var event = AgentWatchCommand.syntheticStop("acme", exit);
 
     assertNull(event.data().get("run_id"));
+    assertNull(event.data().get("run_role"));
   }
 
   @Test
   void syntheticStopFallsBackToSailAgentWhenTypeUnknown() {
-    var exit = new AgentSession.ExitState(false, 0, "scrum-12", "", "run-12");
+    var exit = new AgentSession.ExitState(false, 0, "scrum-12", "", "run-12", "");
 
     var event = AgentWatchCommand.syntheticStop("acme", exit);
 
@@ -262,7 +273,7 @@ class AgentWatchCommandTest {
   @Test
   void emitSyntheticStopPublishesWhenASpecIsKnown() throws Exception {
     var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
-    var exit = new AgentSession.ExitState(false, 2, "scrum-7", "codex", "run-7");
+    var exit = new AgentSession.ExitState(false, 2, "scrum-7", "codex", "run-7", "build");
 
     AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
 
@@ -273,7 +284,7 @@ class AgentWatchCommandTest {
   @Test
   void emitSyntheticStopSkipsOnlyWhenNeitherSpecNorRunIdIsKnown() throws Exception {
     var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
-    var exit = new AgentSession.ExitState(false, 0, "", "codex", "");
+    var exit = new AgentSession.ExitState(false, 0, "", "codex", "", "");
 
     AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
 
@@ -283,7 +294,7 @@ class AgentWatchCommandTest {
   @Test
   void emitSyntheticStopPublishesARunAddressedStopForABlankSpec() throws Exception {
     var captured = new java.util.concurrent.atomic.AtomicReference<Event>();
-    var exit = new AgentSession.ExitState(false, 3, "", "codex", RUN_ID);
+    var exit = new AgentSession.ExitState(false, 3, "", "codex", RUN_ID, "");
 
     AgentWatchCommand.emitSyntheticStop(captured::set, "acme", exit);
 
@@ -331,14 +342,14 @@ class AgentWatchCommandTest {
 
   @Test
   void emitSyntheticStopIsANoOpWithoutAPublisher() {
-    var exit = new AgentSession.ExitState(false, 0, "scrum-7", "codex", "run-7");
+    var exit = new AgentSession.ExitState(false, 0, "scrum-7", "codex", "run-7", "build");
 
     assertDoesNotThrow(() -> AgentWatchCommand.emitSyntheticStop(null, "acme", exit));
   }
 
   @Test
   void emitSyntheticStopSwallowsPublisherFailures() {
-    var exit = new AgentSession.ExitState(false, 1, "scrum-7", "codex", "run-7");
+    var exit = new AgentSession.ExitState(false, 1, "scrum-7", "codex", "run-7", "build");
 
     assertDoesNotThrow(
         () ->

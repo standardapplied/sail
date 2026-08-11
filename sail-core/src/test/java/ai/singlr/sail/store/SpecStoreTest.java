@@ -78,6 +78,31 @@ class SpecStoreTest {
   }
 
   @Test
+  void wakeModePersistsThroughCreateUpdateAndList() {
+    store.create(spec("auth", "OAuth", "pending").withWake("mention"));
+
+    assertEquals("mention", store.findById("auth").orElseThrow().wake());
+    assertEquals("mention", store.list(SpecStore.SpecFilter.all()).getFirst().wake());
+
+    store.update(store.findById("auth").orElseThrow().withWake("off"));
+    assertEquals("off", store.findById("auth").orElseThrow().wake());
+
+    store.update(store.findById("auth").orElseThrow().withWake(null));
+    assertTrue(store.findById("auth").orElseThrow().wake() == null);
+  }
+
+  @Test
+  void wakeModeRidesTheSnapshotAndSurvivesApplyRevision() {
+    store.create(spec("auth", "OAuth", "pending").withWake("on"));
+
+    var snapshot = store.comparableSnapshot("auth");
+    assertEquals("on", snapshot.get("wake"));
+
+    store.applyRevision("auth", snapshot, "2-abc");
+    assertEquals("on", store.findById("auth").orElseThrow().wake());
+  }
+
+  @Test
   void projectSpecsReturnsOnlyTheBucketAsConfigValues() {
     store.create(spec("mine", "acme", "OAuth", "pending"));
     store.create(spec("other", "zenith", "Search", "pending"));

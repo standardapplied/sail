@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
+import java.util.regex.Pattern;
 
 /**
  * Known AI coding agent CLIs that can be installed inside a project container. Each constant
@@ -154,6 +155,71 @@ public enum AgentCli {
                 ? " --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
                 : "";
         yield binaryName + " exec" + perm + codexModelOptions(model, reasoningEffort) + " " + task;
+      }
+    };
+  }
+
+  private static final Pattern SAFE_SESSION_ID =
+      Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+
+  /**
+   * Whether a recorded session id is safe to interpolate into a shell command. Session ids arrive
+   * hook-reported and replicate across boxes, so they are untrusted input at every argv seam.
+   */
+  public static boolean isSafeSessionId(String sessionId) {
+    return sessionId != null && SAFE_SESSION_ID.matcher(sessionId).matches();
+  }
+
+  /**
+   * The headless command resuming a recorded conversation with a fresh task: {@code claude --print
+   * --resume <id> -p …} / {@code codex exec resume <id> …}. Same permission, model, settings, and
+   * streaming semantics as {@link #headlessCommand(String, boolean, String, String, String,
+   * boolean)}; the session id is validated against the safe pattern before it touches the shell
+   * string because it is hook-reported, replicated data.
+   */
+  public String headlessResumeCommand(
+      String sessionId,
+      String taskFile,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String claudeSettingsPath,
+      boolean stream) {
+    if (!isSafeSessionId(sessionId)) {
+      throw new IllegalArgumentException(
+          "Malformed session id; refusing to build a resume command from replicated data.");
+    }
+    var task = "\"$(cat " + taskFile + ")\"";
+    return switch (this) {
+      case CLAUDE_CODE -> {
+        var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
+        var settings =
+            Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
+        var streamFormat = stream ? " --output-format stream-json --verbose" : "";
+        yield binaryName
+            + " --print"
+            + streamFormat
+            + settings
+            + perm
+            + claudeModelOptions(model)
+            + " --resume "
+            + sessionId
+            + " -p "
+            + task;
+      }
+      case CODEX -> {
+        var perm =
+            fullPermissions
+                ? " --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
+                : "";
+        yield binaryName
+            + " exec resume"
+            + perm
+            + codexModelOptions(model, reasoningEffort)
+            + " "
+            + sessionId
+            + " "
+            + task;
       }
     };
   }
