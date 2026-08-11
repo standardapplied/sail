@@ -52,7 +52,8 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentAttachCommand implements Runnable {
 
-  private static final Pattern SAFE_SESSION_ID = Pattern.compile("[A-Za-z0-9._-]{1,128}");
+  private static final Pattern SAFE_SESSION_ID =
+      Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
   private static final Set<String> LIVE_STATUSES = Set.of("running", "stopping");
 
@@ -115,27 +116,32 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * The latest local agent session (build or ad-hoc) of the project, read directly from the
-   * control-plane database like the status and log lanes. Empty when there is none or the database
-   * is unreadable — attach then falls back to a fresh conversation, loudly.
+   * control-plane database like the status and log lanes. Empty only when a successful query finds
+   * no row — attach then falls back to a fresh conversation, loudly. An unreadable database
+   * (locked, corrupt, unmigrated) fails closed instead: treating it as "no run" would bypass the
+   * live-run refusal and fork a second agent over the same worktree.
    */
   private Optional<RunStore.RunRow> latestRun() {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       return new RunStore(db).latestForProjectOnNode(name, NodeIdentity.handle());
     } catch (RuntimeException e) {
-      return Optional.empty();
+      throw new IllegalStateException(
+          "Could not read run state for project '" + name + "'; refusing to attach.", e);
     }
   }
 
   /**
    * The recorded session id, validated before it is spliced into a shell command: the value arrives
    * from an agent-reported hook payload and replicates between boxes, so only a plain token shape
-   * ever reaches the argv. A malformed id fails loud rather than resuming something else.
+   * ever reaches the argv. The first character must be alphanumeric — an id starting with {@code -}
+   * would be parsed by the agent CLI as an option, not a session id. A malformed id fails loud
+   * rather than resuming something else.
    */
   private static String validatedSessionId(RunStore.RunRow run) {
     if (run == null || run.sessionId() == null) {
       return null;
     }
-    if (!SAFE_SESSION_ID.matcher(run.sessionId()).matches()) {
+    if (!isSafeSessionId(run.sessionId())) {
       throw new IllegalStateException(
           "Run "
               + run.id()
@@ -144,6 +150,10 @@ public final class AgentAttachCommand implements Runnable {
               + " inside the container.");
     }
     return run.sessionId();
+  }
+
+  static boolean isSafeSessionId(String sessionId) {
+    return SAFE_SESSION_ID.matcher(sessionId).matches();
   }
 
   private String refusal(RunStore.RunRow run) {

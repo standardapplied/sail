@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AgentCli;
@@ -38,6 +39,33 @@ class AgentAttachCommandTest {
     assertEquals(
         List.of("bash", "-lc", "cd ~/workspace && codex"),
         AgentAttachCommand.buildResumeCommand(AgentCli.CODEX, null));
+  }
+
+  @Test
+  void ordinarySessionIdShapesAreSafe() {
+    assertTrue(AgentAttachCommand.isSafeSessionId("0198f00d-1234-7000-8000-abcdefabcdef"));
+    assertTrue(AgentAttachCommand.isSafeSessionId("abc-123"));
+    assertTrue(AgentAttachCommand.isSafeSessionId("a"));
+    assertTrue(AgentAttachCommand.isSafeSessionId("9session.name_x"));
+  }
+
+  @Test
+  void sessionIdStartingWithDashIsRejectedAsOptionInjection() {
+    assertFalse(
+        AgentAttachCommand.isSafeSessionId("--dangerously-bypass-approvals-and-sandbox"),
+        "a leading '-' would be parsed by the agent CLI as an option, not a session id");
+    assertFalse(AgentAttachCommand.isSafeSessionId("-r"));
+    assertFalse(AgentAttachCommand.isSafeSessionId(".hidden"));
+    assertFalse(AgentAttachCommand.isSafeSessionId("_x"));
+  }
+
+  @Test
+  void sessionIdWithShellMetacharactersOrOversizeIsRejected() {
+    assertFalse(AgentAttachCommand.isSafeSessionId("abc; rm -rf /"));
+    assertFalse(AgentAttachCommand.isSafeSessionId("abc$(id)"));
+    assertFalse(AgentAttachCommand.isSafeSessionId(""));
+    assertFalse(AgentAttachCommand.isSafeSessionId("a".repeat(129)));
+    assertTrue(AgentAttachCommand.isSafeSessionId("a".repeat(128)));
   }
 
   @Test
