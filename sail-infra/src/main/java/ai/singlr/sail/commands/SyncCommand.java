@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -44,6 +45,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -131,16 +135,20 @@ public final class SyncCommand implements Callable<Integer> {
     var syncState = new SyncState(db);
     var fileStore = new FileStore(db);
     var projectStore = new ProjectStore(db);
+    var specStore = new SpecStore(db);
+    var messageStore = new MessageStore(db);
     return new Boxes(
-        new SpecReplica(host, new SpecStore(db), changeLog, conflicts, syncState),
+        new SpecReplica(host, specStore, changeLog, conflicts, syncState),
         new FileReplica(host, fileStore, changeLog, conflicts, syncState),
         new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
         new RunReplica(host, handle, new RunStore(db), changeLog, conflicts, syncState),
         new ReviewReplica(host, new ReviewStore(db), changeLog, conflicts, syncState),
-        new MessageReplica(host, new MessageStore(db), changeLog, conflicts, syncState),
+        new MessageReplica(host, messageStore, changeLog, conflicts, syncState),
         new FdeStore(db),
         fileStore,
-        projectStore);
+        projectStore,
+        specStore,
+        messageStore);
   }
 
   private record Boxes(
@@ -152,7 +160,9 @@ public final class SyncCommand implements Callable<Integer> {
       MessageReplica message,
       FdeStore fdes,
       FileStore files,
-      ProjectStore projects) {}
+      ProjectStore projects,
+      SpecStore specs,
+      MessageStore messages) {}
 
   /**
    * Where this box syncs to. A non-null {@link MainTarget#target()} means reconcile against it; a
@@ -179,9 +189,9 @@ public final class SyncCommand implements Callable<Integer> {
 
   private int runOnce(Boxes boxes, String target) {
     try {
-      var report = reconcile(boxes, target);
-      System.out.println(render(report, json));
-      notifyBoardUpdated(report);
+      var round = reconcile(boxes, target);
+      System.out.println(render(round.report(), json));
+      notify(round);
       return 0;
     } catch (Exception e) {
       System.err.println(
@@ -202,9 +212,9 @@ public final class SyncCommand implements Callable<Integer> {
   private int watchLoop(Boxes boxes, String target) throws InterruptedException {
     while (true) {
       try {
-        var report = reconcile(boxes, target);
-        System.out.println(render(report, json));
-        notifyBoardUpdated(report);
+        var round = reconcile(boxes, target);
+        System.out.println(render(round.report(), json));
+        notify(round);
       } catch (InterruptedException e) {
         throw e;
       } catch (Exception e) {
@@ -217,11 +227,14 @@ public final class SyncCommand implements Callable<Integer> {
     }
   }
 
-  private SyncEngine.Report reconcile(Boxes boxes, String target) throws Exception {
+  /** One reconcile round's outcome: the summed report and the events the pull brought in. */
+  private record Round(SyncEngine.Report report, List<Event> pulledMessages) {}
+
+  private Round reconcile(Boxes boxes, String target) throws Exception {
     return SyncPeer.withChecked("main", () -> reconcileSession(boxes, target));
   }
 
-  private SyncEngine.Report reconcileSession(Boxes boxes, String target) throws Exception {
+  private Round reconcileSession(Boxes boxes, String target) throws Exception {
     try (var channel = SshSyncChannel.open(target);
         var session = new SyncSession(channel.reader(), channel.writer())) {
       var specReport = new SyncEngine().reconcile(boxes.spec(), session.replica("spec"));
@@ -229,7 +242,10 @@ public final class SyncCommand implements Callable<Integer> {
       var projectReport = new SyncEngine().reconcile(boxes.project(), session.replica("project"));
       var runReport = new SyncEngine().reconcile(boxes.run(), session.replica("run"));
       var reviewReport = new SyncEngine().reconcile(boxes.review(), session.replica("review"));
+      var knownMessages = boxes.messages().syncEntityIds();
       var messageReport = new SyncEngine().reconcile(boxes.message(), session.replica("message"));
+      var pulledMessages =
+          pulledMessageEvents(boxes.messages(), boxes.specs(), knownMessages, HostInfo.hostname());
       var rejected = applyFdes(boxes.fdes(), session.fetchFdes());
       if (!rejected.isEmpty()) {
         System.err.println(
@@ -243,12 +259,46 @@ public final class SyncCommand implements Callable<Integer> {
       materialize(boxes.files());
       materializeProjects(boxes.projects());
       reconcileLiveResources(boxes.projects(), projectReport);
-      return combine(
+      return new Round(
           combine(
-              combine(combine(combine(specReport, fileReport), projectReport), runReport),
-              reviewReport),
-          messageReport);
+              combine(
+                  combine(combine(combine(specReport, fileReport), projectReport), runReport),
+                  reviewReport),
+              messageReport),
+          pulledMessages);
     }
+  }
+
+  /**
+   * The {@code spec_message_posted} events a pull round owes the local bus: one per message the
+   * reconcile newly adopted from main, shaped exactly like the posting box's own event so the room
+   * wake reactor hears a synced message the same as a local one. Messages this box already knew —
+   * its own posts, and everything pushed outward — fired at post time and are excluded by the
+   * pre-reconcile id snapshot. A message whose spec has not landed locally is skipped: the spec
+   * replica reconciles first, so that only happens for a row orphaned on main.
+   */
+  static List<Event> pulledMessageEvents(
+      MessageStore messages, SpecStore specs, Set<String> known, String host) {
+    return messages.syncEntityIds().stream()
+        .filter(id -> !known.contains(id))
+        .map(messages::findById)
+        .flatMap(Optional::stream)
+        .map(
+            row ->
+                specs
+                    .findById(row.specId())
+                    .map(
+                        spec ->
+                            SyncTransitionEvents.messagePosted(
+                                spec.project(),
+                                row.specId(),
+                                row.id(),
+                                row.author(),
+                                row.body(),
+                                host))
+                    .orElse(null))
+        .filter(Objects::nonNull)
+        .toList();
   }
 
   /**
@@ -374,21 +424,27 @@ public final class SyncCommand implements Callable<Integer> {
     return value == null ? null : value.toString();
   }
 
-  private void notifyBoardUpdated(SyncEngine.Report report) {
-    if (!shouldNotify(report)) {
-      return;
+  private void notify(Round round) {
+    for (var event : round.pulledMessages()) {
+      publishQuietly(event);
     }
+    if (shouldNotify(round.report())) {
+      publishQuietly(boardUpdatedEvent(HostInfo.hostname(), round.report()));
+    }
+  }
+
+  private void publishQuietly(Event event) {
     try {
       if (publisher == null) {
         publisher = SailEventPublisher.localDefault();
       }
-      publisher.publish(boardUpdatedEvent(HostInfo.hostname(), report));
+      publisher.publish(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Exception ignored) {
       System.err.println(
           Ansi.AUTO.string(
-              "  @|faint Board notification skipped — sail-api isn't running here; the sync is"
+              "  @|faint Event notification skipped — sail-api isn't running here; the sync is"
                   + " unaffected.|@"));
     }
   }

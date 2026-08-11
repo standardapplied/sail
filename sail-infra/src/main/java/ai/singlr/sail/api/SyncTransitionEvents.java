@@ -203,13 +203,25 @@ public final class SyncTransitionEvents {
       return List.of();
     }
     return List.of(
-        event(
-            located.project(),
-            located.specId(),
-            Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
-            author,
-            host,
-            Map.of("message_id", transition.entityId(), "preview", preview(body))));
+        messagePosted(
+            located.project(), located.specId(), transition.entityId(), author, body, host));
+  }
+
+  /**
+   * The sync-sourced {@code spec_message_posted} event for one synced message, shaped exactly like
+   * the local post's event plus {@code data.source = "sync"}. Shared by main's push-side narration
+   * and a node's pull side, so a message arriving over sync wakes the same consumers — the room
+   * wake reactor above all — as one posted locally.
+   */
+  public static Event messagePosted(
+      String project, String specId, String messageId, String author, String body, String host) {
+    return event(
+        project,
+        specId,
+        Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+        author,
+        host,
+        Map.of("message_id", messageId, "preview", preview(body)));
   }
 
   /** A review-side transition addressed to its spec and project, or null when unresolvable. */
