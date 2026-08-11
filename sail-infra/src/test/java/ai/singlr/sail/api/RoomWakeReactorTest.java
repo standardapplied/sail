@@ -399,6 +399,21 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void aSpecDeletedDuringTheDebounceIsDroppedAtFireTime() {
+    seed("auth", "done", "uday", null);
+    buildRun("auth", "completed");
+    ageOutEveryFinish("auth");
+    var executor = new ManualExecutorService();
+    var reactor = reactor(executor);
+
+    reactor.onEvent(message("auth", "uday", "hello"));
+    specStore.delete("auth");
+    executor.drain();
+
+    assertTrue(launcher.woken.isEmpty(), "a spec that vanished mid-debounce wakes nothing");
+  }
+
+  @Test
   void aSyncArrivedMessageWakesTheOwningBoxTheSame() {
     seed("auth", "done", "uday", null);
     buildRun("auth", "completed");

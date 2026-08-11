@@ -11,14 +11,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -125,5 +130,85 @@ class SyncCommandTest {
     assertEquals("boom", SyncCommand.reason(new IllegalStateException("boom")));
     assertEquals("RuntimeException", SyncCommand.reason(new RuntimeException()));
     assertEquals("IllegalStateException", SyncCommand.reason(new IllegalStateException("  ")));
+  }
+
+  @Test
+  void pulledMessageEventsFireOnlyForNewlyAdoptedMessages(@TempDir Path tempDir) {
+    try (var db = Sqlite.open(tempDir.resolve("pull.db"))) {
+      new SchemaManager(db).migrate();
+      var specs = new SpecStore(db);
+      var messages = new MessageStore(db);
+      seedSpec(specs, "auth");
+      messages.append("auth", "uday", "posted before the round", null);
+      var known = messages.syncEntityIds();
+      var pulledId = DateTimeUtils.newId().toString();
+      messages.applyRevision(
+          pulledId,
+          Map.of(
+              "spec_id", "auth",
+              "author", "raj",
+              "body", "hello from main",
+              "created_at", DateTimeUtils.now().toString()),
+          "r1");
+
+      var events = SyncCommand.pulledMessageEvents(messages, specs, known, "devbox");
+
+      assertEquals(1, events.size());
+      var event = events.getFirst();
+      assertEquals(Event.WellKnownTypes.SPEC_MESSAGE_POSTED, event.type());
+      assertEquals("acme", event.project());
+      assertEquals("auth", event.spec());
+      assertEquals("raj", event.agent());
+      assertEquals("devbox", event.host());
+      assertEquals(pulledId, event.data().get("message_id"));
+      assertEquals("hello from main", event.data().get("preview"));
+      assertEquals(Event.WellKnownData.SOURCE_SYNC, event.data().get(Event.WellKnownData.SOURCE));
+      assertTrue(
+          SyncCommand.pulledMessageEvents(messages, specs, messages.syncEntityIds(), "devbox")
+              .isEmpty(),
+          "a message already known before the round never refires");
+    }
+  }
+
+  @Test
+  void aPulledMessageWhoseSpecNeverLandedIsSkipped(@TempDir Path tempDir) {
+    try (var db = Sqlite.open(tempDir.resolve("orphan.db"))) {
+      new SchemaManager(db).migrate();
+      var specs = new SpecStore(db);
+      var messages = new MessageStore(db);
+      seedSpec(specs, "auth");
+      var orphanId = DateTimeUtils.newId().toString();
+      messages.applyRevision(
+          orphanId,
+          Map.of(
+              "spec_id", "ghost",
+              "author", "raj",
+              "body", "orphaned on main",
+              "created_at", DateTimeUtils.now().toString()),
+          "r1");
+
+      assertTrue(SyncCommand.pulledMessageEvents(messages, specs, Set.of(), "devbox").isEmpty());
+    }
+  }
+
+  private static void seedSpec(SpecStore specs, String id) {
+    specs.create(
+        new SpecStore.SpecRow(
+            id,
+            "acme",
+            "OAuth flow",
+            SpecStatus.DONE,
+            "uday",
+            null,
+            null,
+            null,
+            null,
+            0,
+            "uday",
+            "",
+            "",
+            null,
+            List.of(),
+            List.of("app")));
   }
 }

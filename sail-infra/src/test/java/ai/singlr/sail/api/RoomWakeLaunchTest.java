@@ -24,10 +24,13 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -111,7 +114,7 @@ class RoomWakeLaunchTest {
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
         .on("rev-parse HEAD", "aaa111\n")
-        .on("status --porcelain", "")
+        .on("diff --binary HEAD", "")
         .on("printf '%s'", "")
         .on("agent.pid", "123")
         .on("kill -0 123", "")
@@ -403,6 +406,7 @@ class RoomWakeLaunchTest {
         new StubShell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("rev-parse HEAD", "aaa111\n")
+            .on("diff --binary HEAD", "diff --git a/src/Main.java b/src/Main.java\n-old\n+new\n")
             .on("status --porcelain", " M src/Main.java\n?? notes.txt\n");
     var ops = operations(shell);
     seedSpec("auth");
@@ -423,7 +427,7 @@ class RoomWakeLaunchTest {
     runStore.complete(runId, "completed", 0);
     runStore.saveRoomGuardBaseline(
         runId,
-        "{\"app\": {\"head\": \"aaa111\", \"status\":"
+        "{\"app\": {\"head\": \"aaa111\", \"state\":"
             + " \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
 
     ops.guardRoomRun("acme", runId);
@@ -436,6 +440,49 @@ class RoomWakeLaunchTest {
     var reason = String.valueOf(guardrail.data().get("reason"));
     assertTrue(reason.contains("worktree changed"), reason);
     assertTrue(reason.contains("src/Main.java, notes.txt"), reason);
+  }
+
+  @Test
+  void anEditToAnAlreadyDirtyFileIsStillDetected() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("rev-parse HEAD", "aaa111\n")
+            .on("diff --binary HEAD", "diff --git a/src/Main.java b/src/Main.java\n-old\n+worse\n")
+            .on("status --porcelain", " M src/Main.java\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    var baselineDiff = "diff --git a/src/Main.java b/src/Main.java\n-old\n+new\n";
+    runStore.saveRoomGuardBaseline(
+        runId, "{\"app\": {\"head\": \"aaa111\", \"state\": \"" + sha256(baselineDiff) + "\"}}");
+
+    ops.guardRoomRun("acme", runId);
+
+    var guardrail =
+        events.stream()
+            .filter(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type()))
+            .findFirst()
+            .orElseThrow();
+    var reason = String.valueOf(guardrail.data().get("reason"));
+    assertTrue(
+        reason.contains("worktree changed"),
+        "the same porcelain listing with different content must still trip the guard: " + reason);
   }
 
   @Test
@@ -477,6 +524,130 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void aBuildThatFinishedMidChatStillShieldsItsRepos() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell().on("incus list ^acme$", RUNNING_JSON).on("rev-parse HEAD", "bbb222\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
+    var build = DateTimeUtils.newId().toString();
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
+            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " 'completed', ?, ?, '[\"app\"]')",
+        build,
+        HANDLE,
+        DateTimeUtils.now().minusSeconds(600).toString(),
+        DateTimeUtils.now().plusSeconds(60).toString());
+
+    ops.guardRoomRun("acme", runId);
+
+    assertTrue(
+        events.stream().noneMatch(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type())),
+        "a build that committed mid-chat and finished before the guard must still shield its repo");
+  }
+
+  @Test
+  void aBuildThatFinishedBeforeTheChatBeganNeverShields() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("rev-parse HEAD", "bbb222\n")
+            .on("diff --name-only", "src/Main.java\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
+    var build = DateTimeUtils.newId().toString();
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
+            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " 'completed', ?, ?, '[\"app\"]')",
+        build,
+        HANDLE,
+        DateTimeUtils.now().minusSeconds(7200).toString(),
+        DateTimeUtils.now().minusSeconds(3600).toString());
+
+    ops.guardRoomRun("acme", runId);
+
+    assertTrue(
+        events.stream().anyMatch(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type())),
+        "a build that finished before the baseline was captured cannot be the author");
+  }
+
+  @Test
+  void aConcurrentRoomRunNeverSuppressesTheGuard() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("rev-parse HEAD", "bbb222\n")
+            .on("diff --name-only", "src/Main.java\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
+    var chat = DateTimeUtils.newId().toString();
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
+            + " VALUES (?, 'acme', 'other', ?, 'room', 'claude-code', 'running', ?, '[]')",
+        chat,
+        HANDLE,
+        DateTimeUtils.now().toString());
+
+    ops.guardRoomRun("acme", runId);
+
+    assertTrue(
+        events.stream().anyMatch(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type())),
+        "another spec's chat reserves nothing and must not read as a whole-container claim");
+  }
+
+  @Test
   void theGuardIsQuietWithoutARecordedBaseline() throws Exception {
     var runId = DateTimeUtils.newId().toString();
     var ops = operations(new StubShell().on("incus list ^acme$", RUNNING_JSON));
@@ -492,6 +663,41 @@ class RoomWakeLaunchTest {
 
     var missing = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "ghost", HANDLE));
     assertEquals(ErrorCode.SPEC_NOT_FOUND, missing.failure().errorCode());
+  }
+
+  @Test
+  void theServerLaneDelegatesWakeAndGuardThroughSailOperations() throws Exception {
+    var shell = liveAgentShell();
+    operations(shell);
+    seedSpec("auth");
+    var yaml = tempDir.resolve("sail-server.yaml");
+    Files.writeString(yaml, YAML);
+    try (var bus = new EventBus()) {
+      var sailOps =
+          new SailOperations(
+                  shell,
+                  yaml.toString(),
+                  (command, logPath) -> 4242L,
+                  bus,
+                  null,
+                  specStore,
+                  new ReviewStore(db),
+                  runStore)
+              .useMessages(messageStore);
+
+      var runId = sailOps.startRoomRun("acme", "auth", HANDLE);
+      assertEquals("room", runStore.findById(runId).orElseThrow().role());
+
+      sailOps.guardRoomRun("acme", runId);
+      assertTrue(
+          runStore.consumeRoomGuardBaseline(runId).isEmpty(),
+          "the guard consumed its baseline; an unmoved tree stays quiet");
+    }
+  }
+
+  private static String sha256(String value) throws Exception {
+    var hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+    return HexFormat.of().formatHex(hash);
   }
 
   private static final class StubShell implements ShellExec {
