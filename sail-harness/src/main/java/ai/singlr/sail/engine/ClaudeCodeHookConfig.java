@@ -22,7 +22,11 @@ import java.util.concurrent.TimeoutException;
  * <p>Hooks wired:
  *
  * <ul>
- *   <li>{@code SessionStart} ({@code matcher: startup}) → {@code agent_session_started}
+ *   <li>{@code SessionStart} ({@code matcher: startup}) → {@code agent_session_started}, plus
+ *       {@link SailSessionReport} in its own matcher-less group beside it: the event announces a
+ *       session's beginning exactly once, but the session report must fire on every start source —
+ *       a resume, clear, or compact restart mints a new conversation whose identity must overwrite
+ *       the row (last write wins) — so it cannot share the startup-matched group
  *   <li>{@code PreToolUse} → {@code agent_tool_started}
  *   <li>{@code PostToolUse} → {@code agent_tool_finished}, plus {@link SailRoomRelay} beside it in
  *       the same matcher group: the heartbeat prints nothing, so stdout stays the relay's for
@@ -76,7 +80,9 @@ public final class ClaudeCodeHookConfig {
     var sessionEnd = hookCommand(SailEventHelper.SCRIPT_PATH, "agent_session_completed");
 
     var hooks = new LinkedHashMap<String, Object>();
-    hooks.put("SessionStart", List.of(matcherGroup("startup", sessionStart)));
+    hooks.put(
+        "SessionStart",
+        List.of(matcherGroup("startup", sessionStart), matcherGroup(null, sessionReportCommand())));
     hooks.put("PreToolUse", List.of(matcherGroup(null, toolStarted)));
     hooks.put("PostToolUse", List.of(matcherGroup(null, toolFinished, roomRelayCommand())));
     hooks.put("Stop", List.of(matcherGroup(null, stop)));
@@ -145,6 +151,14 @@ public final class ClaudeCodeHookConfig {
     hook.put("type", "command");
     hook.put("command", SailRoomRelay.SCRIPT_PATH);
     hook.put("timeout", SailRoomRelay.HOOK_TIMEOUT_SECONDS);
+    return hook;
+  }
+
+  private static Map<String, Object> sessionReportCommand() {
+    var hook = new LinkedHashMap<String, Object>();
+    hook.put("type", "command");
+    hook.put("command", SailSessionReport.SCRIPT_PATH);
+    hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }
 }

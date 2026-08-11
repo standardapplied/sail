@@ -159,6 +159,24 @@ class CodexHookConfigTest {
 
   @Test
   @SuppressWarnings("unchecked")
+  void renderWiresTheSessionReportBesideTheSessionStartEvent() {
+    var json = CodexHookConfig.render();
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
+    var startGroups = (List<Map<String, Object>>) hooks.get("SessionStart");
+    assertEquals(1, startGroups.size());
+    var startHooks = (List<Map<String, Object>>) startGroups.get(0).get("hooks");
+    assertEquals(2, startHooks.size(), "the event and the session report run in parallel");
+    assertEquals(
+        SailEventHelper.SCRIPT_PATH + " agent_session_started", startHooks.get(0).get("command"));
+    assertEquals(
+        SailSessionReport.SCRIPT_PATH,
+        startHooks.get(1).get("command"),
+        "codex's matcher-less group fires on every start source, so one group serves both hooks");
+    assertEquals(SailSessionReport.HOOK_TIMEOUT_SECONDS, startHooks.get(1).get("timeout"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
   void renderWiresTheRoomRelayBesideThePostToolUseHeartbeat() {
     var json = CodexHookConfig.render();
     var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");

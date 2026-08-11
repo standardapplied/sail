@@ -156,7 +156,10 @@ public final class SchemaManager {
               message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
               PRIMARY KEY (run_id, message_id)
           )""",
-          "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT");
+          "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT",
+          "ALTER TABLE runs ADD COLUMN session_id TEXT",
+          "ALTER TABLE runs ADD COLUMN session_source TEXT",
+          "ALTER TABLE runs ADD COLUMN transcript_path TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

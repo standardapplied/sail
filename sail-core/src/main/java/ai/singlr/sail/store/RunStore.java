@@ -63,6 +63,10 @@ public final class RunStore implements ConflictResolver {
    * and {@code owner} the FDE it acts for. Both are attribution stamped at creation and replicate
    * with the run; the run's credential lives in the local-only {@code run_credentials} table and
    * never joins a snapshot. A row that outlives its credential keeps the handle for history.
+   *
+   * <p>{@code sessionId}, {@code sessionSource}, and {@code transcriptPath} are the hook-reported
+   * identity of the run's agent conversation — see {@link #recordSession}. All three are null until
+   * a session reports; a run adopted from an old-shape snapshot derives nulls the same way.
    */
   public record RunRow(
       String id,
@@ -84,7 +88,58 @@ public final class RunStore implements ConflictResolver {
       List<String> repos,
       Long pidTicks,
       String principal,
-      String owner) {
+      String owner,
+      String sessionId,
+      String sessionSource,
+      String transcriptPath) {
+
+    /** A row without session identity — the shape every run has until its first session report. */
+    public RunRow(
+        String id,
+        String project,
+        String specId,
+        String node,
+        String role,
+        String agent,
+        String branch,
+        String task,
+        Integer pid,
+        Integer watcherPid,
+        String status,
+        Integer exitCode,
+        String logPath,
+        String unit,
+        String startedAt,
+        String completedAt,
+        List<String> repos,
+        Long pidTicks,
+        String principal,
+        String owner) {
+      this(
+          id,
+          project,
+          specId,
+          node,
+          role,
+          agent,
+          branch,
+          task,
+          pid,
+          watcherPid,
+          status,
+          exitCode,
+          logPath,
+          unit,
+          startedAt,
+          completedAt,
+          repos,
+          pidTicks,
+          principal,
+          owner,
+          null,
+          null,
+          null);
+    }
 
     /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
@@ -111,7 +166,7 @@ public final class RunStore implements ConflictResolver {
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
-          + " principal, owner";
+          + " principal, owner, session_id, session_source, transcript_path";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -393,6 +448,31 @@ public final class RunStore implements ConflictResolver {
                 messageId);
           }
           return null;
+        });
+  }
+
+  /**
+   * Records the hook-reported identity of the run's agent conversation: the session id, the start
+   * source ({@code startup}, {@code resume}, {@code clear}, {@code compact}), and the
+   * container-side transcript path. Last write wins by design — a clear or compact restart mints a
+   * new conversation and re-reports, and on a review run the reviewer and fix invocations share the
+   * row, so the recorded session is the most recent invocation's conversation: exactly the attach
+   * target a human wants. Authentication is the caller's concern — the run credential gates the
+   * write, and credential revocation at run completion is the write gate, so no status check here.
+   * Journals a revision so the identity replicates.
+   */
+  public void recordSession(
+      String id, String sessionId, String sessionSource, String transcriptPath) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE runs SET session_id = ?, session_source = ?, transcript_path = ?"
+                  + " WHERE id = ?",
+              sessionId,
+              sessionSource,
+              transcriptPath,
+              id);
+          recordRevision(id, "local", false);
         });
   }
 
@@ -958,8 +1038,8 @@ public final class RunStore implements ConflictResolver {
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
-            principal, owner)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            principal, owner, session_id, session_source, transcript_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -967,7 +1047,9 @@ public final class RunStore implements ConflictResolver {
             exit_code = excluded.exit_code, log_path = excluded.log_path, unit = excluded.unit,
             started_at = excluded.started_at, completed_at = excluded.completed_at,
             repos = excluded.repos, pid_ticks = excluded.pid_ticks,
-            principal = excluded.principal, owner = excluded.owner""",
+            principal = excluded.principal, owner = excluded.owner,
+            session_id = excluded.session_id, session_source = excluded.session_source,
+            transcript_path = excluded.transcript_path""",
         row.id(),
         row.project(),
         row.specId(),
@@ -987,7 +1069,10 @@ public final class RunStore implements ConflictResolver {
         YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())),
         row.pidTicks(),
         row.principal(),
-        row.owner());
+        row.owner(),
+        row.sessionId(),
+        row.sessionSource(),
+        row.transcriptPath());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1012,6 +1097,9 @@ public final class RunStore implements ConflictResolver {
     map.put("pid_ticks", run.pidTicks());
     map.put("principal", run.principal());
     map.put("owner", run.owner());
+    map.put("session_id", run.sessionId());
+    map.put("session_source", run.sessionSource());
+    map.put("transcript_path", run.transcriptPath());
     return map;
   }
 
@@ -1072,7 +1160,10 @@ public final class RunStore implements ConflictResolver {
         stringList(snapshot, "repos"),
         longValue(snapshot, "pid_ticks"),
         text(snapshot, "principal"),
-        text(snapshot, "owner"));
+        text(snapshot, "owner"),
+        text(snapshot, "session_id"),
+        text(snapshot, "session_source"),
+        text(snapshot, "transcript_path"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -1127,6 +1218,9 @@ public final class RunStore implements ConflictResolver {
         YamlUtil.parseStringList(row.text(16)),
         row.isNull(17) ? null : row.integer(17),
         row.text(18),
-        row.text(19));
+        row.text(19),
+        row.text(20),
+        row.text(21),
+        row.text(22));
   }
 }

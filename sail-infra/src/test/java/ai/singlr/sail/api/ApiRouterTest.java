@@ -1324,6 +1324,8 @@ class ApiRouterTest {
                   null,
                   null,
                   null,
+                  null,
+                  null,
                   null)));
     }
 
@@ -1402,7 +1404,7 @@ class ApiRouterTest {
               null,
               null,
               0,
-              new RunSummary("run-1", "node-a", "running", null, null, null)));
+              new RunSummary("run-1", "node-a", "running", null, null, null, null, null)));
     }
 
     @Override
@@ -1515,6 +1517,12 @@ class ApiRouterTest {
     @Override
     public Result<RunAckResponse> ackRunMessages(String runId, java.util.List<String> delivered) {
       return new TestOperations().ackRunMessages(runId, delivered);
+    }
+
+    @Override
+    public Result<RunSessionResponse> recordRunSession(
+        String runId, String sessionId, String source, String transcriptPath) {
+      return new TestOperations().recordRunSession(runId, sessionId, source, transcriptPath);
     }
 
     @Override

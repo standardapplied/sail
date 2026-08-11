@@ -32,7 +32,11 @@ import java.util.concurrent.TimeoutException;
  * <p>Hooks wired:
  *
  * <ul>
- *   <li>{@code SessionStart} → {@code agent_session_started}
+ *   <li>{@code SessionStart} → {@code agent_session_started}, plus {@link SailSessionReport} beside
+ *       it in the same matcher-less group: Codex's SessionStart payload carries {@code session_id}
+ *       and {@code transcript_path} under the same names as Claude Code's (sources
+ *       startup/resume/clear), so the one report script records the resumable conversation for both
+ *       CLIs
  *   <li>{@code PreToolUse} → {@code agent_tool_started}
  *   <li>{@code PostToolUse} → {@code agent_tool_finished}, plus {@link SailRoomRelay} beside it:
  *       Codex's {@code PostToolUse} honors {@code hookSpecificOutput.additionalContext} exactly as
@@ -85,7 +89,7 @@ public final class CodexHookConfig {
     var stop = stopGateCommand();
 
     var hooks = new LinkedHashMap<String, Object>();
-    hooks.put("SessionStart", List.of(matcherGroup(sessionStart)));
+    hooks.put("SessionStart", List.of(matcherGroup(sessionStart, sessionReportCommand())));
     hooks.put("PreToolUse", List.of(matcherGroup(toolStarted)));
     hooks.put("PostToolUse", List.of(matcherGroup(toolFinished, roomRelayCommand())));
     hooks.put("Stop", List.of(matcherGroup(stop)));
@@ -149,6 +153,14 @@ public final class CodexHookConfig {
     hook.put("type", "command");
     hook.put("command", SailRoomRelay.SCRIPT_PATH);
     hook.put("timeout", SailRoomRelay.HOOK_TIMEOUT_SECONDS);
+    return hook;
+  }
+
+  private static Map<String, Object> sessionReportCommand() {
+    var hook = new LinkedHashMap<String, Object>();
+    hook.put("type", "command");
+    hook.put("command", SailSessionReport.SCRIPT_PATH);
+    hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }
 }

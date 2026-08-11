@@ -241,6 +241,60 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
+  void recordRunSessionPersistsTheReportedConversationIdentity() {
+    var recorded =
+        operations.recordRunSession(runId, "abc-123", "startup", "/t/abc.jsonl").orThrow();
+
+    assertEquals(runId, recorded.runId());
+    assertEquals("abc-123", recorded.sessionId());
+    assertEquals("startup", recorded.sessionSource());
+    var map = recorded.toMap();
+    assertEquals(runId, map.get("run_id"));
+    assertEquals("abc-123", map.get("session_id"));
+    assertEquals("startup", map.get("session_source"));
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("abc-123", run.sessionId());
+    assertEquals("startup", run.sessionSource());
+    assertEquals("/t/abc.jsonl", run.transcriptPath());
+  }
+
+  @Test
+  void blankOptionalFieldsAreStoredAsNullNeverAsEmptyStrings() {
+    var recorded = operations.recordRunSession(runId, "  abc-123  ", " ", "").orThrow();
+
+    assertEquals("abc-123", recorded.sessionId());
+    assertNull(recorded.sessionSource());
+    assertFalse(recorded.toMap().containsKey("session_source"));
+    var run = runStore.findById(runId).orElseThrow();
+    assertNull(run.sessionSource());
+    assertNull(run.transcriptPath());
+  }
+
+  @Test
+  void aBlankSessionIdIsRefusedWithoutErasingAPriorReport() {
+    operations.recordRunSession(runId, "abc-123", "startup", "/t/abc.jsonl").orThrow();
+
+    assertEquals(
+        ErrorCode.BAD_REQUEST,
+        operations.recordRunSession(runId, " ", "clear", null).asFailure().errorCode());
+    assertEquals(
+        ErrorCode.BAD_REQUEST,
+        operations.recordRunSession(runId, null, null, null).asFailure().errorCode());
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("abc-123", run.sessionId(), "a refused report never erases the prior one");
+    assertEquals("startup", run.sessionSource());
+  }
+
+  @Test
+  void recordRunSessionRefusesAnUnknownRun() {
+    assertEquals(
+        ErrorCode.RUN_NOT_FOUND,
+        operations.recordRunSession("missing-run", "abc", "startup", null).asFailure().errorCode());
+  }
+
+  @Test
   void afterReadsForwardAndExcludesBothCursorsAtOnce() {
     var first = messages.append("room", "ada", "one", null);
     var second = messages.append("room", "ada", "two", null);

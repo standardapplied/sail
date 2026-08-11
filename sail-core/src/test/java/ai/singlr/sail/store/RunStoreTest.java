@@ -1435,6 +1435,89 @@ class RunStoreTest {
   }
 
   @Test
+  void recordSessionPersistsTheConversationIdentityAndLastWriteWins() {
+    var id = newRun("backend", "auth");
+    var beforeReport = store.latestRev(id);
+
+    store.recordSession(id, "abc-123", "startup", "/home/dev/.claude/projects/p/abc-123.jsonl");
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("abc-123", run.sessionId());
+    assertEquals("startup", run.sessionSource());
+    assertEquals("/home/dev/.claude/projects/p/abc-123.jsonl", run.transcriptPath());
+    assertNotEquals(beforeReport, store.latestRev(id), "a session report journals a revision");
+
+    store.recordSession(id, "def-456", "compact", null);
+
+    var reReported = store.findById(id).orElseThrow();
+    assertEquals("def-456", reReported.sessionId(), "last write wins: the newest conversation");
+    assertEquals("compact", reReported.sessionSource());
+    assertNull(reReported.transcriptPath());
+  }
+
+  @Test
+  void sessionFieldsJoinTheSnapshotAndSurviveReplication() {
+    var id = newRun("backend", "auth");
+    store.recordSession(id, "abc-123", "startup", "/t/abc.jsonl");
+    var snapshot = store.comparableSnapshot(id);
+
+    assertEquals("abc-123", snapshot.get("session_id"));
+    assertEquals("startup", snapshot.get("session_source"));
+    assertEquals("/t/abc.jsonl", snapshot.get("transcript_path"));
+
+    var other = freshStore("session.db");
+    other.applyRevision(id, snapshot, store.latestRev(id));
+
+    var adopted = other.findById(id).orElseThrow();
+    assertEquals("abc-123", adopted.sessionId());
+    assertEquals("startup", adopted.sessionSource());
+    assertEquals("/t/abc.jsonl", adopted.transcriptPath());
+  }
+
+  @Test
+  void adoptingAnOldShapeSnapshotDerivesNullSessionFields() {
+    var id = newRun("backend", "auth");
+    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot(id));
+    snapshot.remove("session_id");
+    snapshot.remove("session_source");
+    snapshot.remove("transcript_path");
+
+    store.applyRevision(id, snapshot, "2-remote");
+
+    var adopted = store.findById(id).orElseThrow();
+    assertNull(adopted.sessionId(), "an old-shape snapshot derives nulls instead of failing");
+    assertNull(adopted.sessionSource());
+    assertNull(adopted.transcriptPath());
+  }
+
+  @Test
+  void completionRevokesTheCredentialSoAFinishedRunCannotReport() {
+    var id = DateTimeUtils.newId().toString();
+    var reservation =
+        (RunStore.Reservation.Reserved)
+            store.reserveDispatch(
+                id,
+                "backend",
+                "auth",
+                "node-a",
+                "node-a",
+                "build",
+                List.of(),
+                "claude-code",
+                "b",
+                "t",
+                "l",
+                "u");
+    assertTrue(store.findByCredential(reservation.credential()).isPresent());
+
+    store.complete(id, "completed", 0);
+
+    assertTrue(
+        store.findByCredential(reservation.credential()).isEmpty(),
+        "credential revocation at completion is the session write gate — no status check needed");
+  }
+
+  @Test
   void seedingByExactIdentityNeverSweepsALateSyncingOlderMessage() {
     var id = newRun("backend", "auth");
     var messages = new MessageStore(db);

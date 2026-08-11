@@ -176,6 +176,25 @@ class ClaudeCodeHookConfigTest {
 
   @Test
   @SuppressWarnings("unchecked")
+  void renderWiresTheSessionReportOnEverySessionStartSource() {
+    var json = ClaudeCodeHookConfig.render();
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");
+    var startGroups = (List<Map<String, Object>>) hooks.get("SessionStart");
+    assertEquals(2, startGroups.size(), "the startup-matched event group plus the report group");
+    assertEquals("startup", startGroups.get(0).get("matcher"));
+    var reportGroup = startGroups.get(1);
+    assertFalse(
+        reportGroup.containsKey("matcher"),
+        "the session report must fire on every start source — a resume, clear, or compact restart"
+            + " mints a new conversation that must overwrite the row (last write wins)");
+    var reportHooks = (List<Map<String, Object>>) reportGroup.get("hooks");
+    assertEquals(1, reportHooks.size());
+    assertEquals(SailSessionReport.SCRIPT_PATH, reportHooks.get(0).get("command"));
+    assertEquals(SailSessionReport.HOOK_TIMEOUT_SECONDS, reportHooks.get(0).get("timeout"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
   void renderWiresTheRoomRelayBesideThePostToolUseHeartbeat() {
     var json = ClaudeCodeHookConfig.render();
     var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");

@@ -1201,6 +1201,25 @@ public final class SailOperations implements Operations {
         });
   }
 
+  @Override
+  public Result<RunSessionResponse> recordRunSession(
+      String runId, String sessionId, String source, String transcriptPath) {
+    return safeWrite(
+        () -> {
+          requireRun(runId);
+          if (Strings.isBlank(sessionId)) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST,
+                "session_id must not be blank; a prior report is never erased.");
+          }
+          var session = sessionId.strip();
+          var sessionSource = Strings.isBlank(source) ? null : source.strip();
+          var transcript = Strings.isBlank(transcriptPath) ? null : transcriptPath.strip();
+          runStore.recordSession(runId, session, sessionSource, transcript);
+          return new RunSessionResponse(runId, session, sessionSource);
+        });
+  }
+
   private RunStore.RunRow requireRun(String runId) {
     if (runStore == null) {
       throw new ApiException(
