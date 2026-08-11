@@ -45,6 +45,24 @@ public final class SpecPolicy {
   }
 
   /**
+   * Decides whether {@code actor} may post a message to spec {@code specId}'s room. Every lane but
+   * the room lane posts under the plain mutation gate. A room principal is read-only everywhere
+   * else — {@link #mutate} refuses it on capability before ownership is even consulted — so the
+   * lane's one write carries its own rule: it may post exactly when it acts for the spec's
+   * assignee, the FDE whose box woke it. Fails closed on an unassigned spec; a wake never fires for
+   * one.
+   */
+  public static AccessDecision post(Actor actor, String specId, String assignee, String createdBy) {
+    if (!actor.roomLane()) {
+      return mutate(actor, specId, assignee, createdBy);
+    }
+    if (Strings.isNotBlank(assignee) && actor.actsFor(assignee)) {
+      return AccessDecision.allowed();
+    }
+    return notAssignee(specId, assignee, createdBy);
+  }
+
+  /**
    * Decides whether {@code actor} may set spec {@code specId}'s assignee to {@code
    * requestedAssignee}. Reassignment is an admin act; the one member-allowed case is claiming a
    * spec that is currently unassigned for oneself. An agent principal claims for the FDE it acts

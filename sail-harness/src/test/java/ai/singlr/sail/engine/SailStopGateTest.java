@@ -364,6 +364,65 @@ class SailStopGateTest {
         StandardCharsets.UTF_8);
   }
 
+  private void writeSessionRole(String role) throws IOException {
+    var session = home.resolve(".sail/runs/" + RUN_ID + "/agent-session.json");
+    Files.createDirectories(session.getParent());
+    Files.writeString(
+        session,
+        "{\"spec_id\": \"s\", \"role\": \"" + role + "\", \"repos\": []}",
+        StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void aRoomRoleRunSkipsTheGitProtocolButKeepsTheRoomLastLook() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("room");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "what is it stuck on?"}]}""");
+    try (var bound = bind()) {
+      var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      var reason = blockReason(result);
+      assertTrue(reason.contains("from uday: what is it stuck on?"), reason);
+      assertFalse(
+          reason.contains("commit your work"),
+          "a chat owns no repos: another run's dirty tree must never nudge it: " + reason);
+      assertTrue(Files.exists(roomMarker()), "the room last-look stays armed for a room run");
+      assertFalse(
+          Files.exists(marker()), "the git concern never runs, so its marker stays unspent");
+    }
+  }
+
+  @Test
+  void aRoomRoleRunWithNothingUndeliveredAllowsDespiteADirtyTree() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("room");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": []}""");
+    try (var bound = bind()) {
+      var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      assertEquals("", result.stdout(), "a room run with a read room stops clean");
+      assertEquals(List.of("agent_session_stopped"), events());
+    }
+  }
+
+  @Test
+  void aBuildRoleSessionFileKeepsTheGitProtocol() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("build");
+
+    var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
+
+    assertTrue(reason.contains("commit your work in api"), reason);
+  }
+
   private String blockReason(GateResult result) {
     var block = YamlUtil.parseMap(result.stdout());
     assertEquals("block", block.get("decision"), result.stdout());

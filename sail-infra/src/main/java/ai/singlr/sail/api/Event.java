@@ -160,6 +160,16 @@ public record Event(
      */
     public static final String RUN_ID = "run_id";
 
+    /**
+     * The stopped run's lane ({@code build}, {@code adhoc}, {@code fix}, {@code room}), carried on
+     * stop signals so lane-aware reactors decide without a store lookup — above all the review
+     * pipeline, which must ignore a {@link #RUN_ROLE_ROOM} stop even on a spec parked in review.
+     */
+    public static final String RUN_ROLE = "run_role";
+
+    /** {@link #RUN_ROLE} value: a room wake — a chat that must never trigger a review. */
+    public static final String RUN_ROLE_ROOM = "room";
+
     private WellKnownData() {}
   }
 

@@ -42,7 +42,12 @@ public final class SpecLifecycleReactor implements EventSubscriber {
 
   @Override
   public Predicate<Event> filter() {
-    return e -> HANDLED_TYPES.contains(e.type()) && e.spec() != null && !e.spec().isBlank();
+    return e ->
+        HANDLED_TYPES.contains(e.type())
+            && e.spec() != null
+            && !e.spec().isBlank()
+            && !Event.WellKnownData.RUN_ROLE_ROOM.equals(
+                e.data().get(Event.WellKnownData.RUN_ROLE));
   }
 
   @Override

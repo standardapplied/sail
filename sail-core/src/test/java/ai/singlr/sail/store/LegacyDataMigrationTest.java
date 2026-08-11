@@ -152,6 +152,7 @@ class LegacyDataMigrationTest {
 
   @Test
   void attributingAnAlreadyJournaledSpecMintsARevisionForTheNewSnapshot() throws Exception {
+    new SchemaManager(db).migrate();
     db.execute(
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)

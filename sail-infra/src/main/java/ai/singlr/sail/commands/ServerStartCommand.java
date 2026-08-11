@@ -10,6 +10,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.ReviewWiring;
+import ai.singlr.sail.api.RoomWakeReactor;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
@@ -221,6 +222,16 @@ public final class ServerStartCommand implements Runnable {
                 NodeIdentity::handle)
             .useMessages(messageStore);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
+    var roomWake =
+        new RoomWakeReactor(
+            specStore,
+            runStore,
+            messageStore,
+            NodeIdentity::handle,
+            (project, specId) -> operations.startRoomRun(project, specId, NodeIdentity.handle()),
+            operations::guardRoomRun);
+    bus.subscribe(roomWake);
+    shutdown.register(roomWake);
     if (narratesSlack(HostSync.config())) {
       bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
     } else {

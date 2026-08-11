@@ -83,9 +83,16 @@ final class LocalApiRouter implements LocalApiHandler {
         return run.principal();
       }
 
+      /**
+       * A {@code room} run's credential resolves to the read-and-converse room principal, never the
+       * write-capable agent principal: the chat lane's authority is decided here, at the boundary,
+       * by the run row the server minted — not by anything the session says.
+       */
       @Override
       public Actor actor() {
-        return Actor.agentPrincipal(run.principal(), run.owner());
+        return run.roomRole()
+            ? Actor.roomPrincipal(run.principal(), run.owner())
+            : Actor.agentPrincipal(run.principal(), run.owner());
       }
     }
 
@@ -155,10 +162,11 @@ final class LocalApiRouter implements LocalApiHandler {
     var body = new LinkedHashMap<String, Object>();
     switch (caller) {
       case Caller.Run(var run) -> {
+        var actor = caller.actor();
         body.put("handle", run.principal());
         body.put("owner", run.owner());
-        body.put("role", Role.MEMBER.name().toLowerCase());
-        body.put("lane", Actor.Lane.AGENT.name().toLowerCase());
+        body.put("role", actor.role().name().toLowerCase());
+        body.put("lane", actor.lane().name().toLowerCase());
         body.put("run_id", run.id());
         body.put("project", run.project());
       }
@@ -224,12 +232,20 @@ final class LocalApiRouter implements LocalApiHandler {
     return new ApiResponse(202, Map.of("id", stamped.id()));
   }
 
+  /**
+   * Spec creation takes no policy actor today, so the room lane's refusal lives here at the route:
+   * a chat session reads and converses, it never mints work items.
+   */
   private ApiResponse specsCollection(LocalApiRequest request, Caller caller) {
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecs(filterFrom(request.query())));
-      case "POST" ->
-          ApiResponse.fromCreated(
-              operations.createGlobalSpec(createFrom(request.form(), caller.author())));
+      case "POST" -> {
+        if (caller.actor().roomLane()) {
+          yield problem(403, "A room session reads and converses; it cannot create specs.");
+        }
+        yield ApiResponse.fromCreated(
+            operations.createGlobalSpec(createFrom(request.form(), caller.author())));
+      }
       default -> problem(405, "specs accepts GET or POST");
     };
   }
@@ -274,6 +290,9 @@ final class LocalApiRouter implements LocalApiHandler {
         yield ApiResponse.from(result);
       }
       case "POST" -> {
+        if (caller instanceof Caller.Run(var run) && run.roomRole() && !id.equals(run.specId())) {
+          yield problem(403, "A room session posts only to its own spec's room.");
+        }
         var form = request.form();
         yield ApiResponse.fromCreated(
             operations.postSpecMessage(
@@ -422,6 +441,7 @@ final class LocalApiRouter implements LocalApiHandler {
             form.containsKey("priority") ? intOr(form.get("priority"), 0) : null,
             form.containsKey("depends_on") ? csv(form.get("depends_on")) : null,
             form.containsKey("repos") ? csv(form.get("repos")) : null,
+            form.get("wake"),
             null,
             Boolean.parseBoolean(form.get("force")))
         .withUpdatedBy(principal);

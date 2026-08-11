@@ -76,9 +76,10 @@ public final class SchemaManager {
    * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
    * versions continuing from {@value #V1_VERSION}. Never reorder, edit, or remove an entry; each
    * addition ships with a test that migrates a seeded database and asserts the data survived. The
-   * {@code run_credentials} table is local-only secret material (per-run credential hashes) and
-   * {@code run_delivered_messages} is local-only delivery bookkeeping — neither ever joins a sync
-   * snapshot.
+   * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
+   * {@code run_delivered_messages} (delivery bookkeeping) and {@code room_guard} (the room commit
+   * guard's launch baseline, kept host-side so the guarded agent can never reach it) are local-only
+   * as well — none of the three ever joins a sync snapshot.
    */
   static final List<String> MIGRATIONS =
       List.of(
@@ -159,7 +160,57 @@ public final class SchemaManager {
           "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT",
           "ALTER TABLE runs ADD COLUMN session_id TEXT",
           "ALTER TABLE runs ADD COLUMN session_source TEXT",
-          "ALTER TABLE runs ADD COLUMN transcript_path TEXT");
+          "ALTER TABLE runs ADD COLUMN transcript_path TEXT",
+          """
+          CREATE TABLE runs_v5 (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              exit_code INTEGER,
+              watcher_pid INTEGER,
+              node TEXT,
+              role TEXT NOT NULL DEFAULT 'build'
+                  CHECK (role IN ('build', 'adhoc', 'review', 'room')),
+              log_path TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              unit TEXT,
+              repos TEXT,
+              pid_ticks INTEGER,
+              principal TEXT,
+              owner TEXT,
+              session_id TEXT,
+              session_source TEXT,
+              transcript_path TEXT
+          )""",
+          """
+          INSERT INTO runs_v5 (id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
+                  session_source, transcript_path)
+              SELECT id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
+                  session_source, transcript_path FROM runs""",
+          "DROP TABLE runs",
+          "ALTER TABLE runs_v5 RENAME TO runs",
+          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          "ALTER TABLE specs ADD COLUMN wake TEXT"
+              + " CHECK (wake IS NULL OR wake IN ('on', 'mention', 'off'))",
+          """
+          CREATE TABLE room_guard (
+              run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+              baseline TEXT NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

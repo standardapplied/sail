@@ -108,7 +108,7 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
       throws Exception {
     var cli = AgentCli.fromYamlName(agent);
     var unit = stage(project, prompt, reviewId);
-    session.writeSession(project, prompt, branch, "", agent, reviewId, repos, unit);
+    session.writeSession(project, prompt, branch, "", agent, reviewId, "fix", repos, unit);
     return launch(project, cli, agent, unit, runCredential, reviewId, model, reasoningEffort);
   }
 

@@ -50,6 +50,7 @@ public final class SailEventHelper {
       fi
       AGENT="${SAIL_AGENT:-claude-code}"
       RUN_ID="${SAIL_RUN_ID:-}"
+      RUN_ROLE="${SAIL_RUN_ROLE:-}"
       CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
       PROJECT="$(hostname)"
       HOST="$(hostname)"
@@ -63,6 +64,9 @@ public final class SailEventHelper {
       FIELDS=""
       if [ -n "$RUN_ID" ]; then
         FIELDS="\\"run_id\\":\\"$RUN_ID\\""
+      fi
+      if [ -n "$RUN_ROLE" ]; then
+        FIELDS="$FIELDS${FIELDS:+,}\\"run_role\\":\\"$RUN_ROLE\\""
       fi
       if [ -n "$REASON" ]; then
         FIELDS="$FIELDS${FIELDS:+,}\\"reason\\":\\"$REASON\\""

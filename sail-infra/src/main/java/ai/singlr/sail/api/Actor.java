@@ -24,7 +24,8 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
   public enum Lane {
     CLI,
     API,
-    AGENT
+    AGENT,
+    ROOM
   }
 
   public Actor(String handle, Role role, Lane lane) {
@@ -47,6 +48,16 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
     return new Actor(handle, Role.MEMBER, Lane.AGENT, owner);
   }
 
+  /**
+   * A {@code room}-role run's principal: read-and-converse only. The viewer role fails every
+   * write-capability gate — status, metadata, content, restore, delete, create — and the room lane
+   * carries the single write the duty needs, posting to its own spec's room, through {@link
+   * SpecPolicy#post}. Enforced at the API boundary, not by the prompt.
+   */
+  public static Actor roomPrincipal(String handle, String owner) {
+    return new Actor(handle, Role.VIEWER, Lane.ROOM, owner);
+  }
+
   /** True when this actor's role grants full administrative authority. */
   public boolean isAdmin() {
     return role == Role.ADMIN;
@@ -57,9 +68,18 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
     return role.allows(Capability.WRITE);
   }
 
-  /** True when this actor was built from a run credential on the in-container agent lane. */
+  /**
+   * True when this actor was built from a run credential on an in-container lane — the agent lane
+   * or its room-restricted variant. Both are refused wherever a run must not act on runs (the
+   * dispatch and stop gates).
+   */
   public boolean agentLane() {
-    return lane == Lane.AGENT;
+    return lane == Lane.AGENT || lane == Lane.ROOM;
+  }
+
+  /** True when this actor is a room-role run's principal — read-and-converse only. */
+  public boolean roomLane() {
+    return lane == Lane.ROOM;
   }
 
   /**

@@ -128,7 +128,11 @@ class DispatchLaunchCancelRaceTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              launchCredential.set(command.getLast());
+              launchCredential.set(
+                  command.stream()
+                      .filter(arg -> arg.startsWith("sailrun_"))
+                      .findFirst()
+                      .orElse(""));
               var run = runStore.running().getFirst();
               assertTrue(runStore.transition(run.id(), "running", "stopped"));
               cancelled.set(run.id());

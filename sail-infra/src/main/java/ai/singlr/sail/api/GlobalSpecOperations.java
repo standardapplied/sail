@@ -16,6 +16,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -153,7 +154,8 @@ final class GlobalSpecOperations {
             existing.updatedAt(),
             request.updatedBy(),
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
-            request.repos() != null ? request.repos() : existing.repos());
+            request.repos() != null ? request.repos() : existing.repos(),
+            request.wake() != null ? validWake(request.wake()) : existing.wake());
     specStore.update(updated);
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
@@ -363,6 +365,21 @@ final class GlobalSpecOperations {
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
     }
+  }
+
+  private static final Set<String> WAKE_MODES = Set.of("on", "mention", "off");
+
+  /** The wake vocabulary is deliberately tiny; an empty string clears the mode back to default. */
+  private static String validWake(String wake) {
+    if (wake.isBlank()) {
+      return null;
+    }
+    if (!WAKE_MODES.contains(wake)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "wake must be on, mention, or off (got '" + wake + "'); an empty value clears it.");
+    }
+    return wake;
   }
 
   private static SpecStatus parseStatus(String value, SpecStatus fallback) {

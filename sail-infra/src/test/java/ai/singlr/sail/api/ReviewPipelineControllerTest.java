@@ -238,6 +238,117 @@ class ReviewPipelineControllerTest {
     assertTrue(syncs.get() > 0, "a spec status transition must trigger sync-on-write to main");
   }
 
+  private Event roomStopEvent(String specId, String runId) {
+    var data = new java.util.LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.EXIT_CODE, 0);
+    data.put(Event.WellKnownData.RUN_ROLE, Event.WellKnownData.RUN_ROLE_ROOM);
+    if (runId != null) {
+      data.put(Event.WellKnownData.RUN_ID, runId);
+    }
+    return Event.of(
+        "test-project",
+        specId,
+        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+        "claude-code",
+        "host",
+        data);
+  }
+
+  @Test
+  void aRoomStopOnASpecParkedInReviewTriggersNothing() {
+    createSpec("auth", "review");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(roomStopEvent("auth", null));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "an escalated spec is exactly where a human asks questions; the chat must never re-enter"
+            + " the loop");
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aRoomStopOnADoneSpecTriggersNothing() {
+    createSpec("auth", "done");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(roomStopEvent("auth", null));
+
+    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aRoomStopThatLostItsRoleMarkerIsStillCaughtByTheRunRow() {
+    createSpec("auth", "review");
+    var runStore = new ai.singlr.sail.store.RunStore(db);
+    var runId = ai.singlr.sail.common.DateTimeUtils.newId().toString();
+    runStore.create(
+        runId,
+        "test-project",
+        "auth",
+        "node-a",
+        "node-a",
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runStore,
+            () -> "node-a");
+    var data = new java.util.LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.RUN_ID, runId);
+
+    ctrl.onEvent(
+        Event.of(
+            "test-project",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            data));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "the run row is the fallback when a signal lost its role");
+  }
+
+  @Test
+  void aBuildStopStillTriggersTheReviewAfterTheRoomExclusion() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    var data = new java.util.LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.RUN_ROLE, "build");
+    ctrl.onEvent(
+        Event.of(
+            "test-project",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            data));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
   @Test
   void aSyncDerivedStopNeverStartsAPipelineTheWorkLivesOnAnotherBox() {
     createSpec("auth", "in_progress");

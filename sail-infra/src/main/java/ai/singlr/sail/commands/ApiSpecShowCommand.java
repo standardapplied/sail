@@ -82,6 +82,9 @@ public final class ApiSpecShowCommand implements Runnable {
       if (spec.get("branch") != null) {
         System.out.println(Ansi.AUTO.string("  @|bold Branch:|@ " + spec.get("branch")));
       }
+      if (spec.get("wake") != null) {
+        System.out.println(Ansi.AUTO.string("  @|bold Wake:|@ " + spec.get("wake")));
+      }
 
       var body = (String) result.get("body");
       if (Strings.isNotBlank(body)) {

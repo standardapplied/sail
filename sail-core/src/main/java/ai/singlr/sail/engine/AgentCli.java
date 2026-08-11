@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
+import java.util.regex.Pattern;
 
 /**
  * Known AI coding agent CLIs that can be installed inside a project container. Each constant
@@ -154,6 +155,157 @@ public enum AgentCli {
                 ? " --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
                 : "";
         yield binaryName + " exec" + perm + codexModelOptions(model, reasoningEffort) + " " + task;
+      }
+    };
+  }
+
+  private static final Pattern SAFE_SESSION_ID =
+      Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+
+  private static final String ROOM_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
+
+  private static final String ROOM_ALLOWED_TOOLS =
+      " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\"";
+
+  /**
+   * Whether this CLI can run the room lane's read-only chat session with the restriction enforced
+   * by the harness rather than promised by the prompt. Claude Code can: {@code --print} without
+   * {@code --dangerously-skip-permissions} denies every tool call not covered by an allow rule, and
+   * {@link #ROOM_TOOLS} removes the mutating tools from the set entirely. Codex cannot: its only
+   * enforcement layer is the bubblewrap sandbox, which needs user namespaces — blocked inside incus
+   * containers ({@code bwrap: setting up uid map: Permission denied}) — so the sole mode that
+   * executes commands at all is the full bypass flag, exactly what the room contract forbids.
+   */
+  public boolean supportsRoomLane() {
+    return this == CLAUDE_CODE;
+  }
+
+  /**
+   * The room lane's headless command: like {@link #headlessCommand} but harness-restricted instead
+   * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} — {@code Write} and
+   * {@code Edit} do not exist in the session, and the {@code --tools} cut is CLI-authoritative, so
+   * no on-disk settings file can re-add them. The only auto-approved commands are {@code spec} (the
+   * lane's one write — posting the answer, and the room credential is viewer-role so even {@code
+   * spec} cannot mutate a spec) and {@code cd} (navigation, no write). Reading the workspace is
+   * {@code Read}/{@code Grep}/{@code Glob}, which have no write flag. Git is deliberately absent:
+   * {@code git diff --output=<path>} writes through a prefix allow-rule, and git's external-diff
+   * and pager config are command-execution surfaces — a read-only lane must not expose them.
+   *
+   * <p>This is the harness-enforced boundary the platform can express, not a kernel one. It is
+   * exact about what it is: {@code Write}/{@code Edit} are structurally gone; the Bash allowlist is
+   * two non-writing commands; the room credential is viewer-role; and a host-side content guard
+   * ({@code DispatchOperations#guardRoomRun}) surfaces any worktree change as a loud guardrail
+   * event. What it is not: hermetic against an ambient {@code .claude/settings.json} that merges an
+   * additional {@code Bash(...)} allow-rule (Claude Code merges permission rules across settings
+   * sources), nor against a kernel-level escape — both are owned by the room-lane hardening
+   * follow-up spec (managed-policy settings and/or a sidecar container with a read-only disk
+   * device), the boundaries incus does not give a same-container process.
+   */
+  public String headlessRoomCommand(
+      String taskFile, String model, String claudeSettingsPath, boolean stream) {
+    requireRoomLane();
+    return roomInvocation(claudeSettingsPath, model, stream) + " -p \"$(cat " + taskFile + ")\"";
+  }
+
+  /**
+   * The room lane's headless resume: {@link #headlessRoomCommand} semantics on a recorded
+   * conversation. The session id is validated against the safe pattern before it touches the shell
+   * string because it is hook-reported, replicated data.
+   */
+  public String headlessRoomResumeCommand(
+      String sessionId, String taskFile, String model, String claudeSettingsPath, boolean stream) {
+    requireRoomLane();
+    if (!isSafeSessionId(sessionId)) {
+      throw new IllegalArgumentException(
+          "Malformed session id; refusing to build a resume command from replicated data.");
+    }
+    return roomInvocation(claudeSettingsPath, model, stream)
+        + " --resume "
+        + sessionId
+        + " -p \"$(cat "
+        + taskFile
+        + ")\"";
+  }
+
+  private String roomInvocation(String claudeSettingsPath, String model, boolean stream) {
+    var settings = Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
+    var streamFormat = stream ? " --output-format stream-json --verbose" : "";
+    return binaryName
+        + " --print"
+        + streamFormat
+        + settings
+        + ROOM_TOOLS
+        + ROOM_ALLOWED_TOOLS
+        + claudeModelOptions(model);
+  }
+
+  private void requireRoomLane() {
+    if (!supportsRoomLane()) {
+      throw new IllegalStateException(
+          displayName()
+              + " has no harness-enforced read-only session inside a sail container;"
+              + " the room lane refuses to launch it.");
+    }
+  }
+
+  /**
+   * Whether a recorded session id is safe to interpolate into a shell command. Session ids arrive
+   * hook-reported and replicate across boxes, so they are untrusted input at every argv seam.
+   */
+  public static boolean isSafeSessionId(String sessionId) {
+    return sessionId != null && SAFE_SESSION_ID.matcher(sessionId).matches();
+  }
+
+  /**
+   * The headless command resuming a recorded conversation with a fresh task: {@code claude --print
+   * --resume <id> -p …} / {@code codex exec resume <id> …}. Same permission, model, settings, and
+   * streaming semantics as {@link #headlessCommand(String, boolean, String, String, String,
+   * boolean)}; the session id is validated against the safe pattern before it touches the shell
+   * string because it is hook-reported, replicated data.
+   */
+  public String headlessResumeCommand(
+      String sessionId,
+      String taskFile,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String claudeSettingsPath,
+      boolean stream) {
+    if (!isSafeSessionId(sessionId)) {
+      throw new IllegalArgumentException(
+          "Malformed session id; refusing to build a resume command from replicated data.");
+    }
+    var task = "\"$(cat " + taskFile + ")\"";
+    return switch (this) {
+      case CLAUDE_CODE -> {
+        var perm = fullPermissions ? " --dangerously-skip-permissions" : "";
+        var settings =
+            Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
+        var streamFormat = stream ? " --output-format stream-json --verbose" : "";
+        yield binaryName
+            + " --print"
+            + streamFormat
+            + settings
+            + perm
+            + claudeModelOptions(model)
+            + " --resume "
+            + sessionId
+            + " -p "
+            + task;
+      }
+      case CODEX -> {
+        var perm =
+            fullPermissions
+                ? " --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
+                : "";
+        yield binaryName
+            + " exec resume"
+            + perm
+            + codexModelOptions(model, reasoningEffort)
+            + " "
+            + sessionId
+            + " "
+            + task;
       }
     };
   }

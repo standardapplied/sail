@@ -46,9 +46,12 @@ public final class AgentSession {
    * @param agentType the {@code SAIL_AGENT} the unit was launched with, or {@code ""} when unknown
    * @param runId the {@code SAIL_RUN_ID} the unit was launched with, or {@code ""} for an ad-hoc
    *     session that minted no run; carried so a synthesized stop can address the exact run
+   * @param role the {@code SAIL_RUN_ROLE} the unit was launched with, or {@code ""} when unknown;
+   *     carried on the synthesized stop so lane-aware reactors (the review pipeline ignoring {@code
+   *     room} stops) never need a store lookup to know what stopped
    */
   public record ExitState(
-      boolean active, int exitCode, String specId, String agentType, String runId) {}
+      boolean active, int exitCode, String specId, String agentType, String runId, String role) {}
 
   /** Ensures the ~/.sail directory exists inside the container. */
   public void ensureDirectory(String containerName)
@@ -93,7 +96,9 @@ public final class AgentSession {
    * recovers them from this file when the unit is already gone, so a clean agent exit still
    * produces a run-addressed stop signal. {@code repos} is the spec's resolved repo set (empty for
    * an ad-hoc session), so the stop gate can scope its readiness checks to exactly the repos a
-   * dispatch works in rather than every repo in the shared container.
+   * dispatch works in rather than every repo in the shared container. {@code role} is the run's
+   * lane ({@code build}, {@code adhoc}, {@code fix}, {@code room}) — the stop gate reads it to skip
+   * the git protocol for a chat-lane run that owns no repos.
    */
   public void writeSession(
       String containerName,
@@ -102,6 +107,7 @@ public final class AgentSession {
       String specId,
       String agentType,
       String runId,
+      String role,
       List<String> repos,
       AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -111,6 +117,7 @@ public final class AgentSession {
     map.put("spec_id", Objects.requireNonNullElse(specId, ""));
     map.put("agent_type", Objects.requireNonNullElse(agentType, ""));
     map.put("run_id", Objects.requireNonNullElse(runId, ""));
+    map.put("role", Objects.requireNonNullElse(role, ""));
     map.put("repos", Objects.requireNonNullElse(repos, List.<String>of()));
     map.put("started_at", Instant.now().toString());
     map.put("log_path", unit.logPath());
@@ -348,13 +355,58 @@ public final class AgentSession {
       String logPath,
       String runId,
       String runCredential) {
+    return buildBackgroundLaunchCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        specId,
+        agentType,
+        logPath,
+        runId,
+        runCredential,
+        "",
+        null);
+  }
+
+  /**
+   * As the twelve-argument overload, additionally exporting {@code role} as {@code SAIL_RUN_ROLE}
+   * (the lane marker hooks and synthesized stops carry) and, when {@code resumeSessionId} is
+   * non-null, launching the agent as a headless resume of that recorded conversation instead of a
+   * fresh one.
+   */
+  public static List<String> buildBackgroundLaunchCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String logPath,
+      String runId,
+      String runCredential,
+      String role,
+      String resumeSessionId) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(
-            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true);
+        agentCommand(
+            cli,
+            fullPermissions,
+            model,
+            reasoningEffort,
+            settingsPath,
+            role,
+            resumeSessionId,
+            unit);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
@@ -364,7 +416,7 @@ public final class AgentSession {
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_CREDENTIAL=$9" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_CREDENTIAL=$9" --setenv "SAIL_RUN_ROLE=${10}" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
@@ -394,7 +446,8 @@ public final class AgentSession {
             effectiveSpec,
             effectiveAgent,
             runId,
-            Objects.toString(runCredential, "")));
+            Objects.toString(runCredential, ""),
+            Objects.toString(role, "")));
   }
 
   /**
@@ -419,6 +472,37 @@ public final class AgentSession {
       String logPath,
       String runId,
       String runCredential) {
+    return buildForegroundTaskCommand(
+        containerName,
+        sshUser,
+        workDir,
+        fullPermissions,
+        agentCli,
+        model,
+        reasoningEffort,
+        specId,
+        agentType,
+        logPath,
+        runId,
+        runCredential,
+        "");
+  }
+
+  /** As the twelve-argument overload, additionally exporting {@code role} as SAIL_RUN_ROLE. */
+  public static List<String> buildForegroundTaskCommand(
+      String containerName,
+      String sshUser,
+      String workDir,
+      boolean fullPermissions,
+      AgentCli agentCli,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String logPath,
+      String runId,
+      String runCredential,
+      String role) {
     var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
@@ -430,7 +514,7 @@ public final class AgentSession {
     var script =
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
-            + " SAIL_RUN_CREDENTIAL=\"$8\""
+            + " SAIL_RUN_CREDENTIAL=\"$8\" SAIL_RUN_ROLE=\"$9\""
             + " exec bash -l -c \"$2\" > \"$5\" 2>&1";
     return ContainerExec.asDevUser(
         containerName,
@@ -447,7 +531,43 @@ public final class AgentSession {
             logPath,
             runId,
             unit.pidPath(),
-            Objects.toString(runCredential, "")));
+            Objects.toString(runCredential, ""),
+            Objects.toString(role, "")));
+  }
+
+  /**
+   * The headless invocation for the run's lane. A {@code room} run gets the harness-restricted chat
+   * command — no mutating tools, print-mode default-deny, only the {@code spec} CLI and read-only
+   * git auto-approved — regardless of {@code fullPermissions}, so no caller can launch a
+   * full-permission chat by mispassing a flag. Every other lane keeps the full-permission dispatch
+   * command.
+   */
+  private static String agentCommand(
+      AgentCli cli,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String settingsPath,
+      String role,
+      String resumeSessionId,
+      AgentUnit unit) {
+    if ("room".equals(role)) {
+      return resumeSessionId == null
+          ? cli.headlessRoomCommand(unit.taskPath(), model, settingsPath, true)
+          : cli.headlessRoomResumeCommand(
+              resumeSessionId, unit.taskPath(), model, settingsPath, true);
+    }
+    return resumeSessionId == null
+        ? cli.headlessCommand(
+            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true)
+        : cli.headlessResumeCommand(
+            resumeSessionId,
+            unit.taskPath(),
+            fullPermissions,
+            model,
+            reasoningEffort,
+            settingsPath,
+            true);
   }
 
   private static void warnIfReasoningEffortDropped(
@@ -485,7 +605,7 @@ public final class AgentSession {
                 "--property=Environment"));
     var result = shell.exec(cmd);
     var state = parseExitState(result.ok() ? result.stdout() : "");
-    if (!state.specId().isBlank() && !state.runId().isBlank()) {
+    if (!state.specId().isBlank() && !state.runId().isBlank() && !state.role().isBlank()) {
       return state;
     }
     var durable = readSessionDescriptor(containerName, unit);
@@ -494,15 +614,16 @@ public final class AgentSession {
         state.exitCode(),
         state.specId().isBlank() ? durable.specId() : state.specId(),
         state.agentType().isBlank() ? durable.agentType() : state.agentType(),
-        state.runId().isBlank() ? durable.runId() : state.runId());
+        state.runId().isBlank() ? durable.runId() : state.runId(),
+        state.role().isBlank() ? durable.role() : state.role());
   }
 
-  private record SessionDescriptor(String specId, String agentType, String runId) {}
+  private record SessionDescriptor(String specId, String agentType, String runId, String role) {}
 
   /**
-   * Reads {@code spec_id}/{@code agent_type}/{@code run_id} from the durable session file. Used as
-   * the fallback when a collected unit no longer reports its environment; returns blanks for an
-   * ad-hoc session.
+   * Reads {@code spec_id}/{@code agent_type}/{@code run_id}/{@code role} from the durable session
+   * file. Used as the fallback when a collected unit no longer reports its environment; returns
+   * blanks for an ad-hoc session.
    */
   @SuppressWarnings("unchecked")
   private SessionDescriptor readSessionDescriptor(String containerName, AgentUnit unit)
@@ -510,13 +631,14 @@ public final class AgentSession {
     var cmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
     var result = shell.exec(cmd);
     if (!result.ok() || result.stdout().isBlank()) {
-      return new SessionDescriptor("", "", "");
+      return new SessionDescriptor("", "", "", "");
     }
     var meta = (Map<String, Object>) YamlUtil.parseMap(result.stdout());
     return new SessionDescriptor(
         Objects.toString(meta.get("spec_id"), ""),
         Objects.toString(meta.get("agent_type"), ""),
-        Objects.toString(meta.get("run_id"), ""));
+        Objects.toString(meta.get("run_id"), ""),
+        Objects.toString(meta.get("role"), ""));
   }
 
   static ExitState parseExitState(String show) {
@@ -543,7 +665,8 @@ public final class AgentSession {
         exitCode,
         envValue(environment, "SAIL_SPEC_ID"),
         envValue(environment, "SAIL_AGENT"),
-        envValue(environment, "SAIL_RUN_ID"));
+        envValue(environment, "SAIL_RUN_ID"),
+        envValue(environment, "SAIL_RUN_ROLE"));
   }
 
   private static String envValue(String environment, String key) {

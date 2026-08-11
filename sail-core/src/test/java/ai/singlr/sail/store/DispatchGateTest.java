@@ -11,32 +11,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** The pure repo-overlap matrix behind the concurrent-dispatch refusal. */
+/** The pure repo-overlap and role matrix behind the concurrent-dispatch refusal. */
 class DispatchGateTest {
 
   private static final String RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
   private static DispatchGate.RunningRun running(String specId, List<String> repos) {
-    return new DispatchGate.RunningRun(RUN, specId, repos);
+    return running(specId, "build", repos);
+  }
+
+  private static DispatchGate.RunningRun running(String specId, String role, List<String> repos) {
+    return new DispatchGate.RunningRun(RUN, specId, role, repos);
   }
 
   @Test
   void noRunningRunsAllows() {
-    assertTrue(DispatchGate.decide("target", List.of("web"), List.of()).isEmpty());
+    assertTrue(DispatchGate.decide("target", "build", List.of("web"), List.of()).isEmpty());
   }
 
   @Test
   void disjointRepoSetsAllow() {
     var running = List.of(running("auth", List.of("app")));
 
-    assertTrue(DispatchGate.decide("target", List.of("web"), running).isEmpty());
+    assertTrue(DispatchGate.decide("target", "build", List.of("web"), running).isEmpty());
   }
 
   @Test
   void intersectingRepoSetsRefuseNamingTheBlockingRunAndOverlap() {
     var running = List.of(running("auth", List.of("app", "web")));
 
-    var conflict = DispatchGate.decide("target", List.of("web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", "build", List.of("web"), running).orElseThrow();
 
     assertEquals(RUN, conflict.run().runId());
     assertEquals("auth", conflict.run().specId());
@@ -47,7 +51,8 @@ class DispatchGateTest {
   void multiRepoTargetsRefuseOnASingleSharedRepo() {
     var running = List.of(running("auth", List.of("app")));
 
-    var conflict = DispatchGate.decide("target", List.of("app", "web"), running).orElseThrow();
+    var conflict =
+        DispatchGate.decide("target", "build", List.of("app", "web"), running).orElseThrow();
 
     assertEquals(List.of("app"), conflict.overlap());
   }
@@ -56,7 +61,7 @@ class DispatchGateTest {
   void anEmptyTargetRepoSetOverlapsEverything() {
     var running = List.of(running("auth", List.of("app")));
 
-    var conflict = DispatchGate.decide("target", List.of(), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", "build", List.of(), running).orElseThrow();
 
     assertEquals(List.of(), conflict.overlap(), "empty means the whole container");
   }
@@ -65,14 +70,14 @@ class DispatchGateTest {
   void aRunningRunWithNoReposOverlapsEverything() {
     var running = List.of(running("auth", List.of()));
 
-    assertTrue(DispatchGate.decide("target", List.of("web"), running).isPresent());
+    assertTrue(DispatchGate.decide("target", "build", List.of("web"), running).isPresent());
   }
 
   @Test
   void aLiveRunOfTheTargetSpecItselfAlwaysBlocksEvenOnDisjointRepos() {
     var running = List.of(running("auth", List.of("app")));
 
-    var conflict = DispatchGate.decide("auth", List.of("web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("auth", "build", List.of("web"), running).orElseThrow();
 
     assertEquals(RUN, conflict.run().runId());
     assertEquals(List.of(), conflict.overlap(), "one spec, one lifecycle: no second execution");
@@ -82,12 +87,70 @@ class DispatchGateTest {
   void theFirstConflictingRunWins() {
     var running =
         List.of(
-            new DispatchGate.RunningRun(RUN, "clear", List.of("docs")),
+            new DispatchGate.RunningRun(RUN, "clear", "build", List.of("docs")),
             new DispatchGate.RunningRun(
-                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "auth", List.of("web")));
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "auth", "build", List.of("web")));
 
-    var conflict = DispatchGate.decide("target", List.of("web"), running).orElseThrow();
+    var conflict = DispatchGate.decide("target", "build", List.of("web"), running).orElseThrow();
 
     assertEquals("auth", conflict.run().specId());
+  }
+
+  @Test
+  void aRoomTargetNeverConflictsWithAnotherSpecsBuildEvenWholeContainer() {
+    var running = List.of(running("auth", "build", List.of()));
+
+    assertTrue(DispatchGate.decide("target", "room", List.of(), running).isEmpty());
+  }
+
+  @Test
+  void aRoomTargetNeverConflictsWithAnotherSpecsAdhocOrReviewRun() {
+    var running =
+        List.of(
+            running("", "adhoc", List.of()),
+            new DispatchGate.RunningRun(
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "auth", "review", List.of("web")));
+
+    assertTrue(DispatchGate.decide("target", "room", List.of(), running).isEmpty());
+  }
+
+  @Test
+  void aRoomTargetIsBlockedByAnyLiveRunOfItsOwnSpec() {
+    var running = List.of(running("auth", "build", List.of("app")));
+
+    var conflict = DispatchGate.decide("auth", "room", List.of(), running).orElseThrow();
+
+    assertEquals(List.of(), conflict.overlap(), "a wake and a dispatch on one spec serialize");
+  }
+
+  @Test
+  void aRoomTargetIsBlockedByALiveRoomRunOfItsOwnSpec() {
+    var running = List.of(running("auth", "room", List.of()));
+
+    assertTrue(DispatchGate.decide("auth", "room", List.of(), running).isPresent());
+  }
+
+  @Test
+  void aLiveRoomRunNeverBlocksADisjointSpecsBuildDespiteItsEmptyRepoSet() {
+    var running = List.of(running("auth", "room", List.of()));
+
+    assertTrue(DispatchGate.decide("target", "build", List.of("web"), running).isEmpty());
+    assertTrue(DispatchGate.decide("target", "build", List.of(), running).isEmpty());
+  }
+
+  @Test
+  void aLiveRoomRunBlocksItsOwnSpecsDispatch() {
+    var running = List.of(running("auth", "room", List.of()));
+
+    var conflict = DispatchGate.decide("auth", "build", List.of("web"), running).orElseThrow();
+
+    assertEquals(RUN, conflict.run().runId());
+  }
+
+  @Test
+  void aLiveRoomRunNeverBlocksAnAdhocSessionsWholeContainerClaim() {
+    var running = List.of(running("auth", "room", List.of()));
+
+    assertTrue(DispatchGate.decide("", "adhoc", List.of(), running).isEmpty());
   }
 }

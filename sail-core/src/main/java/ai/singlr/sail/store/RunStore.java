@@ -151,17 +151,24 @@ public final class RunStore implements ConflictResolver {
       return "adhoc".equals(role);
     }
 
+    /** Whether this row is a room wake — a chat-lane run that answers in its spec's room. */
+    public boolean roomRole() {
+      return "room".equals(role);
+    }
+
     /**
-     * Whether this row is an agent session an operator owns — a build attempt or an ad-hoc run — as
-     * opposed to a pipeline-driven review execution. Session rows are the ones the stop, status,
-     * and log lanes address.
+     * Whether this row is an agent session the run-scoped machinery owns — a build attempt, an
+     * ad-hoc run, or a room wake — as opposed to a pipeline-driven review execution. Session rows
+     * are the ones the stop, status, log, reaper, and missed-stop lanes address; a room run joins
+     * them because it launches through the same systemd unit and must be reaped and stoppable like
+     * any other.
      */
     public boolean sessionRole() {
-      return buildRole() || adhocRole();
+      return buildRole() || adhocRole() || roomRole();
     }
   }
 
-  private static final String SESSION_ROLES = "role IN ('build', 'adhoc')";
+  private static final String SESSION_ROLES = "role IN ('build', 'adhoc', 'room')";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
@@ -390,9 +397,13 @@ public final class RunStore implements ConflictResolver {
           var conflict =
               DispatchGate.decide(
                   specId,
+                  role,
                   reserved,
                   running.stream()
-                      .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.repos()))
+                      .map(
+                          run ->
+                              new DispatchGate.RunningRun(
+                                  run.id(), run.specId(), run.role(), run.repos()))
                       .toList());
           if (conflict.isPresent()) {
             return new Reservation.Conflicted(conflict.get());
@@ -473,6 +484,31 @@ public final class RunStore implements ConflictResolver {
               transcriptPath,
               id);
           recordRevision(id, "local", false);
+        });
+  }
+
+  /**
+   * Records the room commit guard's launch baseline (per-repo HEAD and worktree state), replacing
+   * any earlier one. Host-side storage is the point: the guarded agent runs inside the container
+   * and can never reach this row, unlike a file in its own run directory. Local-only bookkeeping —
+   * never journaled, never synced.
+   */
+  public void saveRoomGuardBaseline(String id, String baseline) {
+    db.execute("INSERT OR REPLACE INTO room_guard (run_id, baseline) VALUES (?, ?)", id, baseline);
+  }
+
+  /**
+   * The recorded room-guard baseline, deleted on read so a replayed stop signal checks nothing
+   * twice. Empty when no baseline was recorded or a prior stop already consumed it.
+   */
+  public Optional<String> consumeRoomGuardBaseline(String id) {
+    return db.transaction(
+        () -> {
+          var baseline =
+              db.queryOne(
+                  "SELECT baseline FROM room_guard WHERE run_id = ?", row -> row.text(0), id);
+          baseline.ifPresent(b -> db.execute("DELETE FROM room_guard WHERE run_id = ?", id));
+          return baseline;
         });
   }
 
@@ -563,6 +599,7 @@ public final class RunStore implements ConflictResolver {
         switch (Objects.toString(role, "")) {
           case "review" -> "review-";
           case "fix" -> "fix-";
+          case "room" -> "room-";
           default -> "";
         };
     return base + "/" + marker + runId;

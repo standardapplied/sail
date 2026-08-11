@@ -260,7 +260,7 @@ class SailOperationsSyncTest {
 
   private static SpecUpdateRequest update(String status) {
     return new SpecUpdateRequest(
-        null, null, status, null, null, null, null, null, null, null, null, "uday", false);
+        null, null, status, null, null, null, null, null, null, null, null, null, "uday", false);
   }
 
   private static Event event(String type) {

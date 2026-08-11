@@ -69,6 +69,13 @@ public final class ApiSpecEditCommand implements Runnable {
   private String repos;
 
   @Option(
+      names = "--wake",
+      description =
+          "Room wake mode (on|mention|off); pass \"\" to clear it back to the default"
+              + " (on once dispatched).")
+  private String wake;
+
+  @Option(
       names = "--force",
       description = "Reassign even a dispatched spec, overriding the claim lock.")
   private boolean force;
@@ -103,6 +110,7 @@ public final class ApiSpecEditCommand implements Runnable {
     if (priority != null) body.put("priority", priority);
     if (dependsOn != null) body.put("depends_on", List.of(dependsOn.split(",")));
     if (repos != null) body.put("repos", List.of(repos.split(",")));
+    if (wake != null) body.put("wake", wake);
 
     if (body.isEmpty()) {
       System.out.println(

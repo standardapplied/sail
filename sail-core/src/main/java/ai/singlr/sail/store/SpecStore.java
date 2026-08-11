@@ -55,7 +55,68 @@ public final class SpecStore implements ConflictResolver {
       String updatedAt,
       String updatedBy,
       List<String> dependsOn,
-      List<String> repos) {
+      List<String> repos,
+      String wake) {
+
+    /** A row with no explicit wake mode — the default every spec has until an operator sets one. */
+    public SpecRow(
+        String id,
+        String project,
+        String title,
+        SpecStatus status,
+        String assignee,
+        String agent,
+        String model,
+        String reasoningEffort,
+        String branch,
+        int priority,
+        String createdBy,
+        String createdAt,
+        String updatedAt,
+        String updatedBy,
+        List<String> dependsOn,
+        List<String> repos) {
+      this(
+          id,
+          project,
+          title,
+          status,
+          assignee,
+          agent,
+          model,
+          reasoningEffort,
+          branch,
+          priority,
+          createdBy,
+          createdAt,
+          updatedAt,
+          updatedBy,
+          dependsOn,
+          repos,
+          null);
+    }
+
+    /** This row with {@code wake} replaced — the single-field edit the wake surfaces use. */
+    public SpecRow withWake(String wake) {
+      return new SpecRow(
+          id,
+          project,
+          title,
+          status,
+          assignee,
+          agent,
+          model,
+          reasoningEffort,
+          branch,
+          priority,
+          createdBy,
+          createdAt,
+          updatedAt,
+          updatedBy,
+          dependsOn,
+          repos,
+          wake);
+    }
 
     /** Projects this stored row onto the storage-agnostic {@link Spec} value type. */
     public Spec toSpec() {
@@ -101,8 +162,9 @@ public final class SpecStore implements ConflictResolver {
           db.execute(
               """
               INSERT INTO specs (id, project, title, status, assignee, agent, model,
-                  reasoning_effort, branch, priority, created_by, created_at, updated_at, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  reasoning_effort, branch, priority, created_by, created_at, updated_at,
+                  updated_by, wake)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               spec.id(),
               spec.project(),
               spec.title(),
@@ -116,7 +178,8 @@ public final class SpecStore implements ConflictResolver {
               spec.createdBy(),
               now,
               now,
-              spec.updatedBy());
+              spec.updatedBy(),
+              spec.wake());
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
           db.execute(
@@ -131,7 +194,7 @@ public final class SpecStore implements ConflictResolver {
     return db.queryOne(
             """
             SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-                branch, priority, created_by, created_at, updated_at, updated_by
+                branch, priority, created_by, created_at, updated_at, updated_by, wake
             FROM specs WHERE id = ?""",
             this::mapSpec,
             id)
@@ -142,7 +205,7 @@ public final class SpecStore implements ConflictResolver {
     var sql = new StringBuilder("SELECT DISTINCT s.id, s.project, s.title, s.status, s.assignee,");
     sql.append(
         " s.agent, s.model, s.reasoning_effort, s.branch, s.priority, s.created_by, s.created_at,"
-            + " s.updated_at, s.updated_by FROM specs s");
+            + " s.updated_at, s.updated_by, s.wake FROM specs s");
     var params = new ArrayList<>();
     var where = new ArrayList<String>();
 
@@ -211,7 +274,7 @@ public final class SpecStore implements ConflictResolver {
               """
               UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?,
                   model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?,
-                  updated_by = ?
+                  updated_by = ?, wake = ?
               WHERE id = ?""",
               spec.project(),
               spec.title(),
@@ -224,6 +287,7 @@ public final class SpecStore implements ConflictResolver {
               spec.priority(),
               now,
               spec.updatedBy(),
+              spec.wake(),
               spec.id());
           db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", spec.id());
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", spec.id());
@@ -415,6 +479,7 @@ public final class SpecStore implements ConflictResolver {
     map.put("updated_at", spec.updatedAt());
     map.put("depends_on", spec.dependsOn());
     map.put("repos", spec.repos());
+    map.put("wake", spec.wake());
     map.put("body", content.body());
     map.put("plan", content.plan());
     return map;
@@ -427,7 +492,8 @@ public final class SpecStore implements ConflictResolver {
       db.execute(
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
-              reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?
+              reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
+              wake = ?
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -440,6 +506,7 @@ public final class SpecStore implements ConflictResolver {
           spec.priority(),
           now,
           spec.updatedBy(),
+          spec.wake(),
           id);
       db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", id);
       db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
@@ -447,8 +514,8 @@ public final class SpecStore implements ConflictResolver {
       db.execute(
           """
           INSERT INTO specs (id, project, title, status, assignee, agent, model, reasoning_effort,
-              branch, priority, created_by, created_at, updated_at, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              branch, priority, created_by, created_at, updated_at, updated_by, wake)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
           id,
           spec.project(),
           spec.title(),
@@ -462,7 +529,8 @@ public final class SpecStore implements ConflictResolver {
           spec.createdBy(),
           spec.createdAt() == null || spec.createdAt().isBlank() ? now : spec.createdAt(),
           now,
-          spec.updatedBy());
+          spec.updatedBy(),
+          spec.wake());
     }
     insertDependencies(id, spec.dependsOn());
     insertRepos(id, spec.repos());
@@ -498,7 +566,8 @@ public final class SpecStore implements ConflictResolver {
         text(s, "updated_at"),
         text(s, "updated_by"),
         (List<String>) s.getOrDefault("depends_on", List.of()),
-        (List<String>) s.getOrDefault("repos", List.of()));
+        (List<String>) s.getOrDefault("repos", List.of()),
+        text(s, "wake"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -519,6 +588,7 @@ public final class SpecStore implements ConflictResolver {
           "priority",
           "depends_on",
           "repos",
+          "wake",
           "body",
           "plan");
 
@@ -767,7 +837,7 @@ public final class SpecStore implements ConflictResolver {
             """
             SELECT s.id, s.project, s.title, s.status, s.assignee, s.agent, s.model,
                 s.reasoning_effort, s.branch, s.priority, s.created_by, s.created_at, s.updated_at,
-                s.updated_by
+                s.updated_by, s.wake
             FROM specs s
             WHERE s.status = 'pending'
             AND (? IS NULL OR s.project = ?)
@@ -844,7 +914,8 @@ public final class SpecStore implements ConflictResolver {
         row.text(12),
         row.text(13),
         List.of(),
-        List.of());
+        List.of(),
+        row.text(14));
   }
 
   private SpecRow hydrate(SpecRow spec) {
@@ -871,7 +942,8 @@ public final class SpecStore implements ConflictResolver {
         spec.updatedAt(),
         spec.updatedBy(),
         deps,
-        repos);
+        repos,
+        spec.wake());
   }
 
   /**

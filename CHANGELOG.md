@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- A room message now wakes the agent when no run is live. A new `room-wake` reactor on
+  `spec_message_posted` (local and sync-arrived alike) runs on the dispatch-owning box — the one
+  whose handle is the spec's assignee, so the fleet has exactly one waker per spec — and launches
+  a real run through the same reservation machinery as dispatch: run role `room`, principal
+  `<agent>/room-<runId>`, run credential, watcher, and guardrail ceiling. The gate learns the
+  chat lane explicitly: a `room` run reserves no repos and conflicts only with runs of its own
+  spec, so a wake and a dispatch on one spec serialize while a chat never blocks another spec's
+  build. Timing is time-based only — a 30s debounce batches messages into one wake, a 10-minute
+  post-finish cooldown kills the thank-you refire and covers the review loop's inter-iteration
+  gaps, and any live run suppresses the wake outright (the relay owns delivery then). Wake
+  policy is the per-spec synced `wake` field (`on` | `mention` | `off`, default `on` once
+  dispatched; `spec update --wake`, shown by `spec show`); only human authors ever wake — agent
+  and `sail` posts are structurally excluded, so no storm loops. The wake resumes the spec's
+  most recent recorded conversation when one exists (`claude --print --resume` /
+  `codex exec resume`, session ids validated before touching an argv) and otherwise primes a
+  fresh session with the spec body and room tail; either way the prompt's rendered messages seed
+  the delivery ledger. The chat is read-only by contract and structurally excluded from review:
+  stop signals now carry `run_role` (env, session file, watcher, reconciler), the pipeline and
+  the lifecycle reactor ignore `room` stops even on a spec parked in `review`, the stop gate
+  skips the git protocol for the chat while keeping the room last-look, and a wake turn that
+  somehow moved a repo's HEAD surfaces as a loud `guardrail_triggered` event with the changed
+  files — never a review.
+
+- The room lane's read-only contract is enforced by the harness, not promised by the prompt. A
+  `room` run launches Claude Code without `--dangerously-skip-permissions`: the tool set is cut
+  to `Bash,Read,Grep,Glob` (no Write, no Edit) and the only auto-approved commands are the
+  `spec` CLI — the lane's one write, posting the answer — plus `cd` and read-only git; print
+  mode denies everything else, so a prompt-injected instruction to edit the worktree fails at
+  the harness. Codex wakes decline loudly instead of launching unenforced: its only sandbox
+  (bubblewrap) needs user namespaces, which incus containers block, so no codex mode both runs
+  commands and honors a read-only boundary. On the socket, a room credential now resolves to a
+  read-and-converse principal (`viewer` role, `room` lane): every spec mutation — status,
+  metadata, content, restore, delete, create, other specs' rooms — returns 403 at the API
+  boundary, and the one allowed write is posting to its own spec's room. The commit guard's
+  baseline moved host-side into the run store (out of the guarded agent's reach, consumed on
+  first read) and now records a worktree digest alongside each HEAD, so an uncommitted edit is
+  as loud as a commit. Wake session resume is node-local: a session id recorded by another box
+  never becomes a `--resume` argv, and the fresh-prompt fallback keeps the spec body.
+
 - Every run now knows its agent session. A new `sail-session-report` SessionStart hook (both
   CLIs; Codex's payload verified to carry the same `session_id`/`transcript_path` fields) posts
   the conversation's identity to the run row over the run-credential lane

@@ -341,7 +341,8 @@ class AgentSessionTest {
     assertTrue(
         joined.contains(
             "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\""
-                + " --setenv \"SAIL_RUN_ID=$8\" --setenv \"SAIL_RUN_CREDENTIAL=$9\" --unit "
+                + " --setenv \"SAIL_RUN_ID=$8\" --setenv \"SAIL_RUN_CREDENTIAL=$9\""
+                + " --setenv \"SAIL_RUN_ROLE=${10}\" --unit "
                 + RUN_UNIT.unitName()));
     assertTrue(joined.contains("claude --print"));
     assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
@@ -424,11 +425,149 @@ class AgentSessionTest {
 
     assertEquals(
         RUN_UNIT.pidPath(),
-        cmd.get(cmd.size() - 2),
+        cmd.get(cmd.size() - 3),
         "the wrapper's pid lands in the run's pid file so a foreground session stays probeable"
             + " and stoppable");
     var script = cmd.get(cmd.indexOf("-c") + 1);
     assertTrue(script.contains("printf '%s\\n' \"$$\" > \"$7\""));
+  }
+
+  @Test
+  void bothLaunchCommandsExportTheRunRole() {
+    var background =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            null);
+    var foreground =
+        AgentSession.buildForegroundTaskCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "adhoc");
+
+    assertTrue(String.join(" ", background).contains("SAIL_RUN_ROLE=${10}"));
+    assertEquals("room", background.getLast(), "the role rides as the tenth positional argument");
+    assertTrue(String.join(" ", foreground).contains("SAIL_RUN_ROLE=\"$9\""));
+    assertEquals("adhoc", foreground.getLast());
+  }
+
+  @Test
+  void theTwelveArgumentOverloadsExportABlankRole() {
+    var background = background(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var foreground = foreground(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+
+    assertEquals("", background.getLast());
+    assertEquals("", foreground.getLast());
+  }
+
+  @Test
+  void buildBackgroundLaunchCommandResumesARecordedSessionWhenAsked() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            "sess-42");
+
+    var joined = String.join(" ", cmd);
+    assertTrue(joined.contains("--resume sess-42"), joined);
+    assertTrue(
+        joined.contains("--output-format stream-json --verbose"),
+        "a resumed background launch still streams so the log fills live");
+  }
+
+  @Test
+  void aRoomLaunchIsHarnessRestrictedEvenWhenFullPermissionsIsMispassed() {
+    var fresh =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            null);
+    var resumed =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            "sess-42");
+
+    for (var joined : List.of(String.join(" ", fresh), String.join(" ", resumed))) {
+      assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
+      assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+      assertTrue(joined.contains("\"Bash(spec:*)\""), joined);
+    }
+    var build =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/home/dev/workspace",
+                true,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "spec-1",
+                "claude-code",
+                RUN_UNIT.logPath(),
+                RUN_ID,
+                "cred-0",
+                "build",
+                null));
+    assertTrue(
+        build.contains("--dangerously-skip-permissions"),
+        "the build lane keeps its full-permission command");
   }
 
   @Test
@@ -488,7 +627,8 @@ class AgentSessionTest {
     var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
 
     new AgentSession(shell)
-        .writeSession("acme", "do it", "b1", "auth", "claude-code", "r1", List.of("app"), unit);
+        .writeSession(
+            "acme", "do it", "b1", "auth", "claude-code", "r1", "build", List.of("app"), unit);
 
     var cmd = shell.invocations().getFirst();
     assertTrue(cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"));
@@ -528,10 +668,10 @@ class AgentSessionTest {
   void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
     var cmd = background(false, AgentCli.CLAUDE_CODE, null, null, null, null);
 
-    var specId = cmd.get(cmd.size() - 4);
-    var agent = cmd.get(cmd.size() - 3);
-    var runId = cmd.get(cmd.size() - 2);
-    var credential = cmd.getLast();
+    var specId = cmd.get(cmd.size() - 5);
+    var agent = cmd.get(cmd.size() - 4);
+    var runId = cmd.get(cmd.size() - 3);
+    var credential = cmd.get(cmd.size() - 2);
     assertEquals("", specId, "ad-hoc launches pass empty specId so the in-container hook no-ops");
     assertEquals("claude-code", agent, "agent type defaults to CLI yamlName when blank");
     assertEquals(RUN_ID, runId, "an ad-hoc launch is still a run, so SAIL_RUN_ID carries its id");
@@ -745,10 +885,10 @@ class AgentSessionTest {
     assertEquals(
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
-            + " SAIL_RUN_CREDENTIAL=\"$8\""
+            + " SAIL_RUN_CREDENTIAL=\"$8\" SAIL_RUN_ROLE=\"$9\""
             + " exec bash -l -c \"$2\" > \"$5\" 2>&1",
         script);
-    assertEquals(RUN_UNIT.pidPath(), cmd.get(cmd.size() - 2));
+    assertEquals(RUN_UNIT.pidPath(), cmd.get(cmd.size() - 3));
   }
 
   @Test
@@ -805,6 +945,19 @@ class AgentSessionTest {
     assertEquals(0, state.exitCode());
     assertEquals("scrum-12", state.specId());
     assertEquals("claude-code", state.agentType());
+  }
+
+  @Test
+  void parseExitStateReadsTheRunRoleFromTheUnitEnvironment() {
+    var state =
+        AgentSession.parseExitState(
+            """
+            ActiveState=inactive
+            ExecMainStatus=0
+            Environment=SAIL_SPEC_ID=scrum-12 SAIL_AGENT=claude-code SAIL_RUN_ID=run-1 SAIL_RUN_ROLE=room
+            """);
+
+    assertEquals("room", state.role());
   }
 
   @Test
@@ -963,6 +1116,7 @@ class AgentSessionTest {
         "v1-sync-commit-integrity",
         "claude-code",
         RUN_ID,
+        "build",
         List.of(),
         RUN_UNIT);
 
@@ -987,11 +1141,24 @@ class AgentSessionTest {
         "spec-1",
         "claude-code",
         RUN_ID,
+        "build",
         List.of("manatee-nexus"),
         RUN_UNIT);
 
     var cmd = shell.invocations().getFirst();
     assertTrue(cmd.contains("repos"), "session must persist repos for stop-gate scoping");
     assertTrue(cmd.contains("manatee-nexus"), cmd);
+  }
+
+  @Test
+  void writeSessionPersistsTheRoleForStopGateLaneDecisions() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var session = new AgentSession(shell);
+
+    session.writeSession(
+        "acme", "task", "", "spec-1", "claude-code", RUN_ID, "room", List.of(), RUN_UNIT);
+
+    var cmd = shell.invocations().getFirst();
+    assertTrue(cmd.contains("\"role\": \"room\""), cmd);
   }
 }

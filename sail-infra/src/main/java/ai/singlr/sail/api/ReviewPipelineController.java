@@ -262,6 +262,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   private void handleAgentStopped(Event event) {
+    if (roomStop(event)) return;
+
     var specId = event.spec();
     var spec = specStore.findById(specId);
     if (spec.isEmpty()) return;
@@ -969,6 +971,27 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private static boolean isAuthoritative(Event event) {
     var source = event.data().get(Event.WellKnownData.SOURCE);
     return source != null && !Event.WellKnownData.SOURCE_SYNC.equals(source);
+  }
+
+  /**
+   * Whether this stop belongs to a room wake — a chat-lane run that answers in the spec's room and
+   * must never trigger a review, structurally: an escalated spec parked in {@code review} is
+   * exactly where a human asks "what is it stuck on?", and reviewing that chat would re-enter the
+   * loop the human just took over. The role rides the stop signal itself (hook, watcher, and
+   * reconciler stops all carry it), with the run row consulted as the fallback for a signal that
+   * lost it.
+   */
+  private boolean roomStop(Event event) {
+    if (Event.WellKnownData.RUN_ROLE_ROOM.equals(event.data().get(Event.WellKnownData.RUN_ROLE))) {
+      return true;
+    }
+    if (runStore == null) {
+      return false;
+    }
+    var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
+    return runId != null
+        && !runId.isBlank()
+        && runStore.findById(runId).map(RunStore.RunRow::roomRole).orElse(false);
   }
 
   private static Integer exitCodeOf(Event event) {

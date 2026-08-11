@@ -90,6 +90,17 @@ class SailEventHelperTest {
   }
 
   @Test
+  void scriptEmbedsTheRunRoleOnlyWhenPresent() {
+    var content = SailEventHelper.scriptContent();
+    assertTrue(content.contains("RUN_ROLE=\"${SAIL_RUN_ROLE:-}\""));
+    assertTrue(content.contains("if [ -n \"$RUN_ROLE\" ]; then"));
+    assertTrue(
+        content.contains("\\\"run_role\\\":\\\"$RUN_ROLE\\\""),
+        "the lane rides every hook-published event so stop consumers can tell a chat from a"
+            + " build without a store lookup");
+  }
+
+  @Test
   void scriptEmbedsSpecFieldUnconditionally() {
     var content = SailEventHelper.scriptContent();
     assertTrue(

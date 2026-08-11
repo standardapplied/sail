@@ -508,10 +508,10 @@ public final class MissedStopReconciler implements AutoCloseable {
             + (exitCode != null ? exitCode : "unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(spec, session.id(), exitCode));
+    bus.publish(stopEvent(spec, session.id(), session.role(), exitCode));
   }
 
-  static Event stopEvent(SpecStore.SpecRow spec, String runId, Integer exitCode) {
+  static Event stopEvent(SpecStore.SpecRow spec, String runId, String role, Integer exitCode) {
     var agent = spec.agent() != null ? spec.agent() : Event.SAIL_AGENT;
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
@@ -520,6 +520,9 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
     if (runId != null && !runId.isBlank()) {
       data.put(Event.WellKnownData.RUN_ID, runId);
+    }
+    if (role != null && !role.isBlank()) {
+      data.put(Event.WellKnownData.RUN_ROLE, role);
     }
     return Event.of(
         spec.project(),

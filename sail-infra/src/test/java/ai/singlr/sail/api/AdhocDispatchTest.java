@@ -224,7 +224,7 @@ class AdhocDispatchTest {
 
     ops.startAdhoc("acme", background("task"), HANDLE);
 
-    var credential = launched.get().getLast();
+    var credential = launched.get().get(launched.get().size() - 2);
     assertTrue(credential.startsWith("sailrun_"), "the launcher receives the real credential");
     assertTrue(
         shown.get().contains("<redacted>"),

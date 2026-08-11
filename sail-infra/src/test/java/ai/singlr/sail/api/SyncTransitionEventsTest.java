@@ -142,6 +142,31 @@ class SyncTransitionEventsTest {
   }
 
   @Test
+  void aSyncedRoomStopKeepsItsRoleSoLifecycleIgnoresIt() {
+    var snapshot = run("completed", 0);
+    snapshot.put("role", "room");
+
+    var stop = map(new SyncTransition("run", "r1", "running", "completed", snapshot)).getFirst();
+
+    assertEquals(
+        Event.WellKnownData.RUN_ROLE_ROOM,
+        stop.data().get(Event.WellKnownData.RUN_ROLE),
+        "a room run's terminal stop must carry its role across sync, or SpecLifecycleReactor"
+            + " treats the chat as a build stop and advances the spec to review");
+  }
+
+  @Test
+  void aSyncedBuildStopCarriesNoRoomRole() {
+    var stop =
+        map(new SyncTransition("run", "r1", "running", "completed", run("completed", 0)))
+            .getFirst();
+    assertEquals(
+        null,
+        stop.data().get(Event.WellKnownData.RUN_ROLE),
+        "a build stop advances lifecycle exactly as before — only room stops are excluded");
+  }
+
+  @Test
   void aNonZeroExitFollowsTheStopWithAgentFailed() {
     var events = map(new SyncTransition("run", "r1", "running", "stopped", run("stopped", 2)));
 

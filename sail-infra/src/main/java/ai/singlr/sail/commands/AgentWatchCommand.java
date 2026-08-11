@@ -465,6 +465,9 @@ public final class AgentWatchCommand implements Runnable {
     if (Strings.isNotBlank(exit.runId())) {
       data.put(Event.WellKnownData.RUN_ID, exit.runId());
     }
+    if (Strings.isNotBlank(exit.role())) {
+      data.put(Event.WellKnownData.RUN_ROLE, exit.role());
+    }
     return Event.of(
         project,
         Strings.isBlank(exit.specId()) ? null : exit.specId(),
