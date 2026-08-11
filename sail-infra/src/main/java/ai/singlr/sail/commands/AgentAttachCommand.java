@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -122,11 +123,28 @@ public final class AgentAttachCommand implements Runnable {
    * live-run refusal and fork a second agent over the same worktree.
    */
   private Optional<RunStore.RunRow> latestRun() {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new RunStore(db).latestForProjectOnNode(name, NodeIdentity.handle());
+    return latestRunOrRefuse(
+        name,
+        () -> {
+          try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+            return new RunStore(db).latestForProjectOnNode(name, NodeIdentity.handle());
+          }
+        });
+  }
+
+  /**
+   * The fail-closed policy, pure: unknown is never absent. Empty means a successful query found no
+   * run — only then may attach fall back to a fresh conversation. A query failure of any kind
+   * refuses the attach, because treating an unreadable database as "no run" would bypass the
+   * live-run refusal and fork a second agent over the same worktree.
+   */
+  static Optional<RunStore.RunRow> latestRunOrRefuse(
+      String project, Supplier<Optional<RunStore.RunRow>> query) {
+    try {
+      return query.get();
     } catch (RuntimeException e) {
       throw new IllegalStateException(
-          "Could not read run state for project '" + name + "'; refusing to attach.", e);
+          "Could not read run state for project '" + project + "'; refusing to attach.", e);
     }
   }
 

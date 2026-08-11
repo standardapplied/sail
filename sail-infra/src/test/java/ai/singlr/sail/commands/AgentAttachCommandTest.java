@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AgentCli;
@@ -14,6 +15,31 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AgentAttachCommandTest {
+
+  @Test
+  void anUnreadableRunStateRefusesTheAttachInsteadOfForkingFresh() {
+    var thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentAttachCommand.latestRunOrRefuse(
+                    "acme",
+                    () -> {
+                      throw new IllegalStateException("database disk image is malformed");
+                    }));
+    assertTrue(
+        thrown.getMessage().contains("refusing to attach"),
+        "unknown is never absent: an unreadable database must refuse, because treating it as"
+            + " 'no run' bypasses the live-run refusal and forks a second agent");
+    assertTrue(thrown.getCause().getMessage().contains("malformed"), "the cause travels");
+  }
+
+  @Test
+  void aSuccessfulEmptyQueryAllowsTheFreshFallback() {
+    assertTrue(
+        AgentAttachCommand.latestRunOrRefuse("acme", java.util.Optional::empty).isEmpty(),
+        "only a successful empty query means no run — the fresh-attach lane stays open");
+  }
 
   @Test
   void aRecordedSessionResumesExactlyByIdForClaudeCode() {
