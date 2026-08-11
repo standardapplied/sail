@@ -711,11 +711,13 @@ public final class DispatchOperations {
     var specId = run != null ? run.specId() : null;
     var baseline = YamlUtil.parseMap(recorded);
     var roomStarted = run != null ? parseInstant(run.startedAt()) : null;
+    var roomNode = run != null ? run.node() : null;
     var guardAt = DateTimeUtils.now();
     var others =
         runStore.listForProject(project).stream()
             .filter(candidate -> !candidate.id().equals(runId))
             .filter(candidate -> !candidate.roomRole())
+            .filter(candidate -> sameNode(roomNode, candidate))
             .filter(candidate -> overlapsRoomInterval(candidate, roomStarted, guardAt))
             .toList();
     if (others.stream().anyMatch(candidate -> candidate.repos().isEmpty())) {
@@ -763,6 +765,18 @@ public final class DispatchOperations {
    * mid-chat and finished first still shields its repos. Unparseable timestamps count as
    * overlapping: the safe failure mode is a quieter guard, never a misattributed one.
    */
+  /**
+   * A candidate run can only have authored changes the local guard observes if it executed in the
+   * same node's shared container. Run rows replicate fleet-wide, so {@code listForProject} returns
+   * foreign-node runs too; a build in another node's separate container cannot touch this
+   * workspace, and letting it match would silently shield repositories from the guard. When the
+   * room run's node is unknown (its row vanished before the guard fired), scope nothing — the
+   * conservative posture is a guard that runs, never one a foreign run can suppress.
+   */
+  private static boolean sameNode(String roomNode, RunStore.RunRow candidate) {
+    return roomNode == null || roomNode.equals(candidate.node());
+  }
+
   private static boolean overlapsRoomInterval(
       RunStore.RunRow candidate, Instant roomStarted, Instant guardAt) {
     var started = parseInstant(candidate.startedAt());

@@ -118,6 +118,9 @@ public final class SyncTransitionEvents {
     var agent = Objects.requireNonNullElse(text(transition.snapshot(), "agent"), Event.SAIL_AGENT);
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.RUN_ID, transition.entityId());
+    if (Event.WellKnownData.RUN_ROLE_ROOM.equals(text(transition.snapshot(), "role"))) {
+      data.put(Event.WellKnownData.RUN_ROLE, Event.WellKnownData.RUN_ROLE_ROOM);
+    }
     var exitCode = transition.snapshot().get("exit_code") instanceof Number n ? n.intValue() : null;
     if (exitCode != null) {
       data.put(Event.WellKnownData.EXIT_CODE, exitCode);

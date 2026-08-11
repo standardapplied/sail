@@ -165,9 +165,7 @@ public enum AgentCli {
   private static final String ROOM_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
 
   private static final String ROOM_ALLOWED_TOOLS =
-      " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\" \"Bash(git log:*)\" \"Bash(git show:*)\""
-          + " \"Bash(git diff:*)\" \"Bash(git status:*)\" \"Bash(git blame:*)\""
-          + " \"Bash(git grep:*)\"";
+      " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\"";
 
   /**
    * Whether this CLI can run the room lane's read-only chat session with the restriction enforced
@@ -184,11 +182,24 @@ public enum AgentCli {
 
   /**
    * The room lane's headless command: like {@link #headlessCommand} but harness-restricted instead
-   * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} (no Write, no Edit), and
-   * the only auto-approved commands are the {@code spec} CLI — the lane's one write, posting the
-   * answer to the room — and read-only git; print mode denies everything else without prompting, so
-   * a prompt-injected instruction to modify the worktree fails at the harness, not at the model's
-   * discretion.
+   * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} — {@code Write} and
+   * {@code Edit} do not exist in the session, and the {@code --tools} cut is CLI-authoritative, so
+   * no on-disk settings file can re-add them. The only auto-approved commands are {@code spec} (the
+   * lane's one write — posting the answer, and the room credential is viewer-role so even {@code
+   * spec} cannot mutate a spec) and {@code cd} (navigation, no write). Reading the workspace is
+   * {@code Read}/{@code Grep}/{@code Glob}, which have no write flag. Git is deliberately absent:
+   * {@code git diff --output=<path>} writes through a prefix allow-rule, and git's external-diff
+   * and pager config are command-execution surfaces — a read-only lane must not expose them.
+   *
+   * <p>This is the harness-enforced boundary the platform can express, not a kernel one. It is
+   * exact about what it is: {@code Write}/{@code Edit} are structurally gone; the Bash allowlist is
+   * two non-writing commands; the room credential is viewer-role; and a host-side content guard
+   * ({@code DispatchOperations#guardRoomRun}) surfaces any worktree change as a loud guardrail
+   * event. What it is not: hermetic against an ambient {@code .claude/settings.json} that merges an
+   * additional {@code Bash(...)} allow-rule (Claude Code merges permission rules across settings
+   * sources), nor against a kernel-level escape — both are owned by the room-lane hardening
+   * follow-up spec (managed-policy settings and/or a sidecar container with a read-only disk
+   * device), the boundaries incus does not give a same-container process.
    */
   public String headlessRoomCommand(
       String taskFile, String model, String claudeSettingsPath, boolean stream) {

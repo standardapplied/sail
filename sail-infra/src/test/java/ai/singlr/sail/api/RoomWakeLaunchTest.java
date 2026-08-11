@@ -524,6 +524,46 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void aForeignNodeBuildDoesNotSuppressTheLocalRoomGuard() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell().on("incus list ^acme$", RUNNING_JSON).on("rev-parse HEAD", "bbb222\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
+    var foreignBuild = DateTimeUtils.newId().toString();
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
+            + " completed_at, repos) VALUES (?, 'acme', 'other', 'other-node', 'build',"
+            + " 'claude-code', 'completed', ?, ?, '[\"app\"]')",
+        foreignBuild,
+        DateTimeUtils.now().minusSeconds(600).toString(),
+        DateTimeUtils.now().plusSeconds(60).toString());
+
+    ops.guardRoomRun("acme", runId);
+
+    assertTrue(
+        events.stream().anyMatch(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type())),
+        "a build in another node's container cannot touch this workspace, so it must never"
+            + " shield the local guard — HEAD moved aaa111→bbb222 and the room run is blamed");
+  }
+
+  @Test
   void aBuildThatFinishedMidChatStillShieldsItsRepos() throws Exception {
     var runId = DateTimeUtils.newId().toString();
     var shell =

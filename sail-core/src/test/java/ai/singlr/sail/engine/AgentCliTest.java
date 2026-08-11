@@ -276,8 +276,13 @@ class AgentCliTest {
     assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
     assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
     assertTrue(cmd.contains("\"Bash(spec:*)\""), cmd);
-    assertTrue(cmd.contains("\"Bash(git log:*)\""), cmd);
-    assertFalse(cmd.contains("Bash(git push"), cmd);
+    assertTrue(cmd.contains("\"Bash(cd:*)\""), cmd);
+    assertFalse(
+        cmd.contains("git"),
+        "git is not allowlisted: git diff --output=<path> writes through a prefix rule, and"
+            + " git's external-diff/pager config is a command-execution surface — a read-only"
+            + " lane exposes neither. Reading is Read/Grep/Glob. Command: "
+            + cmd);
     assertTrue(cmd.endsWith(" -p \"$(cat " + TASK + ")\""), cmd);
   }
 
