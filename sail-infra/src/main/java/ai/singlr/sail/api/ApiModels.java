@@ -897,6 +897,20 @@ record RunAckResponse(String runId, int acked) implements Mappable {
   }
 }
 
+record RunSessionResponse(String runId, String sessionId, String sessionSource)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("run_id", runId);
+    map.put("session_id", sessionId);
+    if (sessionSource != null) {
+      map.put("session_source", sessionSource);
+    }
+    return map;
+  }
+}
+
 record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -1054,7 +1068,9 @@ record RunView(
     Integer exitCode,
     String logPath,
     String principal,
-    String owner)
+    String owner,
+    String sessionId,
+    String sessionSource)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1072,7 +1088,9 @@ record RunView(
         row.exitCode(),
         row.logPath(),
         row.principal(),
-        row.owner());
+        row.owner(),
+        row.sessionId(),
+        row.sessionSource());
   }
 
   @Override
@@ -1093,6 +1111,8 @@ record RunView(
     if (logPath != null) m.put("log_path", logPath);
     if (principal != null) m.put("principal", principal);
     if (owner != null) m.put("owner", owner);
+    if (sessionId != null) m.put("session_id", sessionId);
+    if (sessionSource != null) m.put("session_source", sessionSource);
     return m;
   }
 }
@@ -1146,11 +1166,25 @@ record StopRunResponse(
  * "open logs" button on provenance ({@code node}) without a second call.
  */
 record RunSummary(
-    String id, String node, String status, Integer exitCode, String principal, String owner)
+    String id,
+    String node,
+    String status,
+    Integer exitCode,
+    String principal,
+    String owner,
+    String sessionId,
+    String sessionSource)
     implements Mappable {
   static RunSummary from(RunStore.RunRow row) {
     return new RunSummary(
-        row.id(), row.node(), row.status(), row.exitCode(), row.principal(), row.owner());
+        row.id(),
+        row.node(),
+        row.status(),
+        row.exitCode(),
+        row.principal(),
+        row.owner(),
+        row.sessionId(),
+        row.sessionSource());
   }
 
   @Override
@@ -1162,6 +1196,8 @@ record RunSummary(
     if (exitCode != null) m.put("exit_code", exitCode);
     if (principal != null) m.put("principal", principal);
     if (owner != null) m.put("owner", owner);
+    if (sessionId != null) m.put("session_id", sessionId);
+    if (sessionSource != null) m.put("session_source", sessionSource);
     return m;
   }
 }

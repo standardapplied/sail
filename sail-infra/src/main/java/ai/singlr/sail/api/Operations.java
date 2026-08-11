@@ -142,6 +142,17 @@ public interface Operations {
    */
   Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered);
 
+  /**
+   * Records the hook-reported identity of the run's agent conversation: the session id (required),
+   * the start source, and the container-side transcript path (both optional, stored null when
+   * blank). Last write wins — a resume, clear, or compact restart re-reports and overwrites, so the
+   * row always names the conversation a human would attach to. The run credential is the write
+   * gate: revocation at run completion is what ends a run's ability to report, so there is no
+   * separate status check. A blank session id is rejected without touching a prior report.
+   */
+  Result<RunSessionResponse> recordRunSession(
+      String runId, String sessionId, String source, String transcriptPath);
+
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(

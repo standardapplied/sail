@@ -406,6 +406,41 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void runSessionRecordsTheHookReportedIdentityForRunCallersOnly() {
+    var recorded =
+        router.handle(
+            form(
+                "POST",
+                "/v1/run/session",
+                "session_id=abc-123&source=startup"
+                    + "&transcript_path=%2Fhome%2Fdev%2F.claude%2Fp%2Fabc.jsonl"));
+    assertEquals(200, recorded.status());
+    assertEquals("run-1", recorded.body().get("run_id"));
+    assertEquals("abc-123", recorded.body().get("session_id"));
+    assertEquals("run-1", ops.lastSessionRunId, "the credential names the run, never the client");
+    assertEquals("abc-123", ops.lastSessionId);
+    assertEquals("startup", ops.lastSessionSource);
+    assertEquals(
+        "/home/dev/.claude/p/abc.jsonl",
+        ops.lastTranscriptPath,
+        "form values arrive urldecoded, so a path travels intact");
+
+    var boxed =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/run/session",
+                Map.of(),
+                boxAuth(),
+                "session_id=x".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(403, boxed.status());
+    assertTrue(boxed.body().get("error").toString().contains("run credential"));
+
+    assertEquals(405, router.handle(get("/v1/run/session", Map.of())).status());
+    assertEquals(405, router.handle(form("DELETE", "/v1/run/session", "")).status());
+  }
+
+  @Test
   void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
     var created =
         router.handle(
@@ -519,6 +554,10 @@ class LocalApiRouterTest {
     private String lastAckRunId;
     private List<String> lastDelivered;
     private String lastInboxRunId;
+    private String lastSessionRunId;
+    private String lastSessionId;
+    private String lastSessionSource;
+    private String lastTranscriptPath;
     private boolean emptyMessages;
     private boolean failMessages;
 
@@ -615,6 +654,16 @@ class LocalApiRouterTest {
       lastAckRunId = runId;
       lastDelivered = delivered;
       return super.ackRunMessages(runId, delivered);
+    }
+
+    @Override
+    public Result<RunSessionResponse> recordRunSession(
+        String runId, String sessionId, String source, String transcriptPath) {
+      lastSessionRunId = runId;
+      lastSessionId = sessionId;
+      lastSessionSource = source;
+      lastTranscriptPath = transcriptPath;
+      return super.recordRunSession(runId, sessionId, source, transcriptPath);
     }
   }
 }

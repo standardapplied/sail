@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Every run now knows its agent session. A new `sail-session-report` SessionStart hook (both
+  CLIs; Codex's payload verified to carry the same `session_id`/`transcript_path` fields) posts
+  the conversation's identity to the run row over the run-credential lane
+  (`POST /v1/run/session`), last write wins — a resume, clear, or compact restart re-reports the
+  new conversation, and the fix lane reports without `SAIL_SPEC_ID`. The three fields
+  (`session_id`, `session_source`, `transcript_path`) replicate with the run (old-shape
+  snapshots derive nulls) and surface on runs listings and `latest_run`. `sail agent attach` now
+  has honest semantics per run state: a completed run resumes its recorded conversation exactly
+  (`claude --resume <id>` / `codex resume <id>`, never an interactive picker; loud fresh
+  fallback when no session was recorded, `--dry-run`/`--json` show the exact argv), and a live
+  run is refused with the real lanes named — reply in its spec room to steer it, or stop it
+  first; live observe/attach arrives with the PTY session host.
+
 - A `still_open` ruling's evidence now travels with the finding instead of being discarded. The
   carried row stores the ruling's evidence (`carry_evidence`, newest ruling wins; the
   `carried_from` chain keeps the older ones), the next fix task renders it as a reproduction

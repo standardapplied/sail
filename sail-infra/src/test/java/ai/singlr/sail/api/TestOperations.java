@@ -152,6 +152,8 @@ class TestOperations implements Operations {
                 null,
                 "/home/dev/.sail/runs/" + runId + "/agent.log",
                 null,
+                null,
+                null,
                 null)));
   }
 
@@ -375,6 +377,12 @@ class TestOperations implements Operations {
   @Override
   public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
     return Result.success(new RunAckResponse(runId, delivered.size()));
+  }
+
+  @Override
+  public Result<RunSessionResponse> recordRunSession(
+      String runId, String sessionId, String source, String transcriptPath) {
+    return Result.success(new RunSessionResponse(runId, sessionId, source));
   }
 
   @Override

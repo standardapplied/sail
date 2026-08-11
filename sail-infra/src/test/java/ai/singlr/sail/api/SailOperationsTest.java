@@ -2683,6 +2683,46 @@ class SailOperationsTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void runsListingAndLatestRunCarryTheRecordedSessionIdentity() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell(),
+            null,
+            store -> seedSpec(store, "auth", "Add auth", "pending", List.of(), ""),
+            runs -> {
+              runs.create(
+                  R1,
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "node-a",
+                  "build",
+                  "claude-code",
+                  null,
+                  null,
+                  null,
+                  null,
+                  RUN_LOG,
+                  "sail-agent-" + R1);
+              runs.recordSession(R1, "abc-123", "startup", "/t/abc.jsonl");
+            });
+
+    var listed = (List<Map<String, Object>>) get(operations.runs("acme", null), "runs");
+    assertEquals("abc-123", listed.getFirst().get("session_id"));
+    assertEquals("startup", listed.getFirst().get("session_source"));
+
+    var latest = (Map<String, Object>) get(operations.globalSpec("auth"), "latest_run");
+    assertEquals("abc-123", latest.get("session_id"));
+    assertEquals("startup", latest.get("session_source"));
+
+    var detail = operations.run(R1).orThrow().toMap();
+    assertEquals("abc-123", detail.get("session_id"));
+    assertEquals("startup", detail.get("session_source"));
+  }
+
+  @Test
   void dispatchPublishesAgentSessionStartedWhenRunning() throws Exception {
     try (var bus = new EventBus()) {
       var shell =

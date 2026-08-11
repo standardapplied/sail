@@ -37,6 +37,7 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String EVENTS = "/v1/events";
   private static final String WHOAMI = "/v1/whoami";
   private static final String RUN_MESSAGES = "/v1/run/messages";
+  private static final String RUN_SESSION = "/v1/run/session";
 
   private static final Set<String> AGENT_EVENT_TYPES =
       Set.of(
@@ -119,6 +120,9 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     if (RUN_MESSAGES.equals(path)) {
       return runMessages(request, caller);
+    }
+    if (RUN_SESSION.equals(path)) {
+      return runSession(request, caller);
     }
     if (SPECS.equals(path)) {
       return specsCollection(request, caller);
@@ -320,6 +324,29 @@ final class LocalApiRouter implements LocalApiHandler {
               operations.ackRunMessages(run.id(), deliveredIds(request.form().get("delivered"))));
       default -> problem(405, "run messages accepts GET or POST");
     };
+  }
+
+  /**
+   * The session-identity lane: the SessionStart hook knows only its run credential, so the
+   * credential names the run and the report names the conversation. {@code POST} records the
+   * payload's {@code session_id}, {@code source}, and {@code transcript_path} on the run row, last
+   * write wins — a resume, clear, or compact restart re-reports the new conversation. A revoked
+   * credential never resolves to a caller, so a finished run cannot rewrite its session.
+   */
+  private ApiResponse runSession(LocalApiRequest request, Caller caller) {
+    if (!(caller instanceof Caller.Run(var run))) {
+      return problem(
+          403,
+          "Session reports name a run's conversation and require a run credential; the box"
+              + " credential has no run to report for.");
+    }
+    if (!"POST".equals(request.method())) {
+      return problem(405, "run session accepts POST");
+    }
+    var form = request.form();
+    return ApiResponse.from(
+        operations.recordRunSession(
+            run.id(), form.get("session_id"), form.get("source"), form.get("transcript_path")));
   }
 
   private static List<String> deliveredIds(String value) {
