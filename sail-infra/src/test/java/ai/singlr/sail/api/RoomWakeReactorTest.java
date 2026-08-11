@@ -49,7 +49,8 @@ class RoomWakeReactorTest {
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-08-11T12:00:00Z"));
 
-  private static final class RecordingLauncher implements RoomWakeReactor.Launcher {
+  private static final class RecordingLauncher
+      implements RoomWakeReactor.Waker, RoomWakeReactor.Guard {
     final List<String> woken = new ArrayList<>();
     final List<String> guarded = new ArrayList<>();
     RuntimeException failWith;
@@ -140,6 +141,7 @@ class RoomWakeReactorTest {
         runStore,
         messages,
         handle::get,
+        launcher,
         launcher,
         Duration.ZERO,
         RoomWakeReactor.COOLDOWN,
@@ -493,6 +495,7 @@ class RoomWakeReactorTest {
             messageStore,
             handle::get,
             launcher,
+            launcher,
             Duration.ZERO,
             RoomWakeReactor.COOLDOWN,
             new DirectExecutorService(),
@@ -600,7 +603,7 @@ class RoomWakeReactorTest {
     assertEquals(Duration.ofSeconds(30), RoomWakeReactor.DEBOUNCE);
     assertEquals(Duration.ofMinutes(10), RoomWakeReactor.COOLDOWN);
     try (var reactor =
-        new RoomWakeReactor(specStore, runStore, messageStore, handle::get, launcher)) {
+        new RoomWakeReactor(specStore, runStore, messageStore, handle::get, launcher, launcher)) {
       assertEquals("room-wake", reactor.name());
     }
   }
@@ -609,9 +612,9 @@ class RoomWakeReactorTest {
   void constructorRejectsMissingCollaborators() {
     assertThrows(
         NullPointerException.class,
-        () -> new RoomWakeReactor(null, runStore, messageStore, handle::get, launcher));
+        () -> new RoomWakeReactor(null, runStore, messageStore, handle::get, launcher, launcher));
     assertThrows(
         NullPointerException.class,
-        () -> new RoomWakeReactor(specStore, runStore, messageStore, handle::get, null));
+        () -> new RoomWakeReactor(specStore, runStore, messageStore, handle::get, null, launcher));
   }
 }

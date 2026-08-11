@@ -37,7 +37,7 @@ import java.util.function.Supplier;
  * checks is refused by the gate, never doubled.
  *
  * <p>The reactor also hears {@code room}-role stop signals: a wake turn that somehow moved a repo
- * is a guardrail event, and {@link Launcher#guard} performs that check for runs this box owns.
+ * is a guardrail event, and {@link Guard#guard} performs that check for runs this box owns.
  *
  * <p>Failures are logged and swallowed — a broken wake must never take the bus down — and every
  * launch failure surfaces through the launcher's own refusal messages.
@@ -50,10 +50,15 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   /** How long after any run finish the room stays quiet — no thank-you refire, no loop sniping. */
   public static final Duration COOLDOWN = Duration.ofMinutes(10);
 
-  /** The wake lane's execution seams, implemented by the dispatch machinery. */
-  public interface Launcher {
+  /** The wake seam, implemented by the dispatch machinery's {@code startRoomRun}. */
+  @FunctionalInterface
+  public interface Waker {
     void wake(String project, String specId) throws Exception;
+  }
 
+  /** The commit-guard seam, implemented by the dispatch machinery's {@code guardRoomRun}. */
+  @FunctionalInterface
+  public interface Guard {
     void guard(String project, String runId) throws Exception;
   }
 
@@ -69,7 +74,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private final RunStore runStore;
   private final MessageStore messageStore;
   private final Supplier<String> localHandle;
-  private final Launcher launcher;
+  private final Waker waker;
+  private final Guard guard;
   private final Duration debounce;
   private final Duration cooldown;
   private final ExecutorService executor;
@@ -82,13 +88,15 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       RunStore runStore,
       MessageStore messageStore,
       Supplier<String> localHandle,
-      Launcher launcher) {
+      Waker waker,
+      Guard guard) {
     this(
         specStore,
         runStore,
         messageStore,
         localHandle,
-        launcher,
+        waker,
+        guard,
         DEBOUNCE,
         COOLDOWN,
         Executors.newVirtualThreadPerTaskExecutor(),
@@ -101,7 +109,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       RunStore runStore,
       MessageStore messageStore,
       Supplier<String> localHandle,
-      Launcher launcher,
+      Waker waker,
+      Guard guard,
       Duration debounce,
       Duration cooldown,
       ExecutorService executor,
@@ -111,7 +120,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.messageStore = messageStore;
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
-    this.launcher = Objects.requireNonNull(launcher, "launcher");
+    this.waker = Objects.requireNonNull(waker, "waker");
+    this.guard = Objects.requireNonNull(guard, "guard");
     this.debounce = debounce;
     this.cooldown = cooldown;
     this.executor = executor;
@@ -197,7 +207,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       if (withinCooldown(runs)) {
         return;
       }
-      launcher.wake(spec.project(), specId);
+      waker.wake(spec.project(), specId);
     } catch (Exception e) {
       System.err.println("room-wake: wake of spec " + specId + " failed: " + e.getMessage());
     }
@@ -215,7 +225,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (run == null || !SailOperations.ownsRun(run.node(), localHandle.get())) {
       return;
     }
-    launcher.guard(run.project(), runId);
+    guard.guard(run.project(), runId);
   }
 
   private boolean ownsSpec(SpecStore.SpecRow spec) {

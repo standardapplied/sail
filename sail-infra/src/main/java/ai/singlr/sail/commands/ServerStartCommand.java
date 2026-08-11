@@ -228,17 +228,8 @@ public final class ServerStartCommand implements Runnable {
             runStore,
             messageStore,
             NodeIdentity::handle,
-            new RoomWakeReactor.Launcher() {
-              @Override
-              public void wake(String project, String specId) {
-                operations.startRoomRun(project, specId, NodeIdentity.handle());
-              }
-
-              @Override
-              public void guard(String project, String runId) {
-                operations.guardRoomRun(project, runId);
-              }
-            });
+            (project, specId) -> operations.startRoomRun(project, specId, NodeIdentity.handle()),
+            operations::guardRoomRun);
     bus.subscribe(roomWake);
     shutdown.register(roomWake);
     if (narratesSlack(HostSync.config())) {
