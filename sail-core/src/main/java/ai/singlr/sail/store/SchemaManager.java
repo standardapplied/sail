@@ -74,8 +74,15 @@ public final class SchemaManager {
 
   /**
    * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
-   * versions continuing from {@value #V1_VERSION}. Never reorder, edit, or remove an entry; each
-   * addition ships with a test that migrates a seeded database and asserts the data survived. The
+   * versions continuing from {@value #V1_VERSION}. A migration's version is its <em>list index</em>
+   * ({@link #postBaselineFrom} applies {@code MIGRATIONS.get(version - V1_VERSION - 1)}), so an
+   * entry's position is its identity across releases: inserting one in the middle re-points every
+   * later version at different SQL, and a box stamped by an earlier release then runs a statement
+   * against the wrong schema — the {@code run_principals} incident, where a v0.20.0 box ran {@code
+   * INSERT INTO run_principals} at the index its {@code CREATE} used to hold. <b>Only ever append;
+   * never reorder, edit, or remove an entry.</b> Each addition ships with a test that seeds a
+   * database in a prior release's shape and migrates it forward — a fresh-database test cannot
+   * catch a mid-list insertion, because it never replays the earlier version→SQL mapping. The
    * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
    * {@code run_delivered_messages} (delivery bookkeeping) and {@code room_guard} (the room commit
    * guard's launch baseline, kept host-side so the guarded agent can never reach it) are local-only
@@ -145,18 +152,18 @@ public final class SchemaManager {
           "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
           "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
           """
+          CREATE TABLE run_delivered_messages (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
+              PRIMARY KEY (run_id, message_id)
+          )""",
+          """
           CREATE TABLE run_principals (
               run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
               principal TEXT NOT NULL,
               PRIMARY KEY (run_id, principal)
           )""",
           "INSERT INTO run_principals SELECT id, principal FROM runs WHERE principal IS NOT NULL",
-          """
-          CREATE TABLE run_delivered_messages (
-              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-              message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
-              PRIMARY KEY (run_id, message_id)
-          )""",
           "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT",
           "ALTER TABLE runs ADD COLUMN session_id TEXT",
           "ALTER TABLE runs ADD COLUMN session_source TEXT",

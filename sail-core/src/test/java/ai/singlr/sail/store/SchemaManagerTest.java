@@ -330,6 +330,67 @@ class SchemaManagerTest {
     }
   }
 
+  private static int migrationIndex(String needle) {
+    var migrations = SchemaManager.MIGRATIONS;
+    for (var i = 0; i < migrations.size(); i++) {
+      if (migrations.get(i).contains(needle)) {
+        return i;
+      }
+    }
+    throw new AssertionError("no migration contains: " + needle);
+  }
+
+  @Test
+  void migrationsAddedAfterV0_20_0ComeAfterItsTail() {
+    assertTrue(
+        migrationIndex("CREATE TABLE run_delivered_messages")
+            < migrationIndex("CREATE TABLE run_principals"),
+        "run_delivered_messages was v0.20.0's last migration, so everything added after it —"
+            + " run_principals included — must be appended, never inserted before it. Migrations"
+            + " are addressed by list index; inserting before a shipped release's tail re-points"
+            + " every later version at different SQL and breaks that release's upgrade.");
+  }
+
+  @Test
+  void aV0_20_0ShapedDatabaseUpgradesWithoutRunningTheInsertBeforeItsCreate() {
+    stageAtBaseline();
+    var tail = migrationIndex("CREATE TABLE run_delivered_messages");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, tail + 1).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + tail + 1);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, agent, status, started_at, role, principal, owner)"
+            + " VALUES ('r9', 'acme', 'auth', 'codex', 'completed', 't0', 'build', 'codex/r9',"
+            + " 'uday')");
+
+    var schema = new SchemaManager(db);
+    schema.migrate();
+
+    assertEquals(
+        SchemaManager.CURRENT_VERSION,
+        schema.currentVersion(),
+        "a v0.20.0 box must ride the whole 0.21 chain — run_principals, session columns, the runs"
+            + " rebuild, and room_guard — not halt at the first entry added since it shipped");
+    assertEquals(
+        "codex/r9",
+        db.queryOne("SELECT principal FROM run_principals WHERE run_id = 'r9'", r -> r.text(0))
+            .orElseThrow(
+                () ->
+                    new AssertionError(
+                        "run_principals must exist and be back-filled from runs.principal — the"
+                            + " incident was INSERT running before CREATE on a v0.20.0 box")));
+    assertEquals(
+        "ok",
+        db.queryOne("PRAGMA integrity_check", r -> r.text(0)).orElseThrow(),
+        "the upgraded database is structurally sound");
+  }
+
   private void stageAtBaseline() {
     FloorSchema.stage(db);
     db.execute("PRAGMA foreign_keys = OFF");
