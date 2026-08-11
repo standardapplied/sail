@@ -35,8 +35,25 @@ public final class UpdateChecker {
     return doCheck(cacheFile);
   }
 
+  /** The stale-cache fetch, injectable so tests exercise the cache logic without a network call. */
+  @FunctionalInterface
+  interface VersionFetcher {
+    String fetch() throws Exception;
+  }
+
   /** Package-private overload for testing with a custom cache file path. */
   static String doCheck(Path cacheFile) throws Exception {
+    return doCheck(cacheFile, ReleaseFetcher::fetchLatestVersion);
+  }
+
+  /**
+   * The cache decision with the network fetch behind a seam: a fresh cache returns without
+   * fetching; a stale or absent cache fetches and rewrites. Tests inject {@code fetcher} so the
+   * branch under test is deterministic — the real network's failure mode (connection refused on one
+   * host, an SSL handshake on another) is not a contract this code owns and must never decide
+   * whether a test passes.
+   */
+  static String doCheck(Path cacheFile, VersionFetcher fetcher) throws Exception {
     var cached = readCache(cacheFile);
     if (cached != null) {
       var lastChecked = Instant.ofEpochMilli((Long) cached.get("last_checked"));
@@ -45,7 +62,7 @@ public final class UpdateChecker {
       }
     }
 
-    var latestVersion = ReleaseFetcher.fetchLatestVersion();
+    var latestVersion = fetcher.fetch();
 
     writeCache(cacheFile, latestVersion);
 
