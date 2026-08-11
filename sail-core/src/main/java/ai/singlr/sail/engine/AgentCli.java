@@ -162,6 +162,81 @@ public enum AgentCli {
   private static final Pattern SAFE_SESSION_ID =
       Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
+  private static final String ROOM_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
+
+  private static final String ROOM_ALLOWED_TOOLS =
+      " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\" \"Bash(git log:*)\" \"Bash(git show:*)\""
+          + " \"Bash(git diff:*)\" \"Bash(git status:*)\" \"Bash(git blame:*)\""
+          + " \"Bash(git grep:*)\"";
+
+  /**
+   * Whether this CLI can run the room lane's read-only chat session with the restriction enforced
+   * by the harness rather than promised by the prompt. Claude Code can: {@code --print} without
+   * {@code --dangerously-skip-permissions} denies every tool call not covered by an allow rule, and
+   * {@link #ROOM_TOOLS} removes the mutating tools from the set entirely. Codex cannot: its only
+   * enforcement layer is the bubblewrap sandbox, which needs user namespaces — blocked inside incus
+   * containers ({@code bwrap: setting up uid map: Permission denied}) — so the sole mode that
+   * executes commands at all is the full bypass flag, exactly what the room contract forbids.
+   */
+  public boolean supportsRoomLane() {
+    return this == CLAUDE_CODE;
+  }
+
+  /**
+   * The room lane's headless command: like {@link #headlessCommand} but harness-restricted instead
+   * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} (no Write, no Edit), and
+   * the only auto-approved commands are the {@code spec} CLI — the lane's one write, posting the
+   * answer to the room — and read-only git; print mode denies everything else without prompting, so
+   * a prompt-injected instruction to modify the worktree fails at the harness, not at the model's
+   * discretion.
+   */
+  public String headlessRoomCommand(
+      String taskFile, String model, String claudeSettingsPath, boolean stream) {
+    requireRoomLane();
+    return roomInvocation(claudeSettingsPath, model, stream) + " -p \"$(cat " + taskFile + ")\"";
+  }
+
+  /**
+   * The room lane's headless resume: {@link #headlessRoomCommand} semantics on a recorded
+   * conversation. The session id is validated against the safe pattern before it touches the shell
+   * string because it is hook-reported, replicated data.
+   */
+  public String headlessRoomResumeCommand(
+      String sessionId, String taskFile, String model, String claudeSettingsPath, boolean stream) {
+    requireRoomLane();
+    if (!isSafeSessionId(sessionId)) {
+      throw new IllegalArgumentException(
+          "Malformed session id; refusing to build a resume command from replicated data.");
+    }
+    return roomInvocation(claudeSettingsPath, model, stream)
+        + " --resume "
+        + sessionId
+        + " -p \"$(cat "
+        + taskFile
+        + ")\"";
+  }
+
+  private String roomInvocation(String claudeSettingsPath, String model, boolean stream) {
+    var settings = Strings.isBlank(claudeSettingsPath) ? "" : " --settings " + claudeSettingsPath;
+    var streamFormat = stream ? " --output-format stream-json --verbose" : "";
+    return binaryName
+        + " --print"
+        + streamFormat
+        + settings
+        + ROOM_TOOLS
+        + ROOM_ALLOWED_TOOLS
+        + claudeModelOptions(model);
+  }
+
+  private void requireRoomLane() {
+    if (!supportsRoomLane()) {
+      throw new IllegalStateException(
+          displayName()
+              + " has no harness-enforced read-only session inside a sail container;"
+              + " the room lane refuses to launch it.");
+    }
+  }
+
   /**
    * Whether a recorded session id is safe to interpolate into a shell command. Session ids arrive
    * hook-reported and replicate across boxes, so they are untrusted input at every argv seam.

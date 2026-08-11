@@ -111,6 +111,7 @@ class RoomWakeLaunchTest {
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
         .on("rev-parse HEAD", "aaa111\n")
+        .on("status --porcelain", "")
         .on("printf '%s'", "")
         .on("agent.pid", "123")
         .on("kill -0 123", "")
@@ -118,6 +119,10 @@ class RoomWakeLaunchTest {
   }
 
   private void seedSpec(String id) {
+    seedSpec(id, null);
+  }
+
+  private void seedSpec(String id, String agent) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
@@ -125,7 +130,7 @@ class RoomWakeLaunchTest {
             "OAuth flow",
             SpecStatus.DONE,
             HANDLE,
-            null,
+            agent,
             null,
             null,
             null,
@@ -169,6 +174,13 @@ class RoomWakeLaunchTest {
     var joined = String.join(" ", launched.get());
     assertFalse(joined.contains("--resume"), "no recorded session: a fresh conversation");
     assertEquals("room", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
+    assertFalse(
+        joined.contains("--dangerously-skip-permissions"),
+        "the chat lane never launches full-permission");
+    assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+    assertTrue(
+        runStore.consumeRoomGuardBaseline(runId).orElseThrow().contains("aaa111"),
+        "the guard baseline is recorded host-side before the chat launches");
     var started =
         events.stream()
             .filter(e -> Event.WellKnownTypes.AGENT_SESSION_STARTED.equals(e.type()))
@@ -298,13 +310,57 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void aSessionRecordedOnAnotherNodeIsNeverResumed() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    var remote = DateTimeUtils.newId().toString();
+    runStore.create(
+        remote,
+        "acme",
+        "auth",
+        "raj",
+        "raj",
+        "build",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + remote);
+    runStore.recordSession(remote, "sess-remote", "startup", null);
+    runStore.complete(remote, "completed", 0);
+
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
+
+    assertFalse(
+        String.join(" ", launched.get()).contains("--resume"),
+        "conversation state lives on the box that ran it; a synced session id is not resumable");
+    assertTrue(
+        runStore.findById(runId).orElseThrow().task().contains("Build the OAuth flow."),
+        "a fresh conversation is primed with the spec body");
+  }
+
+  @Test
+  void aCodexSpecDeclinesTheWakeBecauseNothingEnforcesItsReadOnlyLane() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth", "codex");
+
+    var declined = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, declined.failure().errorCode());
+    assertTrue(
+        declined.failure().errorMessage().contains("claude-code"),
+        declined.failure().errorMessage());
+    assertTrue(runStore.listForSpec("auth").isEmpty(), "a declined wake reserves nothing");
+  }
+
+  @Test
   void theGuardPublishesALoudGuardrailWhenAHeadMovedUnattributed() throws Exception {
     var runId = DateTimeUtils.newId().toString();
     var shell =
         new StubShell()
             .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/runs/" + runId + "/room-heads.json", "{\"app\": \"aaa111\"}")
-            .on("rm -f /home/dev/.sail/runs/" + runId + "/room-heads.json", "")
             .on("rev-parse HEAD", "bbb222\n")
             .on("diff --name-only", "src/Main.java\nsrc/Flag.java\n");
     var ops = operations(shell);
@@ -324,6 +380,7 @@ class RoomWakeLaunchTest {
         null,
         "sail-agent-" + runId);
     runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
 
     ops.guardRoomRun("acme", runId);
 
@@ -340,14 +397,13 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void theGuardAttributesNothingWhileAnotherLiveRunHoldsTheRepo() throws Exception {
+  void theGuardIsAsLoudForAnUncommittedEditAsForACommit() throws Exception {
     var runId = DateTimeUtils.newId().toString();
     var shell =
         new StubShell()
             .on("incus list ^acme$", RUNNING_JSON)
-            .on("cat /home/dev/.sail/runs/" + runId + "/room-heads.json", "{\"app\": \"aaa111\"}")
-            .on("rm -f /home/dev/.sail/runs/" + runId + "/room-heads.json", "")
-            .on("rev-parse HEAD", "bbb222\n");
+            .on("rev-parse HEAD", "aaa111\n")
+            .on("status --porcelain", " M src/Main.java\n?? notes.txt\n");
     var ops = operations(shell);
     seedSpec("auth");
     runStore.create(
@@ -365,6 +421,46 @@ class RoomWakeLaunchTest {
         null,
         "sail-agent-" + runId);
     runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(
+        runId,
+        "{\"app\": {\"head\": \"aaa111\", \"status\":"
+            + " \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
+
+    ops.guardRoomRun("acme", runId);
+
+    var guardrail =
+        events.stream()
+            .filter(e -> Event.WellKnownTypes.GUARDRAIL_TRIGGERED.equals(e.type()))
+            .findFirst()
+            .orElseThrow();
+    var reason = String.valueOf(guardrail.data().get("reason"));
+    assertTrue(reason.contains("worktree changed"), reason);
+    assertTrue(reason.contains("src/Main.java, notes.txt"), reason);
+  }
+
+  @Test
+  void theGuardAttributesNothingWhileAnotherLiveRunHoldsTheRepo() throws Exception {
+    var runId = DateTimeUtils.newId().toString();
+    var shell =
+        new StubShell().on("incus list ^acme$", RUNNING_JSON).on("rev-parse HEAD", "bbb222\n");
+    var ops = operations(shell);
+    seedSpec("auth");
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}");
     var live = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
@@ -381,7 +477,7 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void theGuardIsQuietWithoutARecordedHeadsFile() throws Exception {
+  void theGuardIsQuietWithoutARecordedBaseline() throws Exception {
     var runId = DateTimeUtils.newId().toString();
     var ops = operations(new StubShell().on("incus list ^acme$", RUNNING_JSON));
 

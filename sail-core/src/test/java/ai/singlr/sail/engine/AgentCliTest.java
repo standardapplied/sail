@@ -257,4 +257,55 @@ class AgentCliTest {
   void displayNameCodex() {
     assertEquals("Codex CLI", AgentCli.CODEX.displayName());
   }
+
+  @Test
+  void roomLaneIsClaudeOnly() {
+    assertTrue(AgentCli.CLAUDE_CODE.supportsRoomLane());
+    assertFalse(AgentCli.CODEX.supportsRoomLane());
+  }
+
+  @Test
+  void headlessRoomCommandIsHarnessRestrictedNeverFullPermission() {
+    var cmd =
+        AgentCli.CLAUDE_CODE.headlessRoomCommand(
+            TASK, null, "/home/dev/.sail/claude-settings.json", true);
+
+    assertTrue(cmd.startsWith("claude --print"), cmd);
+    assertTrue(cmd.contains("--output-format stream-json --verbose"), cmd);
+    assertTrue(cmd.contains("--settings /home/dev/.sail/claude-settings.json"), cmd);
+    assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
+    assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
+    assertTrue(cmd.contains("\"Bash(spec:*)\""), cmd);
+    assertTrue(cmd.contains("\"Bash(git log:*)\""), cmd);
+    assertFalse(cmd.contains("Bash(git push"), cmd);
+    assertTrue(cmd.endsWith(" -p \"$(cat " + TASK + ")\""), cmd);
+  }
+
+  @Test
+  void headlessRoomResumeCommandKeepsTheRestrictionsOnTheRecordedSession() {
+    var cmd = AgentCli.CLAUDE_CODE.headlessRoomResumeCommand("sess-42", TASK, "opus", null, true);
+
+    assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
+    assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
+    assertTrue(cmd.contains("--model opus"), cmd);
+    assertTrue(cmd.contains("--resume sess-42 -p \"$(cat " + TASK + ")\""), cmd);
+  }
+
+  @Test
+  void headlessRoomResumeCommandRefusesAMalformedSessionId() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AgentCli.CLAUDE_CODE.headlessRoomResumeCommand("$(rm -rf ~)", TASK, null, null, true));
+  }
+
+  @Test
+  void roomCommandsRefuseCodexLoudly() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> AgentCli.CODEX.headlessRoomCommand(TASK, null, null, true));
+    assertThrows(
+        IllegalStateException.class,
+        () -> AgentCli.CODEX.headlessRoomResumeCommand("sess-42", TASK, null, null, true));
+  }
 }

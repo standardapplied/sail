@@ -25,6 +25,22 @@
   somehow moved a repo's HEAD surfaces as a loud `guardrail_triggered` event with the changed
   files — never a review.
 
+- The room lane's read-only contract is enforced by the harness, not promised by the prompt. A
+  `room` run launches Claude Code without `--dangerously-skip-permissions`: the tool set is cut
+  to `Bash,Read,Grep,Glob` (no Write, no Edit) and the only auto-approved commands are the
+  `spec` CLI — the lane's one write, posting the answer — plus `cd` and read-only git; print
+  mode denies everything else, so a prompt-injected instruction to edit the worktree fails at
+  the harness. Codex wakes decline loudly instead of launching unenforced: its only sandbox
+  (bubblewrap) needs user namespaces, which incus containers block, so no codex mode both runs
+  commands and honors a read-only boundary. On the socket, a room credential now resolves to a
+  read-and-converse principal (`viewer` role, `room` lane): every spec mutation — status,
+  metadata, content, restore, delete, create, other specs' rooms — returns 403 at the API
+  boundary, and the one allowed write is posting to its own spec's room. The commit guard's
+  baseline moved host-side into the run store (out of the guarded agent's reach, consumed on
+  first read) and now records a worktree digest alongside each HEAD, so an uncommitted edit is
+  as loud as a commit. Wake session resume is node-local: a session id recorded by another box
+  never becomes a `--resume` argv, and the fresh-prompt fallback keeps the spec body.
+
 - Every run now knows its agent session. A new `sail-session-report` SessionStart hook (both
   CLIs; Codex's payload verified to carry the same `session_id`/`transcript_path` fields) posts
   the conversation's identity to the run row over the run-credential lane

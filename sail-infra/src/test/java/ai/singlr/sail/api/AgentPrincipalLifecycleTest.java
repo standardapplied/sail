@@ -118,7 +118,11 @@ class AgentPrincipalLifecycleTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              credential.set(command.getLast());
+              credential.set(
+                  command.stream()
+                      .filter(arg -> arg.startsWith("sailrun_"))
+                      .findFirst()
+                      .orElse(""));
               return 0;
             },
             DispatchOperations.Listener.NONE);
@@ -267,7 +271,11 @@ class AgentPrincipalLifecycleTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              credential.set(command.getLast());
+              credential.set(
+                  command.stream()
+                      .filter(arg -> arg.startsWith("sailrun_"))
+                      .findFirst()
+                      .orElse(""));
               return 0;
             },
             DispatchOperations.Listener.NONE);

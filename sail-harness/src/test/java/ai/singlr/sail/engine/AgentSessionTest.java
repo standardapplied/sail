@@ -508,6 +508,69 @@ class AgentSessionTest {
   }
 
   @Test
+  void aRoomLaunchIsHarnessRestrictedEvenWhenFullPermissionsIsMispassed() {
+    var fresh =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            null);
+    var resumed =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            AgentCli.CLAUDE_CODE,
+            null,
+            null,
+            "spec-1",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room",
+            "sess-42");
+
+    for (var joined : List.of(String.join(" ", fresh), String.join(" ", resumed))) {
+      assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
+      assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+      assertTrue(joined.contains("\"Bash(spec:*)\""), joined);
+    }
+    var build =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/home/dev/workspace",
+                true,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "spec-1",
+                "claude-code",
+                RUN_UNIT.logPath(),
+                RUN_ID,
+                "cred-0",
+                "build",
+                null));
+    assertTrue(
+        build.contains("--dangerously-skip-permissions"),
+        "the build lane keeps its full-permission command");
+  }
+
+  @Test
   void runScopedLaunchCommandsRejectABlankOrInvalidRunId() {
     assertThrows(
         IllegalArgumentException.class,

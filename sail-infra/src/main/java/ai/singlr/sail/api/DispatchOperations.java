@@ -35,9 +35,13 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -491,11 +495,14 @@ public final class DispatchOperations {
    * as dispatch, role {@code room} with an empty repo set (the gate serializes it only against runs
    * of its own spec), principal {@code <agent>/room-<runId>}, run credential, watcher, and
    * guardrail ceiling. The spec is never claimed, no branch is checked out, no snapshot is taken —
-   * a chat owns no working tree. When the spec's latest run recorded a resumable session for the
+   * a chat owns no working tree, and the launch is harness-restricted, never full-permission
+   * (Claude only; an agent without an enforceable read-only session declines here, before anything
+   * is reserved). When the spec's latest run on this node recorded a resumable session for the
    * chosen agent, the launch resumes that conversation with the wake prompt as its next turn;
    * otherwise a fresh session is primed like dispatch (spec body + room tail). The prompt's
-   * rendered messages seed the run's delivery ledger, and each target repo's HEAD is recorded so
-   * {@link #guardRoomRun} can tell whether the chat somehow moved a tree. Returns the run id.
+   * rendered messages seed the run's delivery ledger, and each target repo's launch state is
+   * recorded host-side so {@link #guardRoomRun} can tell whether the chat somehow changed a tree.
+   * Returns the run id.
    */
   public String startRoomRun(String project, String specId, String localHandle) {
     var loaded = projects.loadRunning(project);
@@ -517,12 +524,22 @@ public final class DispatchOperations {
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
     var agentType = spec.agent() != null ? spec.agent() : config.agent().type();
+    if (!AgentCli.fromYamlName(agentType).supportsRoomLane()) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED,
+          "Room wake needs a harness-enforced read-only session, and "
+              + agentType
+              + " has none inside a sail container: its bubblewrap sandbox needs user namespaces,"
+              + " which incus containers block, so its only working mode bypasses all"
+              + " restrictions. Set the spec's agent to claude-code to chat in this room, or"
+              + " answer from the room directly and dispatch when code should change.");
+    }
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var room =
         messageStore == null
             ? List.<MessageStore.MessageRow>of()
             : messageStore.list(specId, null, 20);
-    var resumeSessionId = resumableSessionId(specId, agentType);
+    var resumeSessionId = resumableSessionId(specId, agentType, localHandle);
     var built =
         RoomWakePrompt.build(
             spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null);
@@ -555,13 +572,13 @@ public final class DispatchOperations {
     var credential = ((RunStore.Reservation.Reserved) reservation).credential();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
-      captureRoomHeads(project, config, unit);
+      captureRoomBaseline(project, config, runId);
       var launch =
           launchSession(
               project,
               config,
               "/home/" + config.sshUser() + "/workspace",
-              true,
+              false,
               spec.model(),
               spec.reasoningEffort(),
               specId,
@@ -591,12 +608,15 @@ public final class DispatchOperations {
   }
 
   /**
-   * The spec's most recent resumable conversation for {@code agentType}: the latest run that
-   * recorded a session id, restricted to the same agent (a Claude session cannot resume under
-   * Codex) and to ids safe to place in an argv — session ids are hook-reported, replicated data.
+   * The spec's most recent conversation this box can actually resume: the latest run that recorded
+   * a session id, restricted to runs executed on this node (conversation state lives on the box
+   * that ran it; run rows and session ids replicate fleet-wide), to the same agent (a Claude
+   * session cannot resume under Codex), and to ids safe to place in an argv — session ids are
+   * hook-reported, replicated data.
    */
-  private String resumableSessionId(String specId, String agentType) {
+  private String resumableSessionId(String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()
+        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))
         .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
@@ -605,77 +625,75 @@ public final class DispatchOperations {
         .orElse(null);
   }
 
-  private static String roomHeadsPath(AgentUnit unit) {
-    return AgentUnit.runDir(unit.unitName().substring(AgentUnit.RUN_UNIT_PREFIX.length()))
-        + "/room-heads.json";
-  }
-
   /**
-   * Records each configured repo's current HEAD into the run directory before the chat launches.
-   * Best-effort bookkeeping: a failure degrades the commit guard, never the wake.
+   * Records each configured repo's launch state — HEAD and a digest of {@code git status
+   * --porcelain} — host-side in the run store before the chat launches, out of the guarded agent's
+   * reach: a baseline the chat could edit or delete would gut the guard. Best-effort bookkeeping: a
+   * failure degrades the commit guard, never the wake. A repo whose worktree state cannot be read
+   * at launch records no digest and is exempt from the dirty check rather than misjudged by it.
    */
-  private void captureRoomHeads(String project, SailYaml config, AgentUnit unit) {
+  private void captureRoomBaseline(String project, SailYaml config, String runId) {
+    if (runStore == null) {
+      return;
+    }
     try {
-      var heads = new LinkedHashMap<String, Object>();
+      var baseline = new LinkedHashMap<String, Object>();
       for (var repo : config.repos()) {
         var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
         var head =
             exec(
                 ContainerExec.asDevUser(
                     project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
-        if (head.ok() && !head.stdout().isBlank()) {
-          heads.put(repo.path(), head.stdout().trim());
+        if (!head.ok() || head.stdout().isBlank()) {
+          continue;
         }
+        var entry = new LinkedHashMap<String, Object>();
+        entry.put("head", head.stdout().trim());
+        var status =
+            exec(
+                ContainerExec.asDevUser(
+                    project, List.of("git", "-C", repoDir, "status", "--porcelain")));
+        if (status.ok()) {
+          entry.put("status", digest(status.stdout()));
+        }
+        baseline.put(repo.path(), entry);
       }
-      if (heads.isEmpty()) {
+      if (baseline.isEmpty()) {
         return;
       }
-      var result =
-          exec(
-              ContainerExec.asDevUser(
-                  project,
-                  List.of(
-                      "bash",
-                      "-c",
-                      "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
-                      "bash",
-                      YamlUtil.dumpJson(heads),
-                      roomHeadsPath(unit))));
-      if (!result.ok()) {
-        System.err.println(
-            "  [room-wake] Warning: could not record repo heads: " + result.stderr());
-      }
+      runStore.saveRoomGuardBaseline(runId, YamlUtil.dumpJson(baseline));
     } catch (RuntimeException e) {
-      System.err.println("  [room-wake] Warning: could not record repo heads: " + e.getMessage());
+      System.err.println(
+          "  [room-wake] Warning: could not record the guard baseline: " + e.getMessage());
     }
   }
 
   /**
-   * The read-only contract's backstop, run when a room run stops: any repo whose HEAD moved since
-   * the wake launched — and that no other live run of the project reserves, so a concurrent build's
-   * commits are never misattributed — is published as a loud {@code guardrail_triggered} event with
-   * the changed file list. Never a review: the pipeline ignores {@code room} stops structurally,
-   * and this guard is how a worktree-writing chat surfaces instead. The recorded heads file is
-   * consumed on first read, so a replayed stop checks nothing twice.
+   * The read-only contract's backstop, run when a room run stops — defense in depth behind the
+   * harness-restricted launch. Any repo whose HEAD moved or whose worktree changed (the porcelain
+   * digest, so an uncommitted edit is as loud as a commit) since the wake launched — and that no
+   * other live run of the project reserves, so a concurrent build's work is never misattributed —
+   * is published as a loud {@code guardrail_triggered} event. Never a review: the pipeline ignores
+   * {@code room} stops structurally, and this guard is how a worktree-writing chat surfaces
+   * instead. The baseline lives host-side in the run store, where the guarded agent cannot touch
+   * it, and is consumed on first read so a replayed stop checks nothing twice.
    */
   public void guardRoomRun(String project, String runId) {
-    var unit = AgentUnit.forRun(runId);
-    var headsPath = roomHeadsPath(unit);
-    var recorded = exec(ContainerExec.asDevUser(project, List.of("cat", headsPath)));
-    if (!recorded.ok() || recorded.stdout().isBlank()) {
+    if (runStore == null) {
       return;
     }
-    exec(ContainerExec.asDevUser(project, List.of("rm", "-f", headsPath)));
-    var run = runStore == null ? null : runStore.findById(runId).orElse(null);
+    var recorded = runStore.consumeRoomGuardBaseline(runId).orElse(null);
+    if (recorded == null || recorded.isBlank()) {
+      return;
+    }
+    var run = runStore.findById(runId).orElse(null);
     var specId = run != null ? run.specId() : null;
-    var heads = YamlUtil.parseMap(recorded.stdout());
+    var baseline = YamlUtil.parseMap(recorded);
     var others =
-        runStore == null
-            ? List.<RunStore.RunRow>of()
-            : runStore.listForProject(project).stream()
-                .filter(DispatchOperations::ownsLiveAgent)
-                .filter(candidate -> !candidate.id().equals(runId))
-                .toList();
+        runStore.listForProject(project).stream()
+            .filter(DispatchOperations::ownsLiveAgent)
+            .filter(candidate -> !candidate.id().equals(runId))
+            .toList();
     if (others.stream().anyMatch(candidate -> candidate.repos().isEmpty())) {
       return;
     }
@@ -685,33 +703,15 @@ public final class DispatchOperations {
             .collect(Collectors.toSet());
     var moved = new ArrayList<String>();
     var config = projects.loadRunning(project).config();
-    for (var entry : heads.entrySet()) {
+    for (var entry : baseline.entrySet()) {
       var repo = entry.getKey();
       if (reserved.contains(repo)) {
         continue;
       }
-      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo;
-      var current =
-          exec(
-              ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
-      if (!current.ok() || current.stdout().isBlank()) {
-        continue;
+      var violation = repoViolation(project, config, repo, entry.getValue());
+      if (violation != null) {
+        moved.add(violation);
       }
-      var head = current.stdout().trim();
-      var before = Objects.toString(entry.getValue(), "");
-      if (head.equals(before)) {
-        continue;
-      }
-      var files =
-          exec(
-              ContainerExec.asDevUser(
-                  project,
-                  List.of("git", "-C", repoDir, "diff", "--name-only", before, head, "--")));
-      var fileList =
-          files.ok() && !files.stdout().isBlank()
-              ? String.join(", ", files.stdout().trim().split("\n"))
-              : "unknown files";
-      moved.add(repo + " (" + fileList + ")");
     }
     if (moved.isEmpty()) {
       return;
@@ -728,7 +728,67 @@ public final class DispatchOperations {
                 + String.join("; ", moved)
                 + " — a chat session must never change code",
             "action",
-            "recorded; the branch keeps the commits — review them by hand"));
+            "recorded; the worktree keeps the changes — review them by hand"));
+  }
+
+  /**
+   * One repo's verdict against its recorded baseline: the description of what changed, or null when
+   * the repo is untouched or unreadable. A moved HEAD names the committed files; an unmoved HEAD
+   * with a changed porcelain digest names the currently-dirty paths.
+   */
+  @SuppressWarnings("unchecked")
+  private String repoViolation(String project, SailYaml config, String repo, Object recorded) {
+    if (!(recorded instanceof Map<?, ?> state)) {
+      return null;
+    }
+    var entry = (Map<String, Object>) state;
+    var before = Objects.toString(entry.get("head"), "");
+    var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo;
+    var current =
+        exec(ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
+    if (!current.ok() || current.stdout().isBlank()) {
+      return null;
+    }
+    var head = current.stdout().trim();
+    if (!head.equals(before)) {
+      var files =
+          exec(
+              ContainerExec.asDevUser(
+                  project,
+                  List.of("git", "-C", repoDir, "diff", "--name-only", before, head, "--")));
+      var fileList =
+          files.ok() && !files.stdout().isBlank()
+              ? String.join(", ", files.stdout().trim().split("\n"))
+              : "unknown files";
+      return repo + " (" + fileList + ")";
+    }
+    var recordedStatus = entry.get("status");
+    if (recordedStatus == null) {
+      return null;
+    }
+    var status =
+        exec(
+            ContainerExec.asDevUser(
+                project, List.of("git", "-C", repoDir, "status", "--porcelain")));
+    if (!status.ok() || digest(status.stdout()).equals(recordedStatus.toString())) {
+      return null;
+    }
+    var dirty =
+        status.stdout().lines().map(line -> line.length() > 3 ? line.substring(3) : line).toList();
+    return repo
+        + " (worktree changed: "
+        + (dirty.isEmpty() ? "unknown files" : String.join(", ", dirty))
+        + ")";
+  }
+
+  private static String digest(String value) {
+    try {
+      var hash =
+          MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(hash);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
   }
 
   private static void prepare(AdhocPreparer preparer) {

@@ -61,15 +61,16 @@ public final class RoomWakePrompt {
     return """
         ## Room Duty
 
-        Read the conversation above, investigate in the workspace as needed (reading is fine),
-        and answer in the room with `spec comment %s --body <text>` (or `--body -`
-        for stdin).
+        Read the conversation above, investigate in the workspace as needed, and answer in
+        the room with `spec comment %s --body <text>` (or `--body -` for stdin).
 
-        This is a read-only chat session: never modify the worktrees, never commit, never
-        push, and never change the spec's status. If the conversation asks for code changes,
-        answer that dispatch is the lane that changes code — describe what a re-dispatch
-        (`sail spec dispatch %s --restart`) or a follow-up spec should do instead of doing
-        it here.
+        This is a read-only chat session, and the harness enforces it: file edits and spec
+        state changes are denied, and the only shell commands that run are the `spec` CLI,
+        `cd`, and read-only git (log, show, diff, status, blame, grep) — use the Read and
+        Grep tools for files. Do not fight a denial; work within the lane. If the
+        conversation asks for code changes, answer that dispatch is the lane that changes
+        code — describe what a re-dispatch (`sail spec dispatch %s --restart`) or a
+        follow-up spec should do instead of doing it here.
 
         The room stays live while you work: replies posted in the meantime are delivered
         into your context automatically after a tool call finishes, and unread messages

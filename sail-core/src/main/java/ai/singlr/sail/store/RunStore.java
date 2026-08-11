@@ -487,6 +487,31 @@ public final class RunStore implements ConflictResolver {
         });
   }
 
+  /**
+   * Records the room commit guard's launch baseline (per-repo HEAD and worktree state), replacing
+   * any earlier one. Host-side storage is the point: the guarded agent runs inside the container
+   * and can never reach this row, unlike a file in its own run directory. Local-only bookkeeping —
+   * never journaled, never synced.
+   */
+  public void saveRoomGuardBaseline(String id, String baseline) {
+    db.execute("INSERT OR REPLACE INTO room_guard (run_id, baseline) VALUES (?, ?)", id, baseline);
+  }
+
+  /**
+   * The recorded room-guard baseline, deleted on read so a replayed stop signal checks nothing
+   * twice. Empty when no baseline was recorded or a prior stop already consumed it.
+   */
+  public Optional<String> consumeRoomGuardBaseline(String id) {
+    return db.transaction(
+        () -> {
+          var baseline =
+              db.queryOne(
+                  "SELECT baseline FROM room_guard WHERE run_id = ?", row -> row.text(0), id);
+          baseline.ifPresent(b -> db.execute("DELETE FROM room_guard WHERE run_id = ?", id));
+          return baseline;
+        });
+  }
+
   /** The run's delivery ledger — see {@link #markDelivered}. */
   public Set<String> deliveredMessageIds(String id) {
     return new LinkedHashSet<>(

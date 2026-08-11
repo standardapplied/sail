@@ -76,9 +76,10 @@ public final class SchemaManager {
    * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
    * versions continuing from {@value #V1_VERSION}. Never reorder, edit, or remove an entry; each
    * addition ships with a test that migrates a seeded database and asserts the data survived. The
-   * {@code run_credentials} table is local-only secret material (per-run credential hashes) and
-   * {@code run_delivered_messages} is local-only delivery bookkeeping — neither ever joins a sync
-   * snapshot.
+   * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
+   * {@code run_delivered_messages} (delivery bookkeeping) and {@code room_guard} (the room commit
+   * guard's launch baseline, kept host-side so the guarded agent can never reach it) are local-only
+   * as well — none of the three ever joins a sync snapshot.
    */
   static final List<String> MIGRATIONS =
       List.of(
@@ -204,7 +205,12 @@ public final class SchemaManager {
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
           "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
           "ALTER TABLE specs ADD COLUMN wake TEXT"
-              + " CHECK (wake IS NULL OR wake IN ('on', 'mention', 'off'))");
+              + " CHECK (wake IS NULL OR wake IN ('on', 'mention', 'off'))",
+          """
+          CREATE TABLE room_guard (
+              run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+              baseline TEXT NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

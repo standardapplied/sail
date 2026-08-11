@@ -397,6 +397,22 @@ class SchemaManagerTest {
   }
 
   @Test
+  void theRoomGuardTableExistsAndCascadesWithItsRun() {
+    new SchemaManager(db).migrate();
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role)"
+            + " VALUES ('r9', 'acme', 'claude-code', 'running', 't1', 'room')");
+    db.execute("INSERT INTO room_guard (run_id, baseline) VALUES ('r9', '{}')");
+
+    db.execute("DELETE FROM runs WHERE id = 'r9'");
+
+    assertTrue(
+        db.queryOne("SELECT baseline FROM room_guard WHERE run_id = 'r9'", r -> r.text(0))
+            .isEmpty(),
+        "a deleted run takes its guard baseline with it");
+  }
+
+  @Test
   void theWakeColumnAdmitsItsThreeModesAndRejectsGarbage() {
     new SchemaManager(db).migrate();
     db.execute(

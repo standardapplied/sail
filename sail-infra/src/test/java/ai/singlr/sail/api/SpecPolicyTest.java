@@ -181,4 +181,51 @@ class SpecPolicyTest {
 
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
+
+  @Test
+  void roomPrincipalMayPostToItsOwnersSpecRoom() {
+    var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
+
+    assertAllowed(SpecPolicy.post(room, SPEC, "raj", "raj"));
+  }
+
+  @Test
+  void roomPrincipalMayNotPostToAnotherFdesSpecRoom() {
+    var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
+
+    var r = refused(SpecPolicy.post(room, SPEC, "sumesh", "sumesh"));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+  }
+
+  @Test
+  void roomPrincipalFailsClosedOnAnUnassignedSpec() {
+    var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
+
+    var r = refused(SpecPolicy.post(room, SPEC, "", "raj"));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+  }
+
+  @Test
+  void roomPrincipalIsRefusedEveryMutationAsReadOnly() {
+    var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
+
+    assertEquals(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        refused(SpecPolicy.mutate(room, SPEC, "raj", "raj")).code());
+    assertEquals(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        refused(SpecPolicy.reassign(room, SPEC, null, "raj")).code());
+  }
+
+  @Test
+  void nonRoomLanesPostUnderThePlainMutationGate() {
+    assertAllowed(SpecPolicy.post(member("uday"), SPEC, "uday", "raj"));
+    assertAllowed(
+        SpecPolicy.post(Actor.agentPrincipal("claude/a1b2c3", "raj"), SPEC, "raj", "raj"));
+    assertEquals(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        refused(SpecPolicy.post(member("uday"), SPEC, "raj", "raj")).code());
+  }
 }

@@ -398,17 +398,15 @@ public final class AgentSession {
     var unit = AgentUnit.forRun(runId);
     var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        resumeSessionId == null
-            ? cli.headlessCommand(
-                unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true)
-            : cli.headlessResumeCommand(
-                resumeSessionId,
-                unit.taskPath(),
-                fullPermissions,
-                model,
-                reasoningEffort,
-                settingsPath,
-                true);
+        agentCommand(
+            cli,
+            fullPermissions,
+            model,
+            reasoningEffort,
+            settingsPath,
+            role,
+            resumeSessionId,
+            unit);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
@@ -535,6 +533,41 @@ public final class AgentSession {
             unit.pidPath(),
             Objects.toString(runCredential, ""),
             Objects.toString(role, "")));
+  }
+
+  /**
+   * The headless invocation for the run's lane. A {@code room} run gets the harness-restricted chat
+   * command — no mutating tools, print-mode default-deny, only the {@code spec} CLI and read-only
+   * git auto-approved — regardless of {@code fullPermissions}, so no caller can launch a
+   * full-permission chat by mispassing a flag. Every other lane keeps the full-permission dispatch
+   * command.
+   */
+  private static String agentCommand(
+      AgentCli cli,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String settingsPath,
+      String role,
+      String resumeSessionId,
+      AgentUnit unit) {
+    if ("room".equals(role)) {
+      return resumeSessionId == null
+          ? cli.headlessRoomCommand(unit.taskPath(), model, settingsPath, true)
+          : cli.headlessRoomResumeCommand(
+              resumeSessionId, unit.taskPath(), model, settingsPath, true);
+    }
+    return resumeSessionId == null
+        ? cli.headlessCommand(
+            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true)
+        : cli.headlessResumeCommand(
+            resumeSessionId,
+            unit.taskPath(),
+            fullPermissions,
+            model,
+            reasoningEffort,
+            settingsPath,
+            true);
   }
 
   private static void warnIfReasoningEffortDropped(

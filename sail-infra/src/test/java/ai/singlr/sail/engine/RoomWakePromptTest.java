@@ -55,7 +55,7 @@ class RoomWakePromptTest {
     assertTrue(built.prompt().contains("what is it stuck on?"));
     assertTrue(built.prompt().contains("## Room Duty"));
     assertTrue(built.prompt().contains("spec comment auth --body"));
-    assertTrue(built.prompt().contains("never commit"));
+    assertTrue(built.prompt().contains("read-only chat session, and the harness enforces it"));
     assertTrue(built.prompt().contains("sail spec dispatch auth --restart"));
     assertEquals(List.of(question), built.renderedMessages());
   }

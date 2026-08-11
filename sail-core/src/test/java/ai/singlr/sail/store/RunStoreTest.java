@@ -1605,4 +1605,20 @@ class RunStoreTest {
         "the seed is the exact ids the prompt rendered — a message syncing in later is never"
             + " swept, even though its id sorts before the rendered one");
   }
+
+  @Test
+  void theRoomGuardBaselineIsConsumedExactlyOnce() {
+    var id = newRun("backend", "auth");
+
+    store.saveRoomGuardBaseline(id, "{\"app\": {\"head\": \"aaa\"}}");
+    store.saveRoomGuardBaseline(id, "{\"app\": {\"head\": \"bbb\"}}");
+
+    assertEquals(
+        "{\"app\": {\"head\": \"bbb\"}}",
+        store.consumeRoomGuardBaseline(id).orElseThrow(),
+        "the latest recorded baseline wins");
+    assertTrue(
+        store.consumeRoomGuardBaseline(id).isEmpty(),
+        "consumed on first read — a replayed stop checks nothing twice");
+  }
 }
