@@ -439,7 +439,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         return new StageOutcome.Errored(message);
       }
       var parsed = (FindingParser.ParseResult.Parsed) parseResult;
-      applyStageResult(stage.id(), carried, parsed);
+      applyStageResult(specId, stage.id(), carried, parsed);
 
       var findings = reviewStore.findingsForStage(stage.id());
       var passed = stageConfig.gate().passes(findings);
@@ -474,9 +474,15 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * with every carried finding still {@code OPEN} instead of silently retired.
    */
   private void applyStageResult(
-      String stageId, List<Finding> carried, FindingParser.ParseResult.Parsed parsed) {
+      String specId,
+      String stageId,
+      List<Finding> carried,
+      FindingParser.ParseResult.Parsed parsed) {
     var reconciled = FindingParser.reconcile(carried, parsed.verdicts());
     warn(reconciled.warnings());
+    if (!reconciled.unmatchedVerdictIds().isEmpty()) {
+      postRoom(specId, misaddressedVerdictNote(reconciled.unmatchedVerdictIds().size()));
+    }
     var rulings =
         carried.stream()
             .map(
@@ -495,6 +501,22 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       case DISPUTED -> Finding.Resolution.DISPUTED;
       case STILL_OPEN -> Finding.Resolution.OPEN;
     };
+  }
+
+  /**
+   * The room note for a reviewer that ruled on a finding id no carried finding holds — the
+   * mis-transcribed-id signature. The verdict was dropped fail-closed and the real finding shows
+   * still-open, which reads as unresolved; this says plainly that it may in fact have been
+   * addressed, so a human checks the review log rather than trusting the open count. Kept off the
+   * pass/fail verdict lines so it fires only when the ambiguity is real.
+   */
+  private static String misaddressedVerdictNote(int count) {
+    return "Note: the reviewer ruled on "
+        + count
+        + " finding id"
+        + (count == 1 ? "" : "s")
+        + " that match no open finding on this spec (a mis-transcribed id). A finding shown"
+        + " still-open below may already be addressed — check the review log before acting on it.";
   }
 
   private static void warn(List<String> warnings) {

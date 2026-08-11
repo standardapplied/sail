@@ -157,6 +157,7 @@ public final class FindingParser {
    */
   public static Reconciled reconcile(List<Finding> carried, List<Verdict> verdicts) {
     var warnings = new ArrayList<String>();
+    var unmatched = new ArrayList<String>();
     var rulings = new LinkedHashMap<String, Verdict>();
     for (var finding : carried) {
       rulings.put(finding.id(), new Verdict(finding.id(), Ruling.STILL_OPEN, ""));
@@ -165,6 +166,7 @@ public final class FindingParser {
     for (var verdict : verdicts) {
       if (!rulings.containsKey(verdict.findingId())) {
         warnings.add("Verdict for unknown finding " + verdict.findingId() + " ignored.");
+        unmatched.add(verdict.findingId());
         continue;
       }
       if (!ruled.add(verdict.findingId())) {
@@ -184,11 +186,20 @@ public final class FindingParser {
       }
       rulings.put(verdict.findingId(), verdict);
     }
-    return new Reconciled(Map.copyOf(rulings), List.copyOf(warnings));
+    return new Reconciled(Map.copyOf(rulings), List.copyOf(warnings), List.copyOf(unmatched));
   }
 
-  /** The effective ruling per carried finding id, plus what fail-closed defaulting rejected. */
-  public record Reconciled(Map<String, Verdict> rulings, List<String> warnings) {}
+  /**
+   * The effective ruling per carried finding id, the freeform warnings fail-closed defaulting
+   * produced, and {@code unmatchedVerdictIds}: the ids the reviewer ruled on that matched no
+   * carried finding. A non-empty {@code unmatchedVerdictIds} is the mis-transcribed-id signature —
+   * the reviewer meant to rule but named the wrong id, so a finding that shows still-open may in
+   * fact have been addressed. It is called out separately from the other warnings (conflicting or
+   * evidence-free verdicts, which are legitimately still_open) so the pipeline can surface only the
+   * ambiguous case in the room.
+   */
+  public record Reconciled(
+      Map<String, Verdict> rulings, List<String> warnings, List<String> unmatchedVerdictIds) {}
 
   static List<String> extractJsonBlocks(String output) {
     if (Strings.isBlank(output)) return List.of();

@@ -466,6 +466,23 @@ class FindingParserTest {
     assertEquals(Ruling.STILL_OPEN, reconciled.rulings().get(carried.getFirst().id()).ruling());
     assertEquals(1, reconciled.warnings().size());
     assertTrue(reconciled.warnings().getFirst().contains("ghost"));
+    assertEquals(
+        List.of("ghost"),
+        reconciled.unmatchedVerdictIds(),
+        "a verdict naming an id no carried finding holds is the mis-transcribed-id signature —"
+            + " surfaced separately so the room can flag that an open finding may be addressed");
+  }
+
+  @Test
+  void reconcileReportsNoUnmatchedIdsWhenEveryVerdictMatches() {
+    var carried = List.of(finding("Old high"));
+    var verdicts = List.of(new Verdict(carried.getFirst().id(), Ruling.FIXED, "evidence"));
+
+    var reconciled = FindingParser.reconcile(carried, verdicts);
+
+    assertTrue(
+        reconciled.unmatchedVerdictIds().isEmpty(),
+        "a legitimately still_open finding (no verdict, or evidence-free) is not an unmatched id");
   }
 
   @Test

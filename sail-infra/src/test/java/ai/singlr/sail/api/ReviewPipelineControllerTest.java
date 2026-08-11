@@ -855,6 +855,48 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aMisaddressedVerdictIsFlaggedInTheRoomNotSilentlyLeftOpen() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "LOGIC", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Stubborn high",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var ghostVerdict =
+        """
+        ```json
+        {"verdicts": [{"finding_id": "ghost-not-a-real-id", "verdict": "fixed",
+          "evidence": "commit abc"}], "findings": []}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> highOutput;
+              case 3 -> ghostVerdict;
+              case 2, 4 -> "fix applied";
+              default -> fixAllCarried(prompt);
+            };
+    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner, null);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(
+        messages.list("auth", null, 50).stream()
+            .anyMatch(m -> m.body().contains("match no open finding")),
+        "a verdict naming an id no carried finding holds must be flagged in the room — the finding"
+            + " reads still-open but the reviewer meant to rule it, so a human is told to check the"
+            + " log rather than trust the open count");
+  }
+
+  @Test
   void aHumanStageOpensWithTheRoomVerdictListingDisputedFindings() {
     createSpec("auth", "in_progress");
     var messages = new MessageStore(db);
