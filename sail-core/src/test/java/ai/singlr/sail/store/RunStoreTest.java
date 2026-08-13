@@ -606,6 +606,70 @@ class RunStoreTest {
   }
 
   @Test
+  void stampActivityCoalescesToOneWritePerFloorWindow() {
+    var id = newRun("backend", "auth");
+
+    assertTrue(store.stampActivity(id, Duration.ofSeconds(30)));
+    var first = store.findById(id).orElseThrow().lastActivityAt();
+    assertNotNull(first);
+    assertFalse(
+        store.stampActivity(id, Duration.ofSeconds(30)),
+        "a second stamp inside the floor window is skipped");
+    assertEquals(first, store.findById(id).orElseThrow().lastActivityAt());
+  }
+
+  @Test
+  void stampActivityRefreshesOncePastTheFloor() {
+    var id = newRun("backend", "auth");
+    assertTrue(store.stampActivity(id, Duration.ZERO));
+
+    assertTrue(
+        store.stampActivity(id, Duration.ZERO),
+        "a zero floor coalesces nothing — every stamp writes");
+  }
+
+  @Test
+  void stampActivityJournalsNoRevisionAndRidesTheNextRealOne() {
+    var id = newRun("backend", "auth");
+    var rev = store.latestRev(id);
+
+    store.stampActivity(id, Duration.ofSeconds(30));
+
+    assertEquals(rev, store.latestRev(id), "presence stamping never mints revisions of its own");
+    assertNull(store.comparableAtRev(id, rev).get("last_activity_at"));
+
+    store.complete(id, "completed", 0);
+
+    assertNotNull(
+        store.comparableSnapshot(id).get("last_activity_at"),
+        "the stamp rides along on the run's next real revision");
+  }
+
+  @Test
+  void stampActivityRefusesANonRunningRun() {
+    var id = newRun("backend", "auth");
+    store.complete(id, "completed", 0);
+
+    assertFalse(store.stampActivity(id, Duration.ofSeconds(30)));
+    assertNull(store.findById(id).orElseThrow().lastActivityAt());
+  }
+
+  @Test
+  void anOldShapeSnapshotDerivesANullActivityStamp() {
+    var id = newRun("backend", "auth");
+    var snapshot = store.comparableSnapshot(id);
+    snapshot.remove("last_activity_at");
+    var rev = store.latestRev(id);
+
+    var other = freshStore("old-shape.db");
+    other.applyRevision(id, snapshot, rev);
+
+    assertNull(
+        other.findById(id).orElseThrow().lastActivityAt(),
+        "a pre-upgrade snapshot must read as unknown activity, never as quiet");
+  }
+
+  @Test
   void mutationsJournalComparableRevisions() {
     var id = newRun("backend", "auth");
 

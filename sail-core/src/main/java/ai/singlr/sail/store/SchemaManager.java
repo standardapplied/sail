@@ -217,7 +217,8 @@ public final class SchemaManager {
           CREATE TABLE room_guard (
               run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
               baseline TEXT NOT NULL
-          )""");
+          )""",
+          "ALTER TABLE runs ADD COLUMN last_activity_at TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

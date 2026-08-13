@@ -11,6 +11,8 @@ import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RoomWakeReactor;
+import ai.singlr.sail.api.RunActivityStamper;
+import ai.singlr.sail.api.RunPresenceEmitter;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
@@ -222,6 +224,7 @@ public final class ServerStartCommand implements Runnable {
                 NodeIdentity::handle)
             .useMessages(messageStore);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
+    bus.subscribe(new RunActivityStamper(runStore));
     var roomWake =
         new RoomWakeReactor(
             specStore,
@@ -293,13 +296,16 @@ public final class ServerStartCommand implements Runnable {
             WatcherRearmer.livingProcess(),
             NodeIdentity::handle,
             operations::relaunchWatcher);
+    var presenceEmitter =
+        new RunPresenceEmitter(runStore, bus, NodeIdentity::handle, DateTimeUtils::now);
     shutdown
         .register(server)
         .register(sweeper)
         .register(eventSweeper)
         .register(reconciler)
         .register(missedStops)
-        .register(rearmer);
+        .register(rearmer)
+        .register(presenceEmitter);
     try {
       server.start();
       sweeper.start();
@@ -323,6 +329,7 @@ public final class ServerStartCommand implements Runnable {
       }
       var rearmed = rearmer.rearm();
       rearmer.start();
+      presenceEmitter.start();
       if (rearmed > 0) {
         System.out.println(
             Ansi.AUTO.string(

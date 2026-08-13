@@ -1326,6 +1326,8 @@ class ApiRouterTest {
                   null,
                   null,
                   null,
+                  null,
+                  null,
                   null)));
     }
 
@@ -1405,7 +1407,8 @@ class ApiRouterTest {
               null,
               null,
               0,
-              new RunSummary("run-1", "node-a", "running", null, null, null, null, null)));
+              new RunSummary(
+                  "run-1", "node-a", "running", null, null, null, null, null, null, null)));
     }
 
     @Override

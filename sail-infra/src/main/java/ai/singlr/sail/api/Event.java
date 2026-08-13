@@ -114,6 +114,17 @@ public record Event(
       };
     }
 
+    /**
+     * Whether {@code type} is evidence the agent is actively working — the one definition of
+     * "progress", shared by the guardrail watcher's stall timer and the {@link RunActivityStamper}
+     * so the two can never disagree about what counts as liveness.
+     */
+    public static boolean progress(String type) {
+      return AGENT_TOOL_STARTED.equals(type)
+          || AGENT_TOOL_FINISHED.equals(type)
+          || AGENT_LOG_CHUNK.equals(type);
+    }
+
     private WellKnownTypes() {}
   }
 

@@ -67,6 +67,10 @@ public final class RunStore implements ConflictResolver {
    * <p>{@code sessionId}, {@code sessionSource}, and {@code transcriptPath} are the hook-reported
    * identity of the run's agent conversation — see {@link #recordSession}. All three are null until
    * a session reports; a run adopted from an old-shape snapshot derives nulls the same way.
+   *
+   * <p>{@code lastActivityAt} is when the run's agent last showed progress (a tool call or a log
+   * chunk) — see {@link #stampActivity}. Null until the first stamp, and on every row adopted from
+   * a pre-upgrade snapshot; presence readers treat null as "unknown", never as quiet.
    */
   public record RunRow(
       String id,
@@ -91,7 +95,60 @@ public final class RunStore implements ConflictResolver {
       String owner,
       String sessionId,
       String sessionSource,
-      String transcriptPath) {
+      String transcriptPath,
+      String lastActivityAt) {
+
+    /** A row without activity — the shape every run has until its first progress stamp. */
+    public RunRow(
+        String id,
+        String project,
+        String specId,
+        String node,
+        String role,
+        String agent,
+        String branch,
+        String task,
+        Integer pid,
+        Integer watcherPid,
+        String status,
+        Integer exitCode,
+        String logPath,
+        String unit,
+        String startedAt,
+        String completedAt,
+        List<String> repos,
+        Long pidTicks,
+        String principal,
+        String owner,
+        String sessionId,
+        String sessionSource,
+        String transcriptPath) {
+      this(
+          id,
+          project,
+          specId,
+          node,
+          role,
+          agent,
+          branch,
+          task,
+          pid,
+          watcherPid,
+          status,
+          exitCode,
+          logPath,
+          unit,
+          startedAt,
+          completedAt,
+          repos,
+          pidTicks,
+          principal,
+          owner,
+          sessionId,
+          sessionSource,
+          transcriptPath,
+          null);
+    }
 
     /** A row without session identity — the shape every run has until its first session report. */
     public RunRow(
@@ -173,7 +230,7 @@ public final class RunStore implements ConflictResolver {
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
-          + " principal, owner, session_id, session_source, transcript_path";
+          + " principal, owner, session_id, session_source, transcript_path, last_activity_at";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -485,6 +542,28 @@ public final class RunStore implements ConflictResolver {
               id);
           recordRevision(id, "local", false);
         });
+  }
+
+  /**
+   * Stamps when the run's agent last showed progress, coalesced to at most one write per {@code
+   * floor} window: the write is skipped while the row's {@code last_activity_at} is still within
+   * {@code floor} of now, so a continuous {@code agent_log_chunk} stream costs one UPDATE per
+   * window instead of one per chunk. Deliberately journals <em>no</em> revision — presence needs
+   * ~minute granularity, and a revision per stamp would flood the ChangeLog and fire sync-on-write
+   * on every chunk; the value rides along on the run's next real revision instead, so a foreign
+   * box's copy is as fresh as the normal sync cadence. Only a {@code running} row is stamped: a
+   * late event must never dirty a terminal row whose final revision has already been journaled.
+   * Returns whether a write happened.
+   */
+  public boolean stampActivity(String id, Duration floor) {
+    var now = DateTimeUtils.now();
+    db.execute(
+        "UPDATE runs SET last_activity_at = ? WHERE id = ? AND status = 'running'"
+            + " AND (last_activity_at IS NULL OR last_activity_at < ?)",
+        now.toString(),
+        id,
+        now.minus(floor).toString());
+    return db.changes() > 0;
   }
 
   /**
@@ -1075,8 +1154,8 @@ public final class RunStore implements ConflictResolver {
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
-            principal, owner, session_id, session_source, transcript_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            principal, owner, session_id, session_source, transcript_path, last_activity_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1086,7 +1165,8 @@ public final class RunStore implements ConflictResolver {
             repos = excluded.repos, pid_ticks = excluded.pid_ticks,
             principal = excluded.principal, owner = excluded.owner,
             session_id = excluded.session_id, session_source = excluded.session_source,
-            transcript_path = excluded.transcript_path""",
+            transcript_path = excluded.transcript_path,
+            last_activity_at = excluded.last_activity_at""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1109,7 +1189,8 @@ public final class RunStore implements ConflictResolver {
         row.owner(),
         row.sessionId(),
         row.sessionSource(),
-        row.transcriptPath());
+        row.transcriptPath(),
+        row.lastActivityAt());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1137,6 +1218,7 @@ public final class RunStore implements ConflictResolver {
     map.put("session_id", run.sessionId());
     map.put("session_source", run.sessionSource());
     map.put("transcript_path", run.transcriptPath());
+    map.put("last_activity_at", run.lastActivityAt());
     return map;
   }
 
@@ -1200,7 +1282,8 @@ public final class RunStore implements ConflictResolver {
         text(snapshot, "owner"),
         text(snapshot, "session_id"),
         text(snapshot, "session_source"),
-        text(snapshot, "transcript_path"));
+        text(snapshot, "transcript_path"),
+        text(snapshot, "last_activity_at"));
   }
 
   private static String text(Map<String, Object> map, String key) {
@@ -1258,6 +1341,7 @@ public final class RunStore implements ConflictResolver {
         row.text(19),
         row.text(20),
         row.text(21),
-        row.text(22));
+        row.text(22),
+        row.text(23));
   }
 }
