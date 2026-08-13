@@ -326,10 +326,7 @@ public final class AgentWatchCommand implements Runnable {
 
   /** Whether an event signals the agent is actively working — resets the stall timer. */
   static boolean isProgressEvent(Event event) {
-    var type = event.type();
-    return Event.WellKnownTypes.AGENT_TOOL_STARTED.equals(type)
-        || Event.WellKnownTypes.AGENT_TOOL_FINISHED.equals(type)
-        || Event.WellKnownTypes.AGENT_LOG_CHUNK.equals(type);
+    return Event.WellKnownTypes.progress(event.type());
   }
 
   /**

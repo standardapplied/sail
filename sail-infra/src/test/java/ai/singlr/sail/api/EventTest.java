@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -241,6 +242,16 @@ class EventTest {
     assertEquals(
         Event.RetentionClass.EPHEMERAL,
         Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.HEARTBEAT));
+  }
+
+  @Test
+  void progressIsExactlyTheToolAndLogChunkSet() {
+    assertTrue(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_TOOL_STARTED));
+    assertTrue(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_TOOL_FINISHED));
+    assertTrue(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_LOG_CHUNK));
+    assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_SESSION_STARTED));
+    assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_PRESENCE));
+    assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.HEARTBEAT));
   }
 
   @Test

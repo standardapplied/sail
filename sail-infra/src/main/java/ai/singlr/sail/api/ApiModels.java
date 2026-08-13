@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
@@ -1076,7 +1077,9 @@ record RunView(
     String principal,
     String owner,
     String sessionId,
-    String sessionSource)
+    String sessionSource,
+    String lastActivityAt,
+    String presence)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1096,7 +1099,9 @@ record RunView(
         row.principal(),
         row.owner(),
         row.sessionId(),
-        row.sessionSource());
+        row.sessionSource(),
+        row.lastActivityAt(),
+        RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()));
   }
 
   @Override
@@ -1119,6 +1124,8 @@ record RunView(
     if (owner != null) m.put("owner", owner);
     if (sessionId != null) m.put("session_id", sessionId);
     if (sessionSource != null) m.put("session_source", sessionSource);
+    if (lastActivityAt != null) m.put("last_activity_at", lastActivityAt);
+    if (presence != null) m.put("presence", presence);
     return m;
   }
 }
@@ -1179,7 +1186,9 @@ record RunSummary(
     String principal,
     String owner,
     String sessionId,
-    String sessionSource)
+    String sessionSource,
+    String lastActivityAt,
+    String presence)
     implements Mappable {
   static RunSummary from(RunStore.RunRow row) {
     return new RunSummary(
@@ -1190,7 +1199,9 @@ record RunSummary(
         row.principal(),
         row.owner(),
         row.sessionId(),
-        row.sessionSource());
+        row.sessionSource(),
+        row.lastActivityAt(),
+        RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()));
   }
 
   @Override
@@ -1204,6 +1215,8 @@ record RunSummary(
     if (owner != null) m.put("owner", owner);
     if (sessionId != null) m.put("session_id", sessionId);
     if (sessionSource != null) m.put("session_source", sessionSource);
+    if (lastActivityAt != null) m.put("last_activity_at", lastActivityAt);
+    if (presence != null) m.put("presence", presence);
     return m;
   }
 }

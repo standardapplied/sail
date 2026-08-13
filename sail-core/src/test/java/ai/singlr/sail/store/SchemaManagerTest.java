@@ -311,6 +311,11 @@ class SchemaManagerTest {
     assertEquals(
         "acme",
         db.queryOne("SELECT project FROM runs WHERE id = 'r1'", r -> r.text(0)).orElseThrow());
+    assertTrue(
+        db.queryOne("SELECT last_activity_at IS NULL FROM runs WHERE id = 'r1'", r -> r.integer(0))
+                .orElseThrow()
+            == 1,
+        "a pre-upgrade run derives a null activity stamp — presence readers must not guess");
   }
 
   @Test
@@ -404,7 +409,7 @@ class SchemaManagerTest {
   @Test
   void theRunsRebuildCarriesRowsAndChildLedgersForwardAndAdmitsRoomRuns() {
     stageAtBaseline();
-    var priorEntries = SchemaManager.MIGRATIONS.size() - 7;
+    var priorEntries = migrationIndex("CREATE TABLE runs_v5") + 1;
     db.execute("PRAGMA foreign_keys = OFF");
     SchemaManager.MIGRATIONS.subList(0, priorEntries).forEach(db::execute);
     db.execute("PRAGMA foreign_keys = ON");
