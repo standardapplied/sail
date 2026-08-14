@@ -269,6 +269,51 @@ class ReviewPipelineControllerTest {
     assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
   }
 
+  private Event laneStopEvent(String specId, String role, String runId) {
+    var data = new java.util.LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.EXIT_CODE, 0);
+    if (role != null) {
+      data.put(Event.WellKnownData.RUN_ROLE, role);
+    }
+    if (runId != null) {
+      data.put(Event.WellKnownData.RUN_ID, runId);
+    }
+    return Event.of(
+        "test-project",
+        specId,
+        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+        "claude-code",
+        "host",
+        data);
+  }
+
+  @Test
+  void aReviewLaneStopNeverTriggersAReview() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(laneStopEvent("auth", Event.WellKnownData.RUN_ROLE_REVIEW, null));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "a reviewer's own stop — even carrying the spec id — must never re-enter the pipeline");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aFixLaneStopNeverTriggersAReview() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(laneStopEvent("auth", Event.WellKnownData.RUN_ROLE_FIX, null));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "a fix agent's own stop must never re-enter the pipeline");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
   @Test
   void aRoomStopOnADoneSpecTriggersNothing() {
     createSpec("auth", "done");

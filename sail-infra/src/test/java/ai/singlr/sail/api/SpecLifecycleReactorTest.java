@@ -89,6 +89,25 @@ class SpecLifecycleReactorTest {
   }
 
   @Test
+  void aReviewOrFixStopNeverAdvancesTheSpec() {
+    seed("auth", "in_progress");
+    for (var role :
+        List.of(Event.WellKnownData.RUN_ROLE_REVIEW, Event.WellKnownData.RUN_ROLE_FIX)) {
+      var laneStop =
+          Event.of(
+              "acme",
+              "auth",
+              Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+              "claude-code",
+              "host",
+              java.util.Map.of(Event.WellKnownData.RUN_ROLE, role));
+      assertFalse(
+          reactor.filter().test(laneStop),
+          "the pipeline's own " + role + " run must never flip the spec to review");
+    }
+  }
+
+  @Test
   void nameIsSpecLifecycle() {
     assertEquals("spec-lifecycle", reactor.name());
   }

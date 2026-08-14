@@ -46,8 +46,8 @@ public final class SpecLifecycleReactor implements EventSubscriber {
         HANDLED_TYPES.contains(e.type())
             && e.spec() != null
             && !e.spec().isBlank()
-            && !Event.WellKnownData.RUN_ROLE_ROOM.equals(
-                e.data().get(Event.WellKnownData.RUN_ROLE));
+            && !Event.WellKnownData.nonTriggeringLane(
+                Objects.toString(e.data().get(Event.WellKnownData.RUN_ROLE), null));
   }
 
   @Override
