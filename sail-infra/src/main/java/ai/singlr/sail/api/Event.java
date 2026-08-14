@@ -181,6 +181,24 @@ public record Event(
     /** {@link #RUN_ROLE} value: a room wake — a chat that must never trigger a review. */
     public static final String RUN_ROLE_ROOM = "room";
 
+    /** {@link #RUN_ROLE} value: a reviewer run — its own stop must never re-enter the pipeline. */
+    public static final String RUN_ROLE_REVIEW = "review";
+
+    /** {@link #RUN_ROLE} value: a fix run — its own stop must never re-enter the pipeline. */
+    public static final String RUN_ROLE_FIX = "fix";
+
+    /**
+     * Whether a run role names a lane whose own stop must never drive the review pipeline: a {@link
+     * #RUN_ROLE_ROOM} chat, or the pipeline's own {@link #RUN_ROLE_REVIEW} / {@link #RUN_ROLE_FIX}
+     * run. Reactors on {@code agent_session_stopped} drop such stops by role so the loop can never
+     * re-enter on its own agents. Null (a role-less stop) is a normal build stop.
+     */
+    public static boolean nonTriggeringLane(String role) {
+      return RUN_ROLE_ROOM.equals(role)
+          || RUN_ROLE_REVIEW.equals(role)
+          || RUN_ROLE_FIX.equals(role);
+    }
+
     private WellKnownData() {}
   }
 

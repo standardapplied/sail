@@ -214,6 +214,15 @@ public final class RunStore implements ConflictResolver {
     }
 
     /**
+     * Whether this row is a review execution — the reviewer or its fix agent, which share the one
+     * review row. Their own stop must never re-enter the pipeline, so lane-aware reactors consult
+     * this as the fallback when a stop signal lost its role marker.
+     */
+    public boolean reviewRole() {
+      return "review".equals(role);
+    }
+
+    /**
      * Whether this row is an agent session the run-scoped machinery owns — a build attempt, an
      * ad-hoc run, or a room wake — as opposed to a pipeline-driven review execution. Session rows
      * are the ones the stop, status, log, reaper, and missed-stop lanes address; a room run joins

@@ -262,7 +262,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   private void handleAgentStopped(Event event) {
-    if (roomStop(event)) return;
+    if (nonTriggeringLaneStop(event)) return;
 
     var specId = event.spec();
     var spec = specStore.findById(specId);
@@ -996,15 +996,25 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   }
 
   /**
-   * Whether this stop belongs to a room wake — a chat-lane run that answers in the spec's room and
-   * must never trigger a review, structurally: an escalated spec parked in {@code review} is
-   * exactly where a human asks "what is it stuck on?", and reviewing that chat would re-enter the
-   * loop the human just took over. The role rides the stop signal itself (hook, watcher, and
-   * reconciler stops all carry it), with the run row consulted as the fallback for a signal that
-   * lost it.
+   * Whether this stop belongs to a lane the pipeline must never act on — so its own agents' stops
+   * can never re-enter the review loop:
+   *
+   * <ul>
+   *   <li>A <b>room</b> wake: a chat-lane run answering in the spec's room. An escalated spec
+   *       parked in {@code review} is exactly where a human asks "what is it stuck on?", and
+   *       reviewing that chat would re-enter the loop the human just took over.
+   *   <li>A <b>review</b> or <b>fix</b> run: the pipeline's own agents. Reviewing on their stop
+   *       would recurse the review loop forever. Their events carry a blank spec (they launch
+   *       without {@code SAIL_SPEC_ID}), so {@code filter()} already drops them — this is the
+   *       explicit, role-keyed backstop that holds even if such a run ever carried a spec id.
+   * </ul>
+   *
+   * <p>The role rides the stop signal itself (hook, watcher, and reconciler stops all carry it),
+   * with the run row consulted as the fallback for a signal that lost it.
    */
-  private boolean roomStop(Event event) {
-    if (Event.WellKnownData.RUN_ROLE_ROOM.equals(event.data().get(Event.WellKnownData.RUN_ROLE))) {
+  private boolean nonTriggeringLaneStop(Event event) {
+    var role = Objects.toString(event.data().get(Event.WellKnownData.RUN_ROLE), null);
+    if (Event.WellKnownData.nonTriggeringLane(role)) {
       return true;
     }
     if (runStore == null) {
@@ -1013,7 +1023,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
     return runId != null
         && !runId.isBlank()
-        && runStore.findById(runId).map(RunStore.RunRow::roomRole).orElse(false);
+        && runStore.findById(runId).map(row -> row.roomRole() || row.reviewRole()).orElse(false);
   }
 
   private static Integer exitCodeOf(Event event) {
