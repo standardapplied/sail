@@ -775,6 +775,16 @@ public final class RunStore implements ConflictResolver {
         this::mapRow);
   }
 
+  /**
+   * Every running run, review executions included — the presence lanes. Unlike {@link #running()},
+   * which the systemd reaper scopes to {@link #SESSION_ROLES}, presence covers a reviewer or fix
+   * agent too: they are agents at work and show a chip like any other run. Read-time presence still
+   * filters to the stamped rows; this only widens which running rows the emitter considers.
+   */
+  public List<RunRow> runningForPresence() {
+    return db.query("SELECT " + COLUMNS + " FROM runs WHERE status = 'running'", this::mapRow);
+  }
+
   /** Marks local review executions orphaned by a server restart failed. */
   public int failRunningReviewsOnNode(String localHandle) {
     var ids =

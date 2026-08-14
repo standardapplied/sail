@@ -19,7 +19,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -484,6 +486,10 @@ class RunStoreTest {
     assertEquals(buildId, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(buildId, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(List.of(buildId), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(
+        Set.of(buildId, reviewId),
+        store.runningForPresence().stream().map(RunStore.RunRow::id).collect(Collectors.toSet()),
+        "presence covers the review execution too — it is an agent at work");
     assertEquals(2, store.listForProject("backend").size(), "the aggregate still lists both roles");
   }
 

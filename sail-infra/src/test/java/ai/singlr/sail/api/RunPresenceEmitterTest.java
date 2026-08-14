@@ -49,6 +49,10 @@ class RunPresenceEmitterTest {
   }
 
   private String runningRunOn(String node) {
+    return runningRunOn(node, "build");
+  }
+
+  private String runningRunOn(String node, String role) {
     var id = DateTimeUtils.newId().toString();
     return runStore.create(
         id,
@@ -56,7 +60,7 @@ class RunPresenceEmitterTest {
         "auth",
         node,
         node,
-        "build",
+        role,
         "claude-code",
         "feat/x",
         "do it",
@@ -132,6 +136,18 @@ class RunPresenceEmitterTest {
     assertEquals(1, emitter.sweep(), "the resume crossing emits working");
     assertEquals(0, emitter.sweep());
     assertEquals(2, bus.publishedCount(), "quiet then working — transitions only, no heartbeats");
+  }
+
+  @Test
+  void aReviewRunGetsPresenceEdgesToo() {
+    var id = runningRunOn("node-a", "review");
+    stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
+
+    assertEquals(
+        1,
+        emitter.sweep(),
+        "a review execution is an agent at work — its quiet crossing must narrate, even though"
+            + " running() excludes review rows for the reaper");
   }
 
   @Test
