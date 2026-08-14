@@ -1004,9 +1004,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    *       parked in {@code review} is exactly where a human asks "what is it stuck on?", and
    *       reviewing that chat would re-enter the loop the human just took over.
    *   <li>A <b>review</b> or <b>fix</b> run: the pipeline's own agents. Reviewing on their stop
-   *       would recurse the review loop forever. Their events carry a blank spec (they launch
-   *       without {@code SAIL_SPEC_ID}), so {@code filter()} already drops them — this is the
-   *       explicit, role-keyed backstop that holds even if such a run ever carried a spec id.
+   *       would recurse the review loop forever. Their own stop hooks are already refused at the
+   *       API layer (the terminal session types are watcher-and-reconciler-only), so in practice
+   *       only a watcher- or reconciler-derived stop could ever carry a review/fix role — this is
+   *       the explicit, role-keyed backstop that drops it regardless.
    * </ul>
    *
    * <p>The role rides the stop signal itself (hook, watcher, and reconciler stops all carry it),

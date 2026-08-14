@@ -35,23 +35,24 @@ public final class SailEventHelper {
       #   Args: <event-type> [reason]
       # The optional reason lands in data.reason, sanitized to keep the
       # hand-built JSON valid (quotes, backslashes, control chars dropped).
-      # Spec attribution flows in via SAIL_SPEC_ID env var (set by sail at launch);
-      # absent or blank means an engineer-initiated session — skip silently so
-      # ad-hoc 'claude' invocations never pollute the spec event bus.
-      # The run credential (SAIL_RUN_CREDENTIAL, injected at launch) authenticates the
-      # request; the server stamps authorship from it, so the agent field here is advisory.
+      # The run credential (SAIL_RUN_CREDENTIAL, injected at launch) both authenticates the
+      # request and scopes it: the server stamps project/spec/run/author from the authenticated
+      # run and ignores the fields below. No credential means an untracked engineer session with
+      # no run to speak for — skip silently so ad-hoc 'claude' invocations never pollute the spec
+      # event bus. This is why a credentialed reviewer/fix run (no SAIL_SPEC_ID, no SAIL_RUN_ID)
+      # still emits and shows presence. SAIL_SPEC_ID rides along only as an advisory hint.
       set -eu
 
       EVENT_TYPE="${1:?event type required}"
       REASON="$(printf '%s' "${2:-}" | tr -d '\\\\"\\000-\\037')"
-      SPEC_ID="${SAIL_SPEC_ID:-}"
-      if [ -z "$SPEC_ID" ]; then
+      CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
+      if [ -z "$CREDENTIAL" ]; then
         exit 0
       fi
+      SPEC_ID="${SAIL_SPEC_ID:-}"
       AGENT="${SAIL_AGENT:-claude-code}"
       RUN_ID="${SAIL_RUN_ID:-}"
       RUN_ROLE="${SAIL_RUN_ROLE:-}"
-      CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
       PROJECT="$(hostname)"
       HOST="$(hostname)"
       TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -66,14 +66,17 @@ class SailEventHelperTest {
   }
 
   @Test
-  void scriptNoOpsWhenSpecIdMissing() {
+  void scriptNoOpsWhenRunCredentialMissing() {
     var content = SailEventHelper.scriptContent();
-    var idx = content.indexOf("if [ -z \"$SPEC_ID\" ]; then");
-    assertTrue(idx > 0, "must short-circuit when SAIL_SPEC_ID is unset");
+    var idx = content.indexOf("if [ -z \"$CREDENTIAL\" ]; then");
+    assertTrue(
+        idx > 0,
+        "must short-circuit when SAIL_RUN_CREDENTIAL is unset — an untracked engineer session has"
+            + " no run to authenticate as, and the credential is what scopes the event");
     var afterCheck = content.substring(idx);
     assertTrue(
         afterCheck.indexOf("exit 0") < afterCheck.indexOf("curl"),
-        "exit 0 must come before the curl call so engineer sessions skip the POST");
+        "exit 0 must come before the curl call so untracked sessions skip the POST");
   }
 
   @Test
