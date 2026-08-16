@@ -417,6 +417,23 @@ class InviteLaunchTest {
   }
 
   @Test
+  void anUntrustedNodeIsRefusedBeforeReserveOrSnapshot() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth", "ghost", null);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startInvite(
+                    "auth", "claude-code", true, null, Actor.cliOperator("ghost"), "ghost"));
+
+    assertEquals(ErrorCode.FDE_NOT_IN_ROSTER, refusal.failure().errorCode());
+    assertTrue(runStore.listForSpec("auth").isEmpty(), "an untrusted node reserves nothing");
+    assertEquals(List.of(), order, "an untrusted node takes no snapshot and launches nothing");
+  }
+
+  @Test
   void aMissingSpecIsRefused() throws Exception {
     var ops = operations(liveAgentShell());
 

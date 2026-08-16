@@ -651,6 +651,7 @@ public final class DispatchOperations {
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
     requireAllowed(actor, spec.toSpec(), localHandle);
+    requireTrustedRoster(localHandle);
     var agentCli = inviteAgent(agentYamlName);
     var inviteModel = inviteModel(model);
     if (!full && !agentCli.supportsReadOnlyInvite()) {

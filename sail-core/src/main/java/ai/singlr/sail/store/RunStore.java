@@ -256,6 +256,8 @@ public final class RunStore implements ConflictResolver {
   private static final String SESSION_ROLES =
       "role IN ('build', 'adhoc', 'room', 'invite', 'invite-full')";
 
+  private static final String PROJECT_SESSION_ROLES = "role IN ('build', 'adhoc', 'room')";
+
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
@@ -738,9 +740,11 @@ public final class RunStore implements ConflictResolver {
   /**
    * The latest agent session (build or ad-hoc) of {@code project} that executed on this box, or
    * empty. Review runs remain in the aggregate but do not replace the session used by agent status,
-   * log, and report commands. Ownership is by node: a box with a handle owns exactly the runs
-   * stamped with it; a box with no handle owns exactly its own blank-node runs and never a run
-   * adopted from another box via sync.
+   * log, and report commands. Invites are excluded too ({@link #PROJECT_SESSION_ROLES}): a
+   * read-only invite runs alongside a live build by design, so a newer invite must not shadow the
+   * build a project-level status or log addresses. Ownership is by node: a box with a handle owns
+   * exactly the runs stamped with it; a box with no handle owns exactly its own blank-node runs and
+   * never a run adopted from another box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
@@ -748,7 +752,7 @@ public final class RunStore implements ConflictResolver {
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
             + " AND "
-            + SESSION_ROLES
+            + PROJECT_SESSION_ROLES
             + " ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
@@ -759,7 +763,9 @@ public final class RunStore implements ConflictResolver {
   /**
    * The active agent session (build or ad-hoc) of {@code project} that executed on this box, or
    * empty. {@code stopping} counts as active: an interrupted stop's claim must stay addressable so
-   * a project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
+   * a project-targeted stop retry resumes it. Invites are excluded ({@link #PROJECT_SESSION_ROLES})
+   * so a project-level stop halts the build, not a consultant running beside it; an invite is
+   * stopped by its own run id. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
@@ -767,7 +773,7 @@ public final class RunStore implements ConflictResolver {
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
             + " AND IFNULL(node, '') = ? AND "
-            + SESSION_ROLES
+            + PROJECT_SESSION_ROLES
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,

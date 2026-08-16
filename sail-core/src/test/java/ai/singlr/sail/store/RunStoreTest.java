@@ -961,6 +961,38 @@ class RunStoreTest {
   }
 
   @Test
+  void aConcurrentInviteNeverShadowsTheBuildForProjectLevelCommands() {
+    var build = newRun("backend", "auth");
+    var invite = DateTimeUtils.newId().toString();
+    store.create(
+        invite,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "invite",
+        "claude-code",
+        null,
+        "consult",
+        null,
+        null,
+        null,
+        "sail-agent-" + invite);
+
+    assertEquals(
+        build,
+        store.latestForProjectOnNode("backend", "node-a").orElseThrow().id(),
+        "project-level status/log addresses the build, not a newer consultant beside it");
+    assertEquals(
+        build,
+        store.runningForProjectOnNode("backend", "node-a").orElseThrow().id(),
+        "a project-level stop halts the build, not the invite running alongside it");
+    assertTrue(
+        store.running().stream().map(RunStore.RunRow::id).toList().contains(invite),
+        "the reaper still owns the invite — it is addressable and stoppable by its run id");
+  }
+
+  @Test
   void aRoomReservationNeverBlocksADisjointSpecsDispatchAndViceVersa() {
     reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
 
