@@ -115,6 +115,7 @@ class InviteLaunchTest {
   private StubShell liveAgentShell() {
     return new StubShell(order)
         .on("incus list ^acme$", RUNNING_JSON)
+        .on("command -v", "/usr/local/bin/claude\n")
         .on("incus snapshot create", "")
         .on("mkdir -p /home/dev/.sail", "")
         .on("rev-parse HEAD", "aaa111\n")
@@ -270,6 +271,7 @@ class InviteLaunchTest {
     var shell =
         new StubShell(order)
             .on("incus list ^acme$", RUNNING_JSON)
+            .on("command -v", "/usr/local/bin/claude\n")
             .on("mkdir -p /home/dev/.sail", "");
     var ops = operations(shell);
     seedSpec("auth");
@@ -316,6 +318,46 @@ class InviteLaunchTest {
     assertEquals("codex/invite-" + launch.runId(), launch.principal());
     var joined = String.join(" ", launched.get());
     assertTrue(joined.contains("--dangerously-bypass-approvals-and-sandbox"), joined);
+  }
+
+  @Test
+  void aShellUnsafeModelIsRefusedBeforeAnyReservation() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startInvite(
+                    "auth",
+                    "claude-code",
+                    false,
+                    "x; touch /home/dev/workspace/PWNED #",
+                    Actor.cliOperator(HANDLE),
+                    HANDLE));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, refusal.failure().errorCode());
+    assertTrue(refusal.failure().errorMessage().contains("shell"), "names the shell hazard");
+    assertTrue(runStore.listForSpec("auth").isEmpty(), "a refused model reserves nothing");
+    assertEquals(List.of(), order, "a refused model takes no snapshot and launches nothing");
+  }
+
+  @Test
+  void anAgentAbsentFromTheContainerIsRefusedBeforeReserveOrSnapshot() throws Exception {
+    var shell = new StubShell(order).on("incus list ^acme$", RUNNING_JSON);
+    var ops = operations(shell);
+    seedSpec("auth");
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () -> ops.startInvite("auth", "codex", true, null, Actor.cliOperator(HANDLE), HANDLE));
+
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, refusal.failure().errorCode());
+    assertTrue(refusal.failure().errorMessage().contains("codex"), "names the absent agent");
+    assertTrue(runStore.listForSpec("auth").isEmpty(), "an absent agent reserves nothing");
+    assertEquals(List.of(), order, "an absent agent takes no snapshot and launches nothing");
   }
 
   @Test

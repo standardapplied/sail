@@ -652,6 +652,7 @@ public final class DispatchOperations {
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
     requireAllowed(actor, spec.toSpec(), localHandle);
     var agentCli = inviteAgent(agentYamlName);
+    var inviteModel = inviteModel(model);
     if (!full && !agentCli.supportsReadOnlyInvite()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
@@ -665,6 +666,7 @@ public final class DispatchOperations {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
     }
+    requireInstalled(agentCli, project);
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var room =
         messageStore == null
@@ -712,7 +714,7 @@ public final class DispatchOperations {
               config,
               workDir,
               full,
-              model,
+              inviteModel,
               null,
               specId,
               agentCli.yamlName(),
@@ -738,6 +740,40 @@ public final class DispatchOperations {
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
       throw e;
+    }
+  }
+
+  /**
+   * Validates the invite's model exactly like a spec write, refusing shell-unsafe values as a
+   * client error before any reservation or snapshot — the model rides the agent command through
+   * {@code bash -l -c}, so only a single safe token may reach it.
+   */
+  private static String inviteModel(String model) {
+    try {
+      return Spec.validatedModel(model);
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+    }
+  }
+
+  /**
+   * Refuses the invite before any reservation or snapshot when the chosen agent's binary is not on
+   * the container's PATH — sail.yaml's agent block declares what a project apply installed, but the
+   * container is the authority on what can actually launch.
+   */
+  private void requireInstalled(AgentCli agentCli, String project) {
+    var found =
+        exec(
+            ContainerExec.asDevUser(
+                project,
+                List.of("bash", "-lc", "command -v -- \"$1\"", "bash", agentCli.binaryName())));
+    if (!found.ok()) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED,
+          "Agent '" + agentCli.yamlName() + "' is not installed in project '" + project + "'.",
+          "Add "
+              + agentCli.yamlName()
+              + " to sail.yaml's agent.install list and run 'sail project apply'.");
     }
   }
 
