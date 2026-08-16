@@ -205,9 +205,17 @@ public final class SyncTransitionEvents {
     if (located == null || author == null || body == null || !"posted".equals(transition.to())) {
       return List.of();
     }
+    var question =
+        Boolean.parseBoolean(Objects.toString(transition.snapshot().get("question"), "false"));
     return List.of(
         messagePosted(
-            located.project(), located.specId(), transition.entityId(), author, body, host));
+            located.project(),
+            located.specId(),
+            transition.entityId(),
+            author,
+            body,
+            question,
+            host));
   }
 
   /**
@@ -217,14 +225,20 @@ public final class SyncTransitionEvents {
    * wake reactor above all — as one posted locally.
    */
   public static Event messagePosted(
-      String project, String specId, String messageId, String author, String body, String host) {
-    return event(
-        project,
-        specId,
-        Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
-        author,
-        host,
-        Map.of("message_id", messageId, "preview", preview(body)));
+      String project,
+      String specId,
+      String messageId,
+      String author,
+      String body,
+      boolean question,
+      String host) {
+    var data = new LinkedHashMap<String, Object>();
+    data.put("message_id", messageId);
+    data.put("preview", preview(body));
+    if (question) {
+      data.put("question", true);
+    }
+    return event(project, specId, Event.WellKnownTypes.SPEC_MESSAGE_POSTED, author, host, data);
   }
 
   /** A review-side transition addressed to its spec and project, or null when unresolvable. */
