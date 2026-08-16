@@ -105,7 +105,8 @@ public final class SpecCliHelper {
         spec update <id> [--status S] [--title T] [--assignee H] [--wake on|mention|off]
                     [--force] [...]  (alias: edit)
         spec content <id> --body-file F [--plan-file F]   revise the body
-        spec comment <id> --body <text>|- [--reply-to <message-id>]
+        spec comment <id> --body <text>|- [--reply-to <message-id>] [--question]
+                    (--question flags a blocking question so the board pages the engineer)
         spec comments <id> [--before <message-id>] [--limit N]
         spec archive <id>
         spec whoami                        show this run's principal identity
@@ -146,10 +147,13 @@ public final class SpecCliHelper {
           else
             FIELDS=(--data-urlencode "body=$body")
           fi
-          if [ $# -gt 0 ]; then
-            [ "$1" = "--reply-to" ] && [ $# -eq 2 ] || die "comment accepts only --reply-to <message-id>"
-            FIELDS+=(--data-urlencode "reply_to=$2")
-          fi
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --reply-to) [ $# -ge 2 ] || die "--reply-to needs a message id"; FIELDS+=(--data-urlencode "reply_to=$2"); shift 2;;
+              --question) FIELDS+=(--data-urlencode "question=true"); shift;;
+              *) die "comment accepts only --reply-to <message-id> and --question";;
+            esac
+          done
           api -X POST "${FIELDS[@]}" "$BASE/$id/messages";;
         comments)
           [ $# -ge 1 ] || die "comments needs a spec id"

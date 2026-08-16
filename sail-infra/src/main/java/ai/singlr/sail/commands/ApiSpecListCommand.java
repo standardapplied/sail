@@ -172,9 +172,18 @@ public final class ApiSpecListCommand implements Runnable {
                   : " @|magenta @" + assignee + "|@";
           var depsStr = deps.isEmpty() ? "" : " @|faint ← " + String.join(", ", deps) + "|@";
           var reposStr = repos.isEmpty() ? "" : " @|faint [" + String.join(", ", repos) + "]|@";
+          var needsReply =
+              Boolean.TRUE.equals(spec.get("needs_reply")) ? " @|bold,red ? needs reply|@" : "";
           System.out.println(
               Ansi.AUTO.string(
-                  "    • @|bold " + id + "|@  " + title + assigneeStr + reposStr + depsStr));
+                  "    • @|bold "
+                      + id
+                      + "|@  "
+                      + title
+                      + assigneeStr
+                      + reposStr
+                      + depsStr
+                      + needsReply));
         }
       }
       System.out.println();

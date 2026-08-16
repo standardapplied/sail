@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -165,6 +166,45 @@ class MessageStoreTest {
         "a run is never told its own story");
     assertThrows(
         IllegalArgumentException.class, () -> messages.listUndelivered("room", runId, "x", 0));
+  }
+
+  @Test
+  void questionFlagRoundTripsAndStaysOutOfPlainSnapshots() {
+    var question = messages.append("room", "claude/run-1", "Which auth flow?", null, true);
+    assertTrue(question.question());
+    assertTrue(messages.findById(question.id()).orElseThrow().question());
+    assertEquals(Boolean.TRUE, messages.comparableSnapshot(question.id()).get("question"));
+
+    var plain = messages.append("room", "claude/run-1", "progress", null);
+    assertFalse(plain.question());
+    assertFalse(messages.comparableSnapshot(plain.id()).containsKey("question"));
+  }
+
+  @Test
+  void openQuestionsFlagsTheLatestAgentQuestionUntilAHumanReplies() {
+    assertEquals(Map.of(), messages.openQuestions());
+
+    var first = messages.append("room", "claude/run-1", "Which db?", null, true);
+    assertEquals(Map.of("room", first.id()), messages.openQuestions());
+
+    var second = messages.append("room", "claude/run-1", "And which cache?", null, true);
+    assertEquals(Map.of("room", second.id()), messages.openQuestions());
+
+    messages.append("room", "codex/run-2", "agent chatter", null);
+    messages.append("room", "sail", "Review passed.", null);
+    assertEquals(
+        Map.of("room", second.id()),
+        messages.openQuestions(),
+        "neither an agent nor the orchestrator answers a question");
+
+    messages.append("room", "ada", "use redis and postgres", null);
+    assertEquals(Map.of(), messages.openQuestions());
+  }
+
+  @Test
+  void aHumanQuestionNeverNeedsAReply() {
+    messages.append("room", "ada", "what did you ship?", null, true);
+    assertEquals(Map.of(), messages.openQuestions());
   }
 
   @Test

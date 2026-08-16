@@ -15,6 +15,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 record HealthResponse(String status) implements Mappable {
   @Override
@@ -739,17 +740,26 @@ record GlobalSpecView(
 }
 
 record GlobalSpecsListResponse(
-    List<GlobalSpecView> specs, int total, Map<String, String> latestMessageAt)
+    List<GlobalSpecView> specs,
+    int total,
+    Map<String, String> latestMessageAt,
+    Map<String, String> openQuestions)
     implements Mappable {
 
+  GlobalSpecsListResponse {
+    openQuestions = openQuestions == null ? Map.of() : openQuestions;
+  }
+
   GlobalSpecsListResponse(List<GlobalSpecView> specs, int total) {
-    this(specs, total, null);
+    this(specs, total, null, null);
   }
 
   /**
    * Each spec's {@code last_activity_at} = max(updated_at, its room's newest message) — the one
-   * activity source {@code updated_at} cannot see. Emitted only when the serving box has the
-   * message store, so a skewed client can detect absence and fall back.
+   * activity source {@code updated_at} cannot see. A spec whose latest agent question is still
+   * unanswered additionally carries {@code needs_reply} plus that question's message id. Both are
+   * emitted only when the serving box has the message store, so a skewed client can detect absence
+   * and fall back.
    */
   @Override
   public Map<String, Object> toMap() {
@@ -768,6 +778,11 @@ record GlobalSpecsListResponse(
                     spec.put(
                         "last_activity_at",
                         message != null && message.compareTo(updated) > 0 ? message : updated);
+                    var question = openQuestions.get(view.id());
+                    if (question != null) {
+                      spec.put("needs_reply", true);
+                      spec.put("question_message_id", question);
+                    }
                     return spec;
                   })
               .toList());
@@ -778,12 +793,28 @@ record GlobalSpecsListResponse(
 }
 
 record GlobalSpecDetailResponse(
-    GlobalSpecView spec, String body, String plan, int openFindings, RunSummary latestRun)
+    GlobalSpecView spec,
+    String body,
+    String plan,
+    int openFindings,
+    RunSummary latestRun,
+    String questionMessageId)
     implements Mappable {
+
+  GlobalSpecDetailResponse(
+      GlobalSpecView spec, String body, String plan, int openFindings, RunSummary latestRun) {
+    this(spec, body, plan, openFindings, latestRun, null);
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("spec", spec.toMap());
+    var specMap = spec.toMap();
+    if (questionMessageId != null) {
+      specMap.put("needs_reply", true);
+      specMap.put("question_message_id", questionMessageId);
+    }
+    m.put("spec", specMap);
     if (body != null) m.put("body", body);
     if (plan != null) m.put("plan", plan);
     if (openFindings > 0) m.put("open_findings", openFindings);
@@ -831,20 +862,33 @@ record GlobalSpecContentResponse(String specId, String body, String plan) implem
   }
 }
 
-record SpecMessageRequest(String body, String replyTo) {
+record SpecMessageRequest(String body, String replyTo, boolean question) {
   static SpecMessageRequest fromMap(Map<String, Object> map) {
     return new SpecMessageRequest(
         map.get("body") == null ? null : map.get("body").toString(),
-        map.get("reply_to") == null ? null : map.get("reply_to").toString());
+        map.get("reply_to") == null ? null : map.get("reply_to").toString(),
+        Boolean.parseBoolean(Objects.toString(map.get("question"), "false")));
   }
 }
 
 record SpecMessageView(
-    String id, String specId, String author, String body, String replyTo, String createdAt)
+    String id,
+    String specId,
+    String author,
+    String body,
+    String replyTo,
+    String createdAt,
+    boolean question)
     implements Mappable {
   static SpecMessageView from(MessageStore.MessageRow row) {
     return new SpecMessageView(
-        row.id(), row.specId(), row.author(), row.body(), row.replyTo(), row.createdAt());
+        row.id(),
+        row.specId(),
+        row.author(),
+        row.body(),
+        row.replyTo(),
+        row.createdAt(),
+        row.question());
   }
 
   @Override
@@ -856,6 +900,7 @@ record SpecMessageView(
     map.put("body", body);
     if (replyTo != null) map.put("reply_to", replyTo);
     map.put("created_at", createdAt);
+    if (question) map.put("question", true);
     return map;
   }
 }
@@ -918,7 +963,13 @@ record RunSessionResponse(String runId, String sessionId, String sessionSource)
   }
 }
 
-record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) implements Mappable {
+record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings, int needsReply)
+    implements Mappable {
+
+  GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) {
+    this(board, doneOpenFindings, 0);
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -932,6 +983,7 @@ record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings) i
     m.put("archived", board.archived());
     m.put("next_ready_id", board.nextReadyId());
     m.put("done_open_findings", doneOpenFindings);
+    m.put("needs_reply", needsReply);
     return m;
   }
 }

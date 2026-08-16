@@ -92,7 +92,9 @@ public final class SpecSkillGenerator {
         `--status pending` or `--assignee me` to filter). Render the result as status columns:
 
         Use `spec comment <id> --body <text>|-` to post progress, questions, and summaries in the
-        spec's conversation; use `spec comments <id>` to read it.
+        spec's conversation; add `--question` when you are blocked and need a human reply — it
+        pages the engineer on the board until someone answers. Use `spec comments <id>` to read
+        the room.
 
         ```
         ┌─────────────┬─────────────────┬──────────────┬────────────────────┬──────────────┐

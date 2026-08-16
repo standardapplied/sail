@@ -295,6 +295,7 @@ public final class SyncCommand implements Callable<Integer> {
                                 row.id(),
                                 row.author(),
                                 row.body(),
+                                row.question(),
                                 host))
                     .orElse(null))
         .filter(Objects::nonNull)

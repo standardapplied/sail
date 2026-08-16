@@ -419,7 +419,7 @@ public final class Fleet implements AutoCloseable {
     public SpecMessageView postMessage(String specId, String body) {
       return operations
           .postSpecMessage(
-              specId, new SpecMessageRequest(body, null), Actor.cliOperator(handle), handle)
+              specId, new SpecMessageRequest(body, null, false), Actor.cliOperator(handle), handle)
           .orThrow()
           .message();
     }

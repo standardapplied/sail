@@ -229,6 +229,31 @@ class SyncTransitionEventsTest {
   }
 
   @Test
+  void aSyncedQuestionCarriesItsFlag() {
+    var snapshot =
+        Map.<String, Object>of(
+            "spec_id", "auth", "author", "codex/abc", "body", "Which region?", "question", true);
+
+    var event = map(new SyncTransition("message", "m1", null, "posted", snapshot)).getFirst();
+
+    assertEquals(
+        Boolean.TRUE,
+        event.data().get("question"),
+        "a synced question must carry its flag so consumers derive needs-reply like a local post");
+  }
+
+  @Test
+  void aSyncedPlainMessageOmitsTheQuestionFlag() {
+    var snapshot = Map.<String, Object>of("spec_id", "auth", "author", "ada", "body", "ok");
+
+    var event = map(new SyncTransition("message", "m1", null, "posted", snapshot)).getFirst();
+
+    assertNull(
+        event.data().get("question"),
+        "a plain message carries no flag — the local post omits it too");
+  }
+
+  @Test
   void aMessageForAnUnknownSpecIsSilent() {
     var snapshot =
         Map.<String, Object>of("spec_id", "ghost", "author", "ada", "body", "Progress update");

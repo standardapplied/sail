@@ -1595,7 +1595,7 @@ class SailOperationsTest {
     var result =
         operations.postSpecMessage(
             "auth",
-            new SpecMessageRequest("Ready", null),
+            new SpecMessageRequest("Ready", null, false),
             new Actor("sail", Role.ADMIN, Actor.Lane.API),
             "sail");
 

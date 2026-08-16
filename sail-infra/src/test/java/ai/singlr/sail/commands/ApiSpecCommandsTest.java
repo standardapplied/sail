@@ -208,6 +208,17 @@ class ApiSpecCommandsTest {
   }
 
   @Test
+  void commentQuestionFlagRidesTheRequestAndReturnsOnTheMessage() {
+    run("create", "--id", "asking", "--title", "Asking");
+
+    var posted = run("comment", "asking", "--body", "Which flow?", "--question");
+    assertTrue(posted.contains("\"question\": true"));
+
+    var listed = run("comments", "asking");
+    assertTrue(listed.contains("\"question\": true"));
+  }
+
+  @Test
   void commentReadsBodyFromStdin() {
     run("create", "--id", "stdin-room", "--title", "Room");
     var original = System.in;

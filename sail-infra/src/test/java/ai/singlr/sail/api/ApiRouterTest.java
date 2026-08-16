@@ -787,6 +787,16 @@ class ApiRouterTest {
       assertEquals(Role.ADMIN, ops.actor.role());
       assertEquals(Actor.Lane.API, ops.actor.lane());
       assertEquals("ada", ops.author);
+      assertFalse(ops.question);
+
+      var asked =
+          post(
+              server,
+              "/v1/specs/auth-flow/messages",
+              "token",
+              "{\"body\":\"which flow?\",\"question\":true}");
+      assertEquals(201, asked.statusCode());
+      assertTrue(ops.question, "the JSON flag reaches the request");
 
       var listed = get(server, "/v1/specs/auth-flow/messages?limit=999", "token");
       assertEquals(200, listed.statusCode());
@@ -1117,6 +1127,7 @@ class ApiRouterTest {
     private Actor actor;
     private String author;
     private String body;
+    private boolean question;
 
     @Override
     public Result<SpecMessageResponse> postSpecMessage(
@@ -1124,6 +1135,7 @@ class ApiRouterTest {
       this.actor = actor;
       this.author = author;
       this.body = request.body();
+      this.question = request.question();
       return super.postSpecMessage(specId, request, actor, author);
     }
   }

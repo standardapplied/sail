@@ -89,6 +89,28 @@ class MessageSyncTest {
   }
 
   @Test
+  void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
+    var runId = "019fee00-0000-7000-8000-0000000000bb";
+    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    runs.createReview(runId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
+    var principal = runs.findById(runId).orElseThrow().principal();
+    var question = node.messages.append("room", principal, "Which flow?", null, true);
+    var engine = new SyncEngine();
+
+    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
+
+    var synced = main.messages.findById(question.id()).orElseThrow();
+    assertTrue(synced.question(), "the flag is message data and rides the snapshot");
+    assertEquals(Map.of("room", question.id()), main.messages.openQuestions());
+
+    main.messages.append("room", "node", "answered", null);
+    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
+    assertEquals(Map.of(), main.messages.openQuestions());
+    assertEquals(Map.of(), node.messages.openQuestions());
+  }
+
+  @Test
   void syncedMessagesCannotBeChangedOrDeleted() {
     main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);

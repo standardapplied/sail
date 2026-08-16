@@ -479,6 +479,38 @@ class SchemaManagerTest {
   }
 
   @Test
+  void theQuestionColumnArrivesDefaultedOnPreUpgradeMessages() {
+    stageAtBaseline();
+    var priorEntries = migrationIndex("ADD COLUMN question");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, priorEntries).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + priorEntries);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth', 'T', 'pending', 't0', 't0')");
+    db.execute(
+        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev)"
+            + " VALUES ('0195a2f0-0000-7000-8000-000000000002', 'auth', 'uday', 'hi', 't0',"
+            + " '1-a')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(
+        0L,
+        (long)
+            db.queryOne(
+                    "SELECT question FROM spec_messages"
+                        + " WHERE id = '0195a2f0-0000-7000-8000-000000000002'",
+                    r -> r.integer(0))
+                .orElseThrow(),
+        "a pre-upgrade message was never a question");
+    assertTrue(new MessageStore(db).append("auth", "claude/r1", "stuck?", null, true).question());
+  }
+
+  @Test
   void theWakeColumnAdmitsItsThreeModesAndRejectsGarbage() {
     new SchemaManager(db).migrate();
     db.execute(

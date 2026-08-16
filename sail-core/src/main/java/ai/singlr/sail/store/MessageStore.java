@@ -26,7 +26,7 @@ public final class MessageStore {
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
   private static final String COLUMNS =
-      "id, spec_id, author, body, reply_to, created_at, rev, base_rev";
+      "id, spec_id, author, body, reply_to, created_at, rev, base_rev, question";
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -44,9 +44,15 @@ public final class MessageStore {
       String replyTo,
       String createdAt,
       String rev,
-      String baseRev) {}
+      String baseRev,
+      boolean question) {}
 
   public MessageRow append(String specId, String author, String body, String replyTo) {
+    return append(specId, author, body, replyTo, false);
+  }
+
+  public MessageRow append(
+      String specId, String author, String body, String replyTo, boolean question) {
     requireBody(body);
     if (Strings.isBlank(author)) {
       throw new IllegalArgumentException("message author is required");
@@ -66,7 +72,8 @@ public final class MessageStore {
                   replyTo,
                   DateTimeUtils.now().toString(),
                   null,
-                  null);
+                  null,
+                  question);
           requireReplyTarget(row);
           var snapshot = snapshot(row);
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
@@ -169,6 +176,38 @@ public final class MessageStore {
         "SELECT id FROM spec_messages WHERE spec_id = ? ORDER BY id DESC LIMIT 1",
         row -> row.text(0),
         specId);
+  }
+
+  /**
+   * Each spec whose latest agent-authored question is still unanswered, mapped to that question's
+   * message id — one aggregate query. A question is answered by any later human message in the
+   * room; the author classes are structural, mirroring {@code RoomWakePolicy.humanAuthor}: an agent
+   * principal always carries a {@code /}, the orchestrator posts as the literal {@code sail}, and
+   * FDE handles contain neither.
+   *
+   * <p>"Later" is message-id order, which is origin-mint order, so this is content-deterministic
+   * and consistent across boxes at sync-freshness. Known edge: a human message posted in the room
+   * during the sync lag <em>before</em> a question arrives has a higher id and reads as answering
+   * it, so the chip and notification will not fire for that question. This never breaks the loop —
+   * {@code RoomWakeReactor} resumes the agent on any human reply regardless of this flag, and the
+   * question stays visible in the room. A robust fix needs per-box arrival order (which breaks
+   * cross-box determinism) or delivery receipts (a deliberate non-goal), so it stays a documented
+   * edge.
+   */
+  public Map<String, String> openQuestions() {
+    var open = new LinkedHashMap<String, String>();
+    for (var entry :
+        db.query(
+            "SELECT q.spec_id, MAX(q.id) FROM spec_messages q"
+                + " WHERE q.question != 0 AND q.author LIKE '%/%'"
+                + " AND NOT EXISTS (SELECT 1 FROM spec_messages h"
+                + " WHERE h.spec_id = q.spec_id AND h.id > q.id"
+                + " AND h.author NOT LIKE '%/%' AND h.author != 'sail')"
+                + " GROUP BY q.spec_id",
+            row -> Map.entry(row.text(0), row.text(1)))) {
+      open.put(entry.getKey(), entry.getValue());
+    }
+    return open;
   }
 
   /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
@@ -309,8 +348,8 @@ public final class MessageStore {
     db.execute(
         """
         INSERT INTO spec_messages
-            (id, spec_id, author, body, reply_to, created_at, rev, base_rev)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, spec_id, author, body, reply_to, created_at, rev, base_rev, question)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET rev = excluded.rev, base_rev = excluded.base_rev""",
         row.id(),
         row.specId(),
@@ -319,7 +358,8 @@ public final class MessageStore {
         row.replyTo(),
         row.createdAt(),
         rev,
-        baseRev);
+        baseRev,
+        row.question() ? 1 : 0);
   }
 
   private void requireReplyTarget(MessageRow row) {
@@ -352,7 +392,8 @@ public final class MessageStore {
         replyTo,
         required(snapshot, "created_at"),
         null,
-        null);
+        null,
+        Boolean.parseBoolean(Objects.toString(snapshot.get("question"), "false")));
   }
 
   private static Map<String, Object> snapshot(MessageRow row) {
@@ -364,6 +405,9 @@ public final class MessageStore {
       map.put("reply_to", row.replyTo());
     }
     map.put("created_at", row.createdAt());
+    if (row.question()) {
+      map.put("question", true);
+    }
     return map;
   }
 
@@ -376,7 +420,8 @@ public final class MessageStore {
         row.text(4),
         row.text(5),
         row.text(6),
-        row.text(7));
+        row.text(7),
+        row.integer(8) != 0);
   }
 
   private static void requireBody(String body) {

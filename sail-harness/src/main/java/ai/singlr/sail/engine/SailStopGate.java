@@ -271,7 +271,7 @@ public final class SailStopGate {
         fi
         REASON="$REASON Address or acknowledge them (reply with spec comment) before ending the turn."
       fi
-      REASON="$REASON If you are genuinely blocked, say so explicitly and stop again."
+      REASON="$REASON If you are genuinely blocked, post the question with spec comment <spec-id> --question --body <text> and stop again."
       publish agent_stop_nudged "$(printf '%.2000s' "$REASON")"
       printf '%s' "$REASON" | python3 -c 'import json, sys; print(json.dumps({"decision": "block", "reason": sys.stdin.read()}))'
       exit 0
