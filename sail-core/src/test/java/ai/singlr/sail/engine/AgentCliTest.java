@@ -288,11 +288,32 @@ class AgentCliTest {
   }
 
   @Test
+  void roomCommandExcludesAmbientSettingsSoNoWorkspaceFileCanWidenPermissions() {
+    var cmd =
+        AgentCli.CLAUDE_CODE.headlessRoomCommand(
+            TASK, null, "/home/dev/.sail/claude-settings.json", true);
+
+    assertTrue(
+        cmd.contains("--setting-sources \"\""),
+        "ambient user/project/local settings merge permission allow-rules additively; the room"
+            + " lane must exclude every settings source except the sail-owned --settings file."
+            + " Command: "
+            + cmd);
+    assertTrue(
+        cmd.contains("--strict-mcp-config"),
+        "a workspace .mcp.json launches MCP server processes into the session; the room lane"
+            + " must ignore every ambient MCP configuration. Command: "
+            + cmd);
+  }
+
+  @Test
   void headlessRoomResumeCommandKeepsTheRestrictionsOnTheRecordedSession() {
     var cmd = AgentCli.CLAUDE_CODE.headlessRoomResumeCommand("sess-42", TASK, "opus", null, true);
 
     assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
     assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
+    assertTrue(cmd.contains("--setting-sources \"\""), cmd);
+    assertTrue(cmd.contains("--strict-mcp-config"), cmd);
     assertTrue(cmd.contains("--model opus"), cmd);
     assertTrue(cmd.contains("--resume sess-42 -p \"$(cat " + TASK + ")\""), cmd);
   }

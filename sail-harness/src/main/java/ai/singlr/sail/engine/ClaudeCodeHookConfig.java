@@ -19,6 +19,10 @@ import java.util.concurrent.TimeoutException;
  * sessions that run bare {@code claude} never see these hooks, so their {@code Stop} events do not
  * leak into the spec event bus.
  *
+ * <p>Besides hooks, the file carries the {@link #boxCredentialReadDeny} permission rule, so every
+ * sail-launched session — most critically the room lane, whose whole file surface is the {@code
+ * Read} tool — is denied tool-level reads of the ambient box credential.
+ *
  * <p>Hooks wired:
  *
  * <ul>
@@ -90,8 +94,24 @@ public final class ClaudeCodeHookConfig {
 
     var root = new LinkedHashMap<String, Object>();
     root.put("includeCoAuthoredBy", false);
+    root.put("permissions", Map.of("deny", List.of(boxCredentialReadDeny())));
     root.put("hooks", hooks);
     return YamlUtil.dumpJson(root);
+  }
+
+  /**
+   * The deny rule keeping the {@code Read} tool away from the ambient box credential. The file is
+   * world-readable by design (it rides the socket bind-mount, inside the box owner's SSH trust
+   * boundary), but it resolves to the box FDE's identity — a higher tier than the viewer credential
+   * a room or read-only-invite session holds — so the one lane whose only file access is the {@code
+   * Read} tool must not be able to lift it. Deny rules outrank every allow rule, and the room
+   * invocation pins {@code --setting-sources ""} so no ambient settings file can shadow this one.
+   * Spec-CLI authentication is untouched: the helper script reads the file at the OS level, not
+   * through the tool.
+   */
+  public static String boxCredentialReadDeny() {
+    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
+    return "Read(/" + credential + ")";
   }
 
   /**

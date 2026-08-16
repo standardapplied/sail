@@ -178,6 +178,12 @@ class InviteLaunchTest {
     var joined = String.join(" ", launched.get());
     assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
     assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+    assertTrue(
+        joined.contains("--setting-sources \"\"") && joined.contains("--strict-mcp-config"),
+        "a read-only invite runs beside live builds without a reservation, so the launched"
+            + " command must exclude ambient settings and MCP configs — no workspace file may"
+            + " widen the tool cut. Command: "
+            + joined);
     assertFalse(joined.contains("--resume"), "an invite is always a fresh participant");
     assertEquals("invite", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
     assertTrue(

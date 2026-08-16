@@ -74,6 +74,20 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void renderDeniesToolLevelReadsOfTheBoxCredential() {
+    var json = ClaudeCodeHookConfig.render();
+    var permissions = (Map<String, Object>) YamlUtil.parseMap(json).get("permissions");
+    var deny = (List<String>) permissions.get("deny");
+    assertEquals(
+        List.of("Read(//var/lib/sail/run/box.credential)"),
+        deny,
+        "the world-readable box credential resolves to the box FDE's identity; the room lane's"
+            + " only file access is the Read tool, so the sail-owned settings must deny it — and"
+            + " the room invocation pins --setting-sources so no ambient file can out-vote this");
+  }
+
+  @Test
   void renderDisablesCommitCoAuthorAttribution() {
     var json = ClaudeCodeHookConfig.render();
     assertTrue(
