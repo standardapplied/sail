@@ -184,6 +184,15 @@ public final class MessageStore {
    * room; the author classes are structural, mirroring {@code RoomWakePolicy.humanAuthor}: an agent
    * principal always carries a {@code /}, the orchestrator posts as the literal {@code sail}, and
    * FDE handles contain neither.
+   *
+   * <p>"Later" is message-id order, which is origin-mint order, so this is content-deterministic
+   * and consistent across boxes at sync-freshness. Known edge: a human message posted in the room
+   * during the sync lag <em>before</em> a question arrives has a higher id and reads as answering
+   * it, so the chip and notification will not fire for that question. This never breaks the loop —
+   * {@code RoomWakeReactor} resumes the agent on any human reply regardless of this flag, and the
+   * question stays visible in the room. A robust fix needs per-box arrival order (which breaks
+   * cross-box determinism) or delivery receipts (a deliberate non-goal), so it stays a documented
+   * edge.
    */
   public Map<String, String> openQuestions() {
     var open = new LinkedHashMap<String, String>();
