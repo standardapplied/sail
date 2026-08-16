@@ -338,7 +338,8 @@ class FixTaskBuilderTest {
                 null,
                 "2026-08-10T00:00:00Z",
                 "1-a",
-                null));
+                null,
+                false));
 
     var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), messages).task();
 

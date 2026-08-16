@@ -344,7 +344,8 @@ class TestOperations implements Operations {
                     request.replyTo(),
                     "2026-07-28T00:00:00Z",
                     "1-a",
-                    null))));
+                    null,
+                    request.question()))));
   }
 
   @Override
@@ -360,7 +361,8 @@ class TestOperations implements Operations {
                     PRINCIPAL,
                     "hello",
                     null,
-                    "2026-07-28T00:00:00Z"))));
+                    "2026-07-28T00:00:00Z",
+                    false))));
   }
 
   @Override
@@ -376,7 +378,8 @@ class TestOperations implements Operations {
                     "uday",
                     "please also update the docs",
                     null,
-                    "2026-07-28T00:01:00Z")),
+                    "2026-07-28T00:01:00Z",
+                    false)),
             false));
   }
 

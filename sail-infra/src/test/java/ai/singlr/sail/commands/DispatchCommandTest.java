@@ -207,6 +207,9 @@ class DispatchCommandTest {
     assertTrue(
         prompt.contains("read the room with\n`spec comments <id>`"),
         "the read verb is the portable floor: check when blocked, and before the final summary");
+    assertTrue(
+        prompt.contains("spec comment <id> --question --body <text>"),
+        "a blocked agent must know the question verb — the flag that pages the engineer");
     assertTrue(prompt.contains("unread messages block your\nfirst attempt to stop"));
   }
 
@@ -222,7 +225,8 @@ class DispatchCommandTest {
             null,
             "2026-07-28T00:00:00Z",
             "1-a",
-            null);
+            null,
+            false);
 
     var prompt = AgentTaskPrompt.build(spec, "Implement the flow", List.of(message)).prompt();
 

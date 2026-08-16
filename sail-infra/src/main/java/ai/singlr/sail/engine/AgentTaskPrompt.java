@@ -102,8 +102,11 @@ public final class AgentTaskPrompt {
         The room is a live channel, not a log: replies posted while you work are delivered into
         your context automatically after a tool call finishes, and unread messages block your
         first attempt to stop. When you are blocked on a decision, read the room with
-        `spec comments <id>` rather than guessing; read it once more before posting your final
-        summary, and acknowledge in that summary any guidance it carried.
+        `spec comments <id>` rather than guessing; if the room does not resolve it, post the
+        question with `spec comment <id> --question --body <text>` — the flag pages the
+        engineer on the board, and their reply clears it and wakes you. Read the room once more
+        before posting your final summary, and acknowledge in that summary any guidance it
+        carried.
 
         The spec is not complete until CI is green: after opening the pull request, watch its
         checks with the CLI of the forge hosting the repo (e.g. `gh pr checks <number> --watch`

@@ -33,6 +33,9 @@ public final class ApiSpecCommentCommand implements Runnable {
   @Option(names = "--reply-to", description = "Message ID to reply to.")
   private String replyTo;
 
+  @Option(names = "--question", description = "Mark this message as a question that needs a reply.")
+  private boolean question;
+
   @Mixin private SyncOptions syncOptions;
   @Mixin private ConnectionOptions connection;
   @Spec private CommandSpec commandSpec;
@@ -50,6 +53,9 @@ public final class ApiSpecCommentCommand implements Runnable {
     request.put("body", text);
     if (replyTo != null) {
       request.put("reply_to", replyTo);
+    }
+    if (question) {
+      request.put("question", true);
     }
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {

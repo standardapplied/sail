@@ -30,6 +30,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1063,13 +1064,29 @@ public final class SailOperations implements Operations {
             return listed;
           }
           return new GlobalSpecsListResponse(
-              listed.specs(), listed.total(), messageStore.latestBySpec());
+              listed.specs(),
+              listed.total(),
+              messageStore.latestBySpec(),
+              messageStore.openQuestions());
         });
   }
 
   @Override
   public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
-    return safeRead(() -> globalSpecOps.get(specId));
+    return safeRead(
+        () -> {
+          var detail = globalSpecOps.get(specId);
+          if (messageStore == null) {
+            return detail;
+          }
+          return new GlobalSpecDetailResponse(
+              detail.spec(),
+              detail.body(),
+              detail.plan(),
+              detail.openFindings(),
+              detail.latestRun(),
+              messageStore.openQuestions().get(specId));
+        });
   }
 
   @Override
@@ -1121,9 +1138,16 @@ public final class SailOperations implements Operations {
           SpecPolicy.post(actor, spec.id(), spec.assignee(), spec.createdBy()).enforce();
           MessageStore.MessageRow row;
           try {
-            row = store.append(specId, author, request.body(), request.replyTo());
+            row =
+                store.append(specId, author, request.body(), request.replyTo(), request.question());
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+          }
+          var data = new LinkedHashMap<String, Object>();
+          data.put("message_id", row.id());
+          data.put("preview", preview(row.body()));
+          if (row.question()) {
+            data.put("question", true);
           }
           publishOnBus(
               Event.of(
@@ -1132,7 +1156,7 @@ public final class SailOperations implements Operations {
                   Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
                   author,
                   HostInfo.hostname(),
-                  Map.of("message_id", row.id(), "preview", preview(row.body()))));
+                  data));
           return new SpecMessageResponse(SpecMessageView.from(row));
         });
   }
@@ -1273,7 +1297,19 @@ public final class SailOperations implements Operations {
 
   @Override
   public Result<GlobalBoardResponse> globalBoard(String project) {
-    return safeRead(() -> globalSpecOps.board(project));
+    return safeRead(
+        () -> {
+          var board = globalSpecOps.board(project);
+          if (messageStore == null) {
+            return board;
+          }
+          var open = messageStore.openQuestions().keySet();
+          var count =
+              specStore.list(new SpecStore.SpecFilter(project, null, null, null, null)).stream()
+                  .filter(row -> open.contains(row.id()))
+                  .count();
+          return new GlobalBoardResponse(board.board(), board.doneOpenFindings(), (int) count);
+        });
   }
 
   @Override

@@ -297,7 +297,10 @@ final class LocalApiRouter implements LocalApiHandler {
         yield ApiResponse.fromCreated(
             operations.postSpecMessage(
                 id,
-                new SpecMessageRequest(form.get("body"), form.get("reply_to")),
+                new SpecMessageRequest(
+                    form.get("body"),
+                    form.get("reply_to"),
+                    Boolean.parseBoolean(form.get("question"))),
                 caller.actor(),
                 caller.author()));
       }

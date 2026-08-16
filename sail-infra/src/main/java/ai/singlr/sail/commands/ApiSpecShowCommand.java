@@ -85,6 +85,12 @@ public final class ApiSpecShowCommand implements Runnable {
       if (spec.get("wake") != null) {
         System.out.println(Ansi.AUTO.string("  @|bold Wake:|@ " + spec.get("wake")));
       }
+      if (Boolean.TRUE.equals(spec.get("needs_reply"))) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|bold,red Needs reply:|@ unanswered question "
+                    + spec.get("question_message_id")));
+      }
 
       var body = (String) result.get("body");
       if (Strings.isNotBlank(body)) {

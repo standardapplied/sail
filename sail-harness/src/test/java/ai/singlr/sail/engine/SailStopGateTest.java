@@ -74,6 +74,9 @@ class SailStopGateTest {
     assertEquals(0, result.exitCode(), result.stderr());
     var reason = blockReason(result);
     assertTrue(reason.contains("commit your work in sail"), reason);
+    assertTrue(
+        reason.contains("spec comment <spec-id> --question --body <text>"),
+        "a genuinely blocked agent must be told the question verb, not just to say so: " + reason);
     assertTrue(Files.exists(marker()), "the first block must drop the one-nudge-per-run marker");
   }
 

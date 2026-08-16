@@ -63,6 +63,18 @@ class SpecCliHelperTest {
   }
 
   @Test
+  void commentAcceptsTheQuestionFlagInAnyOrder() {
+    var content = SpecCliHelper.scriptContent();
+    assertTrue(content.contains("--question) FIELDS+=(--data-urlencode \"question=true\")"));
+    assertTrue(
+        content.contains("comment accepts only --reply-to <message-id> and --question"),
+        "unknown comment options must still die loudly");
+    assertTrue(
+        content.contains("[--reply-to <message-id>] [--question]"),
+        "the usage text teaches the flag");
+  }
+
+  @Test
   void createPostsAndUpdateAndArchivePut() {
     var content = SpecCliHelper.scriptContent();
     assertTrue(content.contains("-X POST --data-urlencode \"project=$PROJECT\""));

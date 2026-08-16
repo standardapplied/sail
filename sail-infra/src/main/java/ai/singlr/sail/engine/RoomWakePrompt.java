@@ -70,12 +70,15 @@ public final class RoomWakePrompt {
         Grep tools for files. Do not fight a denial; work within the lane. If the
         conversation asks for code changes, answer that dispatch is the lane that changes
         code — describe what a re-dispatch (`sail spec dispatch %s --restart`) or a
-        follow-up spec should do instead of doing it here.
+        follow-up spec should do instead of doing it here. If the conversation asks
+        something you cannot answer or decide alone, post it back with
+        `spec comment %s --question --body <text>` — the flag pages the engineer on the
+        board until a human replies.
 
         The room stays live while you work: replies posted in the meantime are delivered
         into your context automatically after a tool call finishes, and unread messages
         block your first attempt to stop. When you have answered, stop.
         """
-        .formatted(specId, specId);
+        .formatted(specId, specId, specId);
   }
 }

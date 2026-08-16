@@ -209,7 +209,8 @@ class ReviewPromptBuilderTest {
             null,
             "2026-07-28T00:00:00Z",
             "1-a",
-            null);
+            null,
+            false);
 
     var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(message));
 

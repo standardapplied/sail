@@ -39,7 +39,7 @@ class RoomWakePromptTest {
 
   private static MessageStore.MessageRow message(String id, String author, String body) {
     return new MessageStore.MessageRow(
-        id, "auth", author, body, null, "2026-08-11T12:00:00Z", "1-a", null);
+        id, "auth", author, body, null, "2026-08-11T12:00:00Z", "1-a", null, false);
   }
 
   @Test
@@ -57,6 +57,9 @@ class RoomWakePromptTest {
     assertTrue(built.prompt().contains("spec comment auth --body"));
     assertTrue(built.prompt().contains("read-only chat session, and the harness enforces it"));
     assertTrue(built.prompt().contains("sail spec dispatch auth --restart"));
+    assertTrue(
+        built.prompt().contains("spec comment auth --question --body"),
+        "the wake lane teaches the question verb for what it cannot answer alone");
     assertEquals(List.of(question), built.renderedMessages());
   }
 
