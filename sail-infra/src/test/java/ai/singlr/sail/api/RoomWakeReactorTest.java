@@ -536,6 +536,82 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void aReadOnlyInviteStopOnAnOwnedRunTriggersTheCommitGuard() {
+    seed("auth", "done", "uday", null);
+    var runId = DateTimeUtils.newId().toString();
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        "uday",
+        "uday",
+        "invite",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    runStore.complete(runId, "completed", 0);
+    var stop = new LinkedHashMap<String, Object>();
+    stop.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    stop.put(Event.WellKnownData.RUN_ID, runId);
+    stop.put(Event.WellKnownData.RUN_ROLE, "invite");
+
+    reactor()
+        .onEvent(
+            Event.of(
+                "acme",
+                "auth",
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                "claude-code",
+                "host",
+                stop));
+
+    assertEquals(
+        List.of("acme/" + runId),
+        launcher.guarded,
+        "a read-only invite carries the same worktree-digest guard as a wake");
+  }
+
+  @Test
+  void aFullInviteStopNeverGuardsItMayLegitimatelyChangeCode() {
+    seed("auth", "done", "uday", null);
+    var runId = DateTimeUtils.newId().toString();
+    runStore.create(
+        runId,
+        "acme",
+        "auth",
+        "uday",
+        "uday",
+        "invite-full",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    var stop = new LinkedHashMap<String, Object>();
+    stop.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    stop.put(Event.WellKnownData.RUN_ID, runId);
+    stop.put(Event.WellKnownData.RUN_ROLE, "invite-full");
+
+    reactor()
+        .onEvent(
+            Event.of(
+                "acme",
+                "auth",
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                "claude-code",
+                "host",
+                stop));
+
+    assertTrue(launcher.guarded.isEmpty());
+  }
+
+  @Test
   void stopsThatAreNotThisBoxsRoomRunsNeverGuard() {
     seed("auth", "done", "uday", null);
     var reactor = reactor();

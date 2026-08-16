@@ -19,6 +19,9 @@ class RoomWakePolicyTest {
     assertFalse(RoomWakePolicy.humanAuthor("sail"));
     assertFalse(RoomWakePolicy.humanAuthor("claude/room-0195a2f0"));
     assertFalse(RoomWakePolicy.humanAuthor("codex/review-0195a2f0"));
+    assertFalse(
+        RoomWakePolicy.humanAuthor("codex/invite-0195a2f0"),
+        "an invited agent's post never wakes or invites anything");
     assertFalse(RoomWakePolicy.humanAuthor(""));
     assertFalse(RoomWakePolicy.humanAuthor(null));
   }

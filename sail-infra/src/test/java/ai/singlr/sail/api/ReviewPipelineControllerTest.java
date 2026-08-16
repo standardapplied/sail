@@ -315,6 +315,71 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void anInviteLaneStopNeverTriggersAReviewInEitherMode() {
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(laneStopEvent("auth", Event.WellKnownData.RUN_ROLE_INVITE, null));
+    ctrl.onEvent(laneStopEvent("auth", Event.WellKnownData.RUN_ROLE_INVITE_FULL, null));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "an invited agent's stop — read only or full — must never enter the pipeline: the"
+            + " review loop stays anchored to dispatch");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void anInviteStopThatLostItsRoleMarkerIsStillCaughtByTheRunRow() {
+    createSpec("auth", "in_progress");
+    var runStore = new ai.singlr.sail.store.RunStore(db);
+    var runId = ai.singlr.sail.common.DateTimeUtils.newId().toString();
+    runStore.create(
+        runId,
+        "test-project",
+        "auth",
+        "node-a",
+        "node-a",
+        "invite-full",
+        "codex",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + runId);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runStore,
+            () -> "node-a");
+    var data = new java.util.LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.RUN_ID, runId);
+
+    ctrl.onEvent(
+        Event.of(
+            "test-project",
+            "auth",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            data));
+
+    assertTrue(
+        reviewStore.reviewsForSpec("auth").isEmpty(),
+        "the run row is the fallback when an invite's signal lost its role");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void aRoomStopOnADoneSpecTriggersNothing() {
     createSpec("auth", "done");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);

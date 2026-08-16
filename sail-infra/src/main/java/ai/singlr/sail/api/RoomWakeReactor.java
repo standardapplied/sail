@@ -214,7 +214,9 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   }
 
   private void handleStop(Event event) throws Exception {
-    if (!Event.WellKnownData.RUN_ROLE_ROOM.equals(event.data().get(Event.WellKnownData.RUN_ROLE))) {
+    var role = event.data().get(Event.WellKnownData.RUN_ROLE);
+    if (!Event.WellKnownData.RUN_ROLE_ROOM.equals(role)
+        && !Event.WellKnownData.RUN_ROLE_INVITE.equals(role)) {
       return;
     }
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);

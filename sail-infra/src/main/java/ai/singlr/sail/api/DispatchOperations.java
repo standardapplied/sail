@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.InvitePrompt;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.SailPaths;
@@ -88,6 +89,12 @@ public final class DispatchOperations {
       AgentSession.SessionInfo session,
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher) {}
+
+  /**
+   * One launched invite: the run it minted, the principal it posts under, its mode, and — full mode
+   * only — the label of the pre-launch snapshot ({@code ""} for read only).
+   */
+  public record InviteLaunch(String runId, String principal, boolean full, String snapshot) {}
 
   /**
    * Container preparation that must not run until the whole-container reservation is won — the
@@ -610,6 +617,172 @@ public final class DispatchOperations {
   }
 
   /**
+   * Launches an invited agent into {@code specId}'s room — the explicit lane beside the wake lane's
+   * automatic one: a human chose the agent, the model, and the mode, so the human's choice decides
+   * the contract. Read only is the room lane verbatim under a new role ({@code invite}): viewer
+   * credential, harness tool cut, no repo reservation (the gate lets it run alongside anything, its
+   * own spec's live build included), worktree-digest guard. Full ({@code invite-full}) is the
+   * member credential a dispatched agent holds, bought with two structural payments: the repo
+   * reservation (reserved like a build, so one writer per repo always holds — a held reservation
+   * refuses the invite with the same vocabulary as a dispatch conflict) and a mandatory pre-launch
+   * snapshot labeled {@code invite-<runId>}, published into the room as {@code snapshot_created}; a
+   * failed snapshot aborts the launch loudly. Neither mode claims the spec, checks out a branch, or
+   * triggers the review pipeline on stop — the review loop stays anchored to dispatch. Inviting
+   * requires the same tier as dispatching on the spec, checked via {@link DispatchPolicy}. Always a
+   * fresh session: the point of an invite is a new participant.
+   */
+  public InviteLaunch startInvite(
+      String specId,
+      String agentYamlName,
+      boolean full,
+      String model,
+      Actor actor,
+      String localHandle) {
+    if (runStore == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box keeps no run aggregate, so an invite cannot be reserved or tracked.");
+    }
+    var spec =
+        specStore
+            .findById(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    requireAllowed(actor, spec.toSpec(), localHandle);
+    var agentCli = inviteAgent(agentYamlName);
+    if (!full && !agentCli.supportsReadOnlyInvite()) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          agentCli.readOnlyInviteRefusal(),
+          "Invite " + agentCli.yamlName() + " with full access, or invite claude-code read-only.");
+    }
+    var project = spec.project();
+    var loaded = projects.loadRunning(project);
+    var config = loaded.config();
+    if (config.agent() == null) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
+    }
+    var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
+    var room =
+        messageStore == null
+            ? List.<MessageStore.MessageRow>of()
+            : messageStore.list(specId, null, 20);
+    var built = InvitePrompt.build(spec, body.isBlank() ? spec.title() : body, room, full);
+    var task = built.prompt();
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    var role = full ? DispatchGate.FULL_INVITE_ROLE : DispatchGate.READ_ONLY_INVITE_ROLE;
+    var targetRepos =
+        full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
+    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
+    var branch = full ? Objects.toString(spec.branch(), "") : "";
+    var owner = Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee();
+    var credential =
+        reserve(
+            runId,
+            project,
+            specId,
+            localHandle,
+            owner,
+            role,
+            repoPaths,
+            agentCli.yamlName(),
+            Strings.isBlank(branch) ? null : branch,
+            task,
+            unit,
+            config);
+    try {
+      seedRoomDelivery(runId, built.renderedMessages());
+      var snapshot = "";
+      if (full) {
+        snapshot = inviteSnapshot(project, specId, runId);
+      } else {
+        captureRoomBaseline(project, config, runId);
+      }
+      var workDir =
+          full
+              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
+              : "/home/" + config.sshUser() + "/workspace";
+      var launch =
+          launchSession(
+              project,
+              config,
+              workDir,
+              full,
+              model,
+              null,
+              specId,
+              agentCli.yamlName(),
+              task,
+              branch,
+              repoPaths,
+              true,
+              unit,
+              runId,
+              credential,
+              role,
+              null);
+      var status = querySession(new AgentSession(shell), project, unit);
+      if (!updateRunProcess(runId, project, status, launch.watcher())) {
+        throw launchLostToCancel(runId, project, unit);
+      }
+      if (status != null && status.running()) {
+        publishAgentSessionStarted(
+            project, specId, agentCli.yamlName(), status.pid(), runId, launch.watcher());
+      }
+      var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
+      return new InviteLaunch(runId, principal, full, snapshot);
+    } catch (RuntimeException e) {
+      releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+  }
+
+  /** Resolves the invite's agent, refusing an unknown or missing name as a client error. */
+  private static AgentCli inviteAgent(String agentYamlName) {
+    if (Strings.isBlank(agentYamlName)) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "An invite must name the agent to launch.",
+          "Pass agent: claude-code or codex.");
+    }
+    try {
+      return AgentCli.fromYamlName(agentYamlName);
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
+    }
+  }
+
+  /**
+   * The full invite's mandatory pre-launch snapshot, labeled {@code invite-<runId>} so rollback is
+   * one visible step. Published with the spec id — unlike the container-scoped dispatch snapshot —
+   * so the {@code snapshot_created} event renders in the room the invite was made from. Failure
+   * aborts the invite: the snapshot is the payment for full access, and a YOLO session with no
+   * rollback point must not launch.
+   */
+  private String inviteSnapshot(String project, String specId, String runId) {
+    var label = "invite-" + runId;
+    try {
+      new SnapshotManager(shell).create(project, label);
+    } catch (Exception e) {
+      throw new ApiException(
+          ErrorCode.SNAPSHOT_FAILED,
+          "Failed to create the pre-invite snapshot, so the invite does not launch.",
+          "Check the host's snapshot capacity (incus storage) and retry.",
+          e);
+    }
+    publish(
+        project,
+        specId,
+        Event.WellKnownTypes.SNAPSHOT_CREATED,
+        Map.of("label", label, Event.WellKnownData.RUN_ID, runId));
+    return label;
+  }
+
+  /**
    * The spec's most recent conversation this box can actually resume: the latest run that recorded
    * a session id, restricted to runs executed on this node (conversation state lives on the box
    * that ran it; run rows and session ids replicate fleet-wide), to the same agent (a Claude
@@ -716,7 +889,7 @@ public final class DispatchOperations {
     var others =
         runStore.listForProject(project).stream()
             .filter(candidate -> !candidate.id().equals(runId))
-            .filter(candidate -> !candidate.roomRole())
+            .filter(candidate -> !candidate.readOnlyLane())
             .filter(candidate -> sameNode(roomNode, candidate))
             .filter(candidate -> overlapsRoomInterval(candidate, roomStarted, guardAt))
             .toList();

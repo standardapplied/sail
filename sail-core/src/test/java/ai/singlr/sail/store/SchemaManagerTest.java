@@ -463,6 +463,31 @@ class SchemaManagerTest {
   }
 
   @Test
+  void theRunsRoleCheckAdmitsBothInviteLanesAndRefusesUnknownRoles() {
+    new SchemaManager(db).migrate();
+
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role)"
+            + " VALUES ('i1', 'acme', 'claude-code', 'running', 't1', 'invite')");
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role)"
+            + " VALUES ('i2', 'acme', 'codex', 'running', 't1', 'invite-full')");
+
+    assertEquals(
+        "invite",
+        db.queryOne("SELECT role FROM runs WHERE id = 'i1'", r -> r.text(0)).orElseThrow());
+    assertEquals(
+        "invite-full",
+        db.queryOne("SELECT role FROM runs WHERE id = 'i2'", r -> r.text(0)).orElseThrow());
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            db.execute(
+                "INSERT INTO runs (id, project, agent, status, started_at, role)"
+                    + " VALUES ('i3', 'acme', 'claude-code', 'running', 't1', 'bogus')"));
+  }
+
+  @Test
   void theRoomGuardTableExistsAndCascadesWithItsRun() {
     new SchemaManager(db).migrate();
     db.execute(

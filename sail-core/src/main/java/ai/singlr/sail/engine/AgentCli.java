@@ -181,6 +181,33 @@ public enum AgentCli {
   }
 
   /**
+   * Whether this CLI can run an invite's read-only mode. The read-only invite is the room lane's
+   * contract verbatim — viewer credential, harness tool cut, no reservation — so support is exactly
+   * {@link #supportsRoomLane}: offered only where the harness can enforce it, never where
+   * enforcement would be a promise. Every agent supports the full mode; it buys its authority with
+   * the pre-launch snapshot and the repo reservation, not a sandbox.
+   */
+  public boolean supportsReadOnlyInvite() {
+    return supportsRoomLane();
+  }
+
+  /**
+   * Why the read-only invite mode is unavailable for this CLI, or null when it is supported.
+   * Declared here, at the agent seam, so the API reports the same reason the launch gate refuses
+   * with and clients can grey the option out honestly.
+   */
+  public String readOnlyInviteRefusal() {
+    if (supportsReadOnlyInvite()) {
+      return null;
+    }
+    return displayName()
+        + " has no harness-enforced read-only session inside a sail container: its bubblewrap"
+        + " sandbox needs user namespaces, which incus containers block, so its only working mode"
+        + " bypasses all restrictions. Invite it with full access instead — a pre-launch snapshot"
+        + " and the repo reservation guard that lane.";
+  }
+
+  /**
    * The room lane's headless command: like {@link #headlessCommand} but harness-restricted instead
    * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} — {@code Write} and
    * {@code Edit} do not exist in the session, and the {@code --tools} cut is CLI-authoritative, so

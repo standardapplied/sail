@@ -881,6 +881,77 @@ class ApiRouterTest {
   }
 
   @Test
+  void agentsListsTheInviteModeSupportToAnAuthenticatedCaller() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/agents", "token");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"name\": \"claude-code\""));
+      assertTrue(response.body().contains("\"display_name\": \"Claude Code\""));
+      assertTrue(response.body().contains("\"mode\": \"read_only\""));
+      assertTrue(response.body().contains("\"supported\": true"));
+      assertTrue(response.body().contains("\"supported\": false"));
+      assertTrue(
+          response.body().contains("\"reason\": \"no harness-enforced sandbox\""),
+          "an unsupported mode travels with its reason so clients grey it honestly");
+      assertTrue(response.body().contains("\"schema_version\": 1"));
+    }
+  }
+
+  @Test
+  void agentsRequiresABearerToken() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/agents", null);
+
+      assertEquals(401, response.statusCode());
+    }
+  }
+
+  @Test
+  void invitePostRoutesTheBodyToTheOperation() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var response =
+          post(
+              server,
+              "/v1/specs/auth-flow/invite",
+              "token",
+              "{\"agent\": \"codex\", \"model\": \"gpt-6\", \"full\": true}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"run_id\": \"run-9\""));
+      assertTrue(response.body().contains("\"principal\": \"claude/invite-run-9\""));
+      assertTrue(response.body().contains("\"mode\": \"full\""));
+      assertTrue(response.body().contains("\"snapshot\": \"invite-run-9\""));
+      assertEquals("auth-flow", ops.lastInvite.specId());
+      assertEquals("codex", ops.lastInvite.request().agent());
+      assertEquals("gpt-6", ops.lastInvite.request().model());
+      assertTrue(ops.lastInvite.request().full());
+    }
+  }
+
+  @Test
+  void invitePostDefaultsToReadOnly() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var response =
+          post(server, "/v1/specs/auth-flow/invite", "token", "{\"agent\": \"claude-code\"}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"mode\": \"read_only\""));
+      assertFalse(ops.lastInvite.request().full());
+    }
+  }
+
+  @Test
+  void inviteRejectsNonPost() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/specs/auth-flow/invite", "token");
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
   void followupPostReturns201WithDraftedSpec() throws Exception {
     try (var server = server()) {
       var response = post(server, "/v1/specs/auth-flow/followup", "token", "{}");
@@ -1221,6 +1292,10 @@ class ApiRouterTest {
   }
 
   private static class FakeOperations implements Operations {
+    record Invite(String specId, InviteRequest request, String localHandle) {}
+
+    volatile Invite lastInvite;
+
     @Override
     public Result<HealthResponse> health() {
       return Result.success(new HealthResponse("ok"));
@@ -1242,6 +1317,37 @@ class ApiRouterTest {
               java.util.List.of(
                   new FdeSummaryView("ada", "Ada Lovelace", "ada@x.dev", "admin"),
                   new FdeSummaryView("bob", "Bob", "bob@x.dev", "member"))));
+    }
+
+    @Override
+    public Result<AgentsResponse> agents() {
+      return Result.success(
+          new AgentsResponse(
+              java.util.List.of(
+                  new AgentView(
+                      "claude-code",
+                      "Claude Code",
+                      java.util.List.of(
+                          new AgentModeView("read_only", true, null),
+                          new AgentModeView("full", true, null))),
+                  new AgentView(
+                      "codex",
+                      "Codex CLI",
+                      java.util.List.of(
+                          new AgentModeView("read_only", false, "no harness-enforced sandbox"),
+                          new AgentModeView("full", true, null))))));
+    }
+
+    @Override
+    public Result<InviteResponse> inviteToSpec(
+        String specId, InviteRequest request, Actor actor, String localHandle) {
+      lastInvite = new Invite(specId, request, localHandle);
+      return Result.success(
+          new InviteResponse(
+              "run-9",
+              "claude/invite-run-9",
+              request.full() ? "full" : "read_only",
+              request.full() ? "invite-run-9" : ""));
     }
 
     @Override

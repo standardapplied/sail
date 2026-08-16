@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -312,5 +313,19 @@ class AgentCliTest {
     assertThrows(
         IllegalStateException.class,
         () -> AgentCli.CODEX.headlessRoomResumeCommand("sess-42", TASK, null, null, true));
+  }
+
+  @Test
+  void readOnlyInviteSupportMatchesTheRoomLaneBoundary() {
+    assertTrue(AgentCli.CLAUDE_CODE.supportsReadOnlyInvite());
+    assertFalse(AgentCli.CODEX.supportsReadOnlyInvite());
+  }
+
+  @Test
+  void readOnlyInviteRefusalNamesTheFullLaneAsTheAlternative() {
+    assertNull(AgentCli.CLAUDE_CODE.readOnlyInviteRefusal());
+    var reason = AgentCli.CODEX.readOnlyInviteRefusal();
+    assertTrue(reason.contains("Codex CLI"), reason);
+    assertTrue(reason.contains("full access"), reason);
   }
 }
