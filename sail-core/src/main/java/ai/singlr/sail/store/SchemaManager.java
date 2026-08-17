@@ -84,9 +84,10 @@ public final class SchemaManager {
    * database in a prior release's shape and migrates it forward — a fresh-database test cannot
    * catch a mid-list insertion, because it never replays the earlier version→SQL mapping. The
    * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
-   * {@code run_delivered_messages} (delivery bookkeeping) and {@code room_guard} (the room commit
-   * guard's launch baseline, kept host-side so the guarded agent can never reach it) are local-only
-   * as well — none of the three ever joins a sync snapshot.
+   * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
+   * guard's launch baseline, kept host-side so the guarded agent can never reach it), and {@code
+   * container_leases} (a box's own exclusive-container-operation claims) are local-only as well —
+   * none of the four ever joins a sync snapshot.
    */
   static final List<String> MIGRATIONS =
       List.of(
@@ -263,7 +264,15 @@ public final class SchemaManager {
           "DROP TABLE runs",
           "ALTER TABLE runs_v6 RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          """
+          CREATE TABLE container_leases (
+              project TEXT NOT NULL,
+              node TEXT NOT NULL DEFAULT '',
+              action TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (project, node)
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

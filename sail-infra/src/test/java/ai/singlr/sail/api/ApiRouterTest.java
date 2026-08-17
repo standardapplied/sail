@@ -370,6 +370,55 @@ class ApiRouterTest {
   }
 
   @Test
+  void snapshotRoutesListDeleteAndRestore() throws Exception {
+    try (var server = server()) {
+      var list = get(server, "/v1/projects/acme/snapshots", "token");
+      assertEquals(200, list.statusCode());
+      assertTrue(list.body().contains("\"invite-run-7\""));
+      assertTrue(list.body().contains("\"source\": \"invite\""));
+
+      var deleted = delete(server, "/v1/projects/acme/snapshots/invite-run-7", "token");
+      assertEquals(202, deleted.statusCode());
+      assertTrue(deleted.body().contains("\"status\": \"accepted\""));
+      assertTrue(deleted.body().contains("\"action\": \"delete\""));
+
+      var restored =
+          post(server, "/v1/projects/acme/snapshots/invite-run-7/restore", "token", "{}");
+      assertEquals(202, restored.statusCode());
+      assertTrue(restored.body().contains("\"action\": \"restore\""));
+    }
+  }
+
+  @Test
+  void snapshotRoutesRefuseWrongMethodsAndUnknownSubResources() throws Exception {
+    try (var server = server()) {
+      assertEquals(405, post(server, "/v1/projects/acme/snapshots", "token", "{}").statusCode());
+      assertEquals(405, get(server, "/v1/projects/acme/snapshots/snap-1", "token").statusCode());
+      assertEquals(
+          405, get(server, "/v1/projects/acme/snapshots/snap-1/restore", "token").statusCode());
+      assertEquals(
+          404,
+          post(server, "/v1/projects/acme/snapshots/snap-1/bogus", "token", "{}").statusCode());
+      assertEquals(
+          404,
+          post(server, "/v1/projects/acme/snapshots/snap-1/restore/extra", "token", "{}")
+              .statusCode());
+    }
+  }
+
+  @Test
+  void aRefusedSnapshotRestoreRendersTheRefusalVerbatim() throws Exception {
+    try (var server = serverWith(new SnapshotRefusingOperations())) {
+      server.start();
+
+      var response = post(server, "/v1/projects/acme/snapshots/snap-1/restore", "token", "{}");
+      assertEquals(409, response.statusCode());
+      assertTrue(response.body().contains("\"agent_already_running\""));
+      assertTrue(response.body().contains("would discard its live work"));
+    }
+  }
+
+  @Test
   void unknownRunSubResourceReturnsNotFound() throws Exception {
     try (var server = server()) {
       assertEquals(404, get(server, "/v1/runs/r1/bogus", "token").statusCode());
@@ -1412,6 +1461,26 @@ class ApiRouterTest {
     }
 
     @Override
+    public Result<SnapshotListResponse> snapshots(String project) {
+      return Result.success(
+          new SnapshotListResponse(
+              java.util.List.of(
+                  new SnapshotView("invite-run-7", "2026-08-17T10:00:00Z", "invite"),
+                  new SnapshotView("snap-20260817-100000", "2026-08-17T11:00:00Z", "dispatch"))));
+    }
+
+    @Override
+    public Result<SnapshotActionResponse> restoreSnapshot(
+        String project, String label, String localHandle) {
+      return Result.success(new SnapshotActionResponse(project, label, "restore", "accepted"));
+    }
+
+    @Override
+    public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
+      return Result.success(new SnapshotActionResponse(project, label, "delete", "accepted"));
+    }
+
+    @Override
     public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       return Result.success(
           new AgentStatusResponse(
@@ -1739,6 +1808,19 @@ class ApiRouterTest {
     @Override
     public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       return Result.failure(ErrorCode.CONFLICT, "Agent is busy.", "Wait.");
+    }
+  }
+
+  private static final class SnapshotRefusingOperations extends FakeOperations {
+    @Override
+    public Result<SnapshotActionResponse> restoreSnapshot(
+        String project, String label, String localHandle) {
+      return Result.failure(
+          ErrorCode.AGENT_ALREADY_RUNNING,
+          "Agent run r-7 is already working spec 'auth' in this container; restoring snapshot '"
+              + label
+              + "' would discard its live work.",
+          "Wait for it to finish or stop it, then retry the restore.");
     }
   }
 

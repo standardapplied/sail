@@ -655,6 +655,30 @@ class SailOperationsTest {
   }
 
   @Test
+  void snapshotRoutesDelegateToTheSnapshotLane() throws Exception {
+    var yaml = tempDir.resolve("sail-snapshots.yaml");
+    Files.writeString(yaml, baseYaml());
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on(
+                "incus snapshot list acme",
+                "[{\"name\": \"snap-1\", \"created_at\": \"2026-08-17T08:00:00Z\"}]");
+    var operations = new SailOperations(shell, yaml.toString());
+
+    var list = operations.snapshots("acme");
+    assertEquals("dispatch", list.orThrow().snapshots().getFirst().source());
+
+    assertError(ErrorCode.NOT_FOUND, operations.deleteSnapshot("acme", "missing"));
+    assertError(ErrorCode.INVALID_REQUEST, operations.restoreSnapshot("acme", "-bad", "uday"));
+
+    assertEquals(
+        "accepted", operations.restoreSnapshot("acme", "snap-1", "uday").orThrow().status());
+    var deleter = new SailOperations(shell, yaml.toString());
+    assertEquals("accepted", deleter.deleteSnapshot("acme", "snap-1").orThrow().status());
+  }
+
+  @Test
   void aFailedRunReservationAbortsDispatchBeforeAnyMutation() throws Exception {
     var yaml = tempDir.resolve("sail-broken-runs.yaml");
     Files.writeString(yaml, baseYaml());

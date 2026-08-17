@@ -52,6 +52,15 @@ class ApiResponseTest {
   }
 
   @Test
+  void fromAcceptedMapsSuccessTo202AndFailureToItsErrorStatus() {
+    var accepted = ApiResponse.fromAccepted(Result.success(new HealthResponse("ok")));
+    assertEquals(202, accepted.status());
+
+    var refused = ApiResponse.fromAccepted(Result.failure(ErrorCode.CONFLICT, "Busy.", "Wait."));
+    assertEquals(409, refused.status());
+  }
+
+  @Test
   void threeArgConstructorCopiesHeadersDefensively() {
     var headers = new java.util.HashMap<String, String>();
     headers.put("ETag", "\"v1\"");

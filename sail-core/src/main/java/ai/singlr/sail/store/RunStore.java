@@ -269,7 +269,8 @@ public final class RunStore implements ConflictResolver {
    * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch;
    * {@code owner} is the FDE the run's agent principal acts for. The principal handle and the run's
    * credential are minted inside the same transaction as the row, so a run and its identity are
-   * atomic. Returns the id.
+   * atomic. Fails if an exclusive container lease (see {@link #acquireContainerLease}) is held — a
+   * run must never start into a container about to be rolled back. Returns the id.
    */
   public String create(
       String id,
@@ -316,8 +317,19 @@ public final class RunStore implements ConflictResolver {
       Integer watcherPid,
       String logPath,
       String unit) {
-    return db.transaction(
+    return db.immediateTransaction(
         () -> {
+          var lease = activeLease(project, node);
+          if (lease.isPresent()) {
+            throw new IllegalStateException(
+                "Refusing to record run "
+                    + id
+                    + " for project "
+                    + project
+                    + ": an exclusive "
+                    + lease.get()
+                    + " operation holds its container. Retry after it completes.");
+          }
           db.execute(
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
@@ -351,9 +363,12 @@ public final class RunStore implements ConflictResolver {
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
    * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the reviewed spec's assignee — the FDE the review principal acts for. Returns the run's
-   * plaintext credential, surfaced exactly once so the launched review agent can actually act as
-   * the principal this row records; only the hash is at rest.
+   * is the reviewed spec's assignee — the FDE the review principal acts for. Fails if an exclusive
+   * container lease (see {@link #acquireContainerLease}) is held — a review must never launch into
+   * a container mid-restore; the pipeline surfaces the error and the reconciler's rescue replay
+   * retries the kickoff after the lease is released. Returns the run's plaintext credential,
+   * surfaced exactly once so the launched review agent can actually act as the principal this row
+   * records; only the hash is at rest.
    */
   public String createReview(
       String reviewId,
@@ -414,12 +429,105 @@ public final class RunStore implements ConflictResolver {
 
   /**
    * What a dispatch reservation produced: the reserved run's plaintext credential (returned exactly
-   * once, hashed at rest), or the blocking conflict.
+   * once, hashed at rest), the blocking conflict, or the exclusive container operation (a snapshot
+   * restore) that owns the whole container right now.
    */
   public sealed interface Reservation {
     record Reserved(String credential) implements Reservation {}
 
     record Conflicted(DispatchGate.Conflict conflict) implements Reservation {}
+
+    record LeaseHeld(String action) implements Reservation {}
+  }
+
+  /**
+   * What acquiring an exclusive container lease produced: the lease, the live run that blocks it,
+   * or the lease some other exclusive operation already holds.
+   */
+  public sealed interface ContainerLease {
+    record Acquired() implements ContainerLease {}
+
+    record BlockedByRun(RunRow run) implements ContainerLease {}
+
+    record BlockedByLease(String action) implements ContainerLease {}
+  }
+
+  /**
+   * How long a container lease is honored before readers treat it as abandoned: the leasing process
+   * releases in a {@code finally}, so an expired row only ever means that process died mid-mutation
+   * — and the mutation itself (a snapshot restore) completes well inside this bound. Expired rows
+   * are pruned on the next acquire or reservation, so a crash never wedges dispatch for good.
+   */
+  public static final Duration LEASE_TTL = Duration.ofMinutes(30);
+
+  /**
+   * Atomically claims the project's container on this box for one exclusive operation (a snapshot
+   * restore): within a single {@code BEGIN IMMEDIATE} transaction, refuses if another lease is held
+   * or any local run of the project is live ({@code running} or {@code stopping}, every role — even
+   * a read-only invite loses its session when the container is rolled back), then inserts the
+   * lease. Every run insert — {@link #reserveDispatch}, {@link #create}, {@link #createReview} —
+   * checks this lease inside its own transaction, so the two sides can never interleave: a restore
+   * is refused over live work, and no run can start until {@link #releaseContainerLease} runs.
+   * Rejoining an existing negotiation via {@link #rotateCredential} needs no check: it requires a
+   * {@code running} row, and any running row refuses the lease.
+   */
+  public ContainerLease acquireContainerLease(String project, String localHandle, String action) {
+    return db.immediateTransaction(
+        () -> {
+          var held = activeLease(project, localHandle);
+          if (held.isPresent()) {
+            return new ContainerLease.BlockedByLease(held.get());
+          }
+          var live =
+              db.queryOne(
+                  "SELECT "
+                      + COLUMNS
+                      + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
+                      + " AND IFNULL(node, '') = ? ORDER BY started_at LIMIT 1",
+                  this::mapRow,
+                  project,
+                  ownerKey(localHandle));
+          if (live.isPresent()) {
+            return new ContainerLease.BlockedByRun(live.get());
+          }
+          db.execute(
+              "INSERT INTO container_leases (project, node, action, created_at)"
+                  + " VALUES (?, ?, ?, ?)",
+              project,
+              ownerKey(localHandle),
+              action,
+              DateTimeUtils.now().toString());
+          return new ContainerLease.Acquired();
+        });
+  }
+
+  /** Releases the box's container lease on the project. Idempotent. */
+  public void releaseContainerLease(String project, String localHandle) {
+    db.execute(
+        "DELETE FROM container_leases WHERE project = ? AND node = ?",
+        project,
+        ownerKey(localHandle));
+  }
+
+  /**
+   * The action of the unexpired container lease on this box's container, or empty. An expired row
+   * is pruned on lookup like {@link #findByCredential}'s credential rows.
+   */
+  private Optional<String> activeLease(String project, String localHandle) {
+    var row =
+        db.queryOne(
+            "SELECT action, created_at FROM container_leases WHERE project = ? AND node = ?",
+            r -> new String[] {r.text(0), r.text(1)},
+            project,
+            ownerKey(localHandle));
+    if (row.isEmpty()) {
+      return Optional.empty();
+    }
+    if (Instant.parse(row.get()[1]).plus(LEASE_TTL).isBefore(DateTimeUtils.now())) {
+      releaseContainerLease(project, localHandle);
+      return Optional.empty();
+    }
+    return Optional.of(row.get()[0]);
   }
 
   /**
@@ -431,13 +539,16 @@ public final class RunStore implements ConflictResolver {
    * row; a check-then-insert split across transactions could admit both into the same repo. The
    * run's agent principal (handle, {@code owner}) and its credential are minted inside the same
    * transaction, so a reserved run always carries an attributable identity and a refused one mints
-   * nothing. Returns the blocking conflict, or the reserved run's credential. A run mid-stop
-   * ({@code stopping}) still occupies its repos — its agent is not verified dead until the claim is
-   * finalized — so it conflicts exactly like a running one. Any database failure propagates — a
-   * dispatch must never launch without the row every later overlap check depends on. {@code
-   * maxDuration} is the run's configured hard stop ({@code guardrails.max_duration}): the
-   * credential expires that long plus {@link #CREDENTIAL_GRACE} after minting, and a null means no
-   * hard stop, so the credential lives until a verified finisher revokes it.
+   * nothing. An exclusive container lease (a snapshot restore mid-flight, see {@link
+   * #acquireContainerLease}) refuses every reservation inside the same transaction, so a run can
+   * never start into a container about to be rolled back. Returns the blocking conflict, the held
+   * lease, or the reserved run's credential. A run mid-stop ({@code stopping}) still occupies its
+   * repos — its agent is not verified dead until the claim is finalized — so it conflicts exactly
+   * like a running one. Any database failure propagates — a dispatch must never launch without the
+   * row every later overlap check depends on. {@code maxDuration} is the run's configured hard stop
+   * ({@code guardrails.max_duration}): the credential expires that long plus {@link
+   * #CREDENTIAL_GRACE} after minting, and a null means no hard stop, so the credential lives until
+   * a verified finisher revokes it.
    */
   public Reservation reserveDispatch(
       String id,
@@ -473,6 +584,10 @@ public final class RunStore implements ConflictResolver {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
     return db.immediateTransaction(
         () -> {
+          var lease = activeLease(project, node);
+          if (lease.isPresent()) {
+            return new Reservation.LeaseHeld(lease.get());
+          }
           var running =
               db.query(
                   "SELECT "

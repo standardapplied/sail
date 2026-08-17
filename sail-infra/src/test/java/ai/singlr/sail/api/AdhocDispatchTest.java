@@ -395,6 +395,22 @@ class AdhocDispatchTest {
   }
 
   @Test
+  void aHeldContainerLeaseRefusesTheAdhocLaunch() throws Exception {
+    var ops = operations(liveAgentShell());
+    runStore.acquireContainerLease("acme", HANDLE, "restore");
+
+    var refusal =
+        assertThrows(ApiException.class, () -> ops.startAdhoc("acme", background("task"), HANDLE));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertTrue(
+        refusal.getMessage().contains("snapshot restore is in progress"), refusal.getMessage());
+    assertTrue(
+        runStore.listForProject("acme").isEmpty(),
+        "a lease-refused launch must not insert a run row");
+  }
+
+  @Test
   void aSecondAdhocSessionIsRefusedWhileTheFirstIsLive() throws Exception {
     var ops = operations(liveAgentShell());
     var first = ops.startAdhoc("acme", background("one"), HANDLE);

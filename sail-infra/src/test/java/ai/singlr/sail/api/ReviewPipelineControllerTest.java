@@ -440,6 +440,45 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aContainerLeaseHeldByARestoreErrorsTheReviewInsteadOfLaunchingIntoTheContainer() {
+    createSpec("auth", "in_progress");
+    var runStore = new RunStore(db);
+    runStore.acquireContainerLease("test-project", "node-a", "restore");
+    var launched = new java.util.concurrent.atomic.AtomicBoolean();
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid, cred) -> {
+              launched.set(true);
+              return CLEAN_REVIEW;
+            },
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runStore,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertFalse(launched.get(), "a review agent must never launch into a container mid-restore");
+    var errored = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", errored.status());
+    assertTrue(errored.errored());
+    assertTrue(errored.error().contains("restore"), errored.error());
+    assertTrue(
+        runStore.listForSpec("auth").isEmpty(), "a refused review must not insert a run row");
+
+    runStore.releaseContainerLease("test-project", "node-a");
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(launched.get(), "the replayed stop must review normally once the lease is gone");
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void aBuildStopStillTriggersTheReviewAfterTheRoomExclusion() {
     createSpec("auth", "in_progress");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);

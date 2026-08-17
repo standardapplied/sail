@@ -35,6 +35,13 @@ public record ApiResponse(int status, Map<String, Object> body, Map<String, Stri
     };
   }
 
+  public static ApiResponse fromAccepted(Result<?> result) {
+    return switch (result) {
+      case Result.Success<?> success -> new ApiResponse(202, ApiJson.withSchema(success.value()));
+      case Result.Failure<?> failure -> error(failure);
+    };
+  }
+
   public static ApiResponse fromCreated(Result<?> result) {
     return switch (result) {
       case Result.Success<?> success -> new ApiResponse(201, ApiJson.withSchema(success.value()));

@@ -49,6 +49,7 @@ class SchemaManagerTest {
     assertTrue(tables.contains("api_tokens"));
     assertTrue(tables.contains("schema_version"));
     assertTrue(tables.contains("runs"));
+    assertTrue(tables.contains("container_leases"));
     assertFalse(tables.contains("agent_sessions"));
   }
 
@@ -394,6 +395,29 @@ class SchemaManagerTest {
         "ok",
         db.queryOne("PRAGMA integrity_check", r -> r.text(0)).orElseThrow(),
         "the upgraded database is structurally sound");
+  }
+
+  @Test
+  void aV0_24_0ShapedDatabaseGainsTheContainerLeasesTable() {
+    stageAtBaseline();
+    var tail = migrationIndex("CREATE TABLE container_leases");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, tail).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + tail);
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+    assertTrue(
+        db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    + " AND name = 'container_leases'",
+                r -> r.text(0))
+            .contains("container_leases"),
+        "a released 0.24.x box must gain the exclusive-container-lease table on upgrade");
   }
 
   private void stageAtBaseline() {
