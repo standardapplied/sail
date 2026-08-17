@@ -1171,6 +1171,112 @@ class RunStoreTest {
   }
 
   @Test
+  void aContainerLeaseIsExclusiveAndBlocksEveryReservationUntilReleased() {
+    assertInstanceOf(
+        RunStore.ContainerLease.Acquired.class,
+        store.acquireContainerLease("backend", "node-a", "restore"));
+
+    var again = store.acquireContainerLease("backend", "node-a", "restore");
+    var held = assertInstanceOf(RunStore.ContainerLease.BlockedByLease.class, again);
+    assertEquals("restore", held.action());
+
+    var refusedId = DateTimeUtils.newId().toString();
+    var reservation =
+        store.reserveDispatch(
+            refusedId,
+            "backend",
+            "auth",
+            "node-a",
+            "node-a",
+            "build",
+            java.util.List.of("app"),
+            "claude-code",
+            "feat/x",
+            "do it",
+            "/log",
+            "sail-agent-" + refusedId);
+    var refused = assertInstanceOf(RunStore.Reservation.LeaseHeld.class, reservation);
+    assertEquals("restore", refused.action());
+    assertTrue(
+        store.findById(refusedId).isEmpty(), "a lease-refused reservation must not insert a row");
+
+    store.releaseContainerLease("backend", "node-a");
+    assertTrue(
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+            .isEmpty());
+  }
+
+  @Test
+  void aLiveRunBlocksTheContainerLeaseAndNamesItself() {
+    var id = newRun("backend", "auth");
+
+    var blocked =
+        assertInstanceOf(
+            RunStore.ContainerLease.BlockedByRun.class,
+            store.acquireContainerLease("backend", "node-a", "restore"));
+
+    assertEquals(id, blocked.run().id());
+  }
+
+  @Test
+  void aReadOnlyInviteBlocksTheContainerLeaseEvenThoughItBlocksNoDispatch() {
+    var invite = DateTimeUtils.newId().toString();
+    store.reserveDispatch(
+        invite,
+        "backend",
+        "",
+        "node-a",
+        "node-a",
+        "invite",
+        java.util.List.of(),
+        "claude-code",
+        null,
+        "consult",
+        "/log",
+        "sail-agent-" + invite);
+
+    var blocked =
+        assertInstanceOf(
+            RunStore.ContainerLease.BlockedByRun.class,
+            store.acquireContainerLease("backend", "node-a", "restore"));
+
+    assertEquals(invite, blocked.run().id());
+  }
+
+  @Test
+  void aForeignNodesRunNeverBlocksTheContainerLeaseHere() {
+    newRun("backend", "auth");
+
+    assertInstanceOf(
+        RunStore.ContainerLease.Acquired.class,
+        store.acquireContainerLease("backend", "node-b", "restore"));
+  }
+
+  @Test
+  void anExpiredContainerLeaseIsPrunedOnAcquire() {
+    db.execute(
+        "INSERT INTO container_leases (project, node, action, created_at)"
+            + " VALUES ('backend', 'node-a', 'restore', ?)",
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+
+    assertInstanceOf(
+        RunStore.ContainerLease.Acquired.class,
+        store.acquireContainerLease("backend", "node-a", "restore"));
+  }
+
+  @Test
+  void anExpiredContainerLeaseNeverBlocksAReservation() {
+    db.execute(
+        "INSERT INTO container_leases (project, node, action, created_at)"
+            + " VALUES ('backend', 'node-a', 'restore', ?)",
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+
+    assertTrue(
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+            .isEmpty());
+  }
+
+  @Test
   void anEmptyRepoSetReservesTheWholeContainer() {
     reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of());
 

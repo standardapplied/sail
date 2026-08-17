@@ -222,6 +222,19 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void aHeldContainerLeaseRefusesTheWake() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    runStore.acquireContainerLease("acme", HANDLE, "restore");
+
+    var refusal = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+
+    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
+    assertTrue(
+        refusal.getMessage().contains("snapshot restore is in progress"), refusal.getMessage());
+  }
+
+  @Test
   void aDisjointSpecsLiveBuildNeverBlocksTheWake() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");

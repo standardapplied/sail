@@ -578,6 +578,9 @@ public final class DispatchOperations {
     if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
       throw overlapRefusal(conflicted.conflict());
     }
+    if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
+      throw leaseRefusal(held);
+    }
     var credential = ((RunStore.Reservation.Reserved) reservation).credential();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
@@ -1584,6 +1587,17 @@ public final class DispatchOperations {
             });
   }
 
+  /**
+   * The refusal when an exclusive container operation (a snapshot restore) holds the container: no
+   * run of any role may start into a container that is about to be rolled back.
+   */
+  private static ApiException leaseRefusal(RunStore.Reservation.LeaseHeld held) {
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "A snapshot " + held.action() + " is in progress in this container.",
+        "Wait for its snapshot_restored event, then retry.");
+  }
+
   private static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
     var run = conflict.run();
     var occupied =
@@ -1736,6 +1750,9 @@ public final class DispatchOperations {
     }
     if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
       throw overlapRefusal(conflicted.conflict());
+    }
+    if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
+      throw leaseRefusal(held);
     }
     pruneRuns(project);
     return ((RunStore.Reservation.Reserved) reservation).credential();

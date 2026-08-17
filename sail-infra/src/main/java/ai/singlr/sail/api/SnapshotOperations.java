@@ -32,8 +32,13 @@ import java.util.concurrent.Executors;
  * snapshot_restored} / {@code snapshot_deleted} events already declared on the bus. A failed
  * mutation publishes the same event with an {@code error} entry so a listener never waits forever.
  *
- * <p>Restore is the dangerous verb — it discards the container's current state — so it refuses
- * while any run is live on this box's container, with the same vocabulary as dispatch conflicts.
+ * <p>Restore is the dangerous verb — it discards the container's current state — so acceptance
+ * takes the {@link RunStore#acquireContainerLease exclusive container lease}: one transaction
+ * refuses the restore while any run is live on this box's container (with the same vocabulary as
+ * dispatch conflicts) and, until the worker releases the lease, refuses every new run reservation —
+ * so a dispatch can never start into a container about to be rolled back. A failed restore that had
+ * stopped a running container starts it again best-effort, so the failure mode is "still on the old
+ * state", never "down".
  */
 final class SnapshotOperations {
 
@@ -81,11 +86,16 @@ final class SnapshotOperations {
 
   SnapshotActionResponse restore(String project, String label, String localHandle) {
     NameValidator.requireValidSnapshotLabel(label);
-    var state = projects.loadCreated(project).state();
+    projects.loadCreated(project);
     requireSnapshotExists(project, label);
-    refuseLiveRun(project, label, localHandle);
     claim(project);
-    executor.execute(() -> runRestore(project, label, state));
+    try {
+      acquireRestoreLease(project, label, localHandle);
+    } catch (RuntimeException e) {
+      inFlight.remove(project);
+      throw e;
+    }
+    executor.execute(() -> runRestore(project, label, localHandle));
     return new SnapshotActionResponse(project, label, RESTORE_ACTION, "accepted");
   }
 
@@ -117,18 +127,39 @@ final class SnapshotOperations {
     return "manual";
   }
 
-  private void runRestore(String project, String label, ContainerState state) {
+  private void runRestore(String project, String label, String localHandle) {
+    var stopped = false;
     try {
-      if (state instanceof ContainerState.Running) {
+      if (projects.loadCreated(project).state() instanceof ContainerState.Running) {
         containers.stop(project);
+        stopped = true;
       }
       snapshots.restore(project, label);
       containers.start(project);
       publish(project, Event.WellKnownTypes.SNAPSHOT_RESTORED, Map.of("label", label));
     } catch (Exception e) {
+      recoverStoppedContainer(project, stopped, e);
       publishFailure(project, Event.WellKnownTypes.SNAPSHOT_RESTORED, label, e);
     } finally {
+      releaseRestoreLease(project, localHandle);
       inFlight.remove(project);
+    }
+  }
+
+  /**
+   * A restore that failed after stopping a running container starts it again, so the failure mode
+   * is "still on the old state", never "down". A restart failure rides the original exception as
+   * suppressed — both reach the published error and the log.
+   */
+  private void recoverStoppedContainer(String project, boolean stopped, Exception failure) {
+    if (!stopped) {
+      return;
+    }
+    try {
+      containers.start(project);
+    } catch (Exception restartFailure) {
+      restoreInterrupt(restartFailure);
+      failure.addSuppressed(restartFailure);
     }
   }
 
@@ -169,18 +200,42 @@ final class SnapshotOperations {
     }
   }
 
-  private void refuseLiveRun(String project, String label, String localHandle) {
+  /**
+   * Claims the container for the restore through {@link RunStore#acquireContainerLease}: one
+   * transaction refuses over any live local run (any role — even a read-only invite loses its
+   * session to a rollback) or an already-held lease, and blocks every new run reservation until
+   * {@link #releaseRestoreLease}. A box without a run aggregate has no runs to race and no
+   * dispatches to fence — the in-flight claim alone gates it.
+   */
+  private void acquireRestoreLease(String project, String label, String localHandle) {
     if (runStore == null) {
       return;
     }
-    runStore.listForProject(project).stream()
-        .filter(DispatchOperations::ownsLiveAgent)
-        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
-        .findFirst()
-        .ifPresent(
-            run -> {
-              throw restoreRefusal(run, label);
-            });
+    switch (runStore.acquireContainerLease(project, localHandle, RESTORE_ACTION)) {
+      case RunStore.ContainerLease.BlockedByRun blocked ->
+          throw restoreRefusal(blocked.run(), label);
+      case RunStore.ContainerLease.BlockedByLease held ->
+          throw new ApiException(
+              ErrorCode.CONFLICT,
+              "A snapshot "
+                  + held.action()
+                  + " is already in progress for project '"
+                  + project
+                  + "'.",
+              "Wait for its snapshot_restored or snapshot_deleted event, then retry.");
+      case RunStore.ContainerLease.Acquired acquired -> {}
+    }
+  }
+
+  private void releaseRestoreLease(String project, String localHandle) {
+    if (runStore == null) {
+      return;
+    }
+    try {
+      runStore.releaseContainerLease(project, localHandle);
+    } catch (RuntimeException e) {
+      ApiLog.unexpected("releasing the container lease for '" + project + "'", e);
+    }
   }
 
   private static ApiException restoreRefusal(RunStore.RunRow run, String label) {

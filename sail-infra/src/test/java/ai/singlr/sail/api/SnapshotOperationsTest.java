@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -217,6 +218,111 @@ class SnapshotOperationsTest {
     assertThrows(IllegalArgumentException.class, () -> ops.restore("acme", "-bad", "uday"));
 
     assertTrue(shell.invocations().isEmpty());
+  }
+
+  @Test
+  void anAcceptedRestoreLeasesTheContainerAgainstDispatchUntilItCompletes() throws Exception {
+    var runs = runStore();
+    var executor = new HoldingExecutorService();
+    var ops = ops(shell(RUNNING_JSON), runs, executor);
+
+    ops.restore("acme", "my-checkpoint", "uday");
+
+    var during = reserve(runs, "r-1");
+    var held = assertInstanceOf(RunStore.Reservation.LeaseHeld.class, during);
+    assertEquals("restore", held.action());
+
+    executor.runAll();
+    assertInstanceOf(RunStore.Reservation.Reserved.class, reserve(runs, "r-2"));
+  }
+
+  @Test
+  void aFailedRestoreReleasesTheLeaseSoDispatchCanProceed() throws Exception {
+    var runs = runStore();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list ^acme$", RUNNING_JSON)
+            .onOk("incus snapshot list acme", SNAPSHOTS_JSON)
+            .onFail("incus snapshot restore acme my-checkpoint", "boom");
+    var ops = ops(shell, runs, new DirectExecutorService());
+
+    ops.restore("acme", "my-checkpoint", "uday");
+
+    assertEquals(1, events.size());
+    assertTrue(events.getFirst().data().get("error").toString().contains("boom"));
+    assertInstanceOf(RunStore.Reservation.Reserved.class, reserve(runs, "r-3"));
+  }
+
+  @Test
+  void aRestoreIsRefusedWhileAnotherLeaseHoldsTheContainer() throws Exception {
+    var runs = runStore();
+    runs.acquireContainerLease("acme", "uday", "restore");
+    var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
+
+    var error =
+        assertThrows(ApiException.class, () -> ops.restore("acme", "my-checkpoint", "uday"));
+
+    assertEquals(ErrorCode.CONFLICT, error.failure().errorCode());
+    assertTrue(error.getMessage().contains("already in progress"));
+    assertEquals(
+        "accepted",
+        ops.delete("acme", "my-checkpoint").status(),
+        "the refused restore must release its in-flight claim");
+  }
+
+  @Test
+  void aFailedRestoreOfARunningContainerStartsItAgain() throws Exception {
+    var shell = shell(RUNNING_JSON).onFail("incus snapshot restore acme my-checkpoint", "boom");
+    var ops = ops(shell, null, new DirectExecutorService());
+
+    ops.restore("acme", "my-checkpoint", "uday");
+
+    var commands = shell.invocations();
+    assertTrue(
+        commands.indexOf("incus stop acme") < commands.indexOf("incus start acme"),
+        "a restore that stopped a running container must start it again on failure");
+    assertEquals(1, events.size());
+    assertTrue(events.getFirst().data().get("error").toString().contains("boom"));
+  }
+
+  @Test
+  void aFailedRestartAfterAFailedRestoreStillPublishesTheError() throws Exception {
+    var shell =
+        shell(RUNNING_JSON)
+            .onFail("incus snapshot restore acme my-checkpoint", "boom")
+            .onFail("incus start acme", "cannot start");
+    var ops = ops(shell, null, new DirectExecutorService());
+
+    ops.restore("acme", "my-checkpoint", "uday");
+
+    assertTrue(shell.invocations().contains("incus start acme"));
+    assertEquals(1, events.size());
+    assertTrue(events.getFirst().data().get("error").toString().contains("boom"));
+  }
+
+  @Test
+  void aFailedLeaseReleaseStillClearsTheInFlightClaim() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("lease-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var runs = new RunStore(db);
+    var executor = new HoldingExecutorService();
+    var ops = ops(shell(RUNNING_JSON), runs, executor);
+    ops.restore("acme", "my-checkpoint", "uday");
+    db.close();
+
+    executor.runAll();
+
+    assertEquals(1, events.size());
+    assertEquals(Event.WellKnownTypes.SNAPSHOT_RESTORED, events.getFirst().type());
+    assertEquals(
+        "accepted",
+        ops.delete("acme", "my-checkpoint").status(),
+        "a lease release that fails must never wedge the in-flight claim");
+  }
+
+  private static RunStore.Reservation reserve(RunStore runs, String id) {
+    return runs.reserveDispatch(
+        id, "acme", "auth", "uday", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
   }
 
   @Test
