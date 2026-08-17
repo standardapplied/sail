@@ -913,6 +913,86 @@ class RunStoreTest {
   }
 
   @Test
+  void inviteRolesMintTheInvitePrincipalAndJoinTheLanePredicates() {
+    var readOnly = DateTimeUtils.newId().toString();
+    var full = DateTimeUtils.newId().toString();
+    store.create(
+        readOnly,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "invite",
+        "claude-code",
+        null,
+        "consult",
+        null,
+        null,
+        null,
+        "sail-agent-" + readOnly);
+    store.create(
+        full,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "invite-full",
+        "codex",
+        null,
+        "pitch in",
+        null,
+        null,
+        null,
+        "sail-agent-" + full);
+
+    var readOnlyRun = store.findById(readOnly).orElseThrow();
+    var fullRun = store.findById(full).orElseThrow();
+    assertEquals("claude/invite-" + readOnly, readOnlyRun.principal());
+    assertEquals("codex/invite-" + full, fullRun.principal());
+    assertTrue(readOnlyRun.inviteRole());
+    assertTrue(fullRun.inviteRole());
+    assertTrue(readOnlyRun.readOnlyLane(), "a read-only invite carries the room contract");
+    assertFalse(fullRun.readOnlyLane(), "a full invite is member-tier, never viewer");
+    assertTrue(readOnlyRun.sessionRole(), "invites join the stop/status/reaper lanes");
+    assertTrue(fullRun.sessionRole());
+    assertFalse(readOnlyRun.buildRole());
+    assertTrue(store.running().stream().map(RunStore.RunRow::id).toList().contains(readOnly));
+    assertTrue(store.running().stream().map(RunStore.RunRow::id).toList().contains(full));
+  }
+
+  @Test
+  void aConcurrentInviteNeverShadowsTheBuildForProjectLevelCommands() {
+    var build = newRun("backend", "auth");
+    var invite = DateTimeUtils.newId().toString();
+    store.create(
+        invite,
+        "backend",
+        "auth",
+        "node-a",
+        "node-a",
+        "invite",
+        "claude-code",
+        null,
+        "consult",
+        null,
+        null,
+        null,
+        "sail-agent-" + invite);
+
+    assertEquals(
+        build,
+        store.latestForProjectOnNode("backend", "node-a").orElseThrow().id(),
+        "project-level status/log addresses the build, not a newer consultant beside it");
+    assertEquals(
+        build,
+        store.runningForProjectOnNode("backend", "node-a").orElseThrow().id(),
+        "a project-level stop halts the build, not the invite running alongside it");
+    assertTrue(
+        store.running().stream().map(RunStore.RunRow::id).toList().contains(invite),
+        "the reaper still owns the invite — it is addressable and stoppable by its run id");
+  }
+
+  @Test
   void aRoomReservationNeverBlocksADisjointSpecsDispatchAndViceVersa() {
     reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
 

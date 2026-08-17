@@ -74,6 +74,27 @@ class ClaudeCodeHookConfigTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void renderDeniesReadsOfTheContainerCredentialsAndKeys() {
+    var json = ClaudeCodeHookConfig.render();
+    var permissions = (Map<String, Object>) YamlUtil.parseMap(json).get("permissions");
+    var deny = (List<String>) permissions.get("deny");
+    assertEquals(
+        List.of(
+            "Read(//var/lib/sail/run/box.credential)",
+            "Read(/home/dev/.ssh/**)",
+            "Read(/home/dev/.git-credentials)"),
+        deny,
+        "the room lane's reads are cwd-scoped (Claude auto-approves cat/head/tail/grep only inside"
+            + " the workspace, refusing out-of-tree paths), so the container's secrets are unreadable"
+            + " by default; these Read-denies belt-and-suspenders the top credentials — the box FDE"
+            + " credential, the box SSH identity, the git credential — explicitly on top. Deny"
+            + " outranks allow and --setting-sources is pinned, so no ambient file can out-vote"
+            + " these; a full (YOLO) agent skips them by design. Hermetic isolation stays with the"
+            + " sidecar follow-up.");
+  }
+
+  @Test
   void renderDisablesCommitCoAuthorAttribution() {
     var json = ClaudeCodeHookConfig.render();
     assertTrue(

@@ -56,6 +56,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String DISMISS = "dismiss";
   private static final String FOLLOWUP = "followup";
   private static final String MESSAGES = "messages";
+  private static final String INVITE = "invite";
+  private static final String AGENTS = "agents";
   private static final int DEFAULT_MESSAGES = 50;
   private static final int MAX_MESSAGES = 100;
   private static final int DEFAULT_TAIL = 200;
@@ -169,6 +171,10 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.matches(GET, V1, FDES)) {
       return ApiResponse.from(operations.fdes());
+    }
+
+    if (request.matches(GET, V1, AGENTS)) {
+      return ApiResponse.from(operations.agents());
     }
 
     if (request.hasEventsPrefix()) {
@@ -355,6 +361,15 @@ public final class ApiRouter implements HttpHandler {
                 specId,
                 FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))
                     .withCreatedBy(actor(exchange))));
+      }
+      if (INVITE.equals(sub)) {
+        requireMethod(request, POST);
+        return ApiResponse.from(
+            operations.inviteToSpec(
+                specId,
+                InviteRequest.fromMap(JsonBody.readMap(exchange)),
+                actorOf(exchange),
+                nodeHandle.get()));
       }
       if (MESSAGES.equals(sub)) {
         return switch (request.method()) {

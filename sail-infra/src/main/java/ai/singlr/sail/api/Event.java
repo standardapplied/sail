@@ -187,16 +187,29 @@ public record Event(
     /** {@link #RUN_ROLE} value: a fix run — its own stop must never re-enter the pipeline. */
     public static final String RUN_ROLE_FIX = "fix";
 
+    /** {@link #RUN_ROLE} value: a read-only invited consultant — chat only, never a review. */
+    public static final String RUN_ROLE_INVITE = "invite";
+
+    /**
+     * {@link #RUN_ROLE} value: a full-access invited agent. Its stop never triggers the review
+     * pipeline — the review loop stays anchored to dispatch; commits it pushed surface in the room
+     * and the next build's review sees them.
+     */
+    public static final String RUN_ROLE_INVITE_FULL = "invite-full";
+
     /**
      * Whether a run role names a lane whose own stop must never drive the review pipeline: a {@link
-     * #RUN_ROLE_ROOM} chat, or the pipeline's own {@link #RUN_ROLE_REVIEW} / {@link #RUN_ROLE_FIX}
-     * run. Reactors on {@code agent_session_stopped} drop such stops by role so the loop can never
-     * re-enter on its own agents. Null (a role-less stop) is a normal build stop.
+     * #RUN_ROLE_ROOM} chat, an invited agent ({@link #RUN_ROLE_INVITE} / {@link
+     * #RUN_ROLE_INVITE_FULL}), or the pipeline's own {@link #RUN_ROLE_REVIEW} / {@link
+     * #RUN_ROLE_FIX} run. Reactors on {@code agent_session_stopped} drop such stops by role so the
+     * loop can never re-enter on its own agents. Null (a role-less stop) is a normal build stop.
      */
     public static boolean nonTriggeringLane(String role) {
       return RUN_ROLE_ROOM.equals(role)
           || RUN_ROLE_REVIEW.equals(role)
-          || RUN_ROLE_FIX.equals(role);
+          || RUN_ROLE_FIX.equals(role)
+          || RUN_ROLE_INVITE.equals(role)
+          || RUN_ROLE_INVITE_FULL.equals(role);
     }
 
     private WellKnownData() {}

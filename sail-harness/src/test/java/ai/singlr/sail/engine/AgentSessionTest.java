@@ -571,6 +571,57 @@ class AgentSessionTest {
   }
 
   @Test
+  void aReadOnlyInviteLaunchIsHarnessRestrictedEvenWhenFullPermissionsIsMispassed() {
+    var joined =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/home/dev/workspace",
+                true,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "spec-1",
+                "claude-code",
+                RUN_UNIT.logPath(),
+                RUN_ID,
+                "cred-0",
+                "invite",
+                null));
+
+    assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
+    assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+    assertTrue(joined.contains("\"Bash(spec:*)\""), joined);
+  }
+
+  @Test
+  void aFullInviteLaunchKeepsTheFullPermissionCommand() {
+    var joined =
+        String.join(
+            " ",
+            AgentSession.buildBackgroundLaunchCommand(
+                "acme",
+                "dev",
+                "/home/dev/workspace",
+                true,
+                AgentCli.CLAUDE_CODE,
+                null,
+                null,
+                "spec-1",
+                "claude-code",
+                RUN_UNIT.logPath(),
+                RUN_ID,
+                "cred-0",
+                "invite-full",
+                null));
+
+    assertTrue(joined.contains("--dangerously-skip-permissions"), joined);
+    assertFalse(joined.contains("--tools"), joined);
+  }
+
+  @Test
   void runScopedLaunchCommandsRejectABlankOrInvalidRunId() {
     assertThrows(
         IllegalArgumentException.class,

@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
+import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -386,6 +387,53 @@ public final class SailOperations implements Operations {
                 fde -> new FdeSummaryView(fde.handle(), fde.displayName(), fde.email(), fde.role()))
             .toList();
     return new FdesResponse(roster);
+  }
+
+  /**
+   * The known agent CLIs and their invite-mode support, declared at the {@link AgentCli} seam: read
+   * only is offered only where the harness enforces it, and the refusal reason travels so clients
+   * grey the option out with the same words the launch gate refuses with.
+   */
+  @Override
+  public Result<AgentsResponse> agents() {
+    var agents =
+        Arrays.stream(AgentCli.values())
+            .map(
+                cli ->
+                    new AgentView(
+                        cli.yamlName(),
+                        cli.displayName(),
+                        List.of(
+                            new AgentModeView(
+                                "read_only",
+                                cli.supportsReadOnlyInvite(),
+                                cli.readOnlyInviteRefusal()),
+                            new AgentModeView("full", true, null))))
+            .toList();
+    return Result.success(new AgentsResponse(agents));
+  }
+
+  @Override
+  public Result<InviteResponse> inviteToSpec(
+      String specId, InviteRequest request, Actor actor, String localHandle) {
+    freshenForRead();
+    var result = safe(() -> inviteValue(specId, request, actor, localHandle));
+    if (result instanceof Result.Success<InviteResponse>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
+  private InviteResponse inviteValue(
+      String specId, InviteRequest request, Actor actor, String localHandle) {
+    var launch =
+        dispatchOps.startInvite(
+            specId, request.agent(), request.full(), request.model(), actor, localHandle);
+    return new InviteResponse(
+        launch.runId(),
+        launch.principal(),
+        launch.full() ? "full" : "read_only",
+        launch.snapshot());
   }
 
   @Override

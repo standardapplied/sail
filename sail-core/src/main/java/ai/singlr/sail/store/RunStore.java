@@ -214,6 +214,25 @@ public final class RunStore implements ConflictResolver {
     }
 
     /**
+     * Whether this row is an invited agent session, either mode: a human explicitly invited this
+     * agent into the spec's room. Invite stops never trigger the review pipeline — the review loop
+     * stays anchored to dispatch.
+     */
+    public boolean inviteRole() {
+      return "invite".equals(role) || "invite-full".equals(role);
+    }
+
+    /**
+     * Whether this row runs under the read-only room contract — a room wake or a read-only invite:
+     * viewer-tier credential, harness tool cut, no repo reservation, worktree-digest guard. The API
+     * boundary derives the credential tier from this predicate, never from anything the session
+     * says.
+     */
+    public boolean readOnlyLane() {
+      return roomRole() || "invite".equals(role);
+    }
+
+    /**
      * Whether this row is a review execution — the reviewer or its fix agent, which share the one
      * review row. Their own stop must never re-enter the pipeline, so lane-aware reactors consult
      * this as the fallback when a stop signal lost its role marker.
@@ -224,17 +243,20 @@ public final class RunStore implements ConflictResolver {
 
     /**
      * Whether this row is an agent session the run-scoped machinery owns — a build attempt, an
-     * ad-hoc run, or a room wake — as opposed to a pipeline-driven review execution. Session rows
-     * are the ones the stop, status, log, reaper, and missed-stop lanes address; a room run joins
-     * them because it launches through the same systemd unit and must be reaped and stoppable like
-     * any other.
+     * ad-hoc run, a room wake, or an invite — as opposed to a pipeline-driven review execution.
+     * Session rows are the ones the stop, status, log, reaper, and missed-stop lanes address; room
+     * and invite runs join them because they launch through the same systemd unit and must be
+     * reaped and stoppable like any other.
      */
     public boolean sessionRole() {
-      return buildRole() || adhocRole() || roomRole();
+      return buildRole() || adhocRole() || roomRole() || inviteRole();
     }
   }
 
-  private static final String SESSION_ROLES = "role IN ('build', 'adhoc', 'room')";
+  private static final String SESSION_ROLES =
+      "role IN ('build', 'adhoc', 'room', 'invite', 'invite-full')";
+
+  private static final String PROJECT_SESSION_ROLES = "role IN ('build', 'adhoc', 'room')";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
@@ -688,6 +710,7 @@ public final class RunStore implements ConflictResolver {
           case "review" -> "review-";
           case "fix" -> "fix-";
           case "room" -> "room-";
+          case "invite", "invite-full" -> "invite-";
           default -> "";
         };
     return base + "/" + marker + runId;
@@ -717,9 +740,11 @@ public final class RunStore implements ConflictResolver {
   /**
    * The latest agent session (build or ad-hoc) of {@code project} that executed on this box, or
    * empty. Review runs remain in the aggregate but do not replace the session used by agent status,
-   * log, and report commands. Ownership is by node: a box with a handle owns exactly the runs
-   * stamped with it; a box with no handle owns exactly its own blank-node runs and never a run
-   * adopted from another box via sync.
+   * log, and report commands. Invites are excluded too ({@link #PROJECT_SESSION_ROLES}): a
+   * read-only invite runs alongside a live build by design, so a newer invite must not shadow the
+   * build a project-level status or log addresses. Ownership is by node: a box with a handle owns
+   * exactly the runs stamped with it; a box with no handle owns exactly its own blank-node runs and
+   * never a run adopted from another box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
@@ -727,7 +752,7 @@ public final class RunStore implements ConflictResolver {
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
             + " AND "
-            + SESSION_ROLES
+            + PROJECT_SESSION_ROLES
             + " ORDER BY started_at DESC"
             + " LIMIT 1",
         this::mapRow,
@@ -738,7 +763,9 @@ public final class RunStore implements ConflictResolver {
   /**
    * The active agent session (build or ad-hoc) of {@code project} that executed on this box, or
    * empty. {@code stopping} counts as active: an interrupted stop's claim must stay addressable so
-   * a project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
+   * a project-targeted stop retry resumes it. Invites are excluded ({@link #PROJECT_SESSION_ROLES})
+   * so a project-level stop halts the build, not a consultant running beside it; an invite is
+   * stopped by its own run id. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
@@ -746,7 +773,7 @@ public final class RunStore implements ConflictResolver {
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
             + " AND IFNULL(node, '') = ? AND "
-            + SESSION_ROLES
+            + PROJECT_SESSION_ROLES
             + " ORDER BY started_at DESC LIMIT 1",
         this::mapRow,
         project,

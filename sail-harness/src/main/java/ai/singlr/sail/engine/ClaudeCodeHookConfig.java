@@ -19,6 +19,11 @@ import java.util.concurrent.TimeoutException;
  * sessions that run bare {@code claude} never see these hooks, so their {@code Stop} events do not
  * leak into the spec event bus.
  *
+ * <p>Besides hooks, the file carries the {@link #roomReadDenyRules} permission rules — a
+ * belt-and-suspenders Read-deny on the container's top secrets (box credential, SSH identity, git
+ * credential) for the room / read-only-invite lane, whose primary read boundary is Claude's
+ * cwd-scoped approval (see {@link #roomReadDenyRules}).
+ *
  * <p>Hooks wired:
  *
  * <ul>
@@ -90,8 +95,43 @@ public final class ClaudeCodeHookConfig {
 
     var root = new LinkedHashMap<String, Object>();
     root.put("includeCoAuthoredBy", false);
+    root.put("permissions", Map.of("deny", roomReadDenyRules()));
     root.put("hooks", hooks);
     return YamlUtil.dumpJson(root);
+  }
+
+  /**
+   * The Read-deny rules that belt-and-suspenders the room / read-only-invite lane's highest-value
+   * credentials. The primary boundary is elsewhere: Claude Code auto-approves read commands ({@code
+   * cat}/{@code head}/{@code tail}/{@code grep}) only inside the working directory (the workspace),
+   * and refuses a read of any path outside it (verified empirically) — so the container's secrets,
+   * all of which live outside {@code ~/workspace}, are unreadable by default even without a rule.
+   * These denies harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh} —
+   * the Sail CLI identity), and the {@code ~/.git-credentials} token explicitly on top of that, so
+   * the protection does not rest solely on the cwd heuristic. Claude Code applies a {@code
+   * Read(path)} deny to a Bash command that reads that path (verified), deny outranks every allow
+   * rule, and the room invocation pins {@code --setting-sources ""} so no ambient settings file can
+   * shadow these. A full (YOLO) agent skips permission rules by design — it is the trusted member
+   * lane. Spec-CLI auth is untouched: the helper reads the credential at the OS level, not through
+   * a tool. Residual (a secret committed inside the workspace, a kernel escape, a
+   * harness-enforcement bug) is owned by the room-lane hardening follow-up — a read-only-disk
+   * sidecar — not this denylist.
+   */
+  public static List<String> roomReadDenyRules() {
+    return List.of(
+        boxCredentialReadDeny(), "Read(" + DEV_HOME + "/.ssh/**)", gitCredentialReadDeny());
+  }
+
+  private static final String DEV_HOME = "/home/dev";
+
+  /** Deny rule for the ambient box FDE credential; see {@link #roomReadDenyRules}. */
+  public static String boxCredentialReadDeny() {
+    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
+    return "Read(/" + credential + ")";
+  }
+
+  private static String gitCredentialReadDeny() {
+    return "Read(" + DEV_HOME + "/.git-credentials)";
   }
 
   /**

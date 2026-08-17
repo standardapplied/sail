@@ -1043,7 +1043,12 @@ class ProjectProvisionerTest {
         cmds.stream().anyMatch(c -> c.contains("git config --global user.name")),
         "Should still set git identity");
     assertFalse(
-        cmds.stream().anyMatch(c -> c.contains(".git-credentials")),
+        cmds.stream()
+            .anyMatch(
+                c ->
+                    c.contains("incus file push")
+                        && c.contains("--mode 0600")
+                        && c.contains(".git-credentials")),
         "Should NOT write .git-credentials for ssh auth");
     assertFalse(
         cmds.stream().anyMatch(c -> c.contains("credential.helper")),
@@ -1095,7 +1100,12 @@ class ProjectProvisionerTest {
         cmds.stream().anyMatch(c -> c.contains("git config --global user.name")),
         "Should still set git identity even without token");
     assertFalse(
-        cmds.stream().anyMatch(c -> c.contains(".git-credentials")),
+        cmds.stream()
+            .anyMatch(
+                c ->
+                    c.contains("incus file push")
+                        && c.contains("--mode 0600")
+                        && c.contains(".git-credentials")),
         "Should NOT write credentials when token is null");
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:11/")),
@@ -1129,7 +1139,12 @@ class ProjectProvisionerTest {
         cmds.stream().anyMatch(c -> c.contains("id_ed25519.pub")),
         "Should push public key when .pub file exists alongside private key");
     assertFalse(
-        cmds.stream().anyMatch(c -> c.contains(".git-credentials")),
+        cmds.stream()
+            .anyMatch(
+                c ->
+                    c.contains("incus file push")
+                        && c.contains("--mode 0600")
+                        && c.contains(".git-credentials")),
         "Should NOT write .git-credentials for ssh auth");
   }
 

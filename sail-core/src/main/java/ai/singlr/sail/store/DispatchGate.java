@@ -34,6 +34,18 @@ public final class DispatchGate {
   public static final String ROOM_ROLE = "room";
 
   /**
+   * The read-only invite lane: a consultant a human explicitly invited into the room. It reserves
+   * no repos and holds no write authority, so it conflicts with nothing at all — not even a live
+   * run of its own spec, because "a read-only consultant alongside the live build" is exactly the
+   * lane's purpose. The same-spec backstop stays for {@link #ROOM_ROLE} wakes, which fire
+   * automatically and must never race a live run.
+   */
+  public static final String READ_ONLY_INVITE_ROLE = "invite";
+
+  /** The full invite lane: reserves like a build, so one writer per repo always holds. */
+  public static final String FULL_INVITE_ROLE = "invite-full";
+
+  /**
    * One running local run of the project: its id, the spec it works, its role, and its reserved
    * repos.
    */
@@ -46,7 +58,9 @@ public final class DispatchGate {
   public record Conflict(RunningRun run, List<String> overlap) {}
 
   /**
-   * The first running run that blocks the dispatch, or empty to allow. A run of {@code
+   * The first running run that blocks the dispatch, or empty to allow. A {@link
+   * #READ_ONLY_INVITE_ROLE} run on either side conflicts with nothing — a read-only consultant runs
+   * alongside anything, including its own spec's live build. Otherwise a run of {@code
    * targetSpecId} itself always blocks, even on disjoint repos: a spec has one lifecycle and one
    * review pipeline, so a second live execution — reachable via restart with a repo override —
    * would race the first over shared spec state. Any other run blocks only on repo overlap, and a
@@ -56,7 +70,11 @@ public final class DispatchGate {
    */
   public static Optional<Conflict> decide(
       String targetSpecId, String targetRole, List<String> targetRepos, List<RunningRun> running) {
+    if (READ_ONLY_INVITE_ROLE.equals(targetRole)) {
+      return Optional.empty();
+    }
     return running.stream()
+        .filter(run -> !READ_ONLY_INVITE_ROLE.equals(run.role()))
         .map(
             run ->
                 sameSpec(run.specId(), targetSpecId)

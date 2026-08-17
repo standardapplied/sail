@@ -1024,7 +1024,10 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
     return runId != null
         && !runId.isBlank()
-        && runStore.findById(runId).map(row -> row.roomRole() || row.reviewRole()).orElse(false);
+        && runStore
+            .findById(runId)
+            .map(row -> row.roomRole() || row.reviewRole() || row.inviteRole())
+            .orElse(false);
   }
 
   private static Integer exitCodeOf(Event event) {

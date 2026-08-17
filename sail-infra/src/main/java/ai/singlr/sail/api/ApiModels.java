@@ -627,6 +627,63 @@ record SpecRestoreRequest(String rev) {
   }
 }
 
+/** Body of {@code POST /v1/specs/{id}/invite}: the agent to invite and the one mode choice. */
+record InviteRequest(String agent, String model, boolean full) {
+  static InviteRequest fromMap(Map<String, Object> map) {
+    return new InviteRequest(
+        (String) map.get("agent"), (String) map.get("model"), Boolean.TRUE.equals(map.get("full")));
+  }
+}
+
+/** Response of {@code POST /v1/specs/{id}/invite}: the launched invite run. */
+record InviteResponse(String runId, String principal, String mode, String snapshot)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("run_id", runId);
+    m.put("principal", principal);
+    m.put("mode", mode);
+    m.put("snapshot", snapshot);
+    return m;
+  }
+}
+
+/** One invite mode an agent does or does not support, with the seam-declared reason when not. */
+record AgentModeView(String mode, boolean supported, String reason) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("mode", mode);
+    m.put("supported", supported);
+    if (reason != null) {
+      m.put("reason", reason);
+    }
+    return m;
+  }
+}
+
+/** One installable agent CLI and its invite-mode support, for {@code GET /v1/agents}. */
+record AgentView(String name, String displayName, List<AgentModeView> modes) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("name", name);
+    m.put("display_name", displayName);
+    m.put("modes", modes);
+    return m;
+  }
+}
+
+record AgentsResponse(List<AgentView> agents) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("agents", agents);
+    return m;
+  }
+}
+
 record SpecRevisionView(
     String rev, String actor, String recordedAt, String origin, boolean deleted, String peer)
     implements Mappable {

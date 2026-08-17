@@ -84,13 +84,15 @@ final class LocalApiRouter implements LocalApiHandler {
       }
 
       /**
-       * A {@code room} run's credential resolves to the read-and-converse room principal, never the
-       * write-capable agent principal: the chat lane's authority is decided here, at the boundary,
-       * by the run row the server minted — not by anything the session says.
+       * A read-only lane run's credential — a {@code room} wake or a read-only {@code invite} —
+       * resolves to the read-and-converse room principal, never the write-capable agent principal:
+       * the lane's authority is decided here, at the boundary, by the run row the server minted —
+       * not by anything the session says. A full invite carries the member-tier agent principal a
+       * dispatched agent holds, nothing more.
        */
       @Override
       public Actor actor() {
-        return run.roomRole()
+        return run.readOnlyLane()
             ? Actor.roomPrincipal(run.principal(), run.owner())
             : Actor.agentPrincipal(run.principal(), run.owner());
       }
@@ -290,7 +292,9 @@ final class LocalApiRouter implements LocalApiHandler {
         yield ApiResponse.from(result);
       }
       case "POST" -> {
-        if (caller instanceof Caller.Run(var run) && run.roomRole() && !id.equals(run.specId())) {
+        if (caller instanceof Caller.Run(var run)
+            && run.readOnlyLane()
+            && !id.equals(run.specId())) {
           yield problem(403, "A room session posts only to its own spec's room.");
         }
         var form = request.form();

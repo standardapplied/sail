@@ -73,6 +73,17 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<AgentsResponse> agents() {
+    return Result.success(new AgentsResponse(List.of()));
+  }
+
+  @Override
+  public Result<InviteResponse> inviteToSpec(
+      String specId, InviteRequest request, Actor actor, String localHandle) {
+    return Result.success(new InviteResponse("run-1", "claude/invite-run-1", "read_only", ""));
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null));
   }

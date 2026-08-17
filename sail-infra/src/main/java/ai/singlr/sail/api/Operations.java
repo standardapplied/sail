@@ -37,6 +37,8 @@ public interface Operations {
   /** The org-wide FDE roster, sorted by handle — a member-tier read backed by the synced roster. */
   Result<FdesResponse> fdes();
 
+  Result<AgentsResponse> agents();
+
   Result<ProjectResponse> project(String project);
 
   /** Returns the two-hop SSH target (server jump + container) for a running project. */
@@ -157,6 +159,9 @@ public interface Operations {
 
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request, Actor actor);
+
+  Result<InviteResponse> inviteToSpec(
+      String specId, InviteRequest request, Actor actor, String localHandle);
 
   Result<GlobalBoardResponse> globalBoard(String project);
 }

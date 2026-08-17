@@ -182,6 +182,9 @@ class RoomWakeLaunchTest {
         "the chat lane never launches full-permission");
     assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
     assertTrue(
+        joined.contains("--setting-sources \"\"") && joined.contains("--strict-mcp-config"),
+        "the chat lane must exclude ambient settings and MCP configs. Command: " + joined);
+    assertTrue(
         runStore.consumeRoomGuardBaseline(runId).orElseThrow().contains("aaa111"),
         "the guard baseline is recorded host-side before the chat launches");
     var started =
