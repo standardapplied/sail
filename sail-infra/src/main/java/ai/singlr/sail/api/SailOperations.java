@@ -54,6 +54,7 @@ public final class SailOperations implements Operations {
   private final Supplier<ConnectEnvironment> connectEnvironment;
   private final SyncScheduler syncScheduler;
   private final ProjectLoader projects;
+  private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
@@ -316,6 +317,7 @@ public final class SailOperations implements Operations {
     this.syncScheduler = syncScheduler;
     this.fdeStore = fdeStore;
     this.projects = new ProjectLoader(shell, file);
+    this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
     this.dispatchOps =
@@ -466,6 +468,22 @@ public final class SailOperations implements Operations {
       triggerSyncAfterWrite();
     }
     return result;
+  }
+
+  @Override
+  public Result<SnapshotListResponse> snapshots(String project) {
+    return safe(() -> snapshotOps.list(project));
+  }
+
+  @Override
+  public Result<SnapshotActionResponse> restoreSnapshot(
+      String project, String label, String localHandle) {
+    return safe(() -> snapshotOps.restore(project, label, localHandle));
+  }
+
+  @Override
+  public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
+    return safe(() -> snapshotOps.delete(project, label));
   }
 
   @Override

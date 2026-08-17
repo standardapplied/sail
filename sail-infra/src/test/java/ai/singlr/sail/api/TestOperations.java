@@ -134,6 +134,22 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<SnapshotListResponse> snapshots(String project) {
+    return Result.success(new SnapshotListResponse(List.of()));
+  }
+
+  @Override
+  public Result<SnapshotActionResponse> restoreSnapshot(
+      String project, String label, String localHandle) {
+    return Result.success(new SnapshotActionResponse(project, label, "restore", "accepted"));
+  }
+
+  @Override
+  public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
+    return Result.success(new SnapshotActionResponse(project, label, "delete", "accepted"));
+  }
+
+  @Override
   public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
     return Result.success(
         new AgentStatusResponse(project, false, null, null, null, null, null, java.util.List.of()));

@@ -1268,6 +1268,45 @@ record RunLogResponse(String runId, List<String> lines, String error) implements
   }
 }
 
+record SnapshotView(String name, String createdAt, String source) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("name", name);
+    m.put("created_at", createdAt);
+    m.put("source", source);
+    return m;
+  }
+}
+
+record SnapshotListResponse(List<SnapshotView> snapshots) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("snapshots", snapshots);
+    m.put("total", snapshots.size());
+    return m;
+  }
+}
+
+/**
+ * The accepted receipt for an async snapshot mutation: the request returned before the mutation
+ * ran, and its completion arrives as the matching {@code snapshot_restored} / {@code
+ * snapshot_deleted} event carrying this {@code name}.
+ */
+record SnapshotActionResponse(String project, String name, String action, String status)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", project);
+    m.put("name", name);
+    m.put("action", action);
+    m.put("status", status);
+    return m;
+  }
+}
+
 record StopRunResponse(
     String runId, boolean stopped, String reason, Integer pid, boolean specCancelled)
     implements Mappable {

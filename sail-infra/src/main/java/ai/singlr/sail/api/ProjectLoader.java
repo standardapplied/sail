@@ -66,13 +66,18 @@ final class ProjectLoader {
   }
 
   void requireExists(String project) {
-    var state = load(project).state();
-    if (state instanceof ContainerState.NotCreated) {
+    loadCreated(project);
+  }
+
+  LoadedProject loadCreated(String project) {
+    var loaded = load(project);
+    if (loaded.state() instanceof ContainerState.NotCreated) {
       throw new ApiException(
           ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
     }
-    if (state instanceof ContainerState.Error error) {
+    if (loaded.state() instanceof ContainerState.Error error) {
       throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
     }
+    return loaded;
   }
 }

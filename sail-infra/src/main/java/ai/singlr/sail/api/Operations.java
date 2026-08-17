@@ -51,6 +51,19 @@ public interface Operations {
   Result<DispatchResponse> dispatch(
       String project, DispatchRequest request, Actor actor, String localHandle);
 
+  /** Lists the project's container snapshots with the source each name's prefix encodes. */
+  Result<SnapshotListResponse> snapshots(String project);
+
+  /**
+   * Accepts an async restore of the container to {@code label}: validation and the live-run gate
+   * run inline, the mutation completes in the background and reports via {@code snapshot_restored}.
+   * Refused while any run is live on this box's container — a restore discards its work.
+   */
+  Result<SnapshotActionResponse> restoreSnapshot(String project, String label, String localHandle);
+
+  /** Accepts an async snapshot delete; completion is reported via {@code snapshot_deleted}. */
+  Result<SnapshotActionResponse> deleteSnapshot(String project, String label);
+
   /**
    * The project's agent status: every local running run (scoped by {@code localHandle} so a synced
    * foreign run is never probed on this box) plus the single-session fields the one-run common case

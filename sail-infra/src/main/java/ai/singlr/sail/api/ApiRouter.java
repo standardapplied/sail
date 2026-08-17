@@ -58,6 +58,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String MESSAGES = "messages";
   private static final String INVITE = "invite";
   private static final String AGENTS = "agents";
+  private static final String SNAPSHOTS = "snapshots";
   private static final int DEFAULT_MESSAGES = 50;
   private static final int MAX_MESSAGES = 100;
   private static final int DEFAULT_TAIL = 200;
@@ -213,8 +214,33 @@ public final class ApiRouter implements HttpHandler {
       case DISPATCH -> routeDispatch(exchange, request, project);
       case AGENT -> routeAgent(request, project);
       case CONNECT -> routeConnect(request, project);
+      case SNAPSHOTS -> routeSnapshots(request, project);
       default -> throw notFound();
     };
+  }
+
+  /**
+   * Routes the snapshot surface — {@code GET /v1/projects/{p}/snapshots}, {@code DELETE
+   * .../snapshots/{label}}, {@code POST .../snapshots/{label}/restore}. The mutations are accepted
+   * asynchronously (202); their completion arrives as {@code snapshot_restored} / {@code
+   * snapshot_deleted} events on the stream, so no client ever holds a request open for a mutation
+   * that can outlive its timeout.
+   */
+  private ApiResponse routeSnapshots(RouteRequest request, String project) {
+    if (request.size() == 4) {
+      requireMethod(request, GET);
+      return ApiResponse.from(operations.snapshots(project));
+    }
+    if (request.size() == 5) {
+      requireMethod(request, DELETE);
+      return ApiResponse.fromAccepted(operations.deleteSnapshot(project, request.subResource()));
+    }
+    if (request.size() == 6 && RESTORE.equals(request.segments().get(5))) {
+      requireMethod(request, POST);
+      return ApiResponse.fromAccepted(
+          operations.restoreSnapshot(project, request.subResource(), nodeHandle.get()));
+    }
+    throw notFound();
   }
 
   private ApiResponse routeProject(RouteRequest request, String project) {
