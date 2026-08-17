@@ -269,7 +269,8 @@ public final class RunStore implements ConflictResolver {
    * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch;
    * {@code owner} is the FDE the run's agent principal acts for. The principal handle and the run's
    * credential are minted inside the same transaction as the row, so a run and its identity are
-   * atomic. Returns the id.
+   * atomic. Fails if an exclusive container lease (see {@link #acquireContainerLease}) is held — a
+   * run must never start into a container about to be rolled back. Returns the id.
    */
   public String create(
       String id,
@@ -316,8 +317,19 @@ public final class RunStore implements ConflictResolver {
       Integer watcherPid,
       String logPath,
       String unit) {
-    return db.transaction(
+    return db.immediateTransaction(
         () -> {
+          var lease = activeLease(project, node);
+          if (lease.isPresent()) {
+            throw new IllegalStateException(
+                "Refusing to record run "
+                    + id
+                    + " for project "
+                    + project
+                    + ": an exclusive "
+                    + lease.get()
+                    + " operation holds its container. Retry after it completes.");
+          }
           db.execute(
               """
               INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
@@ -351,9 +363,12 @@ public final class RunStore implements ConflictResolver {
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
    * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the reviewed spec's assignee — the FDE the review principal acts for. Returns the run's
-   * plaintext credential, surfaced exactly once so the launched review agent can actually act as
-   * the principal this row records; only the hash is at rest.
+   * is the reviewed spec's assignee — the FDE the review principal acts for. Fails if an exclusive
+   * container lease (see {@link #acquireContainerLease}) is held — a review must never launch into
+   * a container mid-restore; the pipeline surfaces the error and the reconciler's rescue replay
+   * retries the kickoff after the lease is released. Returns the run's plaintext credential,
+   * surfaced exactly once so the launched review agent can actually act as the principal this row
+   * records; only the hash is at rest.
    */
   public String createReview(
       String reviewId,
@@ -450,9 +465,11 @@ public final class RunStore implements ConflictResolver {
    * restore): within a single {@code BEGIN IMMEDIATE} transaction, refuses if another lease is held
    * or any local run of the project is live ({@code running} or {@code stopping}, every role — even
    * a read-only invite loses its session when the container is rolled back), then inserts the
-   * lease. {@link #reserveDispatch} checks this lease inside its own transaction, so the two sides
-   * can never interleave: a restore is refused over live work, and no run can start until {@link
-   * #releaseContainerLease} runs.
+   * lease. Every run insert — {@link #reserveDispatch}, {@link #create}, {@link #createReview} —
+   * checks this lease inside its own transaction, so the two sides can never interleave: a restore
+   * is refused over live work, and no run can start until {@link #releaseContainerLease} runs.
+   * Rejoining an existing negotiation via {@link #rotateCredential} needs no check: it requires a
+   * {@code running} row, and any running row refuses the lease.
    */
   public ContainerLease acquireContainerLease(String project, String localHandle, String action) {
     return db.immediateTransaction(

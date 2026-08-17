@@ -35,10 +35,10 @@ import java.util.concurrent.Executors;
  * <p>Restore is the dangerous verb — it discards the container's current state — so acceptance
  * takes the {@link RunStore#acquireContainerLease exclusive container lease}: one transaction
  * refuses the restore while any run is live on this box's container (with the same vocabulary as
- * dispatch conflicts) and, until the worker releases the lease, refuses every new run reservation —
- * so a dispatch can never start into a container about to be rolled back. A failed restore that had
- * stopped a running container starts it again best-effort, so the failure mode is "still on the old
- * state", never "down".
+ * dispatch conflicts) and, until the worker releases the lease, refuses every new run start —
+ * dispatch reservations and review-run creation alike — so no agent can ever launch into a
+ * container about to be rolled back. A failed restore that had stopped a running container starts
+ * it again best-effort, so the failure mode is "still on the old state", never "down".
  */
 final class SnapshotOperations {
 

@@ -1207,6 +1207,57 @@ class RunStoreTest {
   }
 
   @Test
+  void aContainerLeaseBlocksReviewRunCreationUntilReleased() {
+    store.acquireContainerLease("backend", "node-a", "restore");
+
+    var reviewId = DateTimeUtils.newId().toString();
+    var refused = assertThrows(IllegalStateException.class, () -> createReview(reviewId, "node-a"));
+    assertTrue(refused.getMessage().contains("restore"), refused.getMessage());
+    assertTrue(store.findById(reviewId).isEmpty(), "a lease-refused review must not insert a row");
+
+    store.releaseContainerLease("backend", "node-a");
+    createReview(reviewId, "node-a");
+    assertEquals("running", store.findById(reviewId).orElseThrow().status());
+  }
+
+  @Test
+  void aForeignNodesContainerLeaseNeverBlocksReviewRunCreationHere() {
+    store.acquireContainerLease("backend", "node-b", "restore");
+
+    var reviewId = DateTimeUtils.newId().toString();
+    createReview(reviewId, "node-a");
+
+    assertEquals("running", store.findById(reviewId).orElseThrow().status());
+  }
+
+  @Test
+  void anExpiredContainerLeaseNeverBlocksReviewRunCreation() {
+    db.execute(
+        "INSERT INTO container_leases (project, node, action, created_at)"
+            + " VALUES ('backend', 'node-a', 'restore', ?)",
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+
+    var reviewId = DateTimeUtils.newId().toString();
+    createReview(reviewId, "node-a");
+
+    assertEquals("running", store.findById(reviewId).orElseThrow().status());
+  }
+
+  private void createReview(String reviewId, String node) {
+    store.createReview(
+        reviewId,
+        "backend",
+        "auth",
+        node,
+        node,
+        "claude-code",
+        "feat/x",
+        "review",
+        "/home/dev/.sail/runs/" + reviewId + "/review.log",
+        "sail-review-" + reviewId);
+  }
+
+  @Test
   void aLiveRunBlocksTheContainerLeaseAndNamesItself() {
     var id = newRun("backend", "auth");
 
