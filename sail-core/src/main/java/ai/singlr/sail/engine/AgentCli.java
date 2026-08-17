@@ -170,13 +170,21 @@ public enum AgentCli {
   private static final String ROOM_ISOLATION = " --setting-sources \"\" --strict-mcp-config";
 
   /**
-   * Whether this CLI can run the room lane's read-only chat session with the restriction enforced
-   * by the harness rather than promised by the prompt. Claude Code can: {@code --print} without
-   * {@code --dangerously-skip-permissions} denies every tool call not covered by an allow rule, and
-   * {@link #ROOM_TOOLS} removes the mutating tools from the set entirely. Codex cannot: its only
-   * enforcement layer is the bubblewrap sandbox, which needs user namespaces — blocked inside incus
-   * containers ({@code bwrap: setting up uid map: Permission denied}) — so the sole mode that
-   * executes commands at all is the full bypass flag, exactly what the room contract forbids.
+   * Whether this CLI can run the room lane's read-only chat session with the write restriction
+   * enforced by the harness rather than promised by the prompt. Claude Code can: {@code --print}
+   * without {@code --dangerously-skip-permissions} refuses every <em>mutating</em> tool call —
+   * {@link #ROOM_TOOLS} removes {@code Write}/{@code Edit} from the set entirely, Bash write
+   * commands and arbitrary interpreters are denied, so no session-driven code change can happen.
+   * Reads are scoped, not broad: Claude Code auto-approves read commands ({@code cat}/{@code
+   * head}/{@code tail}/{@code grep}) only <em>within the working directory</em> (the workspace the
+   * session launches in, {@code ~/workspace}), and refuses them for paths outside it (verified
+   * empirically) — so the container's secrets, all of which live outside the workspace ({@code
+   * ~/.ssh}, {@code ~/.sail}, {@code ~/.claude}, {@code /var/lib/sail}), are unreadable by default.
+   * Explicit {@code Read}-deny rules ({@link ClaudeCodeHookConfig#roomReadDenyRules})
+   * belt-and-brace the highest-value credentials on top of that — see {@link #roomInvocation}.
+   * Codex cannot run this lane at all: its only enforcement layer is the bubblewrap sandbox, which
+   * needs user namespaces — blocked inside incus containers ({@code bwrap: setting up uid map:
+   * Permission denied}) — so its sole executing mode is the full bypass flag the room forbids.
    */
   public boolean supportsRoomLane() {
     return this == CLAUDE_CODE;
@@ -213,29 +221,41 @@ public enum AgentCli {
    * The room lane's headless command: like {@link #headlessCommand} but harness-restricted instead
    * of full-permission. The tool set is cut to {@code Bash,Read,Grep,Glob} — {@code Write} and
    * {@code Edit} do not exist in the session, and the {@code --tools} cut is CLI-authoritative, so
-   * no on-disk settings file can re-add them. The only auto-approved commands are {@code spec} (the
+   * no on-disk settings file can re-add them. The explicit allow-rules cover {@code spec} (the
    * lane's one write — posting the answer, and the room credential is viewer-role so even {@code
-   * spec} cannot mutate a spec) and {@code cd} (navigation, no write). Reading the workspace is
-   * {@code Read}/{@code Grep}/{@code Glob}, which have no write flag. Git is deliberately absent:
-   * {@code git diff --output=<path>} writes through a prefix allow-rule, and git's external-diff
-   * and pager config are command-execution surfaces — a read-only lane must not expose them.
+   * spec} cannot mutate a spec) and {@code cd}. Beyond those, {@code --print} refuses every
+   * <em>mutating</em> Bash command and every arbitrary interpreter, and it auto-permits recognized
+   * <em>read</em> commands ({@code cat}/{@code head}/{@code tail}/{@code grep}) only for paths
+   * <em>inside the working directory</em> — a read of a path outside {@code ~/workspace} is refused
+   * (verified empirically). So the session reads the code it is consulting on and nothing else:
+   * every container secret lives outside the workspace ({@code ~/.ssh}, {@code ~/.sail}, {@code
+   * ~/.claude}, {@code /var/lib/sail}) and is unreadable by default. The {@code Read}-deny rules in
+   * {@link ClaudeCodeHookConfig#roomReadDenyRules} — which Claude applies to a Bash read of a
+   * denied path too — belt-and-suspenders the highest-value credentials on top of that, they are
+   * not the primary boundary. Git is deliberately absent: {@code git diff --output=<path>} writes
+   * through a prefix allow-rule, and git's external-diff and pager config are command-execution
+   * surfaces — a read-only lane must not expose them.
    *
    * <p>The invocation is pinned closed against ambient configuration: {@code --setting-sources ""}
    * excludes every user/project/local settings file, so a {@code .claude/settings.json} in the
    * workspace or home directory cannot merge an additional {@code Bash(...)} allow-rule into the
    * session (Claude Code merges permission rules additively across settings sources; the flag
-   * removes those sources while the sail-owned {@code --settings} file — hooks plus the {@code
-   * box.credential} read-deny — still applies), and {@code --strict-mcp-config} keeps a workspace
+   * removes those sources while the sail-owned {@code --settings} file — hooks plus the
+   * credential/key read-denies — still applies), and {@code --strict-mcp-config} keeps a workspace
    * {@code .mcp.json} from launching MCP server processes into the session.
    *
    * <p>This is the harness-enforced boundary the platform can express, not a kernel one. It is
-   * exact about what it is: {@code Write}/{@code Edit} are structurally gone; the Bash allowlist is
-   * two non-writing commands; ambient settings and MCP configs are excluded; the room credential is
-   * viewer-role; and a host-side content guard ({@code DispatchOperations#guardRoomRun}) surfaces
-   * any worktree change as a loud guardrail event. What it is not: hermetic against a kernel-level
-   * escape or a harness-enforcement bug — that boundary is owned by the room-lane hardening
-   * follow-up spec (a sidecar container with a read-only disk device), which incus does not give a
-   * same-container process.
+   * exact about what it is: {@code Write}/{@code Edit} are structurally gone and Bash writes and
+   * interpreters are refused, so the session cannot change code; reads are auto-approved only
+   * inside the workspace, so out-of-tree secrets ({@code box.credential}, {@code ~/.ssh}, {@code
+   * ~/.sail}, {@code ~/.claude}) are unreadable by default, with {@code Read}-denies
+   * belt-and-bracing the top credentials; ambient settings and MCP configs are excluded; the room
+   * credential is viewer-role; and a host-side content guard ({@code
+   * DispatchOperations#guardRoomRun}) surfaces any worktree change as a loud guardrail event. What
+   * it is not: hermetic against a kernel-level escape, a harness-enforcement bug, or a secret
+   * committed <em>inside</em> the workspace (which the consultant reads by design, as any build
+   * agent does) — that boundary is owned by the room-lane hardening follow-up spec (a sidecar
+   * container with a read-only disk device), which incus does not give a same-container process.
    */
   public String headlessRoomCommand(
       String taskFile, String model, String claudeSettingsPath, boolean stream) {
