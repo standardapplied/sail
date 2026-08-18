@@ -40,6 +40,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 public final class SailOperations implements Operations {
@@ -62,6 +64,7 @@ public final class SailOperations implements Operations {
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
+  private final ExecutorService inviteExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
   private BoxCredentialStore boxCredentialStore;
   private EventStore eventStore;
@@ -440,6 +443,7 @@ public final class SailOperations implements Operations {
     var launch =
         dispatchOps.startInvite(
             specId, request.agent(), request.full(), request.model(), actor, localHandle);
+    inviteExecutor.submit(launch.completion());
     return new InviteResponse(
         launch.runId(),
         launch.principal(),

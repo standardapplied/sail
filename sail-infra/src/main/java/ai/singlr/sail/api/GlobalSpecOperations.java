@@ -100,13 +100,14 @@ final class GlobalSpecOperations {
           "spec project is required.",
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
+    var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
     var row =
         new SpecStore.SpecRow(
             request.id(),
             request.project(),
             request.title(),
             parseStatus(request.status(), SpecStatus.PENDING),
-            request.assignee(),
+            assignee,
             request.agent(),
             validModel(request.model()),
             validReasoning(request.reasoningEffort()),
