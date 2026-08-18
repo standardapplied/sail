@@ -649,6 +649,23 @@ public final class DispatchOperations {
       String model,
       Actor actor,
       String localHandle) {
+    return startInvite(specId, agentYamlName, full, true, model, actor, localHandle);
+  }
+
+  /**
+   * As {@link #startInvite(String, String, boolean, String, Actor, String)}, but {@code
+   * takeSnapshot} may waive the pre-launch snapshot on a full invite. Skipping trades the rollback
+   * point for an instant launch — the escape hatch for the {@code dir} backend, where a snapshot is
+   * a slow full filesystem copy. Read only never snapshots, so the flag is a no-op there.
+   */
+  public InviteLaunch startInvite(
+      String specId,
+      String agentYamlName,
+      boolean full,
+      boolean takeSnapshot,
+      String model,
+      Actor actor,
+      String localHandle) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -715,7 +732,7 @@ public final class DispatchOperations {
       throw e;
     }
     var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
-    var snapshot = full ? "invite-" + runId : "";
+    var snapshot = full && takeSnapshot ? "invite-" + runId : "";
     Runnable completion =
         () ->
             completeInvite(
@@ -762,7 +779,9 @@ public final class DispatchOperations {
       String snapshot) {
     try {
       if (full) {
-        inviteSnapshot(project, specId, runId);
+        if (!Strings.isBlank(snapshot)) {
+          inviteSnapshot(project, specId, runId);
+        }
       } else {
         captureRoomBaseline(project, config, runId);
       }

@@ -307,6 +307,28 @@ class InviteLaunchTest {
   }
 
   @Test
+  void aFullInviteCanSkipTheSnapshotAndLaunchImmediately() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth", HANDLE, "agent/auth");
+
+    var launch =
+        ops.startInvite(
+            "auth", "claude-code", true, false, null, Actor.cliOperator(HANDLE), HANDLE);
+
+    assertEquals("", launch.snapshot(), "a skipped snapshot has no label");
+    assertEquals("invite-full", runStore.findById(launch.runId()).orElseThrow().role());
+
+    launch.completion().run();
+
+    assertEquals(List.of("launch"), order, "the launch runs with no snapshot before it");
+    assertTrue(
+        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
+        "skipping the snapshot publishes no snapshot event");
+    var joined = String.join(" ", launched.get());
+    assertTrue(joined.contains("--dangerously-skip-permissions"), "full access still launches");
+  }
+
+  @Test
   void aCodexReadOnlyInviteIsRefusedNamingWhatItSupports() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
@@ -489,12 +511,13 @@ class InviteLaunchTest {
                   specStore,
                   new ReviewStore(db),
                   runStore)
-              .useMessages(messageStore);
+              .useMessages(messageStore)
+              .useInviteExecutor(Runnable::run);
 
       var launched =
           sailOps.inviteToSpec(
               "auth",
-              new InviteRequest("claude-code", null, false),
+              new InviteRequest("claude-code", null, false, true),
               Actor.cliOperator(HANDLE),
               HANDLE);
       assertTrue(launched instanceof Result.Success<InviteResponse>);
@@ -505,7 +528,10 @@ class InviteLaunchTest {
 
       var refused =
           sailOps.inviteToSpec(
-              "auth", new InviteRequest("codex", null, false), Actor.cliOperator(HANDLE), HANDLE);
+              "auth",
+              new InviteRequest("codex", null, false, true),
+              Actor.cliOperator(HANDLE),
+              HANDLE);
       assertTrue(refused instanceof Result.Failure<InviteResponse>);
       assertEquals(ErrorCode.BAD_REQUEST, ((Result.Failure<InviteResponse>) refused).errorCode());
 
