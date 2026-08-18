@@ -67,6 +67,27 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void createAutoAssignsToTheCreatorWhenUnassigned() {
+    ops.create(createReq(Map.of()).withCreatedBy("uday"));
+    assertEquals(
+        "uday",
+        ops.get("auth").spec().assignee(),
+        "a new room lands on the caller so their box wakes it — no orphan on nobody's board");
+  }
+
+  @Test
+  void createKeepsAnExplicitAssigneeOverTheCreator() {
+    ops.create(createReq(Map.of("assignee", "alice")).withCreatedBy("uday"));
+    assertEquals("alice", ops.get("auth").spec().assignee());
+  }
+
+  @Test
+  void createLeavesTheAssigneeBlankWhenTheCallerOwnsNoFde() {
+    ops.create(createReq(Map.of()));
+    assertNull(ops.get("auth").spec().assignee());
+  }
+
+  @Test
   void clientSuppliedCreatedByIsIgnored() {
     ops.create(createReq(Map.of("created_by", "attacker")));
     assertNull(ops.get("auth").spec().createdBy());

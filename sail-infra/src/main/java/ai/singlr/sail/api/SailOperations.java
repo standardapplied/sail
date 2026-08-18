@@ -40,6 +40,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 public final class SailOperations implements Operations {
@@ -62,6 +64,7 @@ public final class SailOperations implements Operations {
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
+  private Executor inviteExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
   private BoxCredentialStore boxCredentialStore;
   private EventStore eventStore;
@@ -172,6 +175,17 @@ public final class SailOperations implements Operations {
   public SailOperations useMessages(MessageStore messageStore) {
     this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
     this.dispatchOps.useMessages(messageStore);
+    return this;
+  }
+
+  /**
+   * Overrides the executor that runs the deferred half of an invite (snapshot + launch). Production
+   * keeps the default virtual-thread executor; a test injects {@code Runnable::run} to make the
+   * completion run inline, so its assertions and teardown see a finished launch. Returns {@code
+   * this}.
+   */
+  SailOperations useInviteExecutor(Executor executor) {
+    this.inviteExecutor = Objects.requireNonNull(executor, "executor");
     return this;
   }
 
@@ -439,7 +453,14 @@ public final class SailOperations implements Operations {
       String specId, InviteRequest request, Actor actor, String localHandle) {
     var launch =
         dispatchOps.startInvite(
-            specId, request.agent(), request.full(), request.model(), actor, localHandle);
+            specId,
+            request.agent(),
+            request.full(),
+            request.snapshot(),
+            request.model(),
+            actor,
+            localHandle);
+    inviteExecutor.execute(launch.completion());
     return new InviteResponse(
         launch.runId(),
         launch.principal(),

@@ -645,10 +645,13 @@ record SpecRestoreRequest(String rev) {
 }
 
 /** Body of {@code POST /v1/specs/{id}/invite}: the agent to invite and the one mode choice. */
-record InviteRequest(String agent, String model, boolean full) {
+record InviteRequest(String agent, String model, boolean full, boolean snapshot) {
   static InviteRequest fromMap(Map<String, Object> map) {
     return new InviteRequest(
-        (String) map.get("agent"), (String) map.get("model"), Boolean.TRUE.equals(map.get("full")));
+        (String) map.get("agent"),
+        (String) map.get("model"),
+        Boolean.TRUE.equals(map.get("full")),
+        !Boolean.FALSE.equals(map.get("snapshot")));
   }
 }
 

@@ -160,6 +160,7 @@ class InviteLaunchTest {
 
     var launch =
         ops.startInvite("auth", "claude-code", false, null, Actor.cliOperator(HANDLE), HANDLE);
+    launch.completion().run();
 
     var run = runStore.findById(launch.runId()).orElseThrow();
     assertEquals("invite", run.role());
@@ -225,12 +226,17 @@ class InviteLaunchTest {
     var launch =
         ops.startInvite("auth", "claude-code", true, "opus-x", Actor.cliOperator(HANDLE), HANDLE);
 
-    var run = runStore.findById(launch.runId()).orElseThrow();
-    assertEquals("invite-full", run.role());
-    assertEquals(List.of("app"), run.repos(), "full reserves like a build");
-    assertEquals("agent/auth", run.branch());
-    assertEquals("claude/invite-" + launch.runId(), run.principal());
+    var reserved = runStore.findById(launch.runId()).orElseThrow();
+    assertEquals("invite-full", reserved.role());
+    assertEquals(List.of("app"), reserved.repos(), "full reserves like a build");
+    assertEquals("agent/auth", reserved.branch());
+    assertEquals("claude/invite-" + launch.runId(), reserved.principal());
     assertEquals("invite-" + launch.runId(), launch.snapshot());
+    assertEquals(List.of(), order, "the invite returns before the snapshot or launch runs");
+
+    launch.completion().run();
+
+    var run = runStore.findById(launch.runId()).orElseThrow();
     assertEquals(List.of("snapshot", "launch"), order, "the snapshot precedes the launch");
     assertTrue(run.task().contains("Invite Duty (full access)"));
     var joined = String.join(" ", launched.get());
@@ -282,19 +288,44 @@ class InviteLaunchTest {
     var ops = operations(shell);
     seedSpec("auth");
 
-    var failure =
-        assertThrows(
-            ApiException.class,
-            () ->
-                ops.startInvite(
-                    "auth", "claude-code", true, null, Actor.cliOperator(HANDLE), HANDLE));
+    var launch =
+        ops.startInvite("auth", "claude-code", true, null, Actor.cliOperator(HANDLE), HANDLE);
+    launch.completion().run();
 
-    assertEquals(ErrorCode.SNAPSHOT_FAILED, failure.failure().errorCode());
     assertEquals(null, launched.get(), "the invite does not launch without its rollback point");
     var run = runStore.listForSpec("auth").getFirst();
     assertEquals("failed", run.status(), "the reservation is released through the failed run");
+    var failure =
+        events.stream()
+            .filter(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("auth", failure.spec(), "the room learns the invite failed through the stream");
+    assertEquals("invite-" + launch.runId(), failure.data().get("label"));
+    assertEquals(launch.runId(), failure.data().get(Event.WellKnownData.RUN_ID));
+    assertNotNull(failure.data().get("error"), "the failure carries a reason the room can render");
+  }
+
+  @Test
+  void aFullInviteCanSkipTheSnapshotAndLaunchImmediately() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth", HANDLE, "agent/auth");
+
+    var launch =
+        ops.startInvite(
+            "auth", "claude-code", true, false, null, Actor.cliOperator(HANDLE), HANDLE);
+
+    assertEquals("", launch.snapshot(), "a skipped snapshot has no label");
+    assertEquals("invite-full", runStore.findById(launch.runId()).orElseThrow().role());
+
+    launch.completion().run();
+
+    assertEquals(List.of("launch"), order, "the launch runs with no snapshot before it");
     assertTrue(
-        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())));
+        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
+        "skipping the snapshot publishes no snapshot event");
+    var joined = String.join(" ", launched.get());
+    assertTrue(joined.contains("--dangerously-skip-permissions"), "full access still launches");
   }
 
   @Test
@@ -319,6 +350,7 @@ class InviteLaunchTest {
     seedSpec("auth");
 
     var launch = ops.startInvite("auth", "codex", true, null, Actor.cliOperator(HANDLE), HANDLE);
+    launch.completion().run();
 
     assertEquals("invite-full", runStore.findById(launch.runId()).orElseThrow().role());
     assertEquals("codex/invite-" + launch.runId(), launch.principal());
@@ -479,12 +511,13 @@ class InviteLaunchTest {
                   specStore,
                   new ReviewStore(db),
                   runStore)
-              .useMessages(messageStore);
+              .useMessages(messageStore)
+              .useInviteExecutor(Runnable::run);
 
       var launched =
           sailOps.inviteToSpec(
               "auth",
-              new InviteRequest("claude-code", null, false),
+              new InviteRequest("claude-code", null, false, true),
               Actor.cliOperator(HANDLE),
               HANDLE);
       assertTrue(launched instanceof Result.Success<InviteResponse>);
@@ -495,7 +528,10 @@ class InviteLaunchTest {
 
       var refused =
           sailOps.inviteToSpec(
-              "auth", new InviteRequest("codex", null, false), Actor.cliOperator(HANDLE), HANDLE);
+              "auth",
+              new InviteRequest("codex", null, false, true),
+              Actor.cliOperator(HANDLE),
+              HANDLE);
       assertTrue(refused instanceof Result.Failure<InviteResponse>);
       assertEquals(ErrorCode.BAD_REQUEST, ((Result.Failure<InviteResponse>) refused).errorCode());
 

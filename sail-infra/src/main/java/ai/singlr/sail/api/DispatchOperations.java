@@ -67,6 +67,8 @@ public final class DispatchOperations {
 
   private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
 
+  private static final Duration INVITE_SNAPSHOT_TIMEOUT = Duration.ofHours(1);
+
   /** One dispatch invocation, lane-agnostic. */
   public record Request(
       String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {}
@@ -91,10 +93,16 @@ public final class DispatchOperations {
       Optional<WatcherSpawner.Spawned> watcher) {}
 
   /**
-   * One launched invite: the run it minted, the principal it posts under, its mode, and — full mode
-   * only — the label of the pre-launch snapshot ({@code ""} for read only).
+   * One accepted invite: the run it reserved, the principal it posts under, its mode, and — full
+   * mode only — the label of the pre-launch snapshot ({@code ""} for read only). {@code completion}
+   * runs the deferred work — the snapshot (full) and the launch — off the request thread, so the
+   * caller returns immediately (a dir-backend snapshot is a slow full copy that would blow the
+   * client timeout and, if the request were force-killed mid-copy, leave the container in Error).
+   * The reservation is already held when this record exists; {@code completion} releases it and
+   * publishes a failure event if the snapshot or launch fails.
    */
-  public record InviteLaunch(String runId, String principal, boolean full, String snapshot) {}
+  public record InviteLaunch(
+      String runId, String principal, boolean full, String snapshot, Runnable completion) {}
 
   /**
    * Container preparation that must not run until the whole-container reservation is won — the
@@ -641,6 +649,23 @@ public final class DispatchOperations {
       String model,
       Actor actor,
       String localHandle) {
+    return startInvite(specId, agentYamlName, full, true, model, actor, localHandle);
+  }
+
+  /**
+   * As {@link #startInvite(String, String, boolean, String, Actor, String)}, but {@code
+   * takeSnapshot} may waive the pre-launch snapshot on a full invite. Skipping trades the rollback
+   * point for an instant launch — the escape hatch for the {@code dir} backend, where a snapshot is
+   * a slow full filesystem copy. Read only never snapshots, so the flag is a no-op there.
+   */
+  public InviteLaunch startInvite(
+      String specId,
+      String agentYamlName,
+      boolean full,
+      boolean takeSnapshot,
+      String model,
+      Actor actor,
+      String localHandle) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -702,9 +727,61 @@ public final class DispatchOperations {
             config);
     try {
       seedRoomDelivery(runId, built.renderedMessages());
-      var snapshot = "";
+    } catch (RuntimeException e) {
+      releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+    var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
+    var snapshot = full && takeSnapshot ? "invite-" + runId : "";
+    Runnable completion =
+        () ->
+            completeInvite(
+                project,
+                config,
+                specId,
+                runId,
+                unit,
+                agentCli,
+                inviteModel,
+                task,
+                branch,
+                targetRepos,
+                repoPaths,
+                credential,
+                role,
+                full,
+                snapshot);
+    return new InviteLaunch(runId, principal, full, snapshot, completion);
+  }
+
+  /**
+   * The deferred half of an invite, run off the request thread: take the pre-launch snapshot (full
+   * mode) or capture the room baseline (read only), then launch the session. The reservation is
+   * already held. A snapshot or launch failure releases it and publishes {@code snapshot_created}
+   * carrying an {@code error} — there is no caller left to throw to, so the room learns the invite
+   * failed through the stream.
+   */
+  private void completeInvite(
+      String project,
+      SailYaml config,
+      String specId,
+      String runId,
+      AgentUnit unit,
+      AgentCli agentCli,
+      String inviteModel,
+      String task,
+      String branch,
+      List<SailYaml.Repo> targetRepos,
+      List<String> repoPaths,
+      String credential,
+      String role,
+      boolean full,
+      String snapshot) {
+    try {
       if (full) {
-        snapshot = inviteSnapshot(project, specId, runId);
+        if (!Strings.isBlank(snapshot)) {
+          inviteSnapshot(project, specId, runId);
+        }
       } else {
         captureRoomBaseline(project, config, runId);
       }
@@ -739,12 +816,19 @@ public final class DispatchOperations {
         publishAgentSessionStarted(
             project, specId, agentCli.yamlName(), status.pid(), runId, launch.watcher());
       }
-      var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
-      return new InviteLaunch(runId, principal, full, snapshot);
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
-      throw e;
+      publishInviteFailed(project, specId, runId, snapshot, e);
     }
+  }
+
+  private void publishInviteFailed(
+      String project, String specId, String runId, String snapshot, RuntimeException e) {
+    var data = new LinkedHashMap<String, Object>();
+    data.put("label", snapshot);
+    data.put(Event.WellKnownData.RUN_ID, runId);
+    data.put("error", Objects.requireNonNullElse(e.getMessage(), e.toString()));
+    publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, data);
   }
 
   /**
@@ -806,7 +890,7 @@ public final class DispatchOperations {
   private String inviteSnapshot(String project, String specId, String runId) {
     var label = "invite-" + runId;
     try {
-      new SnapshotManager(shell).create(project, label);
+      new SnapshotManager(shell).create(project, label, INVITE_SNAPSHOT_TIMEOUT);
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.SNAPSHOT_FAILED,
