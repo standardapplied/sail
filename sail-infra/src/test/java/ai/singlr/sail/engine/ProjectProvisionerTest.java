@@ -481,6 +481,8 @@ class ProjectProvisionerTest {
     assertTrue(installCmd.contains("git"));
     assertTrue(installCmd.contains("sudo"));
     assertTrue(installCmd.contains("openssh-server"));
+    assertTrue(installCmd.contains("gh"));
+    assertTrue(installCmd.contains("ripgrep"));
     assertTrue(installCmd.contains("postgresql-client-16"));
   }
 

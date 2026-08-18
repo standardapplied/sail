@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Shared plumbing for integration tests that drive a real incus daemon — the boundary unit tests
@@ -62,20 +63,26 @@ public abstract class AbstractIncusIT {
         launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
   }
 
-  private static final String PREPARED_ALIAS = "sail-it-prepared";
+  private static final String PREPARED_ALIAS = "sail-it-prepared-v2";
   private static final String BUILDER = "sail-it-image-builder";
   private static final List<String> PREPARED_PACKAGES =
-      List.of("curl", "git", "python3", "podman", "uidmap");
+      Stream.concat(
+              ProjectProvisioner.BASELINE_PACKAGES.stream(),
+              Stream.of("python3", "podman", "uidmap"))
+          .distinct()
+          .toList();
   private static final Object PREPARE_LOCK = new Object();
   private static boolean preparedImageReady;
 
   /**
    * Launches {@code container} from the locally published prepared image — the base image plus
-   * every package the incus suite needs. The image is baked at most once per host: baking is the
-   * only step that touches the network (the public image server, container DNS, the apt archive),
-   * each stage is retried and fails naming itself with diagnostics, and every test launch
-   * afterwards is a local copy. Tests must never reach the internet from inside their own bodies —
-   * a bootstrap that depends on external infrastructure at test time is a defect of the test.
+   * every package the incus suite needs, including sail's full provisioning baseline. The alias is
+   * versioned: bump it whenever the package set changes so hosts holding an older bake rebuild
+   * instead of serving a stale image. The image is baked at most once per host: baking is the only
+   * step that touches the network (the public image server, container DNS, the apt archive), each
+   * stage is retried and fails naming itself with diagnostics, and every test launch afterwards is
+   * a local copy. Tests must never reach the internet from inside their own bodies — a bootstrap
+   * that depends on external infrastructure at test time is a defect of the test.
    */
   protected void launchPrepared(String container) throws Exception {
     synchronized (PREPARE_LOCK) {

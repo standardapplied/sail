@@ -38,8 +38,8 @@ public final class ProjectProvisioner {
   private static final String MAVEN_ARCHIVE_BASE_URL =
       "https://archive.apache.org/dist/maven/maven-3/";
 
-  private static final List<String> BASELINE_PACKAGES =
-      List.of("curl", "wget", "git", "sudo", "openssh-server");
+  static final List<String> BASELINE_PACKAGES =
+      List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
 
   private final ShellExec shell;
   private final ProvisionTracker<ProjectPhase> tracker;

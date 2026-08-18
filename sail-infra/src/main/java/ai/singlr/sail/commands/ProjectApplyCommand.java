@@ -448,6 +448,7 @@ public final class ProjectApplyCommand implements Runnable {
     var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
     var results = new ArrayList<ProjectApplier.ApplyResult>();
+    results.add(applier.applyPackages(project, config.packages()));
     results.add(applier.applyServices(project, config.services()));
     results.add(applier.reconcileServices(project, config.services()));
     results.add(

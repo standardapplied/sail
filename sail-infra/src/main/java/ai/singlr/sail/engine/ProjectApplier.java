@@ -60,6 +60,52 @@ public final class ProjectApplier {
   }
 
   /**
+   * Installs missing apt packages — the sail baseline plus any declared in sail.yaml. Packages
+   * already installed are skipped, so a converge on a current container never touches apt. This is
+   * how containers provisioned before a baseline addition pick up the new tools.
+   */
+  public ApplyResult applyPackages(String name, List<String> configPackages)
+      throws IOException, InterruptedException, TimeoutException {
+    var desired = new ArrayList<>(ProjectProvisioner.BASELINE_PACKAGES);
+    if (configPackages != null) {
+      configPackages.stream().filter(p -> !desired.contains(p)).forEach(desired::add);
+    }
+    var missing = new ArrayList<String>();
+    var skipped = 0;
+    for (var pkg : desired) {
+      var check = probes.exec(asRoot(name, List.of("dpkg", "-s", pkg)));
+      if (check.ok()) {
+        skipped++;
+      } else {
+        missing.add(pkg);
+      }
+    }
+    if (missing.isEmpty()) {
+      out.println("  [skip] All " + skipped + " packages already installed");
+      return new ApplyResult(0, 0, skipped, List.of());
+    }
+    out.println("  [add] Installing package(s): " + String.join(", ", missing) + "...");
+    var update =
+        shell.exec(asRoot(name, List.of("apt-get", "update", "-qq")), null, INSTALL_TIMEOUT);
+    if (!update.ok()) {
+      throw new IOException("Failed to update package lists: " + update.stderr());
+    }
+    var install = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
+    install.addAll(missing);
+    var result = shell.exec(asRoot(name, install), null, INSTALL_TIMEOUT);
+    if (!result.ok()) {
+      throw new IOException("Failed to install packages: " + result.stderr());
+    }
+    return new ApplyResult(missing.size(), 0, skipped, List.of());
+  }
+
+  private static List<String> asRoot(String name, List<String> args) {
+    var cmd = new ArrayList<>(List.of("incus", "exec", name, "--"));
+    cmd.addAll(args);
+    return cmd;
+  }
+
+  /**
    * Applies new services from the config. Services already running in the container are skipped.
    */
   public ApplyResult applyServices(String name, Map<String, SailYaml.Service> services)
