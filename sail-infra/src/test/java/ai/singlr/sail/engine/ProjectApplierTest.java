@@ -28,6 +28,105 @@ class ProjectApplierTest {
   @TempDir Path tempDir;
 
   @Test
+  void applyPackagesInstallsMissingBaselineTools() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("dpkg -s gh", "package 'gh' is not installed")
+            .onFail("dpkg -s ripgrep", "package 'ripgrep' is not installed")
+            .onOk("dpkg -s")
+            .onOk("apt-get update")
+            .onOk("apt-get install");
+    var applier = applier(shell);
+
+    var result = applier.applyPackages(CONTAINER, null);
+
+    assertEquals(2, result.added());
+    assertEquals(ProjectProvisioner.BASELINE_PACKAGES.size() - 2, result.skipped());
+    var installCmd =
+        shell.invocations().stream()
+            .filter(c -> c.contains("apt-get install"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(installCmd.contains("gh"));
+    assertTrue(installCmd.contains("ripgrep"));
+    assertFalse(installCmd.contains("curl"), "packages already present are not reinstalled");
+  }
+
+  @Test
+  void applyPackagesSkipsAptEntirelyWhenAllPresent() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("dpkg -s");
+    var applier = applier(shell);
+
+    var result = applier.applyPackages(CONTAINER, List.of("postgresql-client-16"));
+
+    assertEquals(0, result.added());
+    assertEquals(ProjectProvisioner.BASELINE_PACKAGES.size() + 1, result.skipped());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.contains("apt-get")),
+        "a current container must not touch apt on converge");
+  }
+
+  @Test
+  void applyPackagesInstallsMissingConfigPackages() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("dpkg -s postgresql-client-16", "not installed")
+            .onOk("dpkg -s")
+            .onOk("apt-get update")
+            .onOk("apt-get install");
+    var applier = applier(shell);
+
+    var result = applier.applyPackages(CONTAINER, List.of("postgresql-client-16"));
+
+    assertEquals(1, result.added());
+    var installCmd =
+        shell.invocations().stream()
+            .filter(c -> c.contains("apt-get install"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(installCmd.contains("postgresql-client-16"));
+  }
+
+  @Test
+  void applyPackagesDeduplicatesConfigPackagesAlreadyInBaseline() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("dpkg -s");
+    var applier = applier(shell);
+
+    var result = applier.applyPackages(CONTAINER, List.of("git", "ripgrep"));
+
+    assertEquals(ProjectProvisioner.BASELINE_PACKAGES.size(), result.skipped());
+  }
+
+  @Test
+  void applyPackagesThrowsOnInstallFailure() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("dpkg -s gh", "not installed")
+            .onOk("dpkg -s")
+            .onOk("apt-get update")
+            .onFail("apt-get install", "E: Unable to locate package");
+    var applier = applier(shell);
+
+    var ex = assertThrows(Exception.class, () -> applier.applyPackages(CONTAINER, null));
+
+    assertTrue(ex.getMessage().contains("Failed to install packages"));
+  }
+
+  @Test
+  void applyPackagesThrowsOnAptUpdateFailure() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("dpkg -s gh", "not installed")
+            .onOk("dpkg -s")
+            .onFail("apt-get update", "no network");
+    var applier = applier(shell);
+
+    var ex = assertThrows(Exception.class, () -> applier.applyPackages(CONTAINER, null));
+
+    assertTrue(ex.getMessage().contains("Failed to update package lists"));
+  }
+
+  @Test
   void applyServicesStartsNewService() throws Exception {
     var shell =
         new ScriptedShellExecutor()
@@ -58,10 +157,20 @@ class ProjectApplierTest {
         Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
     applier.applyServices(CONTAINER, services);
     applier.applyAgentTools(CONTAINER, List.of("claude-code"));
+    applier.applyPackages(CONTAINER, null);
 
     assertTrue(
         probes.invocations().stream().anyMatch(c -> c.contains("podman container inspect")),
         "existence probes must observe the live container");
+    assertTrue(
+        probes.invocations().stream().anyMatch(c -> c.contains("dpkg -s")),
+        "package-presence probes must observe the live container");
+    assertTrue(
+        probes.invocations().stream().noneMatch(c -> c.contains("apt-get")),
+        "apt mutations must never ride the probe shell");
+    assertTrue(
+        mutator.invocations().stream().anyMatch(c -> c.contains("apt-get install")),
+        "missing packages install through the mutator shell");
     assertTrue(
         probes.invocations().stream().anyMatch(c -> c.contains("which")),
         "tool-presence probes must observe the live container");
