@@ -73,7 +73,7 @@ public final class ProjectApplier {
     var missing = new ArrayList<String>();
     var skipped = 0;
     for (var pkg : desired) {
-      var check = probes.exec(asRoot(name, List.of("dpkg", "-s", pkg)));
+      var check = probes.exec(ContainerExec.asRoot(name, List.of("dpkg", "-s", pkg)));
       if (check.ok()) {
         skipped++;
       } else {
@@ -86,23 +86,18 @@ public final class ProjectApplier {
     }
     out.println("  [add] Installing package(s): " + String.join(", ", missing) + "...");
     var update =
-        shell.exec(asRoot(name, List.of("apt-get", "update", "-qq")), null, INSTALL_TIMEOUT);
+        shell.exec(
+            ContainerExec.asRoot(name, List.of("apt-get", "update", "-qq")), null, INSTALL_TIMEOUT);
     if (!update.ok()) {
       throw new IOException("Failed to update package lists: " + update.stderr());
     }
     var install = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
     install.addAll(missing);
-    var result = shell.exec(asRoot(name, install), null, INSTALL_TIMEOUT);
+    var result = shell.exec(ContainerExec.asRoot(name, install), null, INSTALL_TIMEOUT);
     if (!result.ok()) {
       throw new IOException("Failed to install packages: " + result.stderr());
     }
     return new ApplyResult(missing.size(), 0, skipped, List.of());
-  }
-
-  private static List<String> asRoot(String name, List<String> args) {
-    var cmd = new ArrayList<>(List.of("incus", "exec", name, "--"));
-    cmd.addAll(args);
-    return cmd;
   }
 
   /**

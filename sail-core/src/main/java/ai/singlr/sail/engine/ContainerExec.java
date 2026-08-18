@@ -63,6 +63,21 @@ public final class ContainerExec {
   }
 
   /**
+   * Builds an {@code incus exec} command that runs the given args as root — the privilege apt and
+   * dpkg need. Mirrors {@link #asDevUser} for the few operations (baseline package installs) that
+   * cannot run as the dev user, and validates the container name the same way.
+   *
+   * @param containerName the Incus container name
+   * @param args the command and arguments to run inside the container
+   * @return an unmodifiable command list ready for {@link ShellExec#exec}
+   */
+  public static List<String> asRoot(String containerName, List<String> args) {
+    NameValidator.requireValidProjectName(containerName);
+    var prefix = List.of("incus", "exec", containerName, "--");
+    return Stream.concat(prefix.stream(), args.stream()).toList();
+  }
+
+  /**
    * Queries running Podman containers inside an Incus container and extracts the published host
    * ports. Returns a deduplicated, sorted list of port numbers. Returns an empty list if no
    * containers are running or the query fails.

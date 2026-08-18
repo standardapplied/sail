@@ -69,6 +69,27 @@ class ContainerExecTest {
   }
 
   @Test
+  void asRootBuildsBarePrefixWithNoUserSwitch() {
+    var cmd = ContainerExec.asRoot("acme", List.of("dpkg", "-s", "gh"));
+
+    assertEquals(List.of("incus", "exec", "acme", "--", "dpkg", "-s", "gh"), cmd);
+  }
+
+  @Test
+  void asRootRejectsInvalidContainerName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ContainerExec.asRoot("proj;touch-owned", List.of("apt-get", "update")));
+  }
+
+  @Test
+  void asRootReturnsUnmodifiableList() {
+    var cmd = ContainerExec.asRoot("proj", List.of("echo", "hi"));
+
+    assertThrows(UnsupportedOperationException.class, () -> cmd.add("extra"));
+  }
+
+  @Test
   void queryServicePortsExtractsHostPorts() throws Exception {
     var podmanJson =
         """
