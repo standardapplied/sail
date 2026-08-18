@@ -602,10 +602,88 @@ class ApiRouterTest {
   }
 
   @Test
-  void publishEventRejectsGet() throws Exception {
+  void eventsRejectsUnsupportedMethod() throws Exception {
+    try (var server = server()) {
+      var request =
+          HttpRequest.newBuilder(uri(server, "/v1/events"))
+              .header("Authorization", "Bearer token")
+              .method("DELETE", HttpRequest.BodyPublishers.noBody())
+              .build();
+      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      assertEquals(405, response.statusCode());
+    }
+  }
+
+  @Test
+  void specEventsRequiresSpecQueryParameter() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/events", "token");
-      assertEquals(405, response.statusCode());
+      assertEquals(422, response.statusCode());
+      assertTrue(response.body().contains("spec query parameter is required"));
+    }
+  }
+
+  @Test
+  void specEventsReturnsScopedHistory() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events?spec=auth", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"spec\": \"auth\""));
+      assertTrue(response.body().contains("\"limit\": 100"));
+      assertTrue(response.body().contains("\"events\""));
+      assertFalse(response.body().contains("\"since\""));
+    }
+  }
+
+  @Test
+  void specEventsPassesSinceCursorThrough() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events?spec=auth&since=42", "token");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"since\": 42"));
+    }
+  }
+
+  @Test
+  void specEventsClampsLimitInsteadOfRejecting() throws Exception {
+    try (var server = server()) {
+      assertTrue(
+          get(server, "/v1/events?spec=auth&limit=99999", "token")
+              .body()
+              .contains("\"limit\": 1000"));
+      assertTrue(
+          get(server, "/v1/events?spec=auth&limit=0", "token").body().contains("\"limit\": 1"));
+    }
+  }
+
+  @Test
+  void specEventsRejectsNonNumericLimit() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events?spec=auth&limit=abc", "token");
+      assertEquals(400, response.statusCode());
+    }
+  }
+
+  @Test
+  void specEventsRejectsInvalidSince() throws Exception {
+    try (var server = server()) {
+      assertEquals(422, get(server, "/v1/events?spec=auth&since=abc", "token").statusCode());
+      assertEquals(422, get(server, "/v1/events?spec=auth&since=-1", "token").statusCode());
+    }
+  }
+
+  @Test
+  void specEventsRejectsInvalidSpecId() throws Exception {
+    try (var server = server()) {
+      var response = get(server, "/v1/events?spec=Bad%20Spec!", "token");
+      assertEquals(422, response.statusCode());
+    }
+  }
+
+  @Test
+  void specEventsRequiresAuth() throws Exception {
+    try (var server = server()) {
+      assertEquals(401, get(server, "/v1/events?spec=auth", null).statusCode());
     }
   }
 
@@ -704,6 +782,14 @@ class ApiRouterTest {
     assertEquals(2, recent.returned());
     assertEquals(1L, stats.rejectedSubscribers());
     assertEquals("audit", stats.subscribers().getFirst().name());
+    var scoped = new SpecEventsResponse("auth", 3L, 100, 1, java.util.List.of(Map.of("id", 4)));
+    assertEquals("auth", scoped.spec());
+    assertEquals(3L, scoped.toMap().get("since"));
+    assertEquals(1, scoped.toMap().get("returned"));
+    assertFalse(
+        new SpecEventsResponse("auth", null, 100, 0, java.util.List.of())
+            .toMap()
+            .containsKey("since"));
   }
 
   @Test
@@ -1556,6 +1642,11 @@ class ApiRouterTest {
     @Override
     public Result<RecentEventsResponse> recentEvents(int limit) {
       return Result.success(new RecentEventsResponse(limit, 0, java.util.List.of()));
+    }
+
+    @Override
+    public Result<SpecEventsResponse> specEvents(String specId, Long since, int limit) {
+      return Result.success(new SpecEventsResponse(specId, since, limit, 0, java.util.List.of()));
     }
 
     @Override

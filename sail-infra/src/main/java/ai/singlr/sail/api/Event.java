@@ -13,6 +13,7 @@ import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * One immutable event traveling through the sail {@link EventBus}. Events are emitted by the
@@ -106,9 +107,18 @@ public record Event(
      */
     public static final String AGENT_FAILED = "agent_failed";
 
+    /**
+     * The {@link RetentionClass#TELEMETRY} types: high-volume liveness signals the retention
+     * sweeper prunes and history reads exclude, so "the record" always means RECORD-class events.
+     */
+    public static final Set<String> TELEMETRY_TYPES =
+        Set.of(AGENT_TOOL_STARTED, AGENT_TOOL_FINISHED, AGENT_LOG_CHUNK);
+
     public static RetentionClass retentionClass(String type) {
+      if (TELEMETRY_TYPES.contains(type)) {
+        return RetentionClass.TELEMETRY;
+      }
       return switch (type) {
-        case AGENT_TOOL_STARTED, AGENT_TOOL_FINISHED, AGENT_LOG_CHUNK -> RetentionClass.TELEMETRY;
         case AGENT_PRESENCE, HEARTBEAT -> RetentionClass.EPHEMERAL;
         default -> RetentionClass.RECORD;
       };

@@ -227,6 +227,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<SpecEventsResponse> specEvents(String specId, Long since, int limit) {
+    return Result.success(new SpecEventsResponse(specId, since, limit, 0, List.of()));
+  }
+
+  @Override
   public Result<EventBusStatsResponse> eventBusStats() {
     return Result.success(new EventBusStatsResponse(0L, 0L, List.of()));
   }

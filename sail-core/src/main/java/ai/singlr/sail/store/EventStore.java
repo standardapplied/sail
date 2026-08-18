@@ -64,6 +64,41 @@ public final class EventStore {
         specId);
   }
 
+  /**
+   * The bounded, ascending history window for one spec: at most {@code limit} rows with {@code id >
+   * afterId} when {@code afterId} is non-null, otherwise the newest {@code limit} rows. Rows whose
+   * type is in {@code excludedTypes} never occupy the window. Both shapes range-scan {@code
+   * idx_events_spec} (spec_id plus the implicit rowid), so a large events table is never scanned.
+   */
+  public List<EventRow> forSpec(String specId, Long afterId, int limit, Set<String> excludedTypes) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive, got " + limit);
+    }
+    var exclusion =
+        excludedTypes.isEmpty()
+            ? ""
+            : " AND type NOT IN ("
+                + String.join(", ", Collections.nCopies(excludedTypes.size(), "?"))
+                + ")";
+    var parameters = new ArrayList<Object>();
+    parameters.add(specId);
+    if (afterId != null) {
+      parameters.add(afterId);
+    }
+    parameters.addAll(excludedTypes);
+    parameters.add(limit);
+    var sql =
+        "SELECT id, timestamp, type, project, spec_id, agent, host, data FROM events"
+            + " WHERE spec_id = ?"
+            + (afterId != null ? " AND id > ?" : "")
+            + exclusion
+            + " ORDER BY id "
+            + (afterId != null ? "ASC" : "DESC")
+            + " LIMIT ?";
+    var rows = db.query(sql, this::mapEvent, parameters.toArray());
+    return afterId != null ? rows : rows.reversed();
+  }
+
   public List<EventRow> forSpecAndType(String specId, String type) {
     return db.query(
         """

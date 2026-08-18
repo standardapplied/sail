@@ -443,6 +443,23 @@ record RecentEventsResponse(int limit, int returned, List<Map<String, Object>> e
   }
 }
 
+record SpecEventsResponse(
+    String spec, Long since, int limit, int returned, List<Map<String, Object>> events)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("spec", spec);
+    if (since != null) {
+      m.put("since", since);
+    }
+    m.put("limit", limit);
+    m.put("returned", returned);
+    m.put("events", events);
+    return m;
+  }
+}
+
 record EventBusStatsResponse(
     long published, long rejectedSubscribers, List<SubscriberStatsView> subscribers)
     implements Mappable {
