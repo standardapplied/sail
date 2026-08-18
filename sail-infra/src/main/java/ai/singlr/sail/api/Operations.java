@@ -100,6 +100,16 @@ public interface Operations {
   /** Returns up to {@code limit} most-recent events (oldest first). */
   Result<RecentEventsResponse> recentEvents(int limit);
 
+  /**
+   * The spec's durable event history from this box's audit store, oldest first: RECORD-class events
+   * only, at most {@code limit} rows, and — when {@code since} is non-null — only rows with an
+   * event id strictly greater than it (the gap-fill cursor after an SSE reconnect). {@code since}
+   * null means the newest {@code limit} rows. A spec with no events answers an empty list, never
+   * 404. The record is node-local: events published on another box never land in this store, so the
+   * fleet-consistent room content remains the synced stores (messages, reviews, runs).
+   */
+  Result<SpecEventsResponse> specEvents(String specId, Long since, int limit);
+
   /** Returns per-subscriber + bus stats for {@code /v1/events/stats}. */
   Result<EventBusStatsResponse> eventBusStats();
 

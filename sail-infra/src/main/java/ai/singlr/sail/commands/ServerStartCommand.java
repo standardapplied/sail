@@ -199,7 +199,8 @@ public final class ServerStartCommand implements Runnable {
                 syncScheduler,
                 new FdeStore(db))
             .useMessages(messageStore)
-            .useBoxCredentials(boxCredentialStore);
+            .useBoxCredentials(boxCredentialStore)
+            .useEvents(eventStore);
     var orphaned = reviewStore.failOrphanedRunning();
     var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
     if (orphanedRuns > 0) {

@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
@@ -23,6 +24,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -62,6 +64,7 @@ public final class SailOperations implements Operations {
   private final FdeStore fdeStore;
   private MessageStore messageStore;
   private BoxCredentialStore boxCredentialStore;
+  private EventStore eventStore;
 
   public SailOperations() {
     this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
@@ -175,6 +178,12 @@ public final class SailOperations implements Operations {
   /** Wires the box's ambient credential store for the local socket lane; returns {@code this}. */
   public SailOperations useBoxCredentials(BoxCredentialStore boxCredentialStore) {
     this.boxCredentialStore = Objects.requireNonNull(boxCredentialStore, "boxCredentialStore");
+    return this;
+  }
+
+  /** Wires the audit store so per-spec event history is servable; returns {@code this}. */
+  public SailOperations useEvents(EventStore eventStore) {
+    this.eventStore = Objects.requireNonNull(eventStore, "eventStore");
     return this;
   }
 
@@ -1054,6 +1063,59 @@ public final class SailOperations implements Operations {
           var maps = events.stream().map(Event::toMap).toList();
           return new RecentEventsResponse(limit, maps.size(), maps);
         });
+  }
+
+  @Override
+  public Result<SpecEventsResponse> specEvents(String specId, Long since, int limit) {
+    if (Strings.isBlank(specId)) {
+      return Result.failure(ErrorCode.INVALID_REQUEST, "spec is required");
+    }
+    if (since != null && since < 0) {
+      return Result.failure(ErrorCode.INVALID_REQUEST, "since must be non-negative, got " + since);
+    }
+    if (limit <= 0 || limit > 5000) {
+      return Result.failure(
+          ErrorCode.INVALID_REQUEST, "limit must be between 1 and 5000, got " + limit);
+    }
+    if (eventStore == null) {
+      return Result.success(new SpecEventsResponse(specId, since, limit, 0, List.of()));
+    }
+    return safe(
+        () -> {
+          var rows = eventStore.forSpec(specId, since, limit, Event.WellKnownTypes.TELEMETRY_TYPES);
+          var maps = rows.stream().map(SailOperations::eventRowMap).toList();
+          return new SpecEventsResponse(specId, since, limit, maps.size(), maps);
+        });
+  }
+
+  /**
+   * The wire view of a stored event row, matching the shape live SSE frames and {@code /recent}
+   * carry so one client-side decoder serves all three. A row whose data payload no longer parses is
+   * served without it — one damaged row must not take the whole history read down.
+   */
+  private static Map<String, Object> eventRowMap(EventStore.EventRow row) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("v", Event.CURRENT_VERSION);
+    map.put("id", row.id());
+    map.put("ts", row.timestamp());
+    map.put("project", row.project());
+    if (Strings.isNotBlank(row.specId())) {
+      map.put("spec", row.specId());
+    }
+    map.put("type", row.type());
+    map.put("agent", row.agent());
+    map.put("host", row.host());
+    if (Strings.isNotBlank(row.data())) {
+      try {
+        var data = YamlUtil.parseMap(row.data());
+        if (!data.isEmpty()) {
+          map.put("data", data);
+        }
+      } catch (RuntimeException e) {
+        ApiLog.unexpected("parsing stored event data for event " + row.id(), e);
+      }
+    }
+    return map;
   }
 
   @Override

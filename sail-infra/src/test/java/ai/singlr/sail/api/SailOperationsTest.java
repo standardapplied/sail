@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
@@ -2393,6 +2394,92 @@ class SailOperationsTest {
       var result = operations.recentEvents(5);
       assertTrue(result.isSuccess());
     }
+  }
+
+  @Test
+  void specEventsRejectsBadArguments() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    assertError(ErrorCode.INVALID_REQUEST, operations.specEvents(" ", null, 10));
+    assertError(ErrorCode.INVALID_REQUEST, operations.specEvents("auth", -1L, 10));
+    assertError(ErrorCode.INVALID_REQUEST, operations.specEvents("auth", null, 0));
+    assertError(ErrorCode.INVALID_REQUEST, operations.specEvents("auth", null, 99999));
+  }
+
+  @Test
+  void specEventsEmptyWhenStoreNotWired() throws Exception {
+    var operations = operations(baseYaml(), shell());
+    var result = operations.specEvents("auth", null, 10);
+    assertTrue(result.isSuccess());
+    assertEquals("auth", get(result, "spec"));
+    assertEquals(0, get(result, "returned"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void specEventsServesTheScopedRecordOldestFirst() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var events = new EventStore(db);
+    events.insert(eventRow("spec_dispatched", "auth", "{\"run_id\": \"r-1\"}"));
+    events.insert(eventRow("agent_log_chunk", "auth", "{}"));
+    events.insert(eventRow("agent_session_stopped", "payment", "{}"));
+    events.insert(eventRow("agent_session_stopped", "auth", "{}"));
+    var operations = operations(baseYaml(), shell()).useEvents(events);
+
+    var result = operations.specEvents("auth", null, 10);
+
+    assertTrue(result.isSuccess());
+    assertEquals(2, get(result, "returned"));
+    var served = (List<Map<String, Object>>) get(result, "events");
+    assertEquals(
+        List.of("spec_dispatched", "agent_session_stopped"),
+        served.stream().map(event -> event.get("type")).toList(),
+        "telemetry and other specs never reach the room");
+    assertEquals("auth", served.getFirst().get("spec"));
+    assertEquals("r-1", ((Map<String, Object>) served.getFirst().get("data")).get("run_id"));
+    assertTrue((long) served.getFirst().get("id") < (long) served.getLast().get("id"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void specEventsSinceCursorIsExclusiveAndLimitBounds() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var events = new EventStore(db);
+    events.insert(eventRow("spec_dispatched", "auth", "{}"));
+    events.insert(eventRow("agent_session_started", "auth", "{}"));
+    events.insert(eventRow("agent_session_stopped", "auth", "{}"));
+    var operations = operations(baseYaml(), shell()).useEvents(events);
+
+    var all = (List<Map<String, Object>>) get(operations.specEvents("auth", null, 10), "events");
+    var cursor = (long) all.getFirst().get("id");
+    var after = (List<Map<String, Object>>) get(operations.specEvents("auth", cursor, 1), "events");
+
+    assertEquals(1, after.size());
+    assertEquals("agent_session_started", after.getFirst().get("type"));
+    assertEquals(
+        0, get(operations.specEvents("auth", (long) all.getLast().get("id"), 10), "returned"));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void specEventsServesARowWhoseDataNoLongerParses() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    var events = new EventStore(db);
+    events.insert(eventRow("spec_dispatched", "auth", "{broken"));
+    var operations = operations(baseYaml(), shell()).useEvents(events);
+
+    var result = operations.specEvents("auth", null, 10);
+
+    assertTrue(result.isSuccess());
+    var served = (List<Map<String, Object>>) get(result, "events");
+    assertEquals("spec_dispatched", served.getFirst().get("type"));
+  }
+
+  private static EventStore.EventRow eventRow(String type, String specId, String data) {
+    return new EventStore.EventRow(
+        0, "2026-08-17T00:00:00Z", type, "acme", specId, "sail", "host-01", data);
   }
 
   @Test

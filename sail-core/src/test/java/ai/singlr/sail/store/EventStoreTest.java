@@ -6,11 +6,13 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,6 +88,101 @@ class EventStoreTest {
   @Test
   void forSpecReturnsEmptyForUnknownSpec() {
     assertTrue(store.forSpec("nonexistent").isEmpty());
+  }
+
+  @Test
+  void boundedForSpecScopesAndOrdersAscending() {
+    store.insert(event("dispatched", "backend", "auth"));
+    store.insert(event("dispatched", "backend", "payment"));
+    store.insert(event("started", "backend", "auth"));
+    store.insert(event("stopped", "backend", "auth"));
+
+    var events = store.forSpec("auth", null, 10, Set.of());
+    assertEquals(3, events.size());
+    assertEquals("dispatched", events.get(0).type());
+    assertEquals("started", events.get(1).type());
+    assertEquals("stopped", events.get(2).type());
+  }
+
+  @Test
+  void boundedForSpecWithoutCursorReturnsNewestWindowOldestFirst() {
+    store.insert(event("first", "backend", "auth"));
+    store.insert(event("second", "backend", "auth"));
+    store.insert(event("third", "backend", "auth"));
+
+    var events = store.forSpec("auth", null, 2, Set.of());
+    assertEquals(2, events.size());
+    assertEquals("second", events.get(0).type());
+    assertEquals("third", events.get(1).type());
+  }
+
+  @Test
+  void boundedForSpecCursorIsExclusive() {
+    store.insert(event("first", "backend", "auth"));
+    var cursor = store.insert(event("second", "backend", "auth"));
+    store.insert(event("noise", "backend", "payment"));
+    store.insert(event("third", "backend", "auth"));
+
+    var events = store.forSpec("auth", cursor, 10, Set.of());
+    assertEquals(1, events.size());
+    assertEquals("third", events.getFirst().type());
+    assertTrue(store.forSpec("auth", events.getFirst().id(), 10, Set.of()).isEmpty());
+  }
+
+  @Test
+  void boundedForSpecCursorRespectsLimitAscending() {
+    var cursor = store.insert(event("seed", "backend", "auth"));
+    store.insert(event("a", "backend", "auth"));
+    store.insert(event("b", "backend", "auth"));
+    store.insert(event("c", "backend", "auth"));
+
+    var events = store.forSpec("auth", cursor, 2, Set.of());
+    assertEquals(2, events.size());
+    assertEquals("a", events.get(0).type());
+    assertEquals("b", events.get(1).type());
+  }
+
+  @Test
+  void boundedForSpecExcludesTypesBeforeApplyingTheLimit() {
+    store.insert(event("record_one", "backend", "auth"));
+    for (var i = 0; i < 5; i++) {
+      store.insert(event("agent_log_chunk", "backend", "auth"));
+    }
+    store.insert(event("record_two", "backend", "auth"));
+
+    var events = store.forSpec("auth", null, 2, Set.of("agent_log_chunk"));
+    assertEquals(2, events.size());
+    assertEquals("record_one", events.get(0).type());
+    assertEquals("record_two", events.get(1).type());
+  }
+
+  @Test
+  void boundedForSpecReturnsEmptyForUnknownSpec() {
+    store.insert(event("dispatched", "backend", "auth"));
+    assertTrue(store.forSpec("nonexistent", null, 10, Set.of()).isEmpty());
+  }
+
+  @Test
+  void boundedForSpecRejectsNonPositiveLimit() {
+    assertThrows(IllegalArgumentException.class, () -> store.forSpec("auth", null, 0, Set.of()));
+  }
+
+  @Test
+  void boundedForSpecUsesTheSpecIndexNotATableScan() {
+    var plans =
+        List.of(
+            "EXPLAIN QUERY PLAN SELECT id FROM events WHERE spec_id = ? AND id > ?"
+                + " AND type NOT IN (?) ORDER BY id ASC LIMIT ?",
+            "EXPLAIN QUERY PLAN SELECT id FROM events WHERE spec_id = ?"
+                + " AND type NOT IN (?) ORDER BY id DESC LIMIT ?");
+    var indexed = db.query(plans.get(0), row -> row.text(3), "auth", 1L, "agent_log_chunk", 10);
+    var newest = db.query(plans.get(1), row -> row.text(3), "auth", "agent_log_chunk", 10);
+    for (var detail : List.of(indexed.getFirst(), newest.getFirst())) {
+      assertTrue(
+          detail.contains("USING INDEX idx_events_spec"),
+          "expected idx_events_spec range scan, got: " + detail);
+      assertFalse(detail.startsWith("SCAN"), "combined predicate must not table-scan: " + detail);
+    }
   }
 
   @Test

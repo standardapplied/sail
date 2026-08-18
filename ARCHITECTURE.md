@@ -339,6 +339,16 @@ credential minted at dispatch (`SAIL_RUN_CREDENTIAL`), which resolves to the run
 principal; a missing or revoked credential is refused with 401. Every box runs it, and it
 is what lets an engineer dispatch agents locally.
 
+Event history has two read shapes. `GET /v1/events/recent?limit=` is the unscoped window,
+and `GET /v1/events?spec=<id>[&since=<eventId>][&limit=]` serves one spec's durable history
+from the `EventStore`: RECORD-class events only (telemetry is pruned by retention and never
+served from history), oldest first, with `since` an exclusive monotonic event-id cursor for
+gap-fill after an SSE reconnect. The record is **node-local** — there is no event replica,
+so events recorded on another FDE's box never land in this box's audit store (same
+provenance posture as agent logs). The route serves the local record completely; the
+fleet-consistent room content is and remains the durable synced stores — messages, reviews,
+runs.
+
 **Dispatch and agent execution** (`DispatchCommand` plus `sail-harness`): autonomous
 dispatch reads the next ready spec from the database, honoring `depends_on` and assignee,
 marks it `in_progress`, snapshots the container for rollback, creates the work branch, and

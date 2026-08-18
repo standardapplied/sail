@@ -44,6 +44,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String TAIL = "tail";
   private static final String EVENTS = "events";
   private static final String RECENT = "recent";
+  private static final String SPEC = "spec";
+  private static final String SINCE = "since";
   private static final String STATS = "stats";
   private static final String LIMIT = "limit";
   private static final String BOARD = "board";
@@ -65,6 +67,7 @@ public final class ApiRouter implements HttpHandler {
   private static final int MIN_TAIL = 1;
   private static final int MAX_TAIL = 5000;
   private static final int DEFAULT_RECENT = 100;
+  private static final int MAX_SPEC_EVENTS = 1000;
 
   private final Operations operations;
   private final ApiAuth auth;
@@ -459,10 +462,19 @@ public final class ApiRouter implements HttpHandler {
     throw notFound();
   }
 
+  /**
+   * The events surface. {@code GET /v1/events?spec=<id>[&since=<eventId>][&limit=]} is the
+   * spec-scoped history read: {@code spec} is required for this route shape (the unscoped firehose
+   * stays {@code /recent}), {@code since} is the exclusive monotonic event-id cursor for gap-fill
+   * after an SSE reconnect, and {@code limit} is clamped rather than rejected.
+   */
   private ApiResponse routeEvents(HttpExchange exchange, RouteRequest request) throws IOException {
     if (request.size() == 2) {
-      requireMethod(request, POST);
-      return ApiResponse.from(operations.publishEvent(JsonBody.readEvent(exchange)));
+      return switch (request.method()) {
+        case GET -> specEvents(request);
+        case POST -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(exchange)));
+        default -> throw methodNotAllowed();
+      };
     }
     if (request.size() == 3) {
       return switch (request.segments().get(2)) {
@@ -479,6 +491,39 @@ public final class ApiRouter implements HttpHandler {
       };
     }
     throw notFound();
+  }
+
+  private ApiResponse specEvents(RouteRequest request) {
+    var params = QueryParameters.from(request.uri()).values();
+    var specId = params.get(SPEC);
+    if (Strings.isBlank(specId)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "spec query parameter is required.",
+          "Use GET /v1/events?spec=<id> for a spec's history;"
+              + " the unscoped window is GET /v1/events/recent.");
+    }
+    NameValidator.requireValidSpecId(specId);
+    return ApiResponse.from(
+        operations.specEvents(
+            specId,
+            sinceOf(params.get(SINCE)),
+            clampedLimit(params.get(LIMIT), DEFAULT_RECENT, MAX_SPEC_EVENTS)));
+  }
+
+  private static Long sinceOf(String value) {
+    if (Strings.isBlank(value)) {
+      return null;
+    }
+    try {
+      var since = Long.parseLong(value);
+      if (since < 0) {
+        throw new NumberFormatException();
+      }
+      return since;
+    } catch (NumberFormatException e) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, "since must be a non-negative integer.");
+    }
   }
 
   private ApiResponse routeAgent(RouteRequest request, String project) {
