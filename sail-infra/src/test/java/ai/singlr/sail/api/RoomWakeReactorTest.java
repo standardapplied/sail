@@ -682,6 +682,88 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void theSweepWakesOwedEngagedRoomsAndSkipsForeignOrQuietOnes() {
+    seed("owed", "draft", "uday", null);
+    engage("owed", "claude-code", "full");
+    messageStore.append("owed", "uday", "anyone there?", null);
+
+    seed("foreign", "draft", "someone-else", null);
+    engage("foreign", "claude-code", "full");
+    messageStore.append("foreign", "uday", "not this box's job", null);
+
+    seed("quiet", "draft", "uday", null);
+    engage("quiet", "claude-code", "full");
+
+    reactor().sweepEngagedRooms();
+
+    assertEquals(List.of("acme/owed"), launcher.woken);
+  }
+
+  @Test
+  void aSweepFailureOnOneRoomNeverStopsTheOthers() {
+    seed("first", "draft", "uday", null);
+    engage("first", "claude-code", "full");
+    messageStore.append("first", "uday", "hello", null);
+    seed("second", "draft", "uday", null);
+    engage("second", "claude-code", "full");
+    messageStore.append("second", "uday", "hello too", null);
+    launcher.failWith = new RuntimeException("container offline");
+
+    var reactor = reactor();
+    reactor.sweepEngagedRooms();
+    assertTrue(launcher.woken.isEmpty(), "both wakes failed loudly");
+
+    launcher.failWith = null;
+    reactor.sweepEngagedRooms();
+    assertEquals(2, launcher.woken.size(), "the next sweep retries both");
+  }
+
+  @Test
+  void theOwedCheckSurvivesNullStoresCorruptTimestampsAndMultiMessageRooms() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
+    messageStore.append("chat", "uday", "first", null);
+    var second = messageStore.append("chat", "uday", "second", null);
+
+    reactor(new DirectExecutorService(), null).onEvent(roomStop("chat", run));
+    assertTrue(launcher.woken.isEmpty(), "no message store, no owed check");
+
+    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE id = ?", second.id());
+    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE spec_id = 'chat'");
+    reactor().onEvent(roomStop("chat", run));
+    assertTrue(launcher.woken.isEmpty(), "an unparseable timestamp is never owed");
+
+    db.execute(
+        "UPDATE spec_messages SET created_at = ? WHERE spec_id = 'chat'", now.get().toString());
+    reactor().onEvent(roomStop("chat", run));
+    assertEquals(List.of("acme/chat"), launcher.woken, "the newest of several messages decides");
+  }
+
+  @Test
+  void aSweepOverABrokenMessageStoreLogsAndMovesOn(@TempDir Path other) {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var dead = Sqlite.open(other.resolve("dead.db"));
+    new SchemaManager(dead).migrate();
+    var brokenMessages = new MessageStore(dead);
+    dead.close();
+
+    reactor(new DirectExecutorService(), brokenMessages).sweepEngagedRooms();
+
+    assertTrue(launcher.woken.isEmpty());
+  }
+
+  @Test
+  void theSweepPassArmsAndClosesWithoutFiringEarly() {
+    var reactor = reactor();
+    reactor.startSweep(Duration.ofHours(1));
+    reactor.close();
+
+    assertTrue(launcher.woken.isEmpty());
+  }
+
+  @Test
   void aRoomStopOnAnOwnedRunTriggersTheCommitGuard() {
     seed("auth", "done", "uday", null);
     var runId = DateTimeUtils.newId().toString();

@@ -95,6 +95,16 @@ public record Event(
     public static final String PROJECT_STOPPED = "project_stopped";
     public static final String BOARD_UPDATED = "board_updated";
     public static final String SPEC_MESSAGE_POSTED = "spec_message_posted";
+
+    /** A human put an agent in the spec's room; it answers every human message until dismissed. */
+    public static final String SPEC_ENGAGED = "spec_engaged";
+
+    /** The room's engaged agent was dismissed (or its engagement expired). */
+    public static final String SPEC_DISENGAGED = "spec_disengaged";
+
+    /** An engagement did not take effect — the full mode's snapshot payment failed. */
+    public static final String SPEC_ENGAGE_FAILED = "spec_engage_failed";
+
     public static final String AGENT_PRESENCE = "agent_presence";
     public static final String HEARTBEAT = "heartbeat";
 
@@ -191,6 +201,13 @@ public record Event(
     /** {@link #RUN_ROLE} value: a room wake — a chat that must never trigger a review. */
     public static final String RUN_ROLE_ROOM = "room";
 
+    /**
+     * {@link #RUN_ROLE} value: an engaged agent's full-access chat turn. A conversation, not a
+     * task: never a review trigger, and its clean stop is turn plumbing, not news.
+     */
+    public static final String RUN_ROLE_ROOM_FULL =
+        ai.singlr.sail.store.DispatchGate.ROOM_FULL_ROLE;
+
     /** {@link #RUN_ROLE} value: a reviewer run — its own stop must never re-enter the pipeline. */
     public static final String RUN_ROLE_REVIEW = "review";
 
@@ -216,6 +233,7 @@ public record Event(
      */
     public static boolean nonTriggeringLane(String role) {
       return RUN_ROLE_ROOM.equals(role)
+          || RUN_ROLE_ROOM_FULL.equals(role)
           || RUN_ROLE_REVIEW.equals(role)
           || RUN_ROLE_FIX.equals(role)
           || RUN_ROLE_INVITE.equals(role)

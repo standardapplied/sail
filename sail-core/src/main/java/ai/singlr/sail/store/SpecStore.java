@@ -904,6 +904,17 @@ public final class SpecStore implements ConflictResolver {
         specId);
   }
 
+  /** Every spec with a standing engagement — the rooms the engagement sweeper walks. */
+  public List<SpecRow> listEngaged() {
+    return db.query(
+        """
+        SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
+            branch, priority, created_by, created_at, updated_at, updated_by, wake,
+            engagement
+        FROM specs WHERE engagement IS NOT NULL""",
+        this::mapSpec);
+  }
+
   public List<SpecRow> readySpecs() {
     return readySpecs(null);
   }

@@ -84,6 +84,18 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<EngageResponse> engageToSpec(
+      String specId, EngageRequest request, Actor actor, String localHandle) {
+    return Result.success(
+        new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode(), ""));
+  }
+
+  @Override
+  public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
+    return Result.success(new DisengageResponse(null));
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null));
   }
@@ -260,6 +272,7 @@ class TestOperations implements Operations {
                 List.of(),
                 null,
                 null,
+                null,
                 "",
                 "",
                 null),
@@ -287,6 +300,7 @@ class TestOperations implements Operations {
                 3,
                 List.of(),
                 List.of(),
+                null,
                 null,
                 request.createdBy(),
                 "",
@@ -316,6 +330,7 @@ class TestOperations implements Operations {
                 List.of(),
                 null,
                 null,
+                null,
                 "",
                 "",
                 null)));
@@ -339,6 +354,7 @@ class TestOperations implements Operations {
                 0,
                 List.of(),
                 List.of(),
+                null,
                 null,
                 null,
                 "",

@@ -90,6 +90,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private final Delay delay;
   private final Supplier<Instant> clock;
   private final Set<String> pending = ConcurrentHashMap.newKeySet();
+  private final PeriodicPass sweepPass =
+      new PeriodicPass("room-engagement", this::sweepEngagedRooms);
 
   public RoomWakeReactor(
       SpecStore specStore,
@@ -307,6 +309,24 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
         : null;
   }
 
+  /**
+   * The engaged loop's safety net, run by a periodic pass: any engaged room this box owns whose
+   * newest human message no chat turn has answered gets its turn scheduled — a crashed debounce, a
+   * lost event, or a turn deferred behind a build must never strand a conversation.
+   */
+  public void sweepEngagedRooms() {
+    for (var spec : specStore.listEngaged()) {
+      try {
+        if (ownsSpec(spec)) {
+          refireOwedTurn(spec.id());
+        }
+      } catch (RuntimeException e) {
+        System.err.println(
+            "room-wake: engagement sweep of spec " + spec.id() + " failed: " + e.getMessage());
+      }
+    }
+  }
+
   private boolean ownsSpec(SpecStore.SpecRow spec) {
     var handle = localHandle.get();
     return Strings.isNotBlank(handle) && handle.equals(spec.assignee());
@@ -352,8 +372,14 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     return new Message(event.agent(), Objects.toString(event.data().get("preview"), ""));
   }
 
+  /** Arms the engagement sweep at the given cadence — the safety net behind the event edges. */
+  public void startSweep(Duration interval) {
+    sweepPass.start(interval);
+  }
+
   @Override
   public void close() {
+    sweepPass.close();
     executor.close();
   }
 }

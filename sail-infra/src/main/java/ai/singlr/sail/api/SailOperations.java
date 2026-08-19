@@ -449,6 +449,38 @@ public final class SailOperations implements Operations {
     return result;
   }
 
+  @Override
+  public Result<EngageResponse> engageToSpec(
+      String specId, EngageRequest request, Actor actor, String localHandle) {
+    freshenForRead();
+    var result =
+        safe(
+            () -> {
+              var launch =
+                  dispatchOps.engage(
+                      specId, request.agent(), request.mode(), request.model(), actor, localHandle);
+              if (launch.completion() != null) {
+                inviteExecutor.execute(launch.completion());
+              }
+              return new EngageResponse(launch.agent(), launch.mode(), launch.snapshot());
+            });
+    if (result instanceof Result.Success<EngageResponse>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
+  @Override
+  public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
+    freshenForRead();
+    var result =
+        safe(() -> new DisengageResponse(dispatchOps.disengage(specId, actor, localHandle)));
+    if (result instanceof Result.Success<DisengageResponse>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
   private InviteResponse inviteValue(
       String specId, InviteRequest request, Actor actor, String localHandle) {
     var launch =

@@ -601,4 +601,30 @@ class SpecStoreTest {
     assertEquals(List.of("auth"), store.findById("billing").orElseThrow().dependsOn());
     assertTrue(store.findById("auth").isEmpty(), "the dependency need not exist");
   }
+
+  @Test
+  void engagementRoundTripsThroughCreateUpdateSnapshotAndList() {
+    var engagement = "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}";
+    store.create(spec("auth", "OAuth", "draft").withEngagement(engagement));
+    store.create(spec("plain", "Other", "draft"));
+
+    assertEquals(engagement, store.findById("auth").orElseThrow().engagement());
+    assertEquals(
+        List.of("auth"),
+        store.listEngaged().stream().map(SpecStore.SpecRow::id).toList(),
+        "only engaged rooms join the sweep");
+
+    var journaled =
+        db.queryOne(
+                "SELECT snapshot FROM change_log WHERE entity_id = 'auth'"
+                    + " ORDER BY seq DESC LIMIT 1",
+                r -> r.text(0))
+            .orElseThrow();
+    assertTrue(journaled.contains("engagement"), "the engagement syncs as one atomic field");
+
+    store.update(store.findById("auth").orElseThrow().withEngagement(null));
+    assertTrue(store.listEngaged().isEmpty(), "disengaging clears the room");
+    assertEquals(
+        null, store.findById("auth").orElseThrow().engagement(), "the column reads back null");
+  }
 }

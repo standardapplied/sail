@@ -59,6 +59,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String FOLLOWUP = "followup";
   private static final String MESSAGES = "messages";
   private static final String INVITE = "invite";
+  private static final String ENGAGE = "engage";
+  private static final String DISENGAGE = "disengage";
   private static final String AGENTS = "agents";
   private static final String SNAPSHOTS = "snapshots";
   private static final int DEFAULT_MESSAGES = 50;
@@ -399,6 +401,20 @@ public final class ApiRouter implements HttpHandler {
                 InviteRequest.fromMap(JsonBody.readMap(exchange)),
                 actorOf(exchange),
                 nodeHandle.get()));
+      }
+      if (ENGAGE.equals(sub)) {
+        requireMethod(request, POST);
+        return ApiResponse.from(
+            operations.engageToSpec(
+                specId,
+                EngageRequest.fromMap(JsonBody.readMap(exchange)),
+                actorOf(exchange),
+                nodeHandle.get()));
+      }
+      if (DISENGAGE.equals(sub)) {
+        requireMethod(request, POST);
+        return ApiResponse.from(
+            operations.disengageSpec(specId, actorOf(exchange), nodeHandle.get()));
       }
       if (MESSAGES.equals(sub)) {
         return switch (request.method()) {

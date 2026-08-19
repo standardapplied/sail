@@ -110,8 +110,13 @@ class RoomWakeLaunchTest {
   }
 
   private static StubShell liveAgentShell() {
+    return liveAgentShellFor("claude");
+  }
+
+  private static StubShell liveAgentShellFor(String binary) {
     return new StubShell()
         .on("incus list ^acme$", RUNNING_JSON)
+        .on("command -v", "/usr/local/bin/" + binary + "\n")
         .on("mkdir -p /home/dev/.sail", "")
         .on("rev-parse HEAD", "aaa111\n")
         .on("diff --binary HEAD", "")
@@ -197,7 +202,7 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aLiveRunOfTheSameSpecRefusesTheWake() throws Exception {
+  void aSameSpecLiveBuildNoLongerBlocksTheReadOnlyWake() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
     var live = DateTimeUtils.newId().toString();
@@ -208,6 +213,31 @@ class RoomWakeLaunchTest {
         HANDLE,
         HANDLE,
         "build",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + live);
+
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
+
+    assertEquals("room", runStore.findById(runId).orElseThrow().role());
+  }
+
+  @Test
+  void aLiveChatTurnOfTheSameSpecRefusesTheWake() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    var live = DateTimeUtils.newId().toString();
+    runStore.create(
+        live,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "room",
         "claude-code",
         null,
         "t",
@@ -372,6 +402,122 @@ class RoomWakeLaunchTest {
         declined.failure().errorMessage().contains("claude-code"),
         declined.failure().errorMessage());
     assertTrue(runStore.listForSpec("auth").isEmpty(), "a declined wake reserves nothing");
+  }
+
+  private void engage(String specId, String agent, String mode) {
+    var spec = specStore.findById(specId).orElseThrow();
+    specStore.update(
+        spec.withEngagement(
+            ai.singlr.sail.config.Engagement.of(agent, mode, null, "2026-08-18T00:00:00Z")
+                .toJson()));
+  }
+
+  @Test
+  void anEngagedFullTurnReservesLaunchesFullPermissionAndSkipsTheBaseline() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    engage("auth", "claude-code", "full");
+    messageStore.append("auth", "uday", "draw me the architecture diagram", null);
+
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("room-full", run.role());
+    assertEquals(List.of("app"), run.repos(), "a full turn reserves like a build");
+    assertTrue(run.task().contains("## Engaged Turn (full access)"));
+    var joined = String.join(" ", launched.get());
+    assertTrue(joined.contains("--dangerously-skip-permissions"), joined);
+    assertFalse(joined.contains("--tools"), "full access is the harness's own YOLO, no tool cut");
+    assertTrue(
+        runStore.consumeRoomGuardBaseline(runId).isEmpty(),
+        "a full turn's workspace changes are expected — no read-only guard baseline");
+    assertTrue(
+        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
+        "turns never snapshot — the engage paid once");
+    assertEquals("room-full", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
+  }
+
+  @Test
+  void anEngagedReadOnlyTurnKeepsTheRoomContractAndRunsBesideTheBuild() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    engage("auth", "claude-code", "read-only");
+    var live = DateTimeUtils.newId().toString();
+    runStore.create(
+        live,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "build",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + live);
+
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("room", run.role());
+    assertTrue(run.task().contains("## Engaged Turn (read only)"));
+    var joined = String.join(" ", launched.get());
+    assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+    assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
+  }
+
+  @Test
+  void anEngagedCodexRoomLaunchesFullWhereTheWakeLaneWouldDecline() throws Exception {
+    var ops = operations(liveAgentShellFor("codex"));
+    seedSpec("auth");
+    engage("auth", "codex", "full");
+
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("codex", run.agent());
+    assertEquals("room-full", run.role());
+    var joined = String.join(" ", launched.get());
+    assertTrue(joined.contains("--dangerously-bypass-approvals-and-sandbox"), joined);
+  }
+
+  @Test
+  void anEngagedTurnResumesOnlyTheEngagementsOwnChatSessions() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    engage("auth", "claude-code", "full");
+    var build = DateTimeUtils.newId().toString();
+    runStore.create(
+        build,
+        "acme",
+        "auth",
+        HANDLE,
+        HANDLE,
+        "build",
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + build);
+    runStore.complete(build, "completed", 0);
+    runStore.recordSession(build, "build-session-1", "startup", null);
+
+    var firstTurn = ops.startRoomRun("acme", "auth", HANDLE);
+    assertFalse(
+        String.join(" ", launched.get()).contains("--resume"),
+        "a build conversation never reopens under a chat turn");
+
+    runStore.complete(firstTurn, "completed", 0);
+    runStore.recordSession(firstTurn, "chat-session-1", "startup", null);
+
+    ops.startRoomRun("acme", "auth", HANDLE);
+    assertTrue(
+        String.join(" ", launched.get()).contains("--resume chat-session-1"),
+        "the engagement's own conversation continues: " + String.join(" ", launched.get()));
   }
 
   @Test
