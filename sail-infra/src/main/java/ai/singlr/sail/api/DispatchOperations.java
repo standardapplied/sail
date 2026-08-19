@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -540,8 +541,13 @@ public final class DispatchOperations {
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    var agentType = spec.agent() != null ? spec.agent() : config.agent().type();
-    if (!AgentCli.fromYamlName(agentType).supportsRoomLane()) {
+    var engagement = Engagement.fromJson(spec.engagement());
+    var agentType =
+        engagement != null
+            ? engagement.agent()
+            : spec.agent() != null ? spec.agent() : config.agent().type();
+    var full = engagement != null && engagement.full();
+    if (!full && !AgentCli.fromYamlName(agentType).supportsRoomLane()) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED,
           "Room wake needs a harness-enforced read-only session, and "
@@ -556,13 +562,21 @@ public final class DispatchOperations {
         messageStore == null
             ? List.<MessageStore.MessageRow>of()
             : messageStore.list(specId, null, 20);
-    var resumeSessionId = resumableSessionId(specId, agentType, localHandle);
+    var resumeSessionId =
+        engagement != null
+            ? engagedSessionId(specId, agentType, localHandle)
+            : resumableSessionId(specId, agentType, localHandle);
     var built =
         RoomWakePrompt.build(
-            spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null);
+            spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null, engagement);
     var task = built.prompt();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
+    var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
+    var targetRepos =
+        full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
+    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
+    var branch = full ? Objects.toString(spec.branch(), "") : "";
     RunStore.Reservation reservation;
     try {
       reservation =
@@ -572,10 +586,10 @@ public final class DispatchOperations {
               specId,
               localHandle,
               Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
-              "room",
-              List.of(),
+              role,
+              repoPaths,
               agentType,
-              null,
+              Strings.isBlank(branch) ? null : branch,
               task,
               unit.logPath(),
               unit.unitName(),
@@ -592,25 +606,33 @@ public final class DispatchOperations {
     var credential = ((RunStore.Reservation.Reserved) reservation).credential();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
-      captureRoomBaseline(project, config, runId);
+      if (!full) {
+        captureRoomBaseline(project, config, runId);
+      }
+      var model =
+          engagement != null && engagement.model() != null ? engagement.model() : spec.model();
+      var workDir =
+          full
+              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
+              : "/home/" + config.sshUser() + "/workspace";
       var launch =
           launchSession(
               project,
               config,
-              "/home/" + config.sshUser() + "/workspace",
-              false,
-              spec.model(),
+              workDir,
+              full,
+              model,
               spec.reasoningEffort(),
               specId,
               agentType,
               task,
-              "",
-              List.of(),
+              branch,
+              repoPaths,
               true,
               unit,
               runId,
               credential,
-              "room",
+              role,
               resumeSessionId);
       var status = querySession(new AgentSession(shell), project, unit);
       if (!updateRunProcess(runId, project, status, launch.watcher())) {
@@ -625,6 +647,23 @@ public final class DispatchOperations {
       releaseIfAbsent(runId, project, unit);
       throw e;
     }
+  }
+
+  /**
+   * The engagement's own conversation: the newest chat-turn session of the engaged agent this box
+   * can resume. A build or invite session never qualifies — a working lane's conversation must not
+   * reopen under a chat turn's contract, and the engaged agent's memory is its chat turns.
+   */
+  private String engagedSessionId(String specId, String agentType, String localHandle) {
+    return runStore.listForSpec(specId).stream()
+        .filter(RunStore.RunRow::chatRole)
+        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
+        .filter(run -> Strings.isNotBlank(run.sessionId()))
+        .filter(run -> agentType.equals(run.agent()))
+        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
+        .findFirst()
+        .map(RunStore.RunRow::sessionId)
+        .orElse(null);
   }
 
   /**
@@ -682,11 +721,13 @@ public final class DispatchOperations {
     requireTrustedRoster(localHandle);
     var agentCli = inviteAgent(agentYamlName);
     var inviteModel = inviteModel(model);
-    if (!full && !agentCli.supportsReadOnlyInvite()) {
+    if (!full) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyInviteRefusal(),
-          "Invite " + agentCli.yamlName() + " with full access, or invite claude-code read-only.");
+          "Read-only invites are superseded by engagement: engage the agent in the room instead"
+              + " (POST /v1/specs/{id}/engage, or 'sail spec engage').",
+          "An engaged read-only agent stays in the room and answers every message — the one-shot"
+              + " read-only invite offered strictly less.");
     }
     var project = spec.project();
     var loaded = projects.loadRunning(project);
@@ -701,7 +742,7 @@ public final class DispatchOperations {
         messageStore == null
             ? List.<MessageStore.MessageRow>of()
             : messageStore.list(specId, null, 20);
-    var built = InvitePrompt.build(spec, body.isBlank() ? spec.title() : body, room, full);
+    var built = InvitePrompt.build(spec, body.isBlank() ? spec.title() : body, room);
     var task = built.prompt();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
@@ -749,7 +790,6 @@ public final class DispatchOperations {
                 repoPaths,
                 credential,
                 role,
-                full,
                 snapshot);
     return new InviteLaunch(runId, principal, full, snapshot, completion);
   }
@@ -775,26 +815,18 @@ public final class DispatchOperations {
       List<String> repoPaths,
       String credential,
       String role,
-      boolean full,
       String snapshot) {
     try {
-      if (full) {
-        if (!Strings.isBlank(snapshot)) {
-          inviteSnapshot(project, specId, runId);
-        }
-      } else {
-        captureRoomBaseline(project, config, runId);
+      if (!Strings.isBlank(snapshot)) {
+        inviteSnapshot(project, specId, runId);
       }
-      var workDir =
-          full
-              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
-              : "/home/" + config.sshUser() + "/workspace";
+      var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var launch =
           launchSession(
               project,
               config,
               workDir,
-              full,
+              true,
               inviteModel,
               null,
               specId,
@@ -878,6 +910,136 @@ public final class DispatchOperations {
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
+  }
+
+  /** A prepared engagement: the snapshot label a full mode will pay, and the deferred half. */
+  public record EngageLaunch(String agent, String mode, String snapshot, Runnable completion) {}
+
+  /**
+   * Engages an agent in {@code specId}'s room: records the engagement on the spec row (synced,
+   * atomic — one JSON value) so the wake reactor answers every human message with a chat turn until
+   * a human disengages. Mode {@code full} is the default; {@code read-only} is the explicit narrow
+   * choice, offered only where the harness enforces it. A full engagement may take one engage-time
+   * rollback snapshot (never per turn), but the default is none — on the {@code dir} backend a
+   * snapshot is a slow full filesystem copy, so the rollback point is opt-in ({@code takeSnapshot})
+   * and the per-turn repo reservation remains the standing guard. A requested snapshot runs off the
+   * request thread ({@code completion}) because a {@code dir}-backend snapshot would blow the HTTP
+   * timeout; the engagement is then persisted only after the snapshot succeeds — the payment
+   * precedes the access — and a failure publishes {@code spec_engage_failed} into the room instead
+   * of engaging. Requires the dispatch tier on the spec, exactly like an invite.
+   */
+  public EngageLaunch engage(
+      String specId,
+      String agentYamlName,
+      String mode,
+      String model,
+      boolean takeSnapshot,
+      Actor actor,
+      String localHandle) {
+    var spec =
+        specStore
+            .findById(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    requireAllowed(actor, spec.toSpec(), localHandle);
+    requireTrustedRoster(localHandle);
+    var agentCli = inviteAgent(agentYamlName);
+    Engagement engagement;
+    try {
+      engagement =
+          Engagement.of(
+              agentCli.yamlName(), mode, inviteModel(model), DateTimeUtils.now().toString());
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
+    }
+    if (!engagement.full() && !agentCli.supportsRoomLane()) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          agentCli.readOnlyInviteRefusal(),
+          "Engage " + agentCli.yamlName() + " with full access instead.");
+    }
+    var project = spec.project();
+    projects.loadRunning(project);
+    requireInstalled(agentCli, project);
+    if (!engagement.full() || !takeSnapshot) {
+      persistEngagement(specId, engagement, actor);
+      publishEngaged(project, specId, engagement, "");
+      return new EngageLaunch(engagement.agent(), engagement.mode(), "", null);
+    }
+    var label = "engage-" + DateTimeUtils.newId();
+    Runnable completion = () -> completeEngage(project, specId, engagement, label, actor);
+    return new EngageLaunch(engagement.agent(), engagement.mode(), label, completion);
+  }
+
+  private void completeEngage(
+      String project, String specId, Engagement engagement, String label, Actor actor) {
+    try {
+      try {
+        new SnapshotManager(shell).create(project, label, INVITE_SNAPSHOT_TIMEOUT);
+      } catch (Exception e) {
+        throw new ApiException(
+            ErrorCode.SNAPSHOT_FAILED,
+            "Failed to create the engage snapshot, so the engagement does not take effect.",
+            "Check the host's snapshot capacity (incus storage) and retry.",
+            e);
+      }
+      publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", label));
+      persistEngagement(specId, engagement, actor);
+      publishEngaged(project, specId, engagement, label);
+    } catch (RuntimeException e) {
+      var data = new LinkedHashMap<String, Object>();
+      data.put("agent", engagement.agent());
+      data.put("label", label);
+      data.put("error", Objects.requireNonNullElse(e.getMessage(), e.toString()));
+      publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGE_FAILED, data);
+    }
+  }
+
+  /** Dismisses the room's engaged agent. Idempotent: dismissing an empty room is a no-op. */
+  public String disengage(String specId, Actor actor, String localHandle) {
+    var spec =
+        specStore
+            .findById(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    requireAllowed(actor, spec.toSpec(), localHandle);
+    var engagement = Engagement.fromJson(spec.engagement());
+    if (engagement == null) {
+      return null;
+    }
+    specStore.update(spec.withEngagement(null));
+    publish(
+        spec.project(),
+        specId,
+        Event.WellKnownTypes.SPEC_DISENGAGED,
+        Map.of("agent", engagement.agent(), "mode", engagement.mode()));
+    return engagement.agent();
+  }
+
+  private void persistEngagement(String specId, Engagement engagement, Actor actor) {
+    var current =
+        specStore
+            .findById(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND,
+                        "Spec '" + specId + "' vanished while engaging."));
+    specStore.update(current.withEngagement(engagement.toJson()));
+  }
+
+  private void publishEngaged(String project, String specId, Engagement engagement, String label) {
+    var data = new LinkedHashMap<String, Object>();
+    data.put("agent", engagement.agent());
+    data.put("mode", engagement.mode());
+    if (!Strings.isBlank(label)) {
+      data.put("label", label);
+    }
+    publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGED, data);
   }
 
   /**

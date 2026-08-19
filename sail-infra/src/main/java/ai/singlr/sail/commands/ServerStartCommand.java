@@ -63,6 +63,7 @@ import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RelyingParty;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -235,6 +236,7 @@ public final class ServerStartCommand implements Runnable {
             (project, specId) -> operations.startRoomRun(project, specId, NodeIdentity.handle()),
             operations::guardRoomRun);
     bus.subscribe(roomWake);
+    roomWake.startSweep(Duration.ofSeconds(60));
     shutdown.register(roomWake);
     if (narratesSlack(HostSync.config())) {
       bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));

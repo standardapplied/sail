@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- An agent can be engaged in a spec's room: it joins the conversation and answers every human
+  message until dismissed. `sail spec engage <id> --agent <a>` (API `POST /v1/specs/{id}/engage`)
+  records the engagement on the spec row as one atomic synced value — agent, mode, model,
+  engaged-at as a single JSON column, so field-level sync merging can never stitch two boxes'
+  engagements together — and `sail spec disengage` clears it; both transitions publish room-visible
+  events (`spec_engaged`, `spec_disengaged`). **Full access is the default mode**: conversations
+  produce artifacts (diagrams, drafts, files), so an engaged agent works in the workspace, drafts
+  spec bodies, and creates sibling draft specs, guarded by the same one-writer-per-repo
+  reservation a build takes per turn. An engage-time rollback snapshot is opt-in
+  (`--snapshot` / the dialog checkbox) and off by default — on the `dir` backend a snapshot is a
+  slow full filesystem copy, and the choice to skip it belongs to the human.
+  `--read-only` is the explicit narrow choice, enforced by the harness and offered only where
+  enforcement exists (claude-code today); full mode works on every agent, so codex is a
+  first-class conversationalist. An engagement did not take effect until its snapshot succeeded —
+  a failed payment publishes `spec_engage_failed` and engages nobody.
+- Engaged rooms converse at conversation speed. The wake reactor answers every human message in an
+  engaged room regardless of wake mode or dispatch history — a fresh chat room needs no build-run
+  ancestry — with a 5-second debounce and **no post-finish cooldown** (the 30s/10min rules remain
+  exactly as shipped for non-engaged specs). Turns resume the engagement's own conversation: the
+  session selector is now role- and agent-filtered, so a build's session can never reopen under a
+  chat turn's tool cut. A read-only chat turn runs alongside its own spec's live build (the gate's
+  same-spec rule now applies within working lanes and within chat lanes, never across); a full
+  turn defers on the build through its repo claim and fires on the build's stop, which — like a
+  message landing in a turn's tail — re-evaluates the room for owed turns (newest human message vs
+  newest chat-turn start; derived, never bookkept). A periodic engagement sweep backstops the
+  event edges. Chat turns skip the read-only worktree fingerprint in full mode and never snapshot.
+- Engaged turn prompts drop "when you have contributed, stop": a turn ends, the engagement
+  continues, and the agent is told it will be resumed for the next message — never to say goodbye.
+  The wake prompt also stops promising read-only git the allowlist deliberately denies.
+- The one-shot read-only invite is retired, superseded by engagement (the API refuses it naming
+  the replacement); `sail spec invite` is now the task-shaped lane it always really was — one
+  full-access turn, snapshot first. Slack stops narrating conversation plumbing: a chat or invite
+  turn's clean exit ("Agent stopped (exit 0)") no longer posts, while failures and build stops
+  keep their narration.
+
 - A room message now wakes the agent when no run is live. A new `room-wake` reactor on
   `spec_message_posted` (local and sync-arrived alike) runs on the dispatch-owning box — the one
   whose handle is the spec's assignee, so the fleet has exactly one waker per spec — and launches

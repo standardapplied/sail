@@ -90,8 +90,10 @@ public final class SailStopGate {
       # the git protocol, stop-room-nudged for the room), so a message that
       # arrives after a git nudge still gets its one block and neither concern
       # can wedge a run. stdout is reserved for the hook-protocol block JSON.
-      # A room-role run (role "room" in its session file) and a read-only
-      # invite (role "invite") skip the git protocol entirely — a chat owns no
+      # A chat turn (role "room" or "room-full" in its session file) and a
+      # read-only invite (role "invite") skip the git protocol entirely — a
+      # conversation is not a task: a full turn's workspace changes are the
+      # human's to keep or roll back (the engage snapshot), and a chat owns no
       # repos and must never be nudged about other runs' trees — while keeping
       # the room last-look. A full invite (role "invite-full") keeps it.
       # Any unexpected condition fails open: this gate is a nudge, not a jail.
@@ -148,7 +150,8 @@ public final class SailStopGate {
       ' "$SESSION" 2>/dev/null || true)"
 
       REASONS=""
-      if [ "$RUN_ROLE" != "room" ] && [ "$RUN_ROLE" != "invite" ] && [ ! -f "$GIT_MARKER" ]; then
+      if [ "$RUN_ROLE" != "room" ] && [ "$RUN_ROLE" != "room-full" ] \
+          && [ "$RUN_ROLE" != "invite" ] && [ ! -f "$GIT_MARKER" ]; then
         REPOS="$(python3 -c '
       import json, sys
       try:

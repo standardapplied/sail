@@ -109,6 +109,8 @@ class CommandTaxonomyTest {
             "history",
             "restore",
             "invite",
+            "engage",
+            "disengage",
             "comment",
             "comments",
             "dispatch"),

@@ -31,7 +31,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -153,69 +152,24 @@ class InviteLaunchTest {
   }
 
   @Test
-  void aReadOnlyInviteMintsAnInviteRunOnTheRoomContract() throws Exception {
+  void aReadOnlyInviteIsRefusedAsSupersededByEngagement() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
-    var question = messageStore.append("auth", "uday", "poke holes in this design", null);
+    messageStore.append("auth", "uday", "poke holes in this design", null);
 
-    var launch =
-        ops.startInvite("auth", "claude-code", false, null, Actor.cliOperator(HANDLE), HANDLE);
-    launch.completion().run();
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startInvite(
+                    "auth", "claude-code", false, null, Actor.cliOperator(HANDLE), HANDLE));
 
-    var run = runStore.findById(launch.runId()).orElseThrow();
-    assertEquals("invite", run.role());
-    assertEquals("auth", run.specId());
-    assertEquals(HANDLE, run.owner());
-    assertEquals("claude/invite-" + launch.runId(), run.principal());
-    assertEquals(launch.principal(), run.principal());
-    assertEquals(List.of(), run.repos(), "read only reserves nothing");
-    assertEquals("", launch.snapshot(), "read only pays no snapshot");
-    assertEquals(
-        Set.of(question.id()),
-        runStore.deliveredMessageIds(launch.runId()),
-        "the prompt is the run's first delivery, seeded by identity");
-    assertTrue(run.task().contains("Invite Duty (read only)"));
-    assertTrue(run.task().contains("Build the OAuth flow."));
-    var joined = String.join(" ", launched.get());
-    assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
-    assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
+    assertEquals(ErrorCode.BAD_REQUEST, refusal.failure().errorCode());
     assertTrue(
-        joined.contains("--setting-sources \"\"") && joined.contains("--strict-mcp-config"),
-        "a read-only invite runs beside live builds without a reservation, so the launched"
-            + " command must exclude ambient settings and MCP configs — no workspace file may"
-            + " widen the tool cut. Command: "
-            + joined);
-    assertFalse(joined.contains("--resume"), "an invite is always a fresh participant");
-    assertEquals("invite", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
-    assertTrue(
-        runStore.consumeRoomGuardBaseline(launch.runId()).orElseThrow().contains("aaa111"),
-        "the worktree-digest guard baseline is recorded exactly like a wake");
-    assertTrue(
-        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())));
-    var started =
-        events.stream()
-            .filter(e -> Event.WellKnownTypes.AGENT_SESSION_STARTED.equals(e.type()))
-            .findFirst()
-            .orElseThrow();
-    assertEquals("auth", started.spec());
-  }
-
-  @Test
-  void aReadOnlyInviteRunsAlongsideItsOwnSpecsLiveBuild() throws Exception {
-    var ops = operations(liveAgentShell());
-    seedSpec("auth");
-    var live = DateTimeUtils.newId().toString();
-    db.execute(
-        "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
-            + " VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code', 'running', 't0',"
-            + " '[\"app\"]')",
-        live,
-        HANDLE);
-
-    var launch =
-        ops.startInvite("auth", "claude-code", false, null, Actor.cliOperator(HANDLE), HANDLE);
-
-    assertEquals("invite", runStore.findById(launch.runId()).orElseThrow().role());
+        refusal.failure().errorMessage().contains("engage"),
+        "the refusal names the engagement lane that replaced this one: "
+            + refusal.failure().errorMessage());
+    assertTrue(runStore.listForSpec("auth").isEmpty(), "a refused mode reserves nothing");
   }
 
   @Test
@@ -329,7 +283,7 @@ class InviteLaunchTest {
   }
 
   @Test
-  void aCodexReadOnlyInviteIsRefusedNamingWhatItSupports() throws Exception {
+  void anyReadOnlyInviteIsRefusedWhateverTheAgent() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
 
@@ -340,7 +294,7 @@ class InviteLaunchTest {
 
     assertEquals(ErrorCode.BAD_REQUEST, refusal.failure().errorCode());
     assertTrue(
-        refusal.failure().errorMessage().contains("full access"), refusal.failure().errorMessage());
+        refusal.failure().errorMessage().contains("engage"), refusal.failure().errorMessage());
     assertTrue(runStore.listForSpec("auth").isEmpty(), "a refused mode reserves nothing");
   }
 
@@ -517,14 +471,13 @@ class InviteLaunchTest {
       var launched =
           sailOps.inviteToSpec(
               "auth",
-              new InviteRequest("claude-code", null, false, true),
+              new InviteRequest("claude-code", null, true, true),
               Actor.cliOperator(HANDLE),
               HANDLE);
       assertTrue(launched instanceof Result.Success<InviteResponse>);
       var response = ((Result.Success<InviteResponse>) launched).value();
-      assertEquals("read_only", response.mode());
-      assertEquals("invite", runStore.findById(response.runId()).orElseThrow().role());
-      assertEquals("", response.snapshot());
+      assertEquals("full", response.mode());
+      assertEquals("invite-full", runStore.findById(response.runId()).orElseThrow().role());
 
       var refused =
           sailOps.inviteToSpec(

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
@@ -46,7 +47,8 @@ class RoomWakePromptTest {
   void aFreshWakeIsPrimedWithBodyConversationAndTheStandingInstruction() {
     var question = message("m1", "uday", "what is it stuck on?");
 
-    var built = RoomWakePrompt.build(spec(), "Build the OAuth flow.", List.of(question), false);
+    var built =
+        RoomWakePrompt.build(spec(), "Build the OAuth flow.", List.of(question), false, null);
 
     assertTrue(built.prompt().contains("standing agent of spec \"OAuth flow\""));
     assertTrue(built.prompt().contains("id: auth, status: review"));
@@ -67,7 +69,7 @@ class RoomWakePromptTest {
   void aResumedWakeSkipsTheSpecBodyItsConversationAlreadyCarries() {
     var built =
         RoomWakePrompt.build(
-            spec(), "Build the OAuth flow.", List.of(message("m1", "uday", "hello?")), true);
+            spec(), "Build the OAuth flow.", List.of(message("m1", "uday", "hello?")), true, null);
 
     assertFalse(built.prompt().contains("## Spec body"));
     assertTrue(built.prompt().contains("## Room Duty"));
@@ -75,9 +77,46 @@ class RoomWakePromptTest {
 
   @Test
   void anEmptyRoomBuildsAPromptWithNoConversationBlock() {
-    var built = RoomWakePrompt.build(spec(), "body", List.of(), false);
+    var built = RoomWakePrompt.build(spec(), "body", List.of(), false, null);
 
     assertFalse(built.prompt().contains("## Conversation on this spec"));
     assertTrue(built.renderedMessages().isEmpty());
+  }
+
+  @Test
+  void anEngagedReadOnlyTurnIsAContinuingConversationNotAVisit() {
+    var engagement = Engagement.of("claude-code", "read-only", null, "2026-08-18T00:00:00Z");
+
+    var built = RoomWakePrompt.build(spec(), "body", List.of(), false, engagement);
+
+    assertTrue(built.prompt().contains("You are engaged in this room"));
+    assertTrue(built.prompt().contains("## Engaged Turn (read only)"));
+    assertTrue(built.prompt().contains("git commands are denied too"));
+    assertTrue(built.prompt().contains("you remain engaged and will be resumed"));
+    assertTrue(built.prompt().contains("Never say goodbye"));
+    assertFalse(
+        built.prompt().contains("When you have answered, stop."),
+        "the one-turn stop instruction belongs to the wake lane only");
+  }
+
+  @Test
+  void anEngagedFullTurnTeachesWorkspaceDraftingAndNoForcedCommit() {
+    var engagement = Engagement.of("codex", "full", null, "2026-08-18T00:00:00Z");
+
+    var built = RoomWakePrompt.build(spec(), "body", List.of(), true, engagement);
+
+    assertTrue(built.prompt().contains("## Engaged Turn (full access)"));
+    assertTrue(built.prompt().contains("spec content auth --body-file"));
+    assertTrue(built.prompt().contains("Nothing forces a commit at turn end"));
+    assertTrue(built.prompt().contains("you remain engaged and will be resumed"));
+    assertFalse(built.prompt().contains("## Spec body"), "a resumed turn skips the body");
+  }
+
+  @Test
+  void theWakeDutyNeverPromisesGitTheAllowlistDenies() {
+    var built = RoomWakePrompt.build(spec(), "body", List.of(), false, null);
+
+    assertTrue(built.prompt().contains("git commands are denied too"));
+    assertFalse(built.prompt().contains("read-only git (log, show, diff"));
   }
 }

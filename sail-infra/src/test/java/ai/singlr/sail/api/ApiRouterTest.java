@@ -1043,6 +1043,42 @@ class ApiRouterTest {
   }
 
   @Test
+  void engagePostRoutesTheBodyToTheOperation() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var response =
+          post(
+              server,
+              "/v1/specs/auth-flow/engage",
+              "token",
+              "{\"agent\": \"claude-code\", \"model\": \"opus-x\", \"snapshot\": true}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"agent\": \"claude-code\""));
+      assertTrue(response.body().contains("\"mode\": \"full\""));
+      assertTrue(response.body().contains("\"snapshot\": \"engage-1\""));
+      assertEquals("auth-flow", ops.lastEngage.specId());
+      assertEquals("claude-code", ops.lastEngage.request().agent());
+      assertEquals("opus-x", ops.lastEngage.request().model());
+      assertTrue(ops.lastEngage.request().snapshot());
+    }
+  }
+
+  @Test
+  void engageRequiresPostAndDisengageRoutesTheSpec() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      assertEquals(405, get(server, "/v1/specs/auth-flow/engage", "token").statusCode());
+
+      var response = post(server, "/v1/specs/auth-flow/disengage", "token", "{}");
+
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"disengaged\": true"));
+      assertEquals("auth-flow", ops.lastDisengage);
+    }
+  }
+
+  @Test
   void invitePostRoutesTheBodyToTheOperation() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
@@ -1473,6 +1509,28 @@ class ApiRouterTest {
                           new AgentModeView("full", true, null))))));
     }
 
+    Engage lastEngage;
+    String lastDisengage;
+
+    record Engage(String specId, EngageRequest request, String localHandle) {}
+
+    @Override
+    public Result<EngageResponse> engageToSpec(
+        String specId, EngageRequest request, Actor actor, String localHandle) {
+      lastEngage = new Engage(specId, request, localHandle);
+      return Result.success(
+          new EngageResponse(
+              request.agent(),
+              request.mode() == null ? "full" : request.mode(),
+              request.snapshot() ? "engage-1" : ""));
+    }
+
+    @Override
+    public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
+      lastDisengage = specId;
+      return Result.success(new DisengageResponse("claude-code"));
+    }
+
     @Override
     public Result<InviteResponse> inviteToSpec(
         String specId, InviteRequest request, Actor actor, String localHandle) {
@@ -1679,6 +1737,7 @@ class ApiRouterTest {
                   java.util.List.of(),
                   null,
                   null,
+                  null,
                   "",
                   "",
                   null),
@@ -1708,6 +1767,7 @@ class ApiRouterTest {
                   java.util.List.of(),
                   java.util.List.of(),
                   null,
+                  null,
                   request.createdBy(),
                   "",
                   "",
@@ -1736,6 +1796,7 @@ class ApiRouterTest {
                   java.util.List.of(),
                   null,
                   null,
+                  null,
                   "",
                   "",
                   null)));
@@ -1759,6 +1820,7 @@ class ApiRouterTest {
                   0,
                   java.util.List.of(),
                   java.util.List.of(),
+                  null,
                   null,
                   null,
                   "",

@@ -249,6 +249,50 @@ class SlackReactorTest {
   }
 
   @Test
+  void aCleanChatTurnStopNeverPostsButItsFailureDoes() {
+    var poster = new RecordingPoster();
+    var reactor = reactor(poster);
+    reactor.onEvent(event("spec_dispatched"));
+
+    for (var role : java.util.List.of("room", "room-full", "invite", "invite-full")) {
+      reactor.onEvent(
+          event(
+              Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+              Map.of(
+                  Event.WellKnownData.SOURCE,
+                  Event.WellKnownData.SOURCE_WATCHER,
+                  Event.WellKnownData.RUN_ROLE,
+                  role,
+                  Event.WellKnownData.EXIT_CODE,
+                  0)));
+    }
+    assertEquals(1, poster.posts.size(), "conversation plumbing never reaches Slack");
+
+    reactor.onEvent(
+        event(
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            Map.of(
+                Event.WellKnownData.SOURCE,
+                Event.WellKnownData.SOURCE_WATCHER,
+                Event.WellKnownData.RUN_ROLE,
+                "room",
+                Event.WellKnownData.EXIT_CODE,
+                137)));
+    assertEquals(2, poster.posts.size(), "a dead chat turn is news");
+  }
+
+  @Test
+  void aCleanBuildStopStillPosts() {
+    var poster = new RecordingPoster();
+    var reactor = reactor(poster);
+    reactor.onEvent(event("spec_dispatched"));
+
+    reactor.onEvent(authoritativeStop());
+
+    assertEquals(2, poster.posts.size(), "role-less and build stops keep their narration");
+  }
+
+  @Test
   void escalationBroadcastsToTheChannel() {
     var poster = new RecordingPoster();
     var reactor = reactor(poster);

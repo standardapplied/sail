@@ -20,16 +20,16 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 /**
- * Invites an agent into a spec's room: one choice, read only (default) or {@code --full}. The
- * server owns the whole launch — mode support, reservation, the full lane's pre-launch snapshot —
- * so this command is a thin client of {@code POST /v1/specs/{id}/invite} and renders the server's
- * refusals verbatim.
+ * Runs a task-shaped invite: one full-access agent turn in the spec's room, paid with a pre-launch
+ * snapshot and the repo reservation. Joining a room conversationally is {@code sail spec engage} —
+ * this lane is for "do this now" work. The server owns the whole launch, so this command is a thin
+ * client of {@code POST /v1/specs/{id}/invite} and renders the server's refusals verbatim.
  */
 @Command(
     name = "invite",
     description =
-        "Invite an agent into this spec's room — read only by default, --full to let it change"
-            + " specs and code (snapshots first).",
+        "Run one full-access agent turn in this spec's room (snapshots first). To add an agent to"
+            + " the conversation, use 'spec engage'.",
     mixinStandardHelpOptions = true)
 public final class ApiSpecInviteCommand implements Runnable {
 
@@ -41,11 +41,6 @@ public final class ApiSpecInviteCommand implements Runnable {
 
   @Option(names = "--model", description = "Model override for the invited agent.")
   private String model;
-
-  @Option(
-      names = "--full",
-      description = "Full access: spec CLI writes and code changes, paid with a snapshot.")
-  private boolean full;
 
   @Mixin private SyncOptions syncOptions;
 
@@ -69,7 +64,7 @@ public final class ApiSpecInviteCommand implements Runnable {
     if (Strings.isNotBlank(model)) {
       body.put("model", model);
     }
-    body.put("full", full);
+    body.put("full", true);
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var result = client.post("/v1/specs/" + specId + "/invite", Map.copyOf(body));
 
@@ -77,7 +72,7 @@ public final class ApiSpecInviteCommand implements Runnable {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
         return;
       }
-      var mode = full ? "full access" : "read only";
+      var mode = "full access";
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Invited "

@@ -186,5 +186,10 @@ public interface Operations {
   Result<InviteResponse> inviteToSpec(
       String specId, InviteRequest request, Actor actor, String localHandle);
 
+  Result<EngageResponse> engageToSpec(
+      String specId, EngageRequest request, Actor actor, String localHandle);
+
+  Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle);
+
   Result<GlobalBoardResponse> globalBoard(String project);
 }

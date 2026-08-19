@@ -29,7 +29,7 @@ public final class InvitePrompt {
   public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
 
   public static Built build(
-      SpecStore.SpecRow spec, String body, List<MessageStore.MessageRow> messages, boolean full) {
+      SpecStore.SpecRow spec, String body, List<MessageStore.MessageRow> messages) {
     var conversation =
         PromptConversation.renderNewest(
             messages,
@@ -46,39 +46,14 @@ public final class InvitePrompt {
             + spec.id()
             + ", status: "
             + spec.status().wire()
-            + "). A human invited you into this conversation with "
-            + (full ? "full access" : "read-only access")
+            + "). A human invited you into this conversation with full access"
             + " to help: chat, critique, or draft — bring your own perspective.\n\n"
             + conversationBlock
             + "## Spec body\n\n"
             + body
             + "\n\n"
-            + (full ? fullDuty(spec.id()) : readOnlyDuty(spec.id()));
+            + fullDuty(spec.id());
     return new Built(prompt, conversation.fullyRendered());
-  }
-
-  private static String readOnlyDuty(String specId) {
-    return """
-        ## Invite Duty (read only)
-
-        Read the conversation and spec body above, investigate in the workspace as needed,
-        and post your contribution in the room with `spec comment %s --body <text>`
-        (or `--body -` for stdin).
-
-        This is a read-only chat session, and the harness enforces it: file edits and spec
-        state changes are denied, and the only shell commands that run are the `spec` CLI
-        and `cd` — use the Read and Grep tools for files. Do not fight a denial; work
-        within the lane. If the conversation asks for code changes, describe them in the
-        room — dispatch (or a full invite) is the lane that changes code. If the
-        conversation asks something you cannot answer or decide alone, post it back with
-        `spec comment %s --question --body <text>` — the flag pages the engineer on the
-        board until a human replies.
-
-        The room stays live while you work: replies posted in the meantime are delivered
-        into your context automatically after a tool call finishes, and unread messages
-        block your first attempt to stop. When you have contributed, stop.
-        """
-        .formatted(specId, specId);
   }
 
   private static String fullDuty(String specId) {

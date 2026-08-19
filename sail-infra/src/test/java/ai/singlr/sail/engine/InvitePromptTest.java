@@ -43,28 +43,26 @@ class InvitePromptTest {
   }
 
   @Test
-  void aReadOnlyInviteIsPrimedWithBodyConversationAndTheReadOnlyDuty() {
+  void aTaskInviteIsPrimedWithBodyAndConversationAndIsAlwaysFullAccess() {
     var ask = message("m1", "uday", "poke holes in this design");
 
-    var built = InvitePrompt.build(spec(), "Build the OAuth flow.", List.of(ask), false);
+    var built = InvitePrompt.build(spec(), "Build the OAuth flow.", List.of(ask));
 
     assertTrue(built.prompt().contains("invited agent in the room of spec \"OAuth flow\""));
     assertTrue(built.prompt().contains("id: auth, status: draft"));
-    assertTrue(built.prompt().contains("read-only access"));
+    assertTrue(built.prompt().contains("full access"));
     assertTrue(built.prompt().contains("## Spec body"));
     assertTrue(built.prompt().contains("Build the OAuth flow."));
     assertTrue(built.prompt().contains("poke holes in this design"));
-    assertTrue(built.prompt().contains("## Invite Duty (read only)"));
-    assertTrue(built.prompt().contains("spec comment auth --body"));
-    assertTrue(built.prompt().contains("read-only chat session, and the harness enforces it"));
-    assertTrue(built.prompt().contains("spec comment auth --question --body"));
-    assertFalse(built.prompt().contains("spec create"), "the read-only lane drafts nothing");
+    assertFalse(
+        built.prompt().contains("## Invite Duty (read only)"),
+        "the read-only invite is superseded by engagement");
     assertEquals(List.of(ask), built.renderedMessages());
   }
 
   @Test
   void aFullInviteTeachesTheDraftAndCodeLanesAndTheGitProtocol() {
-    var built = InvitePrompt.build(spec(), "Build the OAuth flow.", List.of(), true);
+    var built = InvitePrompt.build(spec(), "Build the OAuth flow.", List.of());
 
     assertTrue(built.prompt().contains("full access"));
     assertTrue(built.prompt().contains("## Invite Duty (full access)"));
@@ -79,7 +77,7 @@ class InvitePromptTest {
 
   @Test
   void anEmptyRoomBuildsAPromptWithNoConversationBlock() {
-    var built = InvitePrompt.build(spec(), "body", List.of(), false);
+    var built = InvitePrompt.build(spec(), "body", List.of());
 
     assertFalse(built.prompt().contains("## Conversation on this spec"));
     assertTrue(built.renderedMessages().isEmpty());

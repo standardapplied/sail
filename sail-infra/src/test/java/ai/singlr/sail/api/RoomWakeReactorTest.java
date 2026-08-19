@@ -144,6 +144,7 @@ class RoomWakeReactorTest {
         launcher,
         launcher,
         Duration.ZERO,
+        Duration.ZERO,
         RoomWakeReactor.COOLDOWN,
         executor,
         duration -> {},
@@ -170,6 +171,36 @@ class RoomWakeReactorTest {
             List.of(),
             List.of(),
             wake));
+  }
+
+  private void engage(String id, String agent, String mode) {
+    var spec = specStore.findById(id).orElseThrow();
+    specStore.update(
+        spec.withEngagement(
+            ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString()).toJson()));
+  }
+
+  private String chatRun(String specId, String role, String status, Instant startedAt) {
+    var id = DateTimeUtils.newId().toString();
+    runStore.create(
+        id,
+        "acme",
+        specId,
+        "uday",
+        "uday",
+        role,
+        "claude-code",
+        null,
+        "t",
+        null,
+        null,
+        null,
+        "sail-agent-" + id);
+    db.execute("UPDATE runs SET started_at = ? WHERE id = ?", startedAt.toString(), id);
+    if (!"running".equals(status)) {
+      runStore.complete(id, status, 0);
+    }
+    return id;
   }
 
   private String buildRun(String specId, String status) {
@@ -497,6 +528,7 @@ class RoomWakeReactorTest {
             launcher,
             launcher,
             Duration.ZERO,
+            Duration.ZERO,
             RoomWakeReactor.COOLDOWN,
             new DirectExecutorService(),
             duration -> {
@@ -508,6 +540,227 @@ class RoomWakeReactorTest {
 
     assertTrue(launcher.woken.isEmpty());
     assertTrue(Thread.interrupted(), "the interrupt flag is restored, then cleared here");
+  }
+
+  @Test
+  void anEngagedDraftRoomWakesWithNoDispatchHistoryAndNoAssignedWakeMode() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+
+    reactor().onEvent(message("chat", "uday", "hello"));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+  }
+
+  @Test
+  void anEngagedRoomIgnoresTheCooldown() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofSeconds(90)));
+    finishAt(run, now.get().minusSeconds(30));
+
+    reactor().onEvent(message("chat", "uday", "and another thing"));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+  }
+
+  @Test
+  void aLiveChatTurnSuppressesTheEngagedWakeButALiveBuildDoesNot() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    chatRun("chat", "room", "running", now.get());
+
+    reactor().onEvent(message("chat", "uday", "while you think"));
+    assertTrue(launcher.woken.isEmpty(), "the relay owns delivery to a live chat turn");
+
+    seed("busy", "in_progress", "uday", null);
+    engage("busy", "claude-code", "read-only");
+    buildRun("busy", "running");
+
+    reactor().onEvent(message("busy", "uday", "how is it going"));
+    assertEquals(List.of("acme/busy"), launcher.woken, "a build never silences an engaged room");
+  }
+
+  @Test
+  void agentPostsNeverWakeAnEngagedRoom() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+
+    reactor().onEvent(message("chat", "claude/room-1", "my own answer"));
+    reactor().onEvent(message("chat", "sail", "narration"));
+
+    assertTrue(launcher.woken.isEmpty());
+  }
+
+  @Test
+  void anEngagedRoomUsesTheShortDebounce() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    seed("plain", "in_progress", "uday", "on");
+    var paused = new ArrayList<Duration>();
+    var reactor =
+        new RoomWakeReactor(
+            specStore,
+            runStore,
+            messageStore,
+            handle::get,
+            launcher,
+            launcher,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(5),
+            RoomWakeReactor.COOLDOWN,
+            new DirectExecutorService(),
+            paused::add,
+            now::get);
+
+    reactor.onEvent(message("chat", "uday", "hi"));
+    reactor.onEvent(message("plain", "uday", "hi"));
+
+    assertEquals(List.of(Duration.ofSeconds(5), Duration.ofSeconds(30)), paused);
+  }
+
+  @Test
+  void aStopRefiresTheTurnAMessageOwedFromTheTurnsTail() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
+    messageStore.append("chat", "uday", "landed after your last relay check", null);
+
+    reactor().onEvent(roomStop("chat", run));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+    assertEquals(List.of("acme/" + run), launcher.guarded, "the read-only guard still runs");
+  }
+
+  @Test
+  void aStopWithNothingOwedStaysQuiet() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    messageStore.append("chat", "uday", "answered already", null);
+    var run = chatRun("chat", "room", "completed", DateTimeUtils.now().plusSeconds(60));
+
+    reactor().onEvent(roomStop("chat", run));
+
+    assertTrue(launcher.woken.isEmpty(), "the turn started after the newest human message");
+  }
+
+  @Test
+  void aBuildStopFreesADeferredFullTurn() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "codex", "full");
+    messageStore.append("chat", "uday", "please add the diagram", null);
+    var build = buildRun("chat", "completed");
+    var data = new LinkedHashMap<String, Object>();
+    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.RUN_ID, build);
+    data.put(Event.WellKnownData.RUN_ROLE, "build");
+    var stop =
+        Event.of(
+            "acme",
+            "chat",
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            "claude-code",
+            "host",
+            data);
+
+    reactor().onEvent(stop);
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+    assertTrue(launcher.guarded.isEmpty(), "a build stop is not the chat guard's business");
+  }
+
+  @Test
+  void aStopOnAnUnengagedSpecNeverRefires() {
+    seed("plain", "in_progress", "uday", "on");
+    var run = chatRun("plain", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
+    messageStore.append("plain", "uday", "owed but not engaged", null);
+
+    reactor().onEvent(roomStop("plain", run));
+
+    assertTrue(
+        launcher.woken.isEmpty(), "the stop edge is the engaged loop's; wake keeps its own rules");
+  }
+
+  @Test
+  void theSweepWakesOwedEngagedRoomsAndSkipsForeignOrQuietOnes() {
+    seed("owed", "draft", "uday", null);
+    engage("owed", "claude-code", "full");
+    messageStore.append("owed", "uday", "anyone there?", null);
+
+    seed("foreign", "draft", "someone-else", null);
+    engage("foreign", "claude-code", "full");
+    messageStore.append("foreign", "uday", "not this box's job", null);
+
+    seed("quiet", "draft", "uday", null);
+    engage("quiet", "claude-code", "full");
+
+    reactor().sweepEngagedRooms();
+
+    assertEquals(List.of("acme/owed"), launcher.woken);
+  }
+
+  @Test
+  void aSweepFailureOnOneRoomNeverStopsTheOthers() {
+    seed("first", "draft", "uday", null);
+    engage("first", "claude-code", "full");
+    messageStore.append("first", "uday", "hello", null);
+    seed("second", "draft", "uday", null);
+    engage("second", "claude-code", "full");
+    messageStore.append("second", "uday", "hello too", null);
+    launcher.failWith = new RuntimeException("container offline");
+
+    var reactor = reactor();
+    reactor.sweepEngagedRooms();
+    assertTrue(launcher.woken.isEmpty(), "both wakes failed loudly");
+
+    launcher.failWith = null;
+    reactor.sweepEngagedRooms();
+    assertEquals(2, launcher.woken.size(), "the next sweep retries both");
+  }
+
+  @Test
+  void theOwedCheckSurvivesNullStoresCorruptTimestampsAndMultiMessageRooms() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
+    messageStore.append("chat", "uday", "first", null);
+    var second = messageStore.append("chat", "uday", "second", null);
+
+    reactor(new DirectExecutorService(), null).onEvent(roomStop("chat", run));
+    assertTrue(launcher.woken.isEmpty(), "no message store, no owed check");
+
+    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE id = ?", second.id());
+    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE spec_id = 'chat'");
+    reactor().onEvent(roomStop("chat", run));
+    assertTrue(launcher.woken.isEmpty(), "an unparseable timestamp is never owed");
+
+    db.execute(
+        "UPDATE spec_messages SET created_at = ? WHERE spec_id = 'chat'", now.get().toString());
+    reactor().onEvent(roomStop("chat", run));
+    assertEquals(List.of("acme/chat"), launcher.woken, "the newest of several messages decides");
+  }
+
+  @Test
+  void aSweepOverABrokenMessageStoreLogsAndMovesOn(@TempDir Path other) {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var dead = Sqlite.open(other.resolve("dead.db"));
+    new SchemaManager(dead).migrate();
+    var brokenMessages = new MessageStore(dead);
+    dead.close();
+
+    reactor(new DirectExecutorService(), brokenMessages).sweepEngagedRooms();
+
+    assertTrue(launcher.woken.isEmpty());
+  }
+
+  @Test
+  void theSweepPassArmsAndClosesWithoutFiringEarly() {
+    var reactor = reactor();
+    reactor.startSweep(Duration.ofHours(1));
+    reactor.close();
+
+    assertTrue(launcher.woken.isEmpty());
   }
 
   @Test

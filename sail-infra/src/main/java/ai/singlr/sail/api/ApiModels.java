@@ -645,6 +645,39 @@ record SpecRestoreRequest(String rev) {
 }
 
 /** Body of {@code POST /v1/specs/{id}/invite}: the agent to invite and the one mode choice. */
+record EngageRequest(String agent, String mode, String model, boolean snapshot) {
+  static EngageRequest fromMap(Map<String, Object> map) {
+    return new EngageRequest(
+        (String) map.get("agent"),
+        (String) map.get("mode"),
+        (String) map.get("model"),
+        Boolean.TRUE.equals(map.get("snapshot")));
+  }
+}
+
+/** Response of {@code POST /v1/specs/{id}/engage}: the recorded (or pending) engagement. */
+record EngageResponse(String agent, String mode, String snapshot) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("agent", agent);
+    m.put("mode", mode);
+    if (snapshot != null && !snapshot.isBlank()) m.put("snapshot", snapshot);
+    return m;
+  }
+}
+
+/** Response of {@code POST /v1/specs/{id}/disengage}: who left, or nothing if nobody was there. */
+record DisengageResponse(String agent) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    if (agent != null) m.put("agent", agent);
+    m.put("disengaged", agent != null);
+    return m;
+  }
+}
+
 record InviteRequest(String agent, String model, boolean full, boolean snapshot) {
   static InviteRequest fromMap(Map<String, Object> map) {
     return new InviteRequest(
@@ -766,6 +799,7 @@ record GlobalSpecView(
     List<String> dependsOn,
     List<String> repos,
     String wake,
+    Map<String, Object> engagement,
     String createdBy,
     String createdAt,
     String updatedAt,
@@ -786,10 +820,24 @@ record GlobalSpecView(
         row.dependsOn(),
         row.repos(),
         row.wake(),
+        engagementMap(row.engagement()),
         row.createdBy(),
         row.createdAt(),
         row.updatedAt(),
         row.updatedBy());
+  }
+
+  private static Map<String, Object> engagementMap(String stored) {
+    var engagement = ai.singlr.sail.config.Engagement.fromJson(stored);
+    if (engagement == null) {
+      return null;
+    }
+    var m = new LinkedHashMap<String, Object>();
+    m.put("agent", engagement.agent());
+    m.put("mode", engagement.mode());
+    if (engagement.model() != null) m.put("model", engagement.model());
+    m.put("engaged_at", engagement.engagedAt());
+    return m;
   }
 
   @Override
@@ -808,6 +856,7 @@ record GlobalSpecView(
     if (!dependsOn.isEmpty()) m.put("depends_on", dependsOn);
     if (!repos.isEmpty()) m.put("repos", repos);
     if (wake != null) m.put("wake", wake);
+    if (engagement != null) m.put("engagement", engagement);
     if (createdBy != null) m.put("created_by", createdBy);
     m.put("created_at", createdAt);
     m.put("updated_at", updatedAt);

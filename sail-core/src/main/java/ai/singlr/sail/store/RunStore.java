@@ -210,7 +210,16 @@ public final class RunStore implements ConflictResolver {
 
     /** Whether this row is a room wake — a chat-lane run that answers in its spec's room. */
     public boolean roomRole() {
-      return "room".equals(role);
+      return DispatchGate.ROOM_ROLE.equals(role);
+    }
+
+    /**
+     * Whether this row is a conversational turn of the room lane, either mode: a wake or an engaged
+     * agent's turn. Chat stops never trigger the review pipeline, and one chat turn runs at a time
+     * per spec.
+     */
+    public boolean chatRole() {
+      return roomRole() || DispatchGate.ROOM_FULL_ROLE.equals(role);
     }
 
     /**
@@ -219,7 +228,8 @@ public final class RunStore implements ConflictResolver {
      * stays anchored to dispatch.
      */
     public boolean inviteRole() {
-      return "invite".equals(role) || "invite-full".equals(role);
+      return DispatchGate.READ_ONLY_INVITE_ROLE.equals(role)
+          || DispatchGate.FULL_INVITE_ROLE.equals(role);
     }
 
     /**
@@ -229,7 +239,7 @@ public final class RunStore implements ConflictResolver {
      * says.
      */
     public boolean readOnlyLane() {
-      return roomRole() || "invite".equals(role);
+      return roomRole() || DispatchGate.READ_ONLY_INVITE_ROLE.equals(role);
     }
 
     /**
@@ -249,14 +259,15 @@ public final class RunStore implements ConflictResolver {
      * reaped and stoppable like any other.
      */
     public boolean sessionRole() {
-      return buildRole() || adhocRole() || roomRole() || inviteRole();
+      return buildRole() || adhocRole() || chatRole() || inviteRole();
     }
   }
 
   private static final String SESSION_ROLES =
-      "role IN ('build', 'adhoc', 'room', 'invite', 'invite-full')";
+      "role IN ('build', 'adhoc', 'room', 'room-full', 'invite', 'invite-full')";
 
-  private static final String PROJECT_SESSION_ROLES = "role IN ('build', 'adhoc', 'room')";
+  private static final String PROJECT_SESSION_ROLES =
+      "role IN ('build', 'adhoc', 'room', 'room-full')";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
