@@ -435,6 +435,15 @@ class RoomWakeLaunchTest {
         events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
         "turns never snapshot — the engage paid once");
     assertEquals("room-full", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
+    var started =
+        events.stream()
+            .filter(e -> Event.WellKnownTypes.AGENT_SESSION_STARTED.equals(e.type()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        "room-full",
+        started.data().get(Event.WellKnownData.RUN_ROLE),
+        "presence lights at launch: the started event names its lane");
   }
 
   @Test

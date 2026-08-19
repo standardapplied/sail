@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `agent_session_started` now carries `run_role`, so clients can light presence the moment a run
+  launches instead of waiting for its first tool call — the seconds between "message sent" and
+  "agent working" shrink to the wake debounce plus launch.
+
 - An agent can be engaged in a spec's room: it joins the conversation and answers every human
   message until dismissed. `sail spec engage <id> --agent <a>` (API `POST /v1/specs/{id}/engage`)
   records the engagement on the spec row as one atomic synced value — agent, mode, model,

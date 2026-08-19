@@ -399,7 +399,7 @@ public final class DispatchOperations {
       }
       if (status != null && status.running()) {
         publishAgentSessionStarted(
-            project, nextSpec.id(), agentType, status.pid(), runId, launch.watcher());
+            project, nextSpec.id(), agentType, status.pid(), runId, "build", launch.watcher());
       }
       return new Dispatched(
           taskSpec,
@@ -498,7 +498,8 @@ public final class DispatchOperations {
         completeForegroundRun(runId, launch.exitCode());
       }
       if (status != null && status.running()) {
-        publishAgentSessionStarted(project, null, agentType, status.pid(), runId, launch.watcher());
+        publishAgentSessionStarted(
+            project, null, agentType, status.pid(), runId, "adhoc", launch.watcher());
       }
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
@@ -640,7 +641,7 @@ public final class DispatchOperations {
       }
       if (status != null && status.running()) {
         publishAgentSessionStarted(
-            project, specId, agentType, status.pid(), runId, launch.watcher());
+            project, specId, agentType, status.pid(), runId, role, launch.watcher());
       }
       return runId;
     } catch (RuntimeException e) {
@@ -846,7 +847,7 @@ public final class DispatchOperations {
       }
       if (status != null && status.running()) {
         publishAgentSessionStarted(
-            project, specId, agentCli.yamlName(), status.pid(), runId, launch.watcher());
+            project, specId, agentCli.yamlName(), status.pid(), runId, role, launch.watcher());
       }
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
@@ -2189,6 +2190,7 @@ public final class DispatchOperations {
       String agentType,
       Integer pid,
       String runId,
+      String role,
       Optional<WatcherSpawner.Spawned> watcher) {
     var data = new LinkedHashMap<String, Object>();
     if (pid != null) {
@@ -2196,6 +2198,9 @@ public final class DispatchOperations {
     }
     if (Strings.isNotBlank(runId)) {
       data.put(Event.WellKnownData.RUN_ID, runId);
+    }
+    if (Strings.isNotBlank(role)) {
+      data.put(Event.WellKnownData.RUN_ROLE, role);
     }
     if (watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback) {
       data.put(Event.WellKnownData.WATCHER_PID, fallback.pid());
