@@ -560,6 +560,49 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aV0_27_0ShapedDatabaseGainsTheEngagementColumn() {
+    stageAtBaseline();
+    var tail = migrationIndex("ALTER TABLE specs ADD COLUMN engagement");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, tail).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + tail);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('pre', 'T', 'draft', 't0', 't0')");
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
+            + " ('r-pre', 'p', 'keep', 'completed', 't0', 'room')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+    assertTrue(
+        db.queryOne("SELECT engagement FROM specs WHERE id = 'pre'", r -> r.isNull(0))
+            .orElseThrow(),
+        "a pre-upgrade spec reads as not engaged");
+    assertEquals(
+        "keep",
+        db.queryOne("SELECT agent FROM runs WHERE id = 'r-pre'", r -> r.text(0)).orElseThrow(),
+        "the runs_v7 rebuild carries prior rows forward");
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
+            + " ('r-chat', 'p', 'claude-code', 'running', 't0', 'room-full')");
+    assertThrows(
+        SqliteException.class,
+        () ->
+            db.execute(
+                "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
+                    + " ('r-bad', 'p', 'claude-code', 'running', 't0', 'shout')"));
+    db.execute("UPDATE specs SET engagement = '{\"agent\":\"claude-code\"}' WHERE id = 'pre'");
+    assertEquals(
+        "{\"agent\":\"claude-code\"}",
+        db.queryOne("SELECT engagement FROM specs WHERE id = 'pre'", r -> r.text(0)).orElseThrow());
+  }
+
+  @Test
   void theWakeColumnAdmitsItsThreeModesAndRejectsGarbage() {
     new SchemaManager(db).migrate();
     db.execute(

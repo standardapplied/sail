@@ -1026,7 +1026,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
         && !runId.isBlank()
         && runStore
             .findById(runId)
-            .map(row -> row.roomRole() || row.reviewRole() || row.inviteRole())
+            .map(row -> row.chatRole() || row.reviewRole() || row.inviteRole())
             .orElse(false);
   }
 

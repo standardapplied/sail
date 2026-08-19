@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -47,6 +48,12 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   /** How long a triggering message waits so the messages right behind it ride the same wake. */
   public static final Duration DEBOUNCE = Duration.ofSeconds(30);
 
+  /**
+   * The engaged room's debounce: an agent someone deliberately put in the room answers promptly, so
+   * the batching window shrinks to what still catches a quick follow-up keystroke.
+   */
+  public static final Duration ENGAGED_DEBOUNCE = Duration.ofSeconds(5);
+
   /** How long after any run finish the room stays quiet — no thank-you refire, no loop sniping. */
   public static final Duration COOLDOWN = Duration.ofMinutes(10);
 
@@ -77,6 +84,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private final Waker waker;
   private final Guard guard;
   private final Duration debounce;
+  private final Duration engagedDebounce;
   private final Duration cooldown;
   private final ExecutorService executor;
   private final Delay delay;
@@ -98,6 +106,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
         waker,
         guard,
         DEBOUNCE,
+        ENGAGED_DEBOUNCE,
         COOLDOWN,
         Executors.newVirtualThreadPerTaskExecutor(),
         Thread::sleep,
@@ -112,6 +121,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       Waker waker,
       Guard guard,
       Duration debounce,
+      Duration engagedDebounce,
       Duration cooldown,
       ExecutorService executor,
       Delay delay,
@@ -123,6 +133,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     this.waker = Objects.requireNonNull(waker, "waker");
     this.guard = Objects.requireNonNull(guard, "guard");
     this.debounce = debounce;
+    this.engagedDebounce = engagedDebounce;
     this.cooldown = cooldown;
     this.executor = executor;
     this.delay = delay;
@@ -168,20 +179,25 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (spec == null || !ownsSpec(spec)) {
       return;
     }
+    var engaged = Engagement.fromJson(spec.engagement()) != null;
     var message = messageOf(event);
     if (!RoomWakePolicy.shouldWake(
-        spec.wake(), dispatchedAtLeastOnce(specId), message.author(), message.body())) {
+        spec.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
       return;
     }
+    schedule(specId, message, engaged);
+  }
+
+  private void schedule(String specId, Message message, boolean engaged) {
     if (!pending.add(specId)) {
       return;
     }
-    executor.execute(() -> debounceThenFire(specId, message));
+    executor.execute(() -> debounceThenFire(specId, message, engaged ? engagedDebounce : debounce));
   }
 
-  private void debounceThenFire(String specId, Message message) {
+  private void debounceThenFire(String specId, Message message, Duration pause) {
     try {
-      delay.pause(debounce);
+      delay.pause(pause);
       fire(specId, message);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -196,16 +212,23 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       if (spec == null || !ownsSpec(spec)) {
         return;
       }
+      var engaged = Engagement.fromJson(spec.engagement()) != null;
       if (!RoomWakePolicy.shouldWake(
-          spec.wake(), dispatchedAtLeastOnce(specId), message.author(), message.body())) {
+          spec.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
         return;
       }
       var runs = runStore.listForSpec(specId);
-      if (runs.stream().anyMatch(run -> LIVE_STATUSES.contains(run.status()))) {
-        return;
-      }
-      if (withinCooldown(runs)) {
-        return;
+      if (engaged) {
+        if (runs.stream().anyMatch(run -> LIVE_STATUSES.contains(run.status()) && run.chatRole())) {
+          return;
+        }
+      } else {
+        if (runs.stream().anyMatch(run -> LIVE_STATUSES.contains(run.status()))) {
+          return;
+        }
+        if (withinCooldown(runs)) {
+          return;
+        }
       }
       waker.wake(spec.project(), specId);
     } catch (Exception e) {
@@ -214,6 +237,11 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   }
 
   private void handleStop(Event event) throws Exception {
+    guardChatStop(event);
+    refireOwedTurn(event.spec());
+  }
+
+  private void guardChatStop(Event event) throws Exception {
     var role = event.data().get(Event.WellKnownData.RUN_ROLE);
     if (!Event.WellKnownData.RUN_ROLE_ROOM.equals(role)
         && !Event.WellKnownData.RUN_ROLE_INVITE.equals(role)) {
@@ -228,6 +256,55 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return;
     }
     guard.guard(run.project(), runId);
+  }
+
+  /**
+   * The stop edge of the engaged loop: a message that landed in a turn's tail — after the relay's
+   * last check — or a full turn deferred behind a build's repo claim gets its turn when any run of
+   * the spec stops. The owed check is derived, never bookkept: the newest human message arrived
+   * after the newest chat turn started, so no turn has read it.
+   */
+  private void refireOwedTurn(String specId) {
+    var spec = specStore.findById(specId).orElse(null);
+    if (spec == null || !ownsSpec(spec) || Engagement.fromJson(spec.engagement()) == null) {
+      return;
+    }
+    var owed = owedMessage(specId);
+    if (owed == null) {
+      return;
+    }
+    schedule(specId, owed, true);
+  }
+
+  /** The newest human message no chat turn has started after, or {@code null} when none is owed. */
+  private Message owedMessage(String specId) {
+    if (messageStore == null) {
+      return null;
+    }
+    var newestHuman =
+        messageStore.list(specId, null, 20).stream()
+            .filter(row -> RoomWakePolicy.humanAuthor(row.author()))
+            .reduce((first, second) -> second)
+            .orElse(null);
+    if (newestHuman == null) {
+      return null;
+    }
+    var humanAt = parseInstant(newestHuman.createdAt());
+    if (humanAt == null) {
+      return null;
+    }
+    var newestChatStart =
+        runStore.listForSpec(specId).stream()
+            .filter(RunStore.RunRow::chatRole)
+            .map(RunStore.RunRow::startedAt)
+            .filter(Strings::isNotBlank)
+            .map(RoomWakeReactor::parseInstant)
+            .filter(Objects::nonNull)
+            .max(Instant::compareTo)
+            .orElse(Instant.MIN);
+    return humanAt.isAfter(newestChatStart)
+        ? new Message(newestHuman.author(), newestHuman.body())
+        : null;
   }
 
   private boolean ownsSpec(SpecStore.SpecRow spec) {

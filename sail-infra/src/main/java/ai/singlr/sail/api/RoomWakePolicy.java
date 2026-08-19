@@ -22,6 +22,11 @@ import ai.singlr.sail.common.Strings;
  * mention} only when the message addresses {@code @agent}, {@code off} never. An unset mode
  * defaults to {@code on} for any spec that has been dispatched at least once — the agent joined the
  * room when it first worked there — and {@code off} for a spec no agent has ever touched.
+ *
+ * <p>An engaged room ignores the wake vocabulary entirely: engagement is the explicit statement
+ * that an agent is in the room, so every human message deserves an answer regardless of the stored
+ * mode or dispatch history. The human-author rule is the one gate engagement never overrides —
+ * silence is a dismissal away, storms stay impossible by construction.
  */
 public final class RoomWakePolicy {
 
@@ -48,9 +53,16 @@ public final class RoomWakePolicy {
 
   /** Whether a human-authored {@code body} under this spec's mode should wake the agent. */
   public static boolean shouldWake(
-      String storedWake, boolean dispatchedAtLeastOnce, String author, String body) {
+      String storedWake,
+      boolean dispatchedAtLeastOnce,
+      boolean engaged,
+      String author,
+      String body) {
     if (!humanAuthor(author)) {
       return false;
+    }
+    if (engaged) {
+      return true;
     }
     return switch (effectiveMode(storedWake, dispatchedAtLeastOnce)) {
       case "on" -> true;

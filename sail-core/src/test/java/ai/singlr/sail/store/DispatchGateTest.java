@@ -115,12 +115,57 @@ class DispatchGateTest {
   }
 
   @Test
-  void aRoomTargetIsBlockedByAnyLiveRunOfItsOwnSpec() {
+  void aRoomTargetRunsAlongsideItsOwnSpecsLiveBuild() {
     var running = List.of(running("auth", "build", List.of("app")));
 
-    var conflict = DispatchGate.decide("auth", "room", List.of(), running).orElseThrow();
+    assertTrue(
+        DispatchGate.decide("auth", "room", List.of(), running).isEmpty(),
+        "a read-only chat turn answers the room while the build works");
+  }
 
-    assertEquals(List.of(), conflict.overlap(), "a wake and a dispatch on one spec serialize");
+  @Test
+  void chatTurnsOfOneSpecSerializeAcrossModes() {
+    assertTrue(
+        DispatchGate.decide(
+                "auth", "room", List.of(), List.of(running("auth", "room-full", List.of("app"))))
+            .isPresent());
+    assertTrue(
+        DispatchGate.decide(
+                "auth", "room-full", List.of("app"), List.of(running("auth", "room", List.of())))
+            .isPresent());
+  }
+
+  @Test
+  void aFullChatTurnReservesLikeABuild() {
+    var running = List.of(running("auth", "build", List.of("app")));
+
+    var deferred = DispatchGate.decide("chat", "room-full", List.of("app"), running).orElseThrow();
+    assertEquals(List.of("app"), deferred.overlap(), "one writer per repo, chat included");
+    assertTrue(
+        DispatchGate.decide("chat", "room-full", List.of("web"), running).isEmpty(),
+        "disjoint repos share the container");
+  }
+
+  @Test
+  void aFullChatTurnWithNoReposClaimsTheWholeContainer() {
+    var running = List.of(running("auth", "build", List.of("app")));
+
+    assertTrue(DispatchGate.decide("chat", "room-full", List.of(), running).isPresent());
+  }
+
+  @Test
+  void aFullChatTurnDefersOnItsOwnSpecsBuildViaTheRepoRule() {
+    var running = List.of(running("auth", "build", List.of("app")));
+
+    assertTrue(DispatchGate.decide("auth", "room-full", List.of("app"), running).isPresent());
+  }
+
+  @Test
+  void aLiveFullChatTurnBlocksAnOverlappingDispatch() {
+    var running = List.of(running("auth", "room-full", List.of("app")));
+
+    assertTrue(DispatchGate.decide("other", "build", List.of("app"), running).isPresent());
+    assertTrue(DispatchGate.decide("other", "build", List.of("web"), running).isEmpty());
   }
 
   @Test
@@ -139,12 +184,12 @@ class DispatchGateTest {
   }
 
   @Test
-  void aLiveRoomRunBlocksItsOwnSpecsDispatch() {
+  void aLiveRoomRunNeverBlocksItsOwnSpecsDispatch() {
     var running = List.of(running("auth", "room", List.of()));
 
-    var conflict = DispatchGate.decide("auth", "build", List.of("web"), running).orElseThrow();
-
-    assertEquals(RUN, conflict.run().runId());
+    assertTrue(
+        DispatchGate.decide("auth", "build", List.of("web"), running).isEmpty(),
+        "dispatch proceeds during a read-only chat turn");
   }
 
   @Test

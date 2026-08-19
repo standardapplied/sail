@@ -1010,21 +1010,25 @@ class RunStoreTest {
   }
 
   @Test
-  void aRoomReservationSerializesWithItsOwnSpecsRuns() {
+  void chatTurnsOfOneSpecSerializeButRunAlongsideItsDispatch() {
     reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
 
     assertTrue(
         reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
-            .isPresent(),
-        "a wake and a dispatch on one spec serialize");
-    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isPresent());
+            .isEmpty(),
+        "a dispatch proceeds during a read-only chat turn");
+    assertTrue(
+        reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isPresent(),
+        "one conversational turn at a time per spec");
   }
 
   @Test
-  void aLiveBuildBlocksItsOwnSpecsRoomReservation() {
+  void aLiveBuildRunsAlongsideItsOwnSpecsRoomReservation() {
     reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
 
-    assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isPresent());
+    assertTrue(
+        reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isEmpty(),
+        "a read-only chat turn answers the room while the build works");
     assertTrue(reserveRoom(DateTimeUtils.newId().toString(), "other", "node-a").isEmpty());
   }
 
