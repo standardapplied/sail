@@ -645,10 +645,13 @@ record SpecRestoreRequest(String rev) {
 }
 
 /** Body of {@code POST /v1/specs/{id}/invite}: the agent to invite and the one mode choice. */
-record EngageRequest(String agent, String mode, String model) {
+record EngageRequest(String agent, String mode, String model, boolean snapshot) {
   static EngageRequest fromMap(Map<String, Object> map) {
     return new EngageRequest(
-        (String) map.get("agent"), (String) map.get("mode"), (String) map.get("model"));
+        (String) map.get("agent"),
+        (String) map.get("mode"),
+        (String) map.get("model"),
+        Boolean.TRUE.equals(map.get("snapshot")));
   }
 }
 

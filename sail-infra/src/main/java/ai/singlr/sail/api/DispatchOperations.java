@@ -918,19 +918,22 @@ public final class DispatchOperations {
   /**
    * Engages an agent in {@code specId}'s room: records the engagement on the spec row (synced,
    * atomic — one JSON value) so the wake reactor answers every human message with a chat turn until
-   * a human disengages. Mode {@code full} is the default and pays with one engage-time container
-   * snapshot (never per turn); {@code read-only} is the explicit narrow choice, offered only where
-   * the harness enforces it. Requires the dispatch tier on the spec, exactly like an invite. The
-   * full mode's snapshot runs off the request thread ({@code completion}) because a {@code
-   * dir}-backend snapshot would blow the HTTP timeout; the engagement is persisted only after the
-   * snapshot succeeds — the payment precedes the access — and a failure publishes {@code
-   * spec_engage_failed} into the room instead of engaging.
+   * a human disengages. Mode {@code full} is the default; {@code read-only} is the explicit narrow
+   * choice, offered only where the harness enforces it. A full engagement may take one engage-time
+   * rollback snapshot (never per turn), but the default is none — on the {@code dir} backend a
+   * snapshot is a slow full filesystem copy, so the rollback point is opt-in ({@code takeSnapshot})
+   * and the per-turn repo reservation remains the standing guard. A requested snapshot runs off the
+   * request thread ({@code completion}) because a {@code dir}-backend snapshot would blow the HTTP
+   * timeout; the engagement is then persisted only after the snapshot succeeds — the payment
+   * precedes the access — and a failure publishes {@code spec_engage_failed} into the room instead
+   * of engaging. Requires the dispatch tier on the spec, exactly like an invite.
    */
   public EngageLaunch engage(
       String specId,
       String agentYamlName,
       String mode,
       String model,
+      boolean takeSnapshot,
       Actor actor,
       String localHandle) {
     var spec =
@@ -960,7 +963,7 @@ public final class DispatchOperations {
     var project = spec.project();
     projects.loadRunning(project);
     requireInstalled(agentCli, project);
-    if (!engagement.full()) {
+    if (!engagement.full() || !takeSnapshot) {
       persistEngagement(specId, engagement, actor);
       publishEngaged(project, specId, engagement, "");
       return new EngageLaunch(engagement.agent(), engagement.mode(), "", null);

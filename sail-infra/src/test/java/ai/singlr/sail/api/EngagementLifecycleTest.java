@@ -179,12 +179,28 @@ class EngagementLifecycleTest {
   }
 
   @Test
-  void aFullEngageTakesEffectOnlyAfterItsSnapshotAndInOrder() throws Exception {
+  void theDefaultFullEngageTakesEffectImmediatelyWithNoSnapshot() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", null, "opus-x", Actor.cliOperator(HANDLE), HANDLE);
+        ops.engage("auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE);
+
+    assertEquals("full", launch.mode(), "full is the default mode");
+    assertEquals("", launch.snapshot(), "no snapshot unless asked — dir backends are slow");
+    assertNull(launch.completion(), "nothing is deferred");
+    assertTrue(stored("auth").full());
+    assertTrue(ofType(Event.WellKnownTypes.SNAPSHOT_CREATED).isEmpty());
+    assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
+  }
+
+  @Test
+  void aFullEngageTakesEffectOnlyAfterItsRequestedSnapshotAndInOrder() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+
+    var launch =
+        ops.engage("auth", "claude-code", null, "opus-x", true, Actor.cliOperator(HANDLE), HANDLE);
 
     assertEquals("full", launch.mode(), "full is the default mode");
     assertTrue(launch.snapshot().startsWith("engage-"));
@@ -215,7 +231,8 @@ class EngagementLifecycleTest {
     var ops = operations(failing);
     seedSpec("auth");
 
-    var launch = ops.engage("auth", "claude-code", "full", null, Actor.cliOperator(HANDLE), HANDLE);
+    var launch =
+        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
     launch.completion().run();
 
     assertNull(stored("auth"), "a failed payment engages nobody");
@@ -232,7 +249,8 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", "read-only", null, Actor.cliOperator(HANDLE), HANDLE);
+        ops.engage(
+            "auth", "claude-code", "read-only", null, true, Actor.cliOperator(HANDLE), HANDLE);
 
     assertNull(launch.completion(), "nothing is deferred — no payment to make");
     assertEquals("", launch.snapshot());
@@ -251,7 +269,8 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage("auth", "codex", "read-only", null, Actor.cliOperator(HANDLE), HANDLE));
+                ops.engage(
+                    "auth", "codex", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE));
 
     assertEquals(ErrorCode.BAD_REQUEST, refusal.failure().errorCode());
     assertNull(stored("auth"));
@@ -264,10 +283,12 @@ class EngagementLifecycleTest {
 
     assertThrows(
         ApiException.class,
-        () -> ops.engage("auth", "claude-code", "yolo", null, Actor.cliOperator(HANDLE), HANDLE));
+        () ->
+            ops.engage(
+                "auth", "claude-code", "yolo", null, false, Actor.cliOperator(HANDLE), HANDLE));
     assertThrows(
         ApiException.class,
-        () -> ops.engage("auth", "hal9000", null, null, Actor.cliOperator(HANDLE), HANDLE));
+        () -> ops.engage("auth", "hal9000", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
     assertNull(stored("auth"));
     assertTrue(events.isEmpty());
   }
@@ -296,7 +317,7 @@ class EngagementLifecycleTest {
       var engaged =
           sailOps.engageToSpec(
               "auth",
-              new EngageRequest("claude-code", null, null),
+              new EngageRequest("claude-code", null, null, true),
               Actor.cliOperator(HANDLE),
               HANDLE);
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
@@ -308,7 +329,7 @@ class EngagementLifecycleTest {
       var refused =
           sailOps.engageToSpec(
               "auth",
-              new EngageRequest("codex", "read-only", null),
+              new EngageRequest("codex", "read-only", null, false),
               Actor.cliOperator(HANDLE),
               HANDLE);
       assertTrue(refused instanceof Result.Failure<EngageResponse>);
@@ -328,7 +349,7 @@ class EngagementLifecycleTest {
   void disengageClearsTheRoomSpeaksOnTheBusAndIsIdempotent() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
-    ops.engage("auth", "claude-code", "read-only", null, Actor.cliOperator(HANDLE), HANDLE);
+    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
 
     var dismissed = ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
 

@@ -9,8 +9,10 @@
   engagements together — and `sail spec disengage` clears it; both transitions publish room-visible
   events (`spec_engaged`, `spec_disengaged`). **Full access is the default mode**: conversations
   produce artifacts (diagrams, drafts, files), so an engaged agent works in the workspace, drafts
-  spec bodies, and creates sibling draft specs, paid for with one engage-time container snapshot
-  (never per turn) and the same one-writer-per-repo reservation a build takes per turn.
+  spec bodies, and creates sibling draft specs, guarded by the same one-writer-per-repo
+  reservation a build takes per turn. An engage-time rollback snapshot is opt-in
+  (`--snapshot` / the dialog checkbox) and off by default — on the `dir` backend a snapshot is a
+  slow full filesystem copy, and the choice to skip it belongs to the human.
   `--read-only` is the explicit narrow choice, enforced by the harness and offered only where
   enforcement exists (claude-code today); full mode works on every agent, so codex is a
   first-class conversationalist. An engagement did not take effect until its snapshot succeeded —

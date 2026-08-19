@@ -139,11 +139,10 @@ public final class RoomWakePrompt {
           conversation is shaping it, or create sibling specs with
           `spec create --id <id> --title "<title>" --body-file <file>`. New specs are
           born draft; a human promotes them on the board — never set a status yourself.
-        - Work in the workspace freely when asked — diagrams, files, experiments: a
-          container snapshot was taken when you were engaged, and this turn holds the
-          repo reservation. Nothing forces a commit at turn end: leave work in the
-          worktree and say where it is, or commit and push when the change is worth
-          keeping and the conversation asks for it.
+        - Work in the workspace freely when asked — diagrams, files, experiments: this
+          turn holds the repo reservation. Nothing forces a commit at turn end: leave
+          work in the worktree and say where it is, or commit and push when the change
+          is worth keeping and the conversation asks for it.
 
         This is one turn of a continuing conversation. Replies posted while you work are
         delivered into your context automatically after a tool call finishes, and unread

@@ -458,7 +458,13 @@ public final class SailOperations implements Operations {
             () -> {
               var launch =
                   dispatchOps.engage(
-                      specId, request.agent(), request.mode(), request.model(), actor, localHandle);
+                      specId,
+                      request.agent(),
+                      request.mode(),
+                      request.model(),
+                      request.snapshot(),
+                      actor,
+                      localHandle);
               if (launch.completion() != null) {
                 inviteExecutor.execute(launch.completion());
               }

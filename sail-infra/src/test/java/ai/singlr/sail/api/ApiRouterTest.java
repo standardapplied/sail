@@ -1051,7 +1051,7 @@ class ApiRouterTest {
               server,
               "/v1/specs/auth-flow/engage",
               "token",
-              "{\"agent\": \"claude-code\", \"model\": \"opus-x\"}");
+              "{\"agent\": \"claude-code\", \"model\": \"opus-x\", \"snapshot\": true}");
 
       assertEquals(200, response.statusCode());
       assertTrue(response.body().contains("\"agent\": \"claude-code\""));
@@ -1060,6 +1060,7 @@ class ApiRouterTest {
       assertEquals("auth-flow", ops.lastEngage.specId());
       assertEquals("claude-code", ops.lastEngage.request().agent());
       assertEquals("opus-x", ops.lastEngage.request().model());
+      assertTrue(ops.lastEngage.request().snapshot());
     }
   }
 
@@ -1521,7 +1522,7 @@ class ApiRouterTest {
           new EngageResponse(
               request.agent(),
               request.mode() == null ? "full" : request.mode(),
-              "read-only".equals(request.mode()) ? "" : "engage-1"));
+              request.snapshot() ? "engage-1" : ""));
     }
 
     @Override

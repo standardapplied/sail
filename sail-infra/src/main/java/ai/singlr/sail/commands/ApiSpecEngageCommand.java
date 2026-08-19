@@ -21,17 +21,17 @@ import picocli.CommandLine.Spec;
 
 /**
  * Engages an agent in a spec's room: it joins the conversation and answers every human message
- * until dismissed. Full access is the default — conversations produce artifacts — and pays with one
- * engage-time snapshot; {@code --read-only} is the explicit narrow choice, offered only where the
- * harness enforces it. A thin client of {@code POST /v1/specs/{id}/engage}; the server's refusals
- * render verbatim.
+ * until dismissed. Full access is the default — conversations produce artifacts. {@code --snapshot}
+ * opts into a rollback point first (off by default: a dir-backend snapshot is a slow full copy);
+ * {@code --read-only} is the explicit narrow choice, offered only where the harness enforces it. A
+ * thin client of {@code POST /v1/specs/{id}/engage}; the server's refusals render verbatim.
  */
 @Command(
     name = "engage",
     description =
         "Put an agent in this spec's room — it answers every message until 'spec disengage'."
-            + " Full access by default (snapshots first); --read-only for the enforced narrow"
-            + " mode.",
+            + " Full access by default; --read-only for the enforced narrow mode, --snapshot for"
+            + " a rollback point first.",
     mixinStandardHelpOptions = true)
 public final class ApiSpecEngageCommand implements Runnable {
 
@@ -48,6 +48,13 @@ public final class ApiSpecEngageCommand implements Runnable {
       names = "--read-only",
       description = "Enforced read-only conversation (claude-code only today).")
   private boolean readOnly;
+
+  @Option(
+      names = "--snapshot",
+      description =
+          "Take a rollback snapshot before the engagement takes effect (full mode only)."
+              + " Off by default — on the dir backend a snapshot is a slow full copy.")
+  private boolean snapshot;
 
   @Mixin private SyncOptions syncOptions;
 
@@ -69,6 +76,9 @@ public final class ApiSpecEngageCommand implements Runnable {
     var body = new LinkedHashMap<String, Object>();
     body.put("agent", agent);
     body.put("mode", readOnly ? "read-only" : "full");
+    if (snapshot && !readOnly) {
+      body.put("snapshot", true);
+    }
     if (Strings.isNotBlank(model)) {
       body.put("model", model);
     }
