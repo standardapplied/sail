@@ -89,6 +89,26 @@ public final class SchemaManager {
    * container_leases} (a box's own exclusive-container-operation claims) are local-only as well —
    * none of the four ever joins a sync snapshot.
    */
+  /**
+   * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
+   * left {@code OPEN} forever (nothing resolved a passed review's own residue). Closes every such
+   * finding — {@code OPEN} on the non-superseded passed review of a {@code done} spec — as {@code
+   * SHIPPED}, the same terminal state {@code ReviewStore.resolveShippedFindings} now writes on the
+   * {@code → done} transition going forward. Named so the migration test runs this exact statement.
+   */
+  static final String BACKFILL_SHIPPED_RESIDUE =
+      """
+      UPDATE review_findings SET resolution = 'SHIPPED',
+              resolution_evidence = 'shipped below the review gate'
+          WHERE resolution = 'OPEN'
+          AND stage_id IN (
+              SELECT s.id FROM review_stages s
+              JOIN reviews r ON r.id = s.review_id
+              JOIN specs sp ON sp.id = r.spec_id
+              WHERE r.status = 'passed'
+              AND r.superseded_at IS NULL
+              AND sp.status = 'done')""";
+
   static final List<String> MIGRATIONS =
       List.of(
           "ALTER TABLE runs ADD COLUMN principal TEXT",
@@ -318,7 +338,44 @@ public final class SchemaManager {
           "DROP TABLE runs",
           "ALTER TABLE runs_v7 RENAME TO runs",
           "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)");
+          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
+          """
+          CREATE TABLE review_findings_v3 (
+              id TEXT PRIMARY KEY,
+              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
+              severity TEXT NOT NULL,
+              category TEXT NOT NULL,
+              file TEXT,
+              line_start INTEGER,
+              line_end INTEGER,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              evidence TEXT,
+              suggestion_before TEXT,
+              suggestion_after TEXT,
+              suggestion_rationale TEXT,
+              confidence REAL NOT NULL DEFAULT 0.0,
+              resolution TEXT NOT NULL DEFAULT 'OPEN'
+                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED', 'DISPUTED', 'SHIPPED')),
+              resolution_evidence TEXT,
+              carried_from TEXT,
+              carry_evidence TEXT
+          )""",
+          """
+          INSERT INTO review_findings_v3 (id, stage_id, severity, category, file,
+                  line_start, line_end, title, description, evidence, suggestion_before,
+                  suggestion_after, suggestion_rationale, confidence, resolution,
+                  resolution_evidence, carried_from, carry_evidence)
+              SELECT id, stage_id, severity, category, file,
+                  line_start, line_end, title, description, evidence, suggestion_before,
+                  suggestion_after, suggestion_rationale, confidence, resolution,
+                  resolution_evidence, carried_from, carry_evidence
+              FROM review_findings""",
+          "DROP TABLE review_findings",
+          "ALTER TABLE review_findings_v3 RENAME TO review_findings",
+          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
+          BACKFILL_SHIPPED_RESIDUE);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

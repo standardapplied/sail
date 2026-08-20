@@ -196,6 +196,34 @@ class ReviewStoreTest {
   }
 
   @Test
+  void resolveShippedFindingsMarksTheResidueShippedAndClearsIt() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var open = addOpenFinding(stageId, Finding.Severity.HIGH, "Below gate");
+    var fixed = addOpenFinding(stageId, Finding.Severity.LOW, "Fixed");
+    store.resolveFinding(fixed.id(), Finding.Resolution.FIXED);
+    store.updateReviewStatus(reviewId, "passed");
+
+    assertEquals(1, store.resolveShippedFindings("auth"));
+    assertTrue(store.openFindingsAfterPass("auth").isEmpty());
+    assertEquals(
+        Finding.Resolution.SHIPPED, store.findFinding(open.id()).orElseThrow().resolution());
+    assertEquals(
+        Finding.Resolution.FIXED, store.findFinding(fixed.id()).orElseThrow().resolution());
+  }
+
+  @Test
+  void resolveShippedFindingsLeavesAnUnpassedReviewsFindingsOpen() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var open = addOpenFinding(stageId, Finding.Severity.HIGH, "In flight");
+    store.updateReviewStatus(reviewId, "failed");
+
+    assertEquals(0, store.resolveShippedFindings("auth"));
+    assertEquals(Finding.Resolution.OPEN, store.findFinding(open.id()).orElseThrow().resolution());
+  }
+
+  @Test
   void openFindingsAfterPassEmptyWhenLatestReviewNotPassed() {
     var reviewId = store.createReview("auth", 1);
     var stageId = store.createStage(reviewId, "security", "agent");

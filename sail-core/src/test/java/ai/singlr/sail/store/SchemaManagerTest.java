@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -30,6 +31,59 @@ class SchemaManagerTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+  }
+
+  @Test
+  void backfillClosesOnlyTheResidueOfADoneSpecsPassedReview() {
+    new SchemaManager(db).migrate();
+    var specs = new SpecStore(db);
+    var reviews = new ReviewStore(db);
+
+    var residue = seedFinding(specs, reviews, "done-passed", SpecStatus.DONE, "passed", false);
+    var wip = seedFinding(specs, reviews, "wip-passed", SpecStatus.IN_PROGRESS, "passed", false);
+    var failed = seedFinding(specs, reviews, "done-failed", SpecStatus.DONE, "failed", false);
+    var gone = seedFinding(specs, reviews, "done-superseded", SpecStatus.DONE, "passed", true);
+
+    db.execute(SchemaManager.BACKFILL_SHIPPED_RESIDUE);
+
+    assertEquals(
+        Finding.Resolution.SHIPPED, reviews.findFinding(residue).orElseThrow().resolution());
+    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(wip).orElseThrow().resolution());
+    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(failed).orElseThrow().resolution());
+    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(gone).orElseThrow().resolution());
+  }
+
+  private String seedFinding(
+      SpecStore specs,
+      ReviewStore reviews,
+      String specId,
+      SpecStatus status,
+      String reviewStatus,
+      boolean superseded) {
+    specs.create(
+        new SpecStore.SpecRow(
+            specId, "proj", "T", status, null, null, null, null, null, 0, null, "", "", null,
+            List.of(), List.of()));
+    var reviewId = reviews.createReview(specId, 1);
+    var stageId = reviews.createStage(reviewId, "security", "agent");
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "src/A.java",
+            1,
+            2,
+            "title",
+            "desc",
+            "evidence",
+            new Finding.Suggestion("a", "b", "c"),
+            0.5);
+    reviews.addFinding(stageId, finding);
+    reviews.updateReviewStatus(reviewId, reviewStatus);
+    if (superseded) {
+      reviews.supersedeForSpec(specId);
+    }
+    return finding.id();
   }
 
   @Test
