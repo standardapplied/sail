@@ -63,6 +63,22 @@ class RunStoreTest {
         "sail-agent-" + id);
   }
 
+  private static RunStore.RunRow runOnNode(String node) {
+    return new RunStore.RunRow(
+        "r", "proj", "spec", node, "build", "codex", "b", "t", null, null, "running", null, "log",
+        "unit", "t", null, List.of(), null, null, null);
+  }
+
+  @Test
+  void ownedByMatchesTheStampedNodeAndFailsClosedOnBlank() {
+    assertTrue(runOnNode("node-a").ownedBy("node-a"));
+    assertFalse(runOnNode("node-a").ownedBy("node-b"));
+    assertFalse(runOnNode("node-a").ownedBy(null), "a handled box never owns another box's run");
+    assertFalse(runOnNode("").ownedBy("node-a"), "a blank node fails closed for a handled box");
+    assertTrue(runOnNode("").ownedBy(null), "a standalone box owns its own blank-node runs");
+    assertTrue(runOnNode(null).ownedBy(""), "blank handle and blank node both mean standalone");
+  }
+
   @Test
   void createAndFindRun() {
     var id = newRun("backend", "auth");

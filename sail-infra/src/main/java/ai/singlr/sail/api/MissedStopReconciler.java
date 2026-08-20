@@ -232,7 +232,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var released = 0;
     for (var run : sessionStore.running()) {
       if (handledThisSweep.contains(run.specId())
-          || !SailOperations.ownsRun(run.node(), node)
+          || !run.ownedBy(node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
           || specBeingWorked(run.specId())
           || agentProbablyAlive(run)) {
@@ -283,7 +283,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var finalized = 0;
     for (var run : sessionStore.stopping()) {
-      if (!SailOperations.ownsRun(run.node(), node)) {
+      if (!run.ownedBy(node)) {
         continue;
       }
       try {
@@ -357,7 +357,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         sessionStore.listForSpec(spec.id()).stream()
             .filter(RunStore.RunRow::buildRole)
             .findFirst()
-            .filter(run -> SailOperations.ownsRun(run.node(), node))
+            .filter(run -> run.ownedBy(node))
             .filter(run -> TERMINAL_RUN_STATUSES.contains(run.status()));
     if (latest.isEmpty() || unitStillActive(spec, latest.get())) {
       return false;
@@ -400,7 +400,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         sessionStore.listForSpec(spec.id()).stream()
             .filter(RunStore.RunRow::buildRole)
             .findFirst()
-            .filter(run -> SailOperations.ownsRun(run.node(), node));
+            .filter(run -> run.ownedBy(node));
     if (latest.isEmpty()) {
       return false;
     }

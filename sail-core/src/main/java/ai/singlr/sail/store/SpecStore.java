@@ -187,6 +187,15 @@ public final class SpecStore implements ConflictResolver {
           engagement);
     }
 
+    /**
+     * Whether this spec is assigned to the box whose handle is {@code localHandle}. Unlike run
+     * ownership, a blank handle owns nothing: an FDE-bound box serves only its assignee's specs,
+     * and an unbound box drives no spec's room lane at all.
+     */
+    public boolean assignedTo(String localHandle) {
+      return Strings.isNotBlank(localHandle) && localHandle.equals(assignee);
+    }
+
     /** Projects this stored row onto the storage-agnostic {@link Spec} value type. */
     public Spec toSpec() {
       return new Spec(
