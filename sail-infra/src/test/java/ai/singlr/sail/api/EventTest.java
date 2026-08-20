@@ -239,9 +239,6 @@ class EventTest {
     assertEquals(
         Event.RetentionClass.EPHEMERAL,
         Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_PRESENCE));
-    assertEquals(
-        Event.RetentionClass.EPHEMERAL,
-        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.HEARTBEAT));
   }
 
   @Test
@@ -251,7 +248,6 @@ class EventTest {
     assertTrue(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_LOG_CHUNK));
     assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_SESSION_STARTED));
     assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.AGENT_PRESENCE));
-    assertFalse(Event.WellKnownTypes.progress(Event.WellKnownTypes.HEARTBEAT));
   }
 
   @Test

@@ -86,7 +86,7 @@ class RunActivityStamperTest {
     assertFalse(
         stamper.filter().test(progress(Event.WellKnownTypes.AGENT_SESSION_STARTED, Map.of())),
         "session lifecycle is not progress — the stall timer and presence must agree");
-    assertFalse(stamper.filter().test(progress(Event.WellKnownTypes.HEARTBEAT, Map.of())));
+    assertFalse(stamper.filter().test(progress(Event.WellKnownTypes.AGENT_PRESENCE, Map.of())));
   }
 
   @Test

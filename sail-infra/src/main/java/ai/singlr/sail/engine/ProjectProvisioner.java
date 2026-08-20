@@ -1184,16 +1184,12 @@ public final class ProjectProvisioner {
 
   private ShellExec.Result execInContainer(String name, List<String> command)
       throws IOException, InterruptedException, TimeoutException {
-    var full = new ArrayList<>(List.of("incus", "exec", name, "--"));
-    full.addAll(command);
-    return shell.exec(full);
+    return shell.exec(ContainerExec.asRoot(name, command));
   }
 
   private ShellExec.Result execInContainer(String name, List<String> command, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    var full = new ArrayList<>(List.of("incus", "exec", name, "--"));
-    full.addAll(command);
-    return shell.exec(full, null, timeout);
+    return shell.exec(ContainerExec.asRoot(name, command), null, timeout);
   }
 
   /**

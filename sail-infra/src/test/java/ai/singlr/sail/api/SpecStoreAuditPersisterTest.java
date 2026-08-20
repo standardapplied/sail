@@ -57,7 +57,7 @@ class SpecStoreAuditPersisterTest {
     assertFalse(
         persister
             .filter()
-            .test(Event.of("proj", "spec-1", Event.WellKnownTypes.HEARTBEAT, "sail", "host")));
+            .test(Event.of("proj", "spec-1", Event.WellKnownTypes.AGENT_PRESENCE, "sail", "host")));
   }
 
   @Test
