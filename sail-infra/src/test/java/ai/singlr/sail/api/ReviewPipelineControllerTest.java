@@ -1523,6 +1523,61 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aFixCrashSurfacesAsIterationFailedAndEscalatesInsteadOfReReviewingUnfixedCode()
+      throws Exception {
+    createSpec("auth", "in_progress", List.of("api"));
+    var criticalOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Bad",
+          "description": "Very bad", "confidence": 0.9}]}
+        ```
+        """;
+    var runner =
+        new ReviewAgentRunner() {
+          @Override
+          public String run(String p, String a, String prompt, String rid, String cred) {
+            return criticalOutput;
+          }
+
+          @Override
+          public String runFix(
+              String p,
+              String a,
+              String prompt,
+              String rid,
+              String cred,
+              String branch,
+              List<String> repos,
+              String model,
+              String effort) {
+            throw new IllegalStateException("fix agent quota exceeded");
+          }
+        };
+
+    try (var bus = new EventBus()) {
+      var captured = captureEvents(bus, Set.of("review_iteration_failed", "review_escalated"), 2);
+      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+
+      ctrl.onEvent(agentStoppedEvent("auth"));
+      BusTesting.awaitDelivery(captured.latch());
+
+      assertEquals(
+          1,
+          reviewStore.reviewsForSpec("auth").size(),
+          "a crashed fix must not spawn a second review — the branch still holds the unfixed code"
+              + " the reviewer just failed");
+      assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+      var types = captured.events().stream().map(Event::type).toList();
+      assertTrue(
+          types.contains("review_iteration_failed"),
+          "the fix crash must surface as an event, never be swallowed to stderr: " + types);
+      assertTrue(types.contains("review_escalated"), types.toString());
+    }
+  }
+
+  @Test
   void theFixTaskCarriesTheRoomAndSeedsTheDeliveryWatermark() throws Exception {
     createSpec("auth", "in_progress", List.of("api"));
     var messages = new MessageStore(db);
