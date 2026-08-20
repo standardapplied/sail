@@ -93,7 +93,7 @@ public final class ContainerManager {
       throws IOException, InterruptedException, TimeoutException {
     var busPath = ContainerExec.DEV_XDG_RUNTIME_DIR + "/bus";
     for (var attempt = 0; attempt < READINESS_ATTEMPTS; attempt++) {
-      if (shell.exec(List.of("incus", "exec", name, "--", "test", "-S", busPath)).ok()) {
+      if (shell.exec(ContainerExec.asRoot(name, List.of("test", "-S", busPath))).ok()) {
         return true;
       }
       Thread.sleep(READINESS_POLL_MILLIS);
@@ -142,7 +142,7 @@ public final class ContainerManager {
         sed -i "s/^\\(127\\.0\\.1\\.1[[:space:]]*\\).*/\\1$1/" /etc/hosts 2>/dev/null || true
         """;
     var result =
-        shell.exec(List.of("incus", "exec", name, "--", "bash", "-c", script, "bash", name));
+        shell.exec(ContainerExec.asRoot(name, List.of("bash", "-c", script, "bash", name)));
     if (!result.ok()) {
       throw new IOException(
           "Failed to set hostname for container '" + name + "': " + result.stderr());
@@ -153,7 +153,7 @@ public final class ContainerManager {
   /** Reads the live guest hostname and reports whether it already equals {@code name}. */
   public boolean hostnameMatches(String name)
       throws IOException, InterruptedException, TimeoutException {
-    var current = shell.exec(List.of("incus", "exec", name, "--", "hostname"));
+    var current = shell.exec(ContainerExec.asRoot(name, List.of("hostname")));
     return current.ok() && current.stdout().strip().equals(name);
   }
 

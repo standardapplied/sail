@@ -479,7 +479,7 @@ public final class AgentWatchCommand implements Runnable {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("triggered", false);
-      map.put("reason", "agent_session_stopped");
+      map.put("reason", Event.WellKnownTypes.AGENT_SESSION_STOPPED);
       System.out.println(YamlUtil.dumpJson(map));
     } else {
       System.out.println(Ansi.AUTO.string("  @|faint Agent exited. Watch complete.|@"));
@@ -487,7 +487,7 @@ public final class AgentWatchCommand implements Runnable {
     sendNotification(
         notifier,
         notifications,
-        "agent_session_stopped",
+        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         name,
         "Agent exited",
         "Agent process is no longer running. Run: sail agent report " + name);
@@ -500,7 +500,7 @@ public final class AgentWatchCommand implements Runnable {
     sendNotification(
         notifier,
         notifications,
-        "guardrail_triggered",
+        Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
         name,
         "Guardrail: " + triggered.reason(),
         triggered.detail() + ". Action: " + triggered.action());
@@ -510,7 +510,7 @@ public final class AgentWatchCommand implements Runnable {
     sendNotification(
         notifier,
         notifications,
-        "agent_session_completed",
+        Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
         name,
         "Watch complete",
         "Agent session ended. Run: sail agent report " + name);

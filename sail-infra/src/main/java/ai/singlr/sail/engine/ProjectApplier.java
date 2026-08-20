@@ -394,15 +394,15 @@ public final class ProjectApplier {
 
     var newCron = CleanupScripts.buildUpgradedCrontab(existingCron);
     var mktemp =
-        shell.exec(List.of("incus", "exec", name, "--", "mktemp", "/tmp/sail-crontab.XXXXXX"));
+        shell.exec(ContainerExec.asRoot(name, List.of("mktemp", "/tmp/sail-crontab.XXXXXX")));
     if (!mktemp.ok()) {
       throw new IOException("Failed to create temp file for crontab: " + mktemp.stderr());
     }
     var tmpPath = mktemp.stdout().strip();
     pushFile(name, tmpPath, newCron);
     var cronResult =
-        shell.exec(List.of("incus", "exec", name, "--", "crontab", "-u", sshUser, tmpPath));
-    shell.exec(List.of("incus", "exec", name, "--", "rm", "-f", tmpPath));
+        shell.exec(ContainerExec.asRoot(name, List.of("crontab", "-u", sshUser, tmpPath)));
+    shell.exec(ContainerExec.asRoot(name, List.of("rm", "-f", tmpPath)));
     if (!cronResult.ok()) {
       throw new IOException(
           "Failed to install crontab for user '" + sshUser + "': " + cronResult.stderr());

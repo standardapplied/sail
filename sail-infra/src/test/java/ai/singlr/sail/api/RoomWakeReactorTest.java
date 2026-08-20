@@ -273,7 +273,9 @@ class RoomWakeReactorTest {
             .filter()
             .test(Event.of("acme", null, Event.WellKnownTypes.SPEC_MESSAGE_POSTED, "u", "h")));
     assertFalse(
-        reactor.filter().test(Event.of("acme", "auth", Event.WellKnownTypes.HEARTBEAT, "u", "h")));
+        reactor
+            .filter()
+            .test(Event.of("acme", "auth", Event.WellKnownTypes.AGENT_PRESENCE, "u", "h")));
   }
 
   @Test

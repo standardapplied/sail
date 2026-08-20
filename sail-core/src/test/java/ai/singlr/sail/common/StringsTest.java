@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.common;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -33,5 +35,20 @@ class StringsTest {
     assertFalse(Strings.isNotBlank(null));
     assertFalse(Strings.isNotBlank("  "));
     assertTrue(Strings.isNotBlank("x"));
+  }
+
+  @Test
+  void requireNonBlankReturnsTheValueWhenPresent() {
+    assertEquals("x", Strings.requireNonBlank("x", "field"));
+  }
+
+  @Test
+  void requireNonBlankThrowsNamingTheFieldWhenBlank() {
+    for (var blank : new String[] {null, "", "   "}) {
+      var ex =
+          assertThrows(
+              IllegalArgumentException.class, () -> Strings.requireNonBlank(blank, "project"));
+      assertTrue(ex.getMessage().contains("project"), ex.getMessage());
+    }
   }
 }

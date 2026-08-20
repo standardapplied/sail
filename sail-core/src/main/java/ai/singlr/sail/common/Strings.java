@@ -28,4 +28,16 @@ public final class Strings {
   public static boolean isNotBlank(String s) {
     return !isBlank(s);
   }
+
+  /**
+   * Returns {@code value} when it holds a non-whitespace character, else throws {@link
+   * IllegalArgumentException} naming {@code name} — the one throwing blank-guard so precondition
+   * checks read consistently instead of each caller inlining its own.
+   */
+  public static String requireNonBlank(String value, String name) {
+    if (isBlank(value)) {
+      throw new IllegalArgumentException(name + " must not be blank.");
+    }
+    return value;
+  }
 }

@@ -91,8 +91,6 @@ public record Event(
     public static final String SNAPSHOT_RESTORED = "snapshot_restored";
     public static final String SNAPSHOT_DELETED = "snapshot_deleted";
     public static final String GUARDRAIL_TRIGGERED = "guardrail_triggered";
-    public static final String PROJECT_STARTED = "project_started";
-    public static final String PROJECT_STOPPED = "project_stopped";
     public static final String BOARD_UPDATED = "board_updated";
     public static final String SPEC_MESSAGE_POSTED = "spec_message_posted";
 
@@ -106,7 +104,6 @@ public record Event(
     public static final String SPEC_ENGAGE_FAILED = "spec_engage_failed";
 
     public static final String AGENT_PRESENCE = "agent_presence";
-    public static final String HEARTBEAT = "heartbeat";
 
     /** A spec left in_progress/review past the reconciler threshold — surfaced for triage. */
     public static final String SPEC_STRANDED = "spec_stranded";
@@ -129,7 +126,7 @@ public record Event(
         return RetentionClass.TELEMETRY;
       }
       return switch (type) {
-        case AGENT_PRESENCE, HEARTBEAT -> RetentionClass.EPHEMERAL;
+        case AGENT_PRESENCE -> RetentionClass.EPHEMERAL;
         default -> RetentionClass.RECORD;
       };
     }
@@ -251,10 +248,10 @@ public record Event(
       throw new IllegalArgumentException("id must be non-negative, got " + id);
     }
     Objects.requireNonNull(ts, "ts is required");
-    requireNonBlank(project, "project");
-    requireNonBlank(type, "type");
-    requireNonBlank(agent, "agent");
-    requireNonBlank(host, "host");
+    Strings.requireNonBlank(project, "project");
+    Strings.requireNonBlank(type, "type");
+    Strings.requireNonBlank(agent, "agent");
+    Strings.requireNonBlank(host, "host");
     data = data == null ? Map.of() : Map.copyOf(data);
   }
 
@@ -392,11 +389,5 @@ public record Event(
       case String s when !s.isBlank() -> Long.parseLong(s.strip());
       default -> fallback;
     };
-  }
-
-  private static void requireNonBlank(String value, String name) {
-    if (Strings.isBlank(value)) {
-      throw new IllegalArgumentException(name + " is required");
-    }
   }
 }
