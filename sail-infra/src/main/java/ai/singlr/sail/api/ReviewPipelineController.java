@@ -593,7 +593,15 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     if (openFindings.isEmpty()) return;
 
-    triggerFixIteration(reviewId, specId, openFindings, project);
+    if (!triggerFixIteration(reviewId, specId, openFindings, project)) {
+      escalate(
+          project,
+          specId,
+          reviewId,
+          "fix iteration could not run — the coding agent errored before addressing the findings;"
+              + " triage and re-dispatch");
+      return;
+    }
     reReview(config, project, specId, review.get().iteration() + 1);
   }
 
@@ -635,10 +643,17 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * otherwise the re-review judges a branch without the fixes and the shared clone carries the
    * leftovers into the next dispatch.
    */
-  private void triggerFixIteration(
+  /**
+   * Runs the fix agent, returning whether it completed. A {@code false} return means the fix
+   * crashed before addressing the findings: the caller must not re-review, because the branch still
+   * holds the unfixed code the reviewer just failed. The crash is published as {@code
+   * review_iteration_failed} (parallel to {@code review_errored}) so it is never swallowed to
+   * stderr, and the run is marked failed for the reconciler.
+   */
+  private boolean triggerFixIteration(
       String reviewId, String specId, List<Finding> findings, String project) {
     var spec = specStore.findById(specId);
-    if (spec.isEmpty()) return;
+    if (spec.isEmpty()) return false;
 
     var room = roomMessages(specId);
     var built = FixTaskBuilder.build(specId, spec.get().title(), findings, room);
@@ -674,12 +689,14 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
             "fix agent left uncommitted changes in " + describeRescues(rescued),
             "committed and pushed them to " + spec.get().branch());
       }
+      completeReviewRun(reviewId);
+      return true;
     } catch (Exception e) {
       failReviewRun(reviewId, e);
-      System.err.println(
-          "review-pipeline: fix iteration failed for spec " + specId + ": " + e.getMessage());
+      publishEvent(
+          project, specId, "review_iteration_failed", "fix agent errored: " + e.getMessage());
+      return false;
     }
-    completeReviewRun(reviewId);
   }
 
   /** Errored attempts of this iteration in the current dispatch attempt — the retry budget. */
