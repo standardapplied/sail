@@ -162,6 +162,7 @@ final class GlobalSpecOperations {
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
       reviewStore.resolveSourceFindings(specId);
+      reviewStore.resolveShippedFindings(specId);
     }
     var result = specStore.findById(specId).orElseThrow();
     if (result.status() != existing.status()) {

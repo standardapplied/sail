@@ -570,6 +570,19 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void updateToDoneClosesTheSpecsOwnShippedResidue() {
+    ops.create(createReq(Map.of("status", "in_progress")));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+
+    ops.update(
+        "auth", SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"), ADMIN);
+
+    assertEquals(
+        Finding.Resolution.SHIPPED,
+        reviewStore.findingsForReview(reviewId).getFirst().resolution());
+  }
+
+  @Test
   void updateWithoutDoneTransitionLeavesFindingsOpen() {
     ops.create(createReq(Map.of("status", "done")));
     var reviewId = seedPassedReviewWithOpenFinding("auth");

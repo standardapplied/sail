@@ -69,11 +69,17 @@ public record Finding(
     }
   }
 
+  /**
+   * A finding's terminal state. {@code SHIPPED} is distinct from {@code DISMISSED}: the finding was
+   * real, but it sat below the review gate and the human accepted it by merging the spec's work —
+   * so it must close (the loop leaves nothing OPEN) without being mislabeled a false positive.
+   */
   public enum Resolution {
     OPEN,
     FIXED,
     DISMISSED,
-    DISPUTED
+    DISPUTED,
+    SHIPPED
   }
 
   public record Suggestion(String before, String after, String rationale) {

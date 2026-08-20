@@ -588,6 +588,20 @@ public final class ReviewStore implements ConflictResolver {
         .orElse(List.of());
   }
 
+  /**
+   * Closes the residue a spec shipped with — the {@link #openFindingsAfterPass} set — as {@link
+   * Finding.Resolution#SHIPPED}, returning how many changed. Called on the {@code → done}
+   * transition so a completed spec leaves no finding OPEN. A spec whose latest review did not pass
+   * has no residue and is left untouched (its findings are in-flight work, not shipped).
+   */
+  public int resolveShippedFindings(String specId) {
+    var residue = openFindingsAfterPass(specId);
+    for (var finding : residue) {
+      resolveFinding(finding.id(), Finding.Resolution.SHIPPED, "shipped below the review gate");
+    }
+    return residue.size();
+  }
+
   // ---- Sync: the review as a replicated aggregate (review + stages + finding counts) ----
 
   /**
