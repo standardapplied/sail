@@ -82,9 +82,35 @@ class RoomWakeLaunchTest {
     }
   }
 
+  private static final String YAML_NO_AGENT =
+      """
+      name: acme
+      ssh:
+        user: dev
+      repos:
+        - url: https://github.com/acme/app.git
+          path: app
+      """;
+
   private DispatchOperations operations(ShellExec shell) throws IOException {
+    return operations(
+        shell,
+        YAML,
+        true,
+        command -> {
+          launched.set(command);
+          return 0;
+        });
+  }
+
+  private DispatchOperations operations(
+      ShellExec shell,
+      String yamlContent,
+      boolean withRunStore,
+      DispatchOperations.AgentLauncher launcher)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, YAML);
+    Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
@@ -96,17 +122,39 @@ class RoomWakeLaunchTest {
             yaml.toString(),
             specStore,
             new ReviewStore(db),
-            runStore,
+            withRunStore ? runStore : null,
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
-            command -> {
-              launched.set(command);
-              return 0;
-            },
+            launcher,
             DispatchOperations.Listener.NONE)
         .useMessages(messageStore);
+  }
+
+  @Test
+  void aWakeWithoutAnAgentBlockIsRefused() throws Exception {
+    var ops = operations(liveAgentShell(), YAML_NO_AGENT, true, command -> 0);
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, ex.failure().errorCode());
+  }
+
+  @Test
+  void aWakeWithoutARunStoreIsRefused() throws Exception {
+    var ops = operations(liveAgentShell(), YAML, false, command -> 0);
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
+  }
+
+  @Test
+  void aFailedLaunchReleasesTheReservationAndRethrows() throws Exception {
+    var ops = operations(liveAgentShell(), YAML, true, command -> 1);
+    seedSpec("auth");
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, ex.failure().errorCode());
   }
 
   private static StubShell liveAgentShell() {
