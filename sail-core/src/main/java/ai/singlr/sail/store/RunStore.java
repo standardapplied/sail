@@ -833,8 +833,9 @@ public final class RunStore implements ConflictResolver {
   }
 
   private void recordPrincipals(String id, Map<String, Object> snapshot) {
-    stringList(snapshot, "principals").forEach(principal -> recordPrincipal(id, principal));
-    recordPrincipal(id, text(snapshot, "principal"));
+    Snapshots.stringList(snapshot, "principals")
+        .forEach(principal -> recordPrincipal(id, principal));
+    recordPrincipal(id, Snapshots.text(snapshot, "principal"));
   }
 
   private static String principalHandle(String agent, String role, String id) {
@@ -1444,48 +1445,29 @@ public final class RunStore implements ConflictResolver {
   private static RunRow rowFrom(String id, Map<String, Object> snapshot) {
     return new RunRow(
         Ids.requireUuid(id),
-        text(snapshot, "project"),
-        text(snapshot, "spec_id"),
-        text(snapshot, "node"),
-        text(snapshot, "role"),
-        text(snapshot, "agent"),
-        text(snapshot, "branch"),
-        text(snapshot, "task"),
-        integer(snapshot, "pid"),
-        integer(snapshot, "watcher_pid"),
-        text(snapshot, "status"),
-        integer(snapshot, "exit_code"),
-        text(snapshot, "log_path"),
-        text(snapshot, "unit"),
-        text(snapshot, "started_at"),
-        text(snapshot, "completed_at"),
-        stringList(snapshot, "repos"),
-        longValue(snapshot, "pid_ticks"),
-        text(snapshot, "principal"),
-        text(snapshot, "owner"),
-        text(snapshot, "session_id"),
-        text(snapshot, "session_source"),
-        text(snapshot, "transcript_path"),
-        text(snapshot, "last_activity_at"));
-  }
-
-  private static String text(Map<String, Object> map, String key) {
-    var value = map.get(key);
-    return value == null ? null : value.toString();
-  }
-
-  private static List<String> stringList(Map<String, Object> map, String key) {
-    return map.get(key) instanceof List<?> list
-        ? list.stream().map(String::valueOf).toList()
-        : List.of();
-  }
-
-  private static Integer integer(Map<String, Object> map, String key) {
-    return map.get(key) instanceof Number n ? n.intValue() : null;
-  }
-
-  private static Long longValue(Map<String, Object> map, String key) {
-    return map.get(key) instanceof Number n ? n.longValue() : null;
+        Snapshots.text(snapshot, "project"),
+        Snapshots.text(snapshot, "spec_id"),
+        Snapshots.text(snapshot, "node"),
+        Snapshots.text(snapshot, "role"),
+        Snapshots.text(snapshot, "agent"),
+        Snapshots.text(snapshot, "branch"),
+        Snapshots.text(snapshot, "task"),
+        Snapshots.integer(snapshot, "pid"),
+        Snapshots.integer(snapshot, "watcher_pid"),
+        Snapshots.text(snapshot, "status"),
+        Snapshots.integer(snapshot, "exit_code"),
+        Snapshots.text(snapshot, "log_path"),
+        Snapshots.text(snapshot, "unit"),
+        Snapshots.text(snapshot, "started_at"),
+        Snapshots.text(snapshot, "completed_at"),
+        Snapshots.stringList(snapshot, "repos"),
+        Snapshots.longValue(snapshot, "pid_ticks"),
+        Snapshots.text(snapshot, "principal"),
+        Snapshots.text(snapshot, "owner"),
+        Snapshots.text(snapshot, "session_id"),
+        Snapshots.text(snapshot, "session_source"),
+        Snapshots.text(snapshot, "transcript_path"),
+        Snapshots.text(snapshot, "last_activity_at"));
   }
 
   private String rawBaseRev(String id) {

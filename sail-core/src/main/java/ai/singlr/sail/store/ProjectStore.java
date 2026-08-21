@@ -188,7 +188,7 @@ public final class ProjectStore implements ConflictResolver {
             adoptDeletion(id, rev);
           } else {
             var definition = definitionOf(snapshot);
-            writeRow(id, definition, actorOf(snapshot));
+            writeRow(id, definition, Snapshots.actor(snapshot));
             recordRevision(id, definition, rev, "sync", false, true);
           }
         });
@@ -226,7 +226,7 @@ public final class ProjectStore implements ConflictResolver {
             return new PushOutcome.Accepted(rev);
           }
           var definition = definitionOf(snapshot);
-          writeRow(id, definition, actorOf(snapshot));
+          writeRow(id, definition, Snapshots.actor(snapshot));
           return new PushOutcome.Accepted(
               recordRevision(id, definition, null, "sync", false, false));
         });
@@ -256,7 +256,7 @@ public final class ProjectStore implements ConflictResolver {
       return adoptBaseDeletion(id);
     }
     var definition = definitionOf(remote);
-    writeRow(id, definition, actorOf(remote));
+    writeRow(id, definition, Snapshots.actor(remote));
     return recordRevision(id, definition, null, "sync", false, true);
   }
 
@@ -386,11 +386,6 @@ public final class ProjectStore implements ConflictResolver {
    * versioned 0.14 migration can journal a project row that predates attribution. Read on the
    * receiving side so a current snapshot is attributed to the engineer who actually edited it.
    */
-  private static String actorOf(Map<String, Object> snapshot) {
-    var actor = snapshot == null ? null : snapshot.get(ACTOR);
-    return actor == null ? "sync" : actor.toString();
-  }
-
   private String rawBaseRev(String id) {
     var value =
         db.queryOne(
@@ -427,12 +422,10 @@ public final class ProjectStore implements ConflictResolver {
   private static Map<String, Object> comparable(String definition, String actor) {
     var map = comparable(definition);
     if (actor != null) {
-      map.put(ACTOR, actor);
+      map.put(Snapshots.ACTOR, actor);
     }
     return map;
   }
-
-  private static final String ACTOR = "_actor";
 
   private static final String SELECT =
       "SELECT name, definition, created_by, created_at, updated_by, updated_at FROM projects";

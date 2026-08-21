@@ -623,11 +623,11 @@ public final class SpecStore implements ConflictResolver {
         INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
         id,
-        text(snapshot, "body"),
-        text(snapshot, "plan"),
+        Snapshots.text(snapshot, "body"),
+        Snapshots.text(snapshot, "plan"),
         now,
-        text(snapshot, "body"),
-        text(snapshot, "plan"),
+        Snapshots.text(snapshot, "body"),
+        Snapshots.text(snapshot, "plan"),
         now);
   }
 
@@ -635,29 +635,24 @@ public final class SpecStore implements ConflictResolver {
   private static SpecRow specFromSnapshot(Map<String, Object> s) {
     var priority = s.get("priority");
     return new SpecRow(
-        text(s, "id"),
-        text(s, "project"),
-        text(s, "title"),
-        SpecStatus.fromWire(text(s, "status")),
-        text(s, "assignee"),
-        text(s, "agent"),
-        text(s, "model"),
-        text(s, "reasoning_effort"),
-        text(s, "branch"),
+        Snapshots.text(s, "id"),
+        Snapshots.text(s, "project"),
+        Snapshots.text(s, "title"),
+        SpecStatus.fromWire(Snapshots.text(s, "status")),
+        Snapshots.text(s, "assignee"),
+        Snapshots.text(s, "agent"),
+        Snapshots.text(s, "model"),
+        Snapshots.text(s, "reasoning_effort"),
+        Snapshots.text(s, "branch"),
         priority instanceof Number n ? n.intValue() : 0,
-        text(s, "created_by"),
-        text(s, "created_at"),
-        text(s, "updated_at"),
-        text(s, "updated_by"),
+        Snapshots.text(s, "created_by"),
+        Snapshots.text(s, "created_at"),
+        Snapshots.text(s, "updated_at"),
+        Snapshots.text(s, "updated_by"),
         (List<String>) s.getOrDefault("depends_on", List.of()),
         (List<String>) s.getOrDefault("repos", List.of()),
-        text(s, "wake"),
-        text(s, "engagement"));
-  }
-
-  private static String text(Map<String, Object> map, String key) {
-    var value = map.get(key);
-    return value == null ? null : value.toString();
+        Snapshots.text(s, "wake"),
+        Snapshots.text(s, "engagement"));
   }
 
   private static final Set<String> SYNC_FIELDS =
@@ -695,7 +690,7 @@ public final class SpecStore implements ConflictResolver {
     }
     var author = full.get("updated_by");
     if (author != null) {
-      m.put(ACTOR, author);
+      m.put(Snapshots.ACTOR, author);
     }
     return m;
   }
@@ -706,12 +701,6 @@ public final class SpecStore implements ConflictResolver {
    * _}-prefixed) keys, so attribution propagates without ever causing a false conflict. The
    * receiving side reads it to attribute the synced row to its real author instead of {@code sync}.
    */
-  private static final String ACTOR = "_actor";
-
-  private static String authorOf(Map<String, Object> snapshot) {
-    var author = snapshot.get(ACTOR);
-    return author == null ? "sync" : author.toString();
-  }
 
   /** Comparable snapshot of the current state, or null if the spec is absent/deleted. */
   public Map<String, Object> comparableSnapshot(String id) {
@@ -803,7 +792,7 @@ public final class SpecStore implements ConflictResolver {
           } else {
             var full = new LinkedHashMap<>(snapshot);
             full.put("id", id);
-            full.put("updated_by", authorOf(snapshot));
+            full.put("updated_by", Snapshots.actor(snapshot));
             applySnapshot(id, full);
             recordRevision(id, rev, "sync", false, true);
           }
@@ -833,7 +822,7 @@ public final class SpecStore implements ConflictResolver {
           }
           var full = new LinkedHashMap<>(snapshot);
           full.put("id", id);
-          full.put("updated_by", authorOf(snapshot));
+          full.put("updated_by", Snapshots.actor(snapshot));
           applySnapshot(id, full);
           return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
         });
@@ -890,7 +879,7 @@ public final class SpecStore implements ConflictResolver {
   private static Map<String, Object> withSync(String id, Map<String, Object> snapshot) {
     var full = new LinkedHashMap<>(snapshot);
     full.put("id", id);
-    full.put("updated_by", authorOf(snapshot));
+    full.put("updated_by", Snapshots.actor(snapshot));
     return full;
   }
 
