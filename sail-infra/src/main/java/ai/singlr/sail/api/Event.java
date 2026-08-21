@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -196,45 +197,39 @@ public record Event(
     public static final String RUN_ROLE = "run_role";
 
     /** {@link #RUN_ROLE} value: a room wake — a chat that must never trigger a review. */
-    public static final String RUN_ROLE_ROOM = "room";
+    public static final String RUN_ROLE_ROOM = Lane.ROOM.wire();
 
     /**
      * {@link #RUN_ROLE} value: an engaged agent's full-access chat turn. A conversation, not a
      * task: never a review trigger, and its clean stop is turn plumbing, not news.
      */
-    public static final String RUN_ROLE_ROOM_FULL =
-        ai.singlr.sail.store.DispatchGate.ROOM_FULL_ROLE;
+    public static final String RUN_ROLE_ROOM_FULL = Lane.ROOM_FULL.wire();
 
     /** {@link #RUN_ROLE} value: a reviewer run — its own stop must never re-enter the pipeline. */
-    public static final String RUN_ROLE_REVIEW = "review";
+    public static final String RUN_ROLE_REVIEW = Lane.REVIEW.wire();
 
     /** {@link #RUN_ROLE} value: a fix run — its own stop must never re-enter the pipeline. */
-    public static final String RUN_ROLE_FIX = "fix";
+    public static final String RUN_ROLE_FIX = Lane.FIX.wire();
 
     /** {@link #RUN_ROLE} value: a read-only invited consultant — chat only, never a review. */
-    public static final String RUN_ROLE_INVITE = "invite";
+    public static final String RUN_ROLE_INVITE = Lane.INVITE.wire();
 
     /**
      * {@link #RUN_ROLE} value: a full-access invited agent. Its stop never triggers the review
      * pipeline — the review loop stays anchored to dispatch; commits it pushed surface in the room
      * and the next build's review sees them.
      */
-    public static final String RUN_ROLE_INVITE_FULL = "invite-full";
+    public static final String RUN_ROLE_INVITE_FULL = Lane.INVITE_FULL.wire();
 
     /**
-     * Whether a run role names a lane whose own stop must never drive the review pipeline: a {@link
-     * #RUN_ROLE_ROOM} chat, an invited agent ({@link #RUN_ROLE_INVITE} / {@link
-     * #RUN_ROLE_INVITE_FULL}), or the pipeline's own {@link #RUN_ROLE_REVIEW} / {@link
-     * #RUN_ROLE_FIX} run. Reactors on {@code agent_session_stopped} drop such stops by role so the
-     * loop can never re-enter on its own agents. Null (a role-less stop) is a normal build stop.
+     * Whether a run role names a lane whose own stop must never drive the review pipeline — every
+     * lane except a dispatch build and an ad-hoc run. Reactors on {@code agent_session_stopped}
+     * drop such stops by role so the loop can never re-enter on its own agents. Null (a role-less
+     * stop), like an unrecognized role, is treated as a normal triggering stop. Delegates to {@link
+     * Lane} so this classification and {@code RunRow}'s share one source.
      */
     public static boolean nonTriggeringLane(String role) {
-      return RUN_ROLE_ROOM.equals(role)
-          || RUN_ROLE_ROOM_FULL.equals(role)
-          || RUN_ROLE_REVIEW.equals(role)
-          || RUN_ROLE_FIX.equals(role)
-          || RUN_ROLE_INVITE.equals(role)
-          || RUN_ROLE_INVITE_FULL.equals(role);
+      return Lane.of(role).map(lane -> !lane.triggersReview()).orElse(false);
     }
 
     private WellKnownData() {}
