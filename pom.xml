@@ -191,6 +191,7 @@
                                         <exclude>ai.singlr.sail.api.RunLauncher</exclude>
                                         <exclude>ai.singlr.sail.api.RunLauncher.*</exclude>
                                         <exclude>ai.singlr.sail.api.RunReservation</exclude>
+                                        <exclude>ai.singlr.sail.api.InviteLauncher</exclude>
                                         <exclude>ai.singlr.sail.api.AgentLogStreamer</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient.StopReadingException</exclude>
@@ -262,6 +263,36 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.88</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>1.0</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.InviteLauncher</include>
+                                    </includes>
+                                    <!--
+                                        The invite lane. Every method is exercised (METHOD 1.0): the
+                                        authorize/reserve/complete paths and the defensive guards (no
+                                        run store, no agent block, empty room) directly by
+                                        InviteLaunchTest. The uncovered lines are defensive-only —
+                                        seedRoomDelivery's empty-ledger guard (InvitePrompt always
+                                        renders at least the prompt, so a full invite's rendered set
+                                        is never empty) and the seed catch (markDelivered would have
+                                        to throw between a won reservation and the ledger write) —
+                                        neither reachable without fault injection. Floored just under
+                                        the actual.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.93</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>

@@ -83,9 +83,24 @@ class InviteLaunchTest {
     }
   }
 
+  private static final String YAML_NO_AGENT =
+      """
+      name: acme
+      ssh:
+        user: dev
+      repos:
+        - url: https://github.com/acme/app.git
+          path: app
+      """;
+
   private DispatchOperations operations(ShellExec shell) throws IOException {
+    return operations(shell, YAML, true);
+  }
+
+  private DispatchOperations operations(ShellExec shell, String yamlContent, boolean withRunStore)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, YAML);
+    Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("invite-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
@@ -97,7 +112,7 @@ class InviteLaunchTest {
             yaml.toString(),
             specStore,
             new ReviewStore(db),
-            runStore,
+            withRunStore ? runStore : null,
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
@@ -109,6 +124,48 @@ class InviteLaunchTest {
             },
             DispatchOperations.Listener.NONE)
         .useMessages(messageStore);
+  }
+
+  @Test
+  void anInviteWithoutARunStoreIsRefused() throws Exception {
+    var ops = operations(liveAgentShell(), YAML, false);
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startInvite(
+                    "auth", "claude-code", true, null, Actor.cliOperator(HANDLE), HANDLE));
+    assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
+  }
+
+  @Test
+  void anInviteWithoutAnAgentBlockIsRefused() throws Exception {
+    var ops = operations(liveAgentShell(), YAML_NO_AGENT, true);
+    seedSpec("auth");
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.startInvite(
+                    "auth", "claude-code", true, null, Actor.cliOperator(HANDLE), HANDLE));
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, ex.failure().errorCode());
+  }
+
+  @Test
+  void anInviteWithAnEmptyRoomSeedsNoDelivery() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+
+    var launch =
+        ops.startInvite(
+            "auth", "claude-code", true, false, null, Actor.cliOperator(HANDLE), HANDLE);
+
+    assertNotNull(launch.runId());
+    assertTrue(
+        runStore.deliveredMessageIds(launch.runId()).isEmpty(),
+        "an invite into a room with no messages delivers nothing");
   }
 
   private StubShell liveAgentShell() {
