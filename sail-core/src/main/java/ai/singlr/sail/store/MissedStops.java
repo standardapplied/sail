@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.config.RunStatus;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -33,7 +34,14 @@ import java.util.Set;
  */
 public final class MissedStops {
 
-  private static final Set<String> TERMINAL = Set.of("stopped", "completed");
+  /**
+   * The finished states whose missed stop should be replayed to <em>advance</em> the spec.
+   * Deliberately narrower than {@link RunStatus#isTerminal}: a {@link RunStatus#FAILED} run is
+   * terminal too, but a failed spec surfaces for triage rather than advancing, so replaying its
+   * stop would only duplicate the failure — it is excluded here on purpose.
+   */
+  private static final Set<String> TERMINAL =
+      Set.of(RunStatus.STOPPED.wire(), RunStatus.COMPLETED.wire());
 
   /** What one reconciliation pass should do for a spec's latest session. */
   public sealed interface Outcome {
