@@ -116,7 +116,7 @@ public final class WatcherRearmer implements AutoCloseable {
     try {
       var node = localHandle.get();
       for (var run : sessionStore.running()) {
-        if (!SailOperations.ownsRun(run.node(), node) || Strings.isBlank(run.unit())) {
+        if (!run.ownedBy(node) || Strings.isBlank(run.unit())) {
           continue;
         }
         try {

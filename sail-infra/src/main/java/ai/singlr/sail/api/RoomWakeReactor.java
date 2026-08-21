@@ -178,7 +178,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private void handleMessage(Event event) {
     var specId = event.spec();
     var spec = specStore.findById(specId).orElse(null);
-    if (spec == null || !ownsSpec(spec)) {
+    if (spec == null || !spec.assignedTo(localHandle.get())) {
       return;
     }
     var engaged = Engagement.fromJson(spec.engagement()) != null;
@@ -211,7 +211,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private void fire(String specId, Message message) {
     try {
       var spec = specStore.findById(specId).orElse(null);
-      if (spec == null || !ownsSpec(spec)) {
+      if (spec == null || !spec.assignedTo(localHandle.get())) {
         return;
       }
       var engaged = Engagement.fromJson(spec.engagement()) != null;
@@ -254,7 +254,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return;
     }
     var run = runStore.findById(runId).orElse(null);
-    if (run == null || !SailOperations.ownsRun(run.node(), localHandle.get())) {
+    if (run == null || !run.ownedBy(localHandle.get())) {
       return;
     }
     guard.guard(run.project(), runId);
@@ -268,7 +268,9 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
    */
   private void refireOwedTurn(String specId) {
     var spec = specStore.findById(specId).orElse(null);
-    if (spec == null || !ownsSpec(spec) || Engagement.fromJson(spec.engagement()) == null) {
+    if (spec == null
+        || !spec.assignedTo(localHandle.get())
+        || Engagement.fromJson(spec.engagement()) == null) {
       return;
     }
     var owed = owedMessage(specId);
@@ -317,7 +319,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   public void sweepEngagedRooms() {
     for (var spec : specStore.listEngaged()) {
       try {
-        if (ownsSpec(spec)) {
+        if (spec.assignedTo(localHandle.get())) {
           refireOwedTurn(spec.id());
         }
       } catch (RuntimeException e) {
@@ -325,11 +327,6 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
             "room-wake: engagement sweep of spec " + spec.id() + " failed: " + e.getMessage());
       }
     }
-  }
-
-  private boolean ownsSpec(SpecStore.SpecRow spec) {
-    var handle = localHandle.get();
-    return Strings.isNotBlank(handle) && handle.equals(spec.assignee());
   }
 
   private boolean dispatchedAtLeastOnce(String specId) {

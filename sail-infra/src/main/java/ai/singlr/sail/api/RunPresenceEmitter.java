@@ -74,7 +74,7 @@ public final class RunPresenceEmitter implements AutoCloseable {
     var live = new HashSet<String>();
     var emitted = 0;
     for (var run : runStore.runningForPresence()) {
-      if (!SailOperations.ownsRun(run.node(), node)) {
+      if (!run.ownedBy(node)) {
         continue;
       }
       var presence = RunPresence.of(run.status(), run.lastActivityAt(), now);

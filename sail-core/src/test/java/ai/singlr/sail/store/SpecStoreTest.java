@@ -62,6 +62,33 @@ class SpecStoreTest {
   }
 
   @Test
+  void assignedToMatchesOnlyANonBlankHandleEqualToTheAssignee() {
+    var mine =
+        new SpecStore.SpecRow(
+            "s",
+            "test-project",
+            "T",
+            SpecStatus.fromWire("pending"),
+            "uday",
+            null,
+            null,
+            null,
+            null,
+            0,
+            null,
+            "",
+            "",
+            null,
+            List.of(),
+            List.of());
+    assertTrue(mine.assignedTo("uday"));
+    assertFalse(mine.assignedTo("mady"));
+    assertFalse(mine.assignedTo(null), "a blank handle is assigned no spec");
+    assertFalse(
+        spec("s", "T", "pending").assignedTo("uday"), "an unassigned spec is owned by nobody");
+  }
+
+  @Test
   void createAndFindById() {
     store.create(spec("auth", "OAuth flow", "pending"));
 

@@ -693,23 +693,12 @@ public final class SailOperations implements Operations {
 
   /**
    * Whether a run did not execute on this box — the provenance test, the inverse of {@link
-   * #ownsRun}. A box with a handle serves only runs stamped with it, so a blank {@code node} fails
-   * closed to foreign; a box with no handle serves only its own blank-node runs and never a synced
-   * run stamped by another box.
+   * RunStore.RunRow#ownedBy}. A box with a handle serves only runs stamped with it, so a blank
+   * {@code node} fails closed to foreign; a box with no handle serves only its own blank-node runs
+   * and never a synced run stamped by another box.
    */
   static boolean isForeign(RunStore.RunRow run, String localHandle) {
-    return !ownsRun(run.node(), localHandle);
-  }
-
-  /**
-   * Whether a run whose execution node is {@code runNode} belongs to the box whose handle is {@code
-   * localHandle}. One predicate for every ownership question — the read guard here and the
-   * completion/report lookups in {@link RunStore#latestForProjectOnNode} — so they can never
-   * disagree. A handled box owns the runs stamped with its handle (blank node → not owned, fail
-   * closed); an unhandled box (standalone / not yet bound to an FDE) owns its own blank-node runs.
-   */
-  static boolean ownsRun(String runNode, String localHandle) {
-    return Strings.isBlank(localHandle) ? Strings.isBlank(runNode) : localHandle.equals(runNode);
+    return !run.ownedBy(localHandle);
   }
 
   /**
@@ -860,7 +849,7 @@ public final class SailOperations implements Operations {
             : runStore.listForProject(project).stream()
                 .filter(DispatchOperations::ownsLiveAgent)
                 .filter(RunStore.RunRow::sessionRole)
-                .filter(run -> ownsRun(run.node(), localHandle))
+                .filter(run -> run.ownedBy(localHandle))
                 .toList();
     if (running.isEmpty()) {
       return agentStatusResponse(project, null, List.of());

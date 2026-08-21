@@ -225,7 +225,7 @@ public final class StopOperations {
             .findById(runId)
             .orElseThrow(
                 () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'."));
-    if (!SailOperations.ownsRun(run.node(), localHandle)) {
+    if (!run.ownedBy(localHandle)) {
       var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
       throw new ApiException(
           ErrorCode.RUN_ON_OTHER_NODE,

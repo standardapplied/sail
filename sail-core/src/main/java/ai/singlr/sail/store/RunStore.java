@@ -261,6 +261,17 @@ public final class RunStore implements ConflictResolver {
     public boolean sessionRole() {
       return buildRole() || adhocRole() || chatRole() || inviteRole();
     }
+
+    /**
+     * Whether this run belongs to the box whose handle is {@code localHandle} — the one predicate
+     * for every run-ownership question (the read guard, the reaper, the reconciler, presence), so
+     * they can never disagree about which box owns a run. A handled box owns the runs stamped with
+     * its handle (a blank node fails closed); an unhandled box — standalone, not yet bound to an
+     * FDE — owns its own blank-node runs.
+     */
+    public boolean ownedBy(String localHandle) {
+      return Strings.isBlank(localHandle) ? Strings.isBlank(node) : localHandle.equals(node);
+    }
   }
 
   private static final String SESSION_ROLES =

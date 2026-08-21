@@ -658,7 +658,7 @@ public final class DispatchOperations {
   private String engagedSessionId(String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()
         .filter(RunStore.RunRow::chatRole)
-        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
+        .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))
         .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
@@ -1078,7 +1078,7 @@ public final class DispatchOperations {
    */
   private String resumableSessionId(String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()
-        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
+        .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))
         .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
@@ -1879,7 +1879,7 @@ public final class DispatchOperations {
     }
     return runStore.listForProject(project).stream()
         .filter(DispatchOperations::ownsLiveAgent)
-        .filter(run -> SailOperations.ownsRun(run.node(), localHandle))
+        .filter(run -> run.ownedBy(localHandle))
         .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.role(), run.repos()))
         .toList();
   }
