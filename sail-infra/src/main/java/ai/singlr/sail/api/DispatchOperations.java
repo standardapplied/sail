@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
-import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -21,7 +20,6 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.InvitePrompt;
-import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -211,6 +209,7 @@ public final class DispatchOperations {
   private final RunLauncher runLauncher;
   private final RunReservation runReservation;
   private final AdhocRunner adhocRunner;
+  private final RoomWakeLauncher roomWakeLauncher;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -256,6 +255,15 @@ public final class DispatchOperations {
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
     this.runReservation = new RunReservation(runStore, shell, listener);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
+    this.roomWakeLauncher =
+        new RoomWakeLauncher(
+            projects,
+            specStore,
+            () -> messageStore,
+            runStore,
+            runReservation,
+            runLauncher,
+            roomCommitGuard);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -447,129 +455,7 @@ public final class DispatchOperations {
    * Returns the run id.
    */
   public String startRoomRun(String project, String specId, String localHandle) {
-    var loaded = projects.loadRunning(project);
-    var config = loaded.config();
-    if (config.agent() == null) {
-      throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
-    }
-    if (runStore == null) {
-      throw new ApiException(
-          ErrorCode.COMMAND_FAILED,
-          "This box keeps no run aggregate, so a room wake cannot be reserved or tracked.");
-    }
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    var engagement = Engagement.fromJson(spec.engagement());
-    var agentType =
-        engagement != null
-            ? engagement.agent()
-            : spec.agent() != null ? spec.agent() : config.agent().type();
-    var full = engagement != null && engagement.full();
-    if (!full && !AgentCli.fromYamlName(agentType).supportsRoomLane()) {
-      throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED,
-          "Room wake needs a harness-enforced read-only session, and "
-              + agentType
-              + " has none inside a sail container: its bubblewrap sandbox needs user namespaces,"
-              + " which incus containers block, so its only working mode bypasses all"
-              + " restrictions. Set the spec's agent to claude-code to chat in this room, or"
-              + " answer from the room directly and dispatch when code should change.");
-    }
-    var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
-    var room =
-        messageStore == null
-            ? List.<MessageStore.MessageRow>of()
-            : messageStore.list(specId, null, 20);
-    var resumeSessionId =
-        engagement != null
-            ? engagedSessionId(specId, agentType, localHandle)
-            : resumableSessionId(specId, agentType, localHandle);
-    var built =
-        RoomWakePrompt.build(
-            spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null, engagement);
-    var task = built.prompt();
-    var runId = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(runId);
-    var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
-    var targetRepos =
-        full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
-    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
-    var branch = full ? Objects.toString(spec.branch(), "") : "";
-    var credential =
-        runReservation.reserve(
-            runId,
-            project,
-            specId,
-            localHandle,
-            Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
-            role,
-            repoPaths,
-            agentType,
-            Strings.isBlank(branch) ? null : branch,
-            task,
-            unit,
-            config);
-    try {
-      seedRoomDelivery(runId, built.renderedMessages());
-      if (!full) {
-        roomCommitGuard.captureRoomBaseline(project, config, runId);
-      }
-      var model =
-          engagement != null && engagement.model() != null ? engagement.model() : spec.model();
-      var workDir =
-          full
-              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
-              : "/home/" + config.sshUser() + "/workspace";
-      var launch =
-          runLauncher.launchSession(
-              new RunLauncher.LaunchSpec(
-                  project,
-                  config,
-                  workDir,
-                  full,
-                  model,
-                  spec.reasoningEffort(),
-                  specId,
-                  agentType,
-                  task,
-                  branch,
-                  repoPaths,
-                  true,
-                  unit,
-                  runId,
-                  credential,
-                  role,
-                  resumeSessionId));
-      runLauncher.finishLaunch(
-          new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
-      return runId;
-    } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
-      throw e;
-    }
-  }
-
-  /**
-   * The engagement's own conversation: the newest chat-turn session of the engaged agent this box
-   * can resume. A build or invite session never qualifies — a working lane's conversation must not
-   * reopen under a chat turn's contract, and the engaged agent's memory is its chat turns.
-   */
-  private String engagedSessionId(String specId, String agentType, String localHandle) {
-    return runStore.listForSpec(specId).stream()
-        .filter(RunStore.RunRow::chatRole)
-        .filter(run -> run.ownedBy(localHandle))
-        .filter(run -> Strings.isNotBlank(run.sessionId()))
-        .filter(run -> agentType.equals(run.agent()))
-        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
-        .findFirst()
-        .map(RunStore.RunRow::sessionId)
-        .orElse(null);
+    return roomWakeLauncher.wake(project, specId, localHandle);
   }
 
   /**
@@ -810,24 +696,6 @@ public final class DispatchOperations {
         Event.WellKnownTypes.SNAPSHOT_CREATED,
         Map.of("label", label, Event.WellKnownData.RUN_ID, runId));
     return label;
-  }
-
-  /**
-   * The spec's most recent conversation this box can actually resume: the latest run that recorded
-   * a session id, restricted to runs executed on this node (conversation state lives on the box
-   * that ran it; run rows and session ids replicate fleet-wide), to the same agent (a Claude
-   * session cannot resume under Codex), and to ids safe to place in an argv — session ids are
-   * hook-reported, replicated data.
-   */
-  private String resumableSessionId(String specId, String agentType, String localHandle) {
-    return runStore.listForSpec(specId).stream()
-        .filter(run -> run.ownedBy(localHandle))
-        .filter(run -> Strings.isNotBlank(run.sessionId()))
-        .filter(run -> agentType.equals(run.agent()))
-        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
-        .findFirst()
-        .map(RunStore.RunRow::sessionId)
-        .orElse(null);
   }
 
   /**
