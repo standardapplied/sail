@@ -9,9 +9,11 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -20,6 +22,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * The Run aggregate on SQLite: one dispatch execution of a spec. Records where it ran ({@code node}
@@ -199,19 +203,33 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           null);
     }
 
+    /** This row's lane, or empty for an unrecognized role. */
+    public Optional<Lane> lane() {
+      return Lane.of(role);
+    }
+
+    /**
+     * Whether this run's own stop hands its spec to the review pipeline — only a build or ad-hoc
+     * does. A row-less or unrecognized role is treated as a normal triggering stop, matching the
+     * role-marker path.
+     */
+    public boolean triggersReview() {
+      return lane().map(Lane::triggersReview).orElse(true);
+    }
+
     /** Whether this row is a build attempt of a spec. */
     public boolean buildRole() {
-      return "build".equals(role);
+      return Lane.BUILD.matches(role);
     }
 
     /** Whether this row is an ad-hoc session — an engineer-initiated run that works no spec. */
     public boolean adhocRole() {
-      return "adhoc".equals(role);
+      return Lane.ADHOC.matches(role);
     }
 
     /** Whether this row is a room wake — a chat-lane run that answers in its spec's room. */
     public boolean roomRole() {
-      return DispatchGate.ROOM_ROLE.equals(role);
+      return Lane.ROOM.matches(role);
     }
 
     /**
@@ -220,7 +238,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * per spec.
      */
     public boolean chatRole() {
-      return roomRole() || DispatchGate.ROOM_FULL_ROLE.equals(role);
+      return lane().map(Lane::isChat).orElse(false);
     }
 
     /**
@@ -229,8 +247,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * stays anchored to dispatch.
      */
     public boolean inviteRole() {
-      return DispatchGate.READ_ONLY_INVITE_ROLE.equals(role)
-          || DispatchGate.FULL_INVITE_ROLE.equals(role);
+      return lane().map(Lane::isInvite).orElse(false);
     }
 
     /**
@@ -240,7 +257,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * says.
      */
     public boolean readOnlyLane() {
-      return roomRole() || DispatchGate.READ_ONLY_INVITE_ROLE.equals(role);
+      return lane().map(Lane::readOnly).orElse(false);
     }
 
     /**
@@ -249,7 +266,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * this as the fallback when a stop signal lost its role marker.
      */
     public boolean reviewRole() {
-      return "review".equals(role);
+      return Lane.REVIEW.matches(role);
     }
 
     /**
@@ -260,7 +277,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * reaped and stoppable like any other.
      */
     public boolean sessionRole() {
-      return buildRole() || adhocRole() || chatRole() || inviteRole();
+      return lane().map(Lane::isSession).orElse(false);
     }
 
     /**
@@ -275,11 +292,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
   }
 
-  private static final String SESSION_ROLES =
-      "role IN ('build', 'adhoc', 'room', 'room-full', 'invite', 'invite-full')";
+  private static final String SESSION_ROLES = roleIn(Lane::isSession);
 
   private static final String PROJECT_SESSION_ROLES =
-      "role IN ('build', 'adhoc', 'room', 'room-full')";
+      roleIn(lane -> lane.isSession() && !lane.isInvite());
+
+  /** A {@code role IN (...)} clause over the lanes matching {@code which}, in enum order. */
+  private static String roleIn(Predicate<Lane> which) {
+    return Arrays.stream(Lane.values())
+        .filter(which)
+        .map(lane -> "'" + lane.wire() + "'")
+        .collect(Collectors.joining(", ", "role IN (", ")"));
+  }
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"

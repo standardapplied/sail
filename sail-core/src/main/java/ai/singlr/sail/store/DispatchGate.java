@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.config.Lane;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,7 +32,7 @@ public final class DispatchGate {
   private DispatchGate() {}
 
   /** The chat lane: a run that reserves no repos and conflicts only with runs of its own spec. */
-  public static final String ROOM_ROLE = "room";
+  public static final String ROOM_ROLE = Lane.ROOM.wire();
 
   /**
    * The read-only invite lane: a consultant a human explicitly invited into the room. It reserves
@@ -40,10 +41,10 @@ public final class DispatchGate {
    * lane's purpose. The same-spec backstop stays for {@link #ROOM_ROLE} wakes, which fire
    * automatically and must never race a live run.
    */
-  public static final String READ_ONLY_INVITE_ROLE = "invite";
+  public static final String READ_ONLY_INVITE_ROLE = Lane.INVITE.wire();
 
   /** The full invite lane: reserves like a build, so one writer per repo always holds. */
-  public static final String FULL_INVITE_ROLE = "invite-full";
+  public static final String FULL_INVITE_ROLE = Lane.INVITE_FULL.wire();
 
   /**
    * The full chat lane: an engaged agent's turn with write access. It reserves the spec's repos
@@ -51,7 +52,7 @@ public final class DispatchGate {
    * exactly as for builds — a full turn defers on a live build through the ordinary repo rule and
    * frees when the build's stop re-evaluates the room.
    */
-  public static final String ROOM_FULL_ROLE = "room-full";
+  public static final String ROOM_FULL_ROLE = Lane.ROOM_FULL.wire();
 
   /**
    * One running local run of the project: its id, the spec it works, its role, and its reserved
