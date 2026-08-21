@@ -20,8 +20,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Exercises the sync machinery {@link ProjectStore} grows in Brick B — the contract a {@code
- * ProjectReplica} will delegate to — mirroring the revision/CAS/tombstone behaviour proven for
- * {@link FileStore}. The comparable snapshot is the {@code definition} alone.
+ * StoreReplica} will delegate to — mirroring the revision/CAS/tombstone behaviour proven for {@link
+ * FileStore}. The comparable snapshot is the {@code definition} alone.
  */
 class ProjectStoreSyncTest {
 

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
@@ -54,8 +54,8 @@ class SyncSchemaConvergenceTest {
         LegacyDataMigration.NAME);
   }
 
-  private static SpecReplica replica(String id, Sqlite db) {
-    return new SpecReplica(
+  private static StoreReplica replica(String id, Sqlite db) {
+    return new StoreReplica(
         id, new SpecStore(db), new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
   }
 

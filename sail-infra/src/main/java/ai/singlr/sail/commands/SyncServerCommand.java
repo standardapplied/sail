@@ -25,13 +25,8 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.sync.FileReplica;
 import ai.singlr.sail.sync.MainReplica;
-import ai.singlr.sail.sync.MessageReplica;
-import ai.singlr.sail.sync.ProjectReplica;
-import ai.singlr.sail.sync.ReviewReplica;
-import ai.singlr.sail.sync.RunReplica;
-import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
@@ -101,18 +96,25 @@ public final class SyncServerCommand implements Callable<Integer> {
     var changeLog = new ChangeLog(db);
     var conflicts = new SyncConflicts(db);
     var syncState = new SyncState(db);
+    var runStore = new RunStore(db);
     var replicas =
         Map.<String, MainReplica>of(
-            "spec", new SpecReplica(mainId, new SpecStore(db), changeLog, conflicts, syncState),
-            "file", new FileReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
+            "spec", new StoreReplica(mainId, new SpecStore(db), changeLog, conflicts, syncState),
+            "file", new StoreReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
             "project",
-                new ProjectReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
+                new StoreReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
             "run",
-                new RunReplica(mainId, mainId, new RunStore(db), changeLog, conflicts, syncState),
+                new StoreReplica(
+                    mainId,
+                    runStore,
+                    changeLog,
+                    conflicts,
+                    syncState,
+                    id -> runStore.pushableFrom(id, mainId)),
             "review",
-                new ReviewReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState),
+                new StoreReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState),
             "message",
-                new MessageReplica(mainId, new MessageStore(db), changeLog, conflicts, syncState));
+                new StoreReplica(mainId, new MessageStore(db), changeLog, conflicts, syncState));
     new SyncRpcServer(replicas, principal(db, token), () -> roster(db), transitionSink)
         .serve(in, out);
     return 0;

@@ -30,7 +30,7 @@ import java.util.Set;
  * comparable; attribution and timestamps never cause a false conflict. Containers and run state are
  * local and live elsewhere; this table is only the definition every box agrees on.
  */
-public final class ProjectStore implements ConflictResolver {
+public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "project";
   private static final String BLOCKS_RESURRECTION = "_blocks_resurrection";
@@ -120,8 +120,30 @@ public final class ProjectStore implements ConflictResolver {
 
   // ── Sync roles (mirrors FileStore): the database is the replicated source of truth ──
 
+  @Override
+  public String entityType() {
+    return ENTITY;
+  }
+
   public Map<String, Object> comparableSnapshot(String id) {
     return findByName(id).map(row -> comparable(row.definition(), row.updatedBy())).orElse(null);
+  }
+
+  /**
+   * As {@link #comparableSnapshot}, but a deleted id this box holds a rename resurrection-block for
+   * reports the blocking marker rather than absence, so a stale peer still holding the old name
+   * adopts the deletion instead of pushing its surviving copy back.
+   */
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    var current = comparableSnapshot(id);
+    return current != null || !blocksResurrection(id) ? current : blocksResurrectionMarker();
+  }
+
+  /** Reads the resurrection-block marker back as a deletion; otherwise a normal adopt. */
+  @Override
+  public void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
+    applyRevision(id, isBlocksResurrectionMarker(snapshot) ? null : snapshot, rev);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {

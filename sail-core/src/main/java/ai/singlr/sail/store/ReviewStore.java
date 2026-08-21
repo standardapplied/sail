@@ -27,7 +27,7 @@ import java.util.Set;
  * journals a new revision of the whole aggregate within the same transaction, exactly as {@link
  * RunStore} does for a flat run row. Single-writer, so reconciliation is conflict-free in practice.
  */
-public final class ReviewStore implements ConflictResolver {
+public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "review";
   private static final Set<String> SURROGATE_FIELDS = Set.of("id");
@@ -631,6 +631,11 @@ public final class ReviewStore implements ConflictResolver {
 
   public String latestRev(String id) {
     return revisions.latestRev(id);
+  }
+
+  @Override
+  public String entityType() {
+    return ENTITY;
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

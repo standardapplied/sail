@@ -7,43 +7,60 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.store.SyncedStore;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * Adapts one box's {@link FileStore} to the sync roles, so the {@link SyncEngine} reconciles shared
- * project files bidirectionally with main exactly as it does specs — a different entity type
- * ({@code file}) over the same channel. Pure delegation to {@link FileStore} (revisions), {@link
- * SyncConflicts} (parked conflicts), and {@link SyncState} (checkpoint).
+ * Adapts any {@link SyncedStore} to the sync roles. One box acts as the node ({@link LocalReplica})
+ * when it syncs up to main and as the authority ({@link MainReplica}) when another node syncs to
+ * it, so the in-process two-node harness wires two {@code StoreReplica}s together and a transport
+ * adapter swaps the {@link MainReplica} side without the engine changing. Pure delegation to the
+ * store (revisions), {@link SyncConflicts} (parked conflicts), and {@link SyncState} (checkpoint) —
+ * the one adapter behind every entity type, replacing the six hand-written per-store copies.
+ *
+ * <p>{@code pushPolicy} decides whether this node may push its own change for an id up to main: the
+ * default always may (multi-writer entities — specs, files, projects), and a single-writer entity
+ * like a run supplies a policy so a reader box never pushes a run it did not author.
  */
-public final class FileReplica implements LocalReplica, MainReplica {
-
-  private static final String ENTITY = "file";
+public final class StoreReplica implements LocalReplica, MainReplica {
 
   private final String id;
-  private final FileStore files;
+  private final SyncedStore store;
   private final ChangeLog changeLog;
   private final SyncConflicts conflicts;
   private final SyncState syncState;
+  private final Predicate<String> pushPolicy;
 
-  public FileReplica(
+  public StoreReplica(
       String id,
-      FileStore files,
+      SyncedStore store,
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState) {
+    this(id, store, changeLog, conflicts, syncState, entityId -> true);
+  }
+
+  public StoreReplica(
+      String id,
+      SyncedStore store,
+      ChangeLog changeLog,
+      SyncConflicts conflicts,
+      SyncState syncState,
+      Predicate<String> pushPolicy) {
     this.id = Objects.requireNonNull(id, "id");
-    this.files = Objects.requireNonNull(files, "files");
+    this.store = Objects.requireNonNull(store, "store");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
+    this.pushPolicy = Objects.requireNonNull(pushPolicy, "pushPolicy");
   }
 
   @Override
@@ -53,7 +70,12 @@ public final class FileReplica implements LocalReplica, MainReplica {
 
   @Override
   public Set<String> entityIds() {
-    return files.syncEntityIds();
+    return store.syncEntityIds();
+  }
+
+  @Override
+  public boolean mayPush(String entityId) {
+    return pushPolicy.test(entityId);
   }
 
   @Override
@@ -63,27 +85,27 @@ public final class FileReplica implements LocalReplica, MainReplica {
 
   @Override
   public Map<String, Object> current(String entityId) {
-    return files.comparableSnapshot(entityId);
+    return store.currentForSync(entityId);
   }
 
   @Override
   public Map<String, Object> base(String entityId) {
-    return files.comparableAtRev(entityId, files.baseRevOf(entityId));
+    return store.comparableAtRev(entityId, store.baseRevOf(entityId));
   }
 
   @Override
   public String currentRev(String entityId) {
-    return files.latestRev(entityId);
+    return store.latestRev(entityId);
   }
 
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
-    files.applyRevision(entityId, snapshot, rev);
+    store.adoptForSync(entityId, snapshot, rev);
   }
 
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-    return switch (files.commitRevision(entityId, snapshot, expectedRev)) {
+    return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
       case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
       case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
     };
@@ -91,7 +113,7 @@ public final class FileReplica implements LocalReplica, MainReplica {
 
   @Override
   public long maxSeq() {
-    return changeLog.maxSeq(ENTITY);
+    return changeLog.maxSeq(store.entityType());
   }
 
   @Override
@@ -101,12 +123,12 @@ public final class FileReplica implements LocalReplica, MainReplica {
       Map<String, Object> local,
       Map<String, Object> remote,
       List<String> fields) {
-    conflicts.record(ENTITY, entityId, json(base), json(local), json(remote), fields);
+    conflicts.record(store.entityType(), entityId, json(base), json(local), json(remote), fields);
   }
 
   @Override
   public void advanceCheckpoint(String peerId, long seq) {
-    syncState.advance(peerId + ":" + ENTITY, seq);
+    syncState.advance(peerId, seq);
   }
 
   private static String json(Map<String, Object> snapshot) {

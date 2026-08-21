@@ -49,9 +49,9 @@ class FleetSyncTest {
     final FileStore files;
     final ProjectStore projects;
     final FdeStore fdes;
-    final SpecReplica specReplica;
-    final FileReplica fileReplica;
-    final ProjectReplica projectReplica;
+    final StoreReplica specReplica;
+    final StoreReplica fileReplica;
+    final StoreReplica projectReplica;
 
     Box(String id) {
       this.db = Sqlite.open(dir.resolve(id + ".db"));
@@ -63,9 +63,9 @@ class FleetSyncTest {
       this.files = new FileStore(db);
       this.projects = new ProjectStore(db);
       this.fdes = new FdeStore(db);
-      this.specReplica = new SpecReplica(id, specs, changeLog, conflicts, syncState);
-      this.fileReplica = new FileReplica(id, files, changeLog, conflicts, syncState);
-      this.projectReplica = new ProjectReplica(id, projects, changeLog, conflicts, syncState);
+      this.specReplica = new StoreReplica(id, specs, changeLog, conflicts, syncState);
+      this.fileReplica = new StoreReplica(id, files, changeLog, conflicts, syncState);
+      this.projectReplica = new StoreReplica(id, projects, changeLog, conflicts, syncState);
     }
 
     @Override

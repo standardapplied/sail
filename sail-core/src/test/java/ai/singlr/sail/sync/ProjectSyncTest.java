@@ -42,7 +42,7 @@ class ProjectSyncTest {
     final Sqlite db;
     final ProjectStore projects;
     final SyncConflicts conflicts;
-    final ProjectReplica replica;
+    final StoreReplica replica;
 
     Box(String id) {
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
@@ -50,7 +50,7 @@ class ProjectSyncTest {
       this.projects = new ProjectStore(db);
       this.conflicts = new SyncConflicts(db);
       this.replica =
-          new ProjectReplica(id, projects, new ChangeLog(db), conflicts, new SyncState(db));
+          new StoreReplica(id, projects, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override

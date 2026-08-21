@@ -30,12 +30,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.sync.FileReplica;
-import ai.singlr.sail.sync.MessageReplica;
-import ai.singlr.sail.sync.ProjectReplica;
-import ai.singlr.sail.sync.ReviewReplica;
-import ai.singlr.sail.sync.RunReplica;
-import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
@@ -137,13 +132,20 @@ public final class SyncCommand implements Callable<Integer> {
     var projectStore = new ProjectStore(db);
     var specStore = new SpecStore(db);
     var messageStore = new MessageStore(db);
+    var runStore = new RunStore(db);
     return new Boxes(
-        new SpecReplica(host, specStore, changeLog, conflicts, syncState),
-        new FileReplica(host, fileStore, changeLog, conflicts, syncState),
-        new ProjectReplica(host, projectStore, changeLog, conflicts, syncState),
-        new RunReplica(host, handle, new RunStore(db), changeLog, conflicts, syncState),
-        new ReviewReplica(host, new ReviewStore(db), changeLog, conflicts, syncState),
-        new MessageReplica(host, messageStore, changeLog, conflicts, syncState),
+        new StoreReplica(host, specStore, changeLog, conflicts, syncState),
+        new StoreReplica(host, fileStore, changeLog, conflicts, syncState),
+        new StoreReplica(host, projectStore, changeLog, conflicts, syncState),
+        new StoreReplica(
+            host,
+            runStore,
+            changeLog,
+            conflicts,
+            syncState,
+            id -> runStore.pushableFrom(id, handle)),
+        new StoreReplica(host, new ReviewStore(db), changeLog, conflicts, syncState),
+        new StoreReplica(host, messageStore, changeLog, conflicts, syncState),
         new FdeStore(db),
         fileStore,
         projectStore,
@@ -152,12 +154,12 @@ public final class SyncCommand implements Callable<Integer> {
   }
 
   private record Boxes(
-      SpecReplica spec,
-      FileReplica file,
-      ProjectReplica project,
-      RunReplica run,
-      ReviewReplica review,
-      MessageReplica message,
+      StoreReplica spec,
+      StoreReplica file,
+      StoreReplica project,
+      StoreReplica run,
+      StoreReplica review,
+      StoreReplica message,
       FdeStore fdes,
       FileStore files,
       ProjectStore projects,

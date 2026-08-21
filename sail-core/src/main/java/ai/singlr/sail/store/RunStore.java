@@ -30,13 +30,13 @@ import java.util.Set;
  *
  * <p><strong>Single-writer by construction.</strong> Only the executing node ever mutates its own
  * runs; every other box is a reader. Sync is therefore conflict-free for runs — the {@code
- * RunReplica} still delegates to the full revision/CAS machinery, but a true same-field conflict
+ * StoreReplica} still delegates to the full revision/CAS machinery, but a true same-field conflict
  * can only arise from a corrupted invariant, never from normal operation. Each mutation journals
  * the run's full post-state into the shared {@link ChangeLog} under entity type {@code run} within
  * one transaction, so a run's lifecycle (start → complete/fail/stop) replicates to main and on to
  * every other box, and any box can answer "which node is running spec X".
  */
-public final class RunStore implements ConflictResolver {
+public final class RunStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "run";
 
@@ -1158,6 +1158,26 @@ public final class RunStore implements ConflictResolver {
               id);
           recordRevision(id, "local", false);
         });
+  }
+
+  @Override
+  public String entityType() {
+    return ENTITY;
+  }
+
+  /**
+   * Whether a box whose FDE handle is {@code handle} may push its own change to run {@code id} up
+   * to main. Runs are single-writer: only the executing node pushes its runs. A box with no handle,
+   * or a run whose node is unknown, defers to main's own ownership guard rather than being denied
+   * here.
+   */
+  public boolean pushableFrom(String id, String handle) {
+    if (handle == null || handle.isBlank()) {
+      return true;
+    }
+    return findById(id)
+        .map(run -> run.node() == null || run.node().isBlank() || handle.equals(run.node()))
+        .orElse(true);
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

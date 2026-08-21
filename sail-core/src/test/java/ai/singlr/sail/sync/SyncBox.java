@@ -17,7 +17,7 @@ import java.util.List;
 
 /**
  * One box in a sync test: its own SQLite database with the full set of stores and a {@link
- * SpecReplica}. Shared by the in-process, over-the-wire, and conflict-resolution harnesses so the
+ * StoreReplica}. Shared by the in-process, over-the-wire, and conflict-resolution harnesses so the
  * fixture is defined once.
  */
 final class SyncBox implements AutoCloseable {
@@ -27,7 +27,7 @@ final class SyncBox implements AutoCloseable {
   final SpecStore specs;
   final SyncConflicts conflicts;
   final SyncState syncState;
-  final SpecReplica replica;
+  final StoreReplica replica;
 
   SyncBox(Path dir, String id) {
     this.id = id;
@@ -36,7 +36,7 @@ final class SyncBox implements AutoCloseable {
     this.specs = new SpecStore(db);
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);
-    this.replica = new SpecReplica(id, specs, new ChangeLog(db), conflicts, syncState);
+    this.replica = new StoreReplica(id, specs, new ChangeLog(db), conflicts, syncState);
   }
 
   static SpecStore.SpecRow spec(String id, String title, String status) {

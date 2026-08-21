@@ -21,7 +21,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /** Append-only messages attached to specs and journaled as independently synced records. */
-public final class MessageStore {
+public final class MessageStore implements SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
@@ -225,6 +225,11 @@ public final class MessageStore {
   public Optional<MessageRow> findById(String id) {
     return db.queryOne(
         "SELECT " + COLUMNS + " FROM spec_messages WHERE id = ?", MessageStore::map, id);
+  }
+
+  @Override
+  public String entityType() {
+    return ENTITY;
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
