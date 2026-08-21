@@ -219,7 +219,7 @@ public final class DispatchOperations {
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final RunStore runStore;
-  private final FdeStore fdeStore;
+  private final LaunchAdmission admission;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -252,7 +252,7 @@ public final class DispatchOperations {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.runStore = runStore;
-    this.fdeStore = fdeStore;
+    this.admission = new LaunchAdmission(shell, fdeStore);
     this.events = Objects.requireNonNull(events, "events");
     this.watcherSpawner = Objects.requireNonNull(watcherSpawner, "watcherSpawner");
     this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
@@ -297,7 +297,7 @@ public final class DispatchOperations {
     if (Strings.isBlank(localHandle)) {
       throw refusal(DispatchPolicy.nodeHandleUnset());
     }
-    requireTrustedRoster(localHandle);
+    admission.requireTrustedRoster(localHandle);
     if (loaded.config().agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
@@ -702,10 +702,10 @@ public final class DispatchOperations {
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    requireAllowed(actor, spec.toSpec(), localHandle);
-    requireTrustedRoster(localHandle);
-    var agentCli = inviteAgent(agentYamlName);
-    var inviteModel = inviteModel(model);
+    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
+    admission.requireTrustedRoster(localHandle);
+    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
+    var inviteModel = LaunchAdmission.validateModel(model);
     if (!full) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
@@ -721,7 +721,7 @@ public final class DispatchOperations {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
     }
-    requireInstalled(agentCli, project);
+    admission.requireInstalled(agentCli, project);
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var room =
         messageStore == null
@@ -843,55 +843,6 @@ public final class DispatchOperations {
     publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, data);
   }
 
-  /**
-   * Validates the invite's model exactly like a spec write, refusing shell-unsafe values as a
-   * client error before any reservation or snapshot — the model rides the agent command through
-   * {@code bash -l -c}, so only a single safe token may reach it.
-   */
-  private static String inviteModel(String model) {
-    try {
-      return Spec.validatedModel(model);
-    } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
-    }
-  }
-
-  /**
-   * Refuses the invite before any reservation or snapshot when the chosen agent's binary is not on
-   * the container's PATH — sail.yaml's agent block declares what a project apply installed, but the
-   * container is the authority on what can actually launch.
-   */
-  private void requireInstalled(AgentCli agentCli, String project) {
-    var found =
-        exec(
-            ContainerExec.asDevUser(
-                project,
-                List.of("bash", "-lc", "command -v -- \"$1\"", "bash", agentCli.binaryName())));
-    if (!found.ok()) {
-      throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED,
-          "Agent '" + agentCli.yamlName() + "' is not installed in project '" + project + "'.",
-          "Add "
-              + agentCli.yamlName()
-              + " to sail.yaml's agent.install list and run 'sail project apply'.");
-    }
-  }
-
-  /** Resolves the invite's agent, refusing an unknown or missing name as a client error. */
-  private static AgentCli inviteAgent(String agentYamlName) {
-    if (Strings.isBlank(agentYamlName)) {
-      throw new ApiException(
-          ErrorCode.BAD_REQUEST,
-          "An invite must name the agent to launch.",
-          "Pass agent: claude-code or codex.");
-    }
-    try {
-      return AgentCli.fromYamlName(agentYamlName);
-    } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
-    }
-  }
-
   /** A prepared engagement: the snapshot label a full mode will pay, and the deferred half. */
   public record EngageLaunch(String agent, String mode, String snapshot, Runnable completion) {}
 
@@ -923,14 +874,17 @@ public final class DispatchOperations {
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    requireAllowed(actor, spec.toSpec(), localHandle);
-    requireTrustedRoster(localHandle);
-    var agentCli = inviteAgent(agentYamlName);
+    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
+    admission.requireTrustedRoster(localHandle);
+    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement engagement;
     try {
       engagement =
           Engagement.of(
-              agentCli.yamlName(), mode, inviteModel(model), DateTimeUtils.now().toString());
+              agentCli.yamlName(),
+              mode,
+              LaunchAdmission.validateModel(model),
+              DateTimeUtils.now().toString());
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
@@ -942,7 +896,7 @@ public final class DispatchOperations {
     }
     var project = spec.project();
     projects.loadRunning(project);
-    requireInstalled(agentCli, project);
+    admission.requireInstalled(agentCli, project);
     if (!engagement.full() || !takeSnapshot) {
       persistEngagement(specId, engagement, actor);
       publishEngaged(project, specId, engagement, "");
@@ -986,7 +940,7 @@ public final class DispatchOperations {
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    requireAllowed(actor, spec.toSpec(), localHandle);
+    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
     var engagement = Engagement.fromJson(spec.engagement());
     if (engagement == null) {
       return null;
@@ -1436,10 +1390,10 @@ public final class DispatchOperations {
       if (next == null) {
         return SpecResolution.none();
       }
-      requireAllowed(actor, next, localHandle);
+      LaunchAdmission.requireAllowed(actor, next, localHandle);
       return SpecResolution.of(next);
     }
-    requireAllowed(actor, spec, localHandle);
+    LaunchAdmission.requireAllowed(actor, spec, localHandle);
     return switch (RestartResolution.decide(specId, spec, restart)) {
       case RestartResolution.Refused refused -> throw refusal(refused);
       case RestartResolution.NotRestarted ignored -> {
@@ -1454,30 +1408,6 @@ public final class DispatchOperations {
       case RestartResolution.Restarted restarted ->
           SpecResolution.restarted(spec, restarted.previousStatus());
     };
-  }
-
-  private static void requireAllowed(Actor actor, Spec spec, String localHandle) {
-    if (DispatchPolicy.check(actor, spec, localHandle)
-        instanceof DispatchDecision.Refused refused) {
-      throw refusal(refused);
-    }
-  }
-
-  /**
-   * Refuses dispatch when this box's FDE handle is missing from the synced roster: an unauthorized
-   * handle means the specs assigned to it cannot be trusted. Enforced on every lane; a box that
-   * keeps no roster ({@code fdeStore == null}) skips the check.
-   */
-  private void requireTrustedRoster(String localHandle) {
-    if (fdeStore == null || fdeStore.byHandle(localHandle).isPresent()) {
-      return;
-    }
-    throw new ApiException(
-        ErrorCode.FDE_NOT_IN_ROSTER,
-        "FDE '"
-            + localHandle
-            + "' is not in this box's roster, so its assigned specs cannot be trusted.",
-        "Run 'sail sync' to pull the roster from main, or get authorized there first.");
   }
 
   /**
