@@ -25,7 +25,7 @@
 
     <properties>
         <picocli-version>4.7.7</picocli-version>
-        <snakeyaml-engine-version>3.0.1</snakeyaml-engine-version>
+        <snakeyaml-engine-version>3.1.1</snakeyaml-engine-version>
         <junit-version>6.0.2</junit-version>
 
         <maven.compiler.source>25</maven.compiler.source>
