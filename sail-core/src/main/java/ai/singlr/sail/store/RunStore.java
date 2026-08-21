@@ -42,10 +42,12 @@ public final class RunStore implements ConflictResolver {
 
   private final Sqlite db;
   private final ChangeLog changeLog;
+  private final RevisionJournal journal;
 
   public RunStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
+    this.journal = new RevisionJournal(db, changeLog, new RunSchema());
   }
 
   /**
@@ -1159,87 +1161,35 @@ public final class RunStore implements ConflictResolver {
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
-    return findById(id)
-        .map(
-            run -> {
-              var map = snapshotMap(run);
-              map.put("principals", principals(id));
-              return comparable(map);
-            })
-        .orElse(null);
+    return journal.comparableSnapshot(id);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
-    if (Strings.isBlank(rev)) {
-      return null;
-    }
-    return changeLog
-        .at(ENTITY, id, rev)
-        .map(e -> comparable(YamlUtil.parseMap(e.snapshot())))
-        .orElse(null);
+    return journal.comparableAtRev(id, rev);
   }
 
   public String latestRev(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return history.isEmpty() ? null : history.getLast().rev();
+    return journal.latestRev(id);
   }
 
   public String baseRevOf(String id) {
-    if (findById(id).isPresent()) {
-      return rawBaseRev(id);
-    }
-    var tombstone = changeLog.history(ENTITY, id);
-    if (tombstone.isEmpty()) {
-      return null;
-    }
-    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
-    return baseRev == null ? null : baseRev.toString();
+    return journal.baseRevOf(id);
   }
 
   public Set<String> syncEntityIds() {
-    return new LinkedHashSet<>(
-        db.query(
-            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
-            row -> row.text(0),
-            ENTITY));
+    return journal.entityIds();
   }
 
   /**
    * Adopts main's authoritative state at its exact rev (no minting), as the new synced ancestor.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
-    db.transaction(
-        () -> {
-          if (snapshot == null) {
-            adoptDeletion(id, rev);
-          } else {
-            writeRow(rowFrom(id, snapshot));
-            recordPrincipals(id, snapshot);
-            recordRevision(id, rev, "sync", false, true);
-          }
-        });
+    journal.applyRevision(id, snapshot, rev);
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.immediateTransaction(
-        () -> {
-          if (!Objects.equals(latestRev(id), expectedRev)) {
-            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
-          }
-          if (snapshot == null) {
-            if (findById(id).isEmpty()) {
-              return new PushOutcome.Accepted(latestRev(id));
-            }
-            var rev = recordRevision(id, null, "sync", true, false);
-            revokeCredential(id);
-            db.execute("DELETE FROM runs WHERE id = ?", id);
-            return new PushOutcome.Accepted(rev);
-          }
-          writeRow(rowFrom(id, snapshot));
-          recordPrincipals(id, snapshot);
-          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
-        });
+    return journal.commitRevision(id, snapshot, expectedRev);
   }
 
   /**
@@ -1249,88 +1199,11 @@ public final class RunStore implements ConflictResolver {
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return db.transaction(
-        () -> {
-          var baseRev = adoptBase(id, remote);
-          if (sameContent(chosen, remote)) {
-            return baseRev;
-          }
-          return writeChosen(id, chosen);
-        });
-  }
-
-  private String adoptBase(String id, Map<String, Object> remote) {
-    if (remote == null) {
-      return adoptBaseDeletion(id);
-    }
-    writeRow(rowFrom(id, remote));
-    recordPrincipals(id, remote);
-    return recordRevision(id, null, "sync", false, true);
-  }
-
-  private String adoptBaseDeletion(String id) {
-    if (findById(id).isEmpty()) {
-      var rev = Revisions.next(currentRev(id), "{}");
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-      return rev;
-    }
-    var rev = recordRevision(id, null, "sync", true, false);
-    revokeCredential(id);
-    db.execute("DELETE FROM runs WHERE id = ?", id);
-    return rev;
-  }
-
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
-      if (findById(id).isEmpty()) {
-        return latestRev(id);
-      }
-      var rev = recordRevision(id, null, "resolve", true, false);
-      revokeCredential(id);
-      db.execute("DELETE FROM runs WHERE id = ?", id);
-      return rev;
-    }
-    writeRow(rowFrom(id, chosen));
-    recordPrincipals(id, chosen);
-    return recordRevision(id, null, "resolve", false, false);
-  }
-
-  private void adoptDeletion(String id, String rev) {
-    if (findById(id).isEmpty()) {
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-      return;
-    }
-    recordRevision(id, rev, "sync", true, false);
-    revokeCredential(id);
-    db.execute("DELETE FROM runs WHERE id = ?", id);
+    return journal.resolveConflict(id, chosen, remote);
   }
 
   String recordRevision(String id, String origin, boolean deleted) {
-    return recordRevision(id, null, origin, deleted, false);
-  }
-
-  private String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
-    var run = findById(id).orElse(null);
-    if (run == null) {
-      return null;
-    }
-    var map = snapshotMap(run);
-    map.put("principals", principals(id));
-    if (deleted) {
-      map.put("_base_rev", rawBaseRev(id));
-    }
-    var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
-    if (!deleted) {
-      if (setBaseRev) {
-        db.execute("UPDATE runs SET rev = ?, base_rev = ? WHERE id = ?", rev, rev, id);
-      } else {
-        db.execute("UPDATE runs SET rev = ? WHERE id = ?", rev, id);
-      }
-    }
-    changeLog.append(ENTITY, id, rev, run.node(), origin, deleted, snapshot);
-    return rev;
+    return journal.recordRevision(id, origin, deleted);
   }
 
   private void writeRow(RunRow row) {
@@ -1426,22 +1299,6 @@ public final class RunStore implements ConflictResolver {
     return m;
   }
 
-  private static Map<String, Object> comparable(RunRow run) {
-    return comparable(snapshotMap(run));
-  }
-
-  private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {
-    if (a == null || b == null) {
-      return a == b;
-    }
-    var keys = new LinkedHashSet<String>();
-    keys.addAll(a.keySet());
-    keys.addAll(b.keySet());
-    return keys.stream()
-        .filter(key -> !key.startsWith("_"))
-        .allMatch(key -> Objects.equals(a.get(key), b.get(key)));
-  }
-
   private static RunRow rowFrom(String id, Map<String, Object> snapshot) {
     return new RunRow(
         Ids.requireUuid(id),
@@ -1470,16 +1327,57 @@ public final class RunStore implements ConflictResolver {
         Snapshots.text(snapshot, "last_activity_at"));
   }
 
-  private String rawBaseRev(String id) {
-    var value =
-        db.queryOne("SELECT COALESCE(base_rev, '') FROM runs WHERE id = ?", row -> row.text(0), id)
-            .orElse("");
-    return value.isBlank() ? null : value;
-  }
+  /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
+  private final class RunSchema implements EntitySchema {
 
-  private String currentRev(String id) {
-    return db.queryOne("SELECT COALESCE(rev, '') FROM runs WHERE id = ?", row -> row.text(0), id)
-        .orElse("");
+    @Override
+    public String entityType() {
+      return ENTITY;
+    }
+
+    @Override
+    public String table() {
+      return "runs";
+    }
+
+    @Override
+    public boolean exists(String id) {
+      return findById(id).isPresent();
+    }
+
+    @Override
+    public Map<String, Object> snapshotMap(String id) {
+      return findById(id)
+          .map(
+              run -> {
+                var map = RunStore.snapshotMap(run);
+                map.put("principals", principals(id));
+                return map;
+              })
+          .orElse(null);
+    }
+
+    @Override
+    public String author(String id) {
+      return findById(id).map(RunRow::node).orElse(null);
+    }
+
+    @Override
+    public void apply(String id, Map<String, Object> snapshot) {
+      writeRow(rowFrom(id, snapshot));
+      recordPrincipals(id, snapshot);
+    }
+
+    @Override
+    public Map<String, Object> comparable(Map<String, Object> full) {
+      return RunStore.comparable(full);
+    }
+
+    @Override
+    public void deleteRow(String id) {
+      revokeCredential(id);
+      db.execute("DELETE FROM runs WHERE id = ?", id);
+    }
   }
 
   private RunRow mapRow(Sqlite.Row row) {
