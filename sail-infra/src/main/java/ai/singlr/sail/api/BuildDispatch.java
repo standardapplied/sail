@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -211,7 +212,7 @@ public final class BuildDispatch {
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
-                  project, unit, runId, nextSpec.id(), agentType, "build", background),
+                  project, unit, runId, nextSpec.id(), agentType, Lane.BUILD.wire(), background),
               launch);
       return new DispatchOperations.Dispatched(
           taskSpec,
@@ -437,7 +438,8 @@ public final class BuildDispatch {
    */
   private void requireNoRepoOverlap(
       String project, String localHandle, String specId, List<String> targetRepos) {
-    DispatchGate.decide(specId, "build", targetRepos, runningLocalRuns(project, localHandle))
+    DispatchGate.decide(
+            specId, Lane.BUILD.wire(), targetRepos, runningLocalRuns(project, localHandle))
         .ifPresent(
             conflict -> {
               throw RunReservation.overlapRefusal(conflict);
@@ -482,7 +484,18 @@ public final class BuildDispatch {
       return null;
     }
     return runReservation.reserve(
-        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
+        runId,
+        project,
+        specId,
+        node,
+        owner,
+        Lane.BUILD.wire(),
+        repos,
+        agentType,
+        branch,
+        task,
+        unit,
+        config);
   }
 
   /**

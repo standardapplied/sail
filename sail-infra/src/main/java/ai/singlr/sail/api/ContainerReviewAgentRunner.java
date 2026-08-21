@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -108,7 +109,8 @@ final class ContainerReviewAgentRunner implements ReviewAgentRunner {
       throws Exception {
     var cli = AgentCli.fromYamlName(agent);
     var unit = stage(project, prompt, reviewId);
-    session.writeSession(project, prompt, branch, "", agent, reviewId, "fix", repos, unit);
+    session.writeSession(
+        project, prompt, branch, "", agent, reviewId, Lane.FIX.wire(), repos, unit);
     return launch(project, cli, agent, unit, runCredential, reviewId, model, reasoningEffort);
   }
 

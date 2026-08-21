@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentUnit;
@@ -87,7 +88,7 @@ public final class AdhocRunner {
                   unit,
                   runId,
                   null,
-                  "adhoc",
+                  Lane.ADHOC.wire(),
                   null)));
       return new DispatchOperations.AdhocSession(runId, null, null, Optional.empty());
     }
@@ -114,12 +115,12 @@ public final class AdhocRunner {
                   unit,
                   runId,
                   credential,
-                  "adhoc",
+                  Lane.ADHOC.wire(),
                   null));
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
-                  project, unit, runId, null, agentType, "adhoc", background),
+                  project, unit, runId, null, agentType, Lane.ADHOC.wire(), background),
               launch);
       return new DispatchOperations.AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
@@ -144,7 +145,18 @@ public final class AdhocRunner {
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
     return runReservation.reserve(
-        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit, config);
+        runId,
+        project,
+        "",
+        node,
+        node,
+        Lane.ADHOC.wire(),
+        List.of(),
+        agentType,
+        branch,
+        task,
+        unit,
+        config);
   }
 
   private static String adhocWorkDir(SailYaml config, String path) {
