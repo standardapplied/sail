@@ -390,17 +390,10 @@ public final class DispatchOperations {
               unit,
               runId,
               credential);
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (!background) {
-        completeForegroundRun(runId, launch.exitCode());
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, nextSpec.id(), agentType, status.pid(), runId, "build", launch.watcher());
-      }
+      var status =
+          finishLaunch(
+              new RunContext(project, unit, runId, nextSpec.id(), agentType, "build", background),
+              launch);
       return new Dispatched(
           taskSpec,
           branch,
@@ -450,20 +443,24 @@ public final class DispatchOperations {
       listener.launching(
           background,
           launchCommand(
-              project,
-              config,
-              workDir,
-              fullPermissions,
-              null,
-              null,
-              "",
-              agentType,
-              background,
-              unit,
-              runId,
-              null,
-              "adhoc",
-              null));
+              new LaunchSpec(
+                  project,
+                  config,
+                  workDir,
+                  fullPermissions,
+                  null,
+                  null,
+                  "",
+                  agentType,
+                  request.task(),
+                  request.branch(),
+                  List.of(),
+                  background,
+                  unit,
+                  runId,
+                  null,
+                  "adhoc",
+                  null)));
       return new AdhocSession(runId, null, null, Optional.empty());
     }
     var credential =
@@ -473,34 +470,27 @@ public final class DispatchOperations {
       prepare(preparer);
       var launch =
           launchSession(
-              project,
-              config,
-              workDir,
-              fullPermissions,
-              null,
-              null,
-              "",
-              agentType,
-              request.task(),
-              request.branch(),
-              List.of(),
-              background,
-              unit,
-              runId,
-              credential,
-              "adhoc",
-              null);
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (!background) {
-        completeForegroundRun(runId, launch.exitCode());
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, null, agentType, status.pid(), runId, "adhoc", launch.watcher());
-      }
+              new LaunchSpec(
+                  project,
+                  config,
+                  workDir,
+                  fullPermissions,
+                  null,
+                  null,
+                  "",
+                  agentType,
+                  request.task(),
+                  request.branch(),
+                  List.of(),
+                  background,
+                  unit,
+                  runId,
+                  credential,
+                  "adhoc",
+                  null));
+      var status =
+          finishLaunch(
+              new RunContext(project, unit, runId, null, agentType, "adhoc", background), launch);
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
@@ -618,31 +608,25 @@ public final class DispatchOperations {
               : "/home/" + config.sshUser() + "/workspace";
       var launch =
           launchSession(
-              project,
-              config,
-              workDir,
-              full,
-              model,
-              spec.reasoningEffort(),
-              specId,
-              agentType,
-              task,
-              branch,
-              repoPaths,
-              true,
-              unit,
-              runId,
-              credential,
-              role,
-              resumeSessionId);
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, specId, agentType, status.pid(), runId, role, launch.watcher());
-      }
+              new LaunchSpec(
+                  project,
+                  config,
+                  workDir,
+                  full,
+                  model,
+                  spec.reasoningEffort(),
+                  specId,
+                  agentType,
+                  task,
+                  branch,
+                  repoPaths,
+                  true,
+                  unit,
+                  runId,
+                  credential,
+                  role,
+                  resumeSessionId));
+      finishLaunch(new RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
@@ -824,31 +808,26 @@ public final class DispatchOperations {
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var launch =
           launchSession(
-              project,
-              config,
-              workDir,
-              true,
-              inviteModel,
-              null,
-              specId,
-              agentCli.yamlName(),
-              task,
-              branch,
-              repoPaths,
-              true,
-              unit,
-              runId,
-              credential,
-              role,
-              null);
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, specId, agentCli.yamlName(), status.pid(), runId, role, launch.watcher());
-      }
+              new LaunchSpec(
+                  project,
+                  config,
+                  workDir,
+                  true,
+                  inviteModel,
+                  null,
+                  specId,
+                  agentCli.yamlName(),
+                  task,
+                  branch,
+                  repoPaths,
+                  true,
+                  unit,
+                  runId,
+                  credential,
+                  role,
+                  null));
+      finishLaunch(
+          new RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true), launch);
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
       publishInviteFailed(project, specId, runId, snapshot, e);
@@ -1623,6 +1602,50 @@ public final class DispatchOperations {
   private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
 
   /**
+   * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
+   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, room, and invite
+   * lanes differ only in the fields they fill: a build carries a spec id, model, and reasoning
+   * effort; an ad-hoc a blank spec id; a room/invite a viewer role and no repo reservation. {@code
+   * task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused when only
+   * the launch command is built.
+   */
+  private record LaunchSpec(
+      String project,
+      SailYaml config,
+      String workDir,
+      boolean fullPermissions,
+      String model,
+      String reasoningEffort,
+      String specId,
+      String agentType,
+      String task,
+      String branch,
+      List<String> repoPaths,
+      boolean background,
+      AgentUnit unit,
+      String runId,
+      String runCredential,
+      String role,
+      String resumeSessionId) {}
+
+  /**
+   * The run identity the post-launch tail needs to verify the process, complete a foreground run,
+   * and publish {@code agent_session_started}. One value so every lane runs the identical tail —
+   * the reserve→launch→verify→publish sequence whose four hand-copied variants hosted the #142/#148
+   * field bugs — differing only in the {@code specId}/{@code role} it carries. A background run
+   * (room, invite, background dispatch/ad-hoc) skips the foreground completion via {@code
+   * background}.
+   */
+  private record RunContext(
+      String project,
+      AgentUnit unit,
+      String runId,
+      String specId,
+      String agentType,
+      String role,
+      boolean background) {}
+
+  /**
    * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
    * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
    * never becomes its authorization owner — the agent must act for the assignee whose spec it
@@ -1645,23 +1668,51 @@ public final class DispatchOperations {
       String runId,
       String runCredential) {
     return launchSession(
-        project,
-        config,
-        AgentSession.launchWorkDir(config.sshUser(), targetRepos),
-        true,
-        spec.model(),
-        spec.reasoningEffort(),
-        spec.id(),
-        agentType,
-        task,
-        branch,
-        targetRepos.stream().map(SailYaml.Repo::path).toList(),
-        background,
-        unit,
-        runId,
-        runCredential,
-        "build",
-        null);
+        new LaunchSpec(
+            project,
+            config,
+            AgentSession.launchWorkDir(config.sshUser(), targetRepos),
+            true,
+            spec.model(),
+            spec.reasoningEffort(),
+            spec.id(),
+            agentType,
+            task,
+            branch,
+            targetRepos.stream().map(SailYaml.Repo::path).toList(),
+            background,
+            unit,
+            runId,
+            runCredential,
+            "build",
+            null));
+  }
+
+  /**
+   * The one post-launch tail every lane runs: read the launched process's status, fail the launch
+   * if a concurrent cancel already claimed the run, complete a foreground run, and — once the agent
+   * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
+   * lane can build its own response. Replaces four hand-copied copies of this sequence.
+   */
+  private AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
+    var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
+    if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
+      throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
+    }
+    if (!ctx.background()) {
+      completeForegroundRun(ctx.runId(), launch.exitCode());
+    }
+    if (status != null && status.running()) {
+      publishAgentSessionStarted(
+          ctx.project(),
+          ctx.specId(),
+          ctx.agentType(),
+          status.pid(),
+          ctx.runId(),
+          ctx.role(),
+          launch.watcher());
+    }
+    return status;
   }
 
   /**
@@ -1670,62 +1721,31 @@ public final class DispatchOperations {
    * only — verify the launch and arm the run-addressed watcher. The lanes differ only in what they
    * pass: a dispatch carries its spec's identity and model, an ad-hoc session a blank spec id.
    */
-  private LaunchOutcome launchSession(
-      String project,
-      SailYaml config,
-      String workDir,
-      boolean fullPermissions,
-      String model,
-      String reasoningEffort,
-      String specId,
-      String agentType,
-      String task,
-      String branch,
-      List<String> repoPaths,
-      boolean background,
-      AgentUnit unit,
-      String runId,
-      String runCredential,
-      String role,
-      String resumeSessionId) {
+  private LaunchOutcome launchSession(LaunchSpec s) {
     try {
-      ensureSailSetup(project);
+      ensureSailSetup(s.project());
       var session = new AgentSession(shell);
-      session.ensureDirectory(project);
-      session.writeTaskFile(project, task, unit);
+      session.ensureDirectory(s.project());
+      session.writeTaskFile(s.project(), s.task(), s.unit());
       session.writeSession(
-          project,
-          task,
-          Objects.requireNonNullElse(branch, ""),
-          specId,
-          agentType,
-          runId,
-          role,
-          repoPaths,
-          unit);
-      var command =
-          launchCommand(
-              project,
-              config,
-              workDir,
-              fullPermissions,
-              model,
-              reasoningEffort,
-              specId,
-              agentType,
-              background,
-              unit,
-              runId,
-              runCredential,
-              role,
-              resumeSessionId);
-      listener.launching(background, redactCredential(command, runCredential));
+          s.project(),
+          s.task(),
+          Objects.requireNonNullElse(s.branch(), ""),
+          s.specId(),
+          s.agentType(),
+          s.runId(),
+          s.role(),
+          s.repoPaths(),
+          s.unit());
+      var command = launchCommand(s);
+      listener.launching(s.background(), redactCredential(command, s.runCredential()));
       var exitCode = launcher.launch(command);
-      if (background) {
+      if (s.background()) {
         if (exitCode != 0) {
           throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
         }
-        return new LaunchOutcome(exitCode, launchWatcherIfAgent(project, config, runId, unit));
+        return new LaunchOutcome(
+            exitCode, launchWatcherIfAgent(s.project(), s.config(), s.runId(), s.unit()));
       }
       return new LaunchOutcome(exitCode, Optional.empty());
     } catch (ApiException e) {
@@ -1750,52 +1770,38 @@ public final class DispatchOperations {
         .toList();
   }
 
-  private static List<String> launchCommand(
-      String project,
-      SailYaml config,
-      String workDir,
-      boolean fullPermissions,
-      String model,
-      String reasoningEffort,
-      String specId,
-      String agentType,
-      boolean background,
-      AgentUnit unit,
-      String runId,
-      String runCredential,
-      String role,
-      String resumeSessionId) {
-    var agentCli = AgentCli.fromYamlName(agentType);
-    return background
+  private static List<String> launchCommand(LaunchSpec s) {
+    var agentCli = AgentCli.fromYamlName(s.agentType());
+    return s.background()
         ? AgentSession.buildBackgroundLaunchCommand(
-            project,
-            config.sshUser(),
-            workDir,
-            fullPermissions,
+            s.project(),
+            s.config().sshUser(),
+            s.workDir(),
+            s.fullPermissions(),
             agentCli,
-            model,
-            reasoningEffort,
-            specId,
-            agentType,
-            unit.logPath(),
-            runId,
-            runCredential,
-            role,
-            resumeSessionId)
+            s.model(),
+            s.reasoningEffort(),
+            s.specId(),
+            s.agentType(),
+            s.unit().logPath(),
+            s.runId(),
+            s.runCredential(),
+            s.role(),
+            s.resumeSessionId())
         : AgentSession.buildForegroundTaskCommand(
-            project,
-            config.sshUser(),
-            workDir,
-            fullPermissions,
+            s.project(),
+            s.config().sshUser(),
+            s.workDir(),
+            s.fullPermissions(),
             agentCli,
-            model,
-            reasoningEffort,
-            specId,
-            agentType,
-            unit.logPath(),
-            runId,
-            runCredential,
-            role);
+            s.model(),
+            s.reasoningEffort(),
+            s.specId(),
+            s.agentType(),
+            s.unit().logPath(),
+            s.runId(),
+            s.runCredential(),
+            s.role());
   }
 
   /**
