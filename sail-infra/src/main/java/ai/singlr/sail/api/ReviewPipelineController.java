@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
@@ -428,7 +429,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
               branch, repos, stageConfig.categories(), roomMessages(specId), carried);
 
       var credential =
-          startReviewRun(stage.reviewId(), project, specId, agent, branch, prompt, "review");
+          startReviewRun(
+              stage.reviewId(), project, specId, agent, branch, prompt, Lane.REVIEW.wire());
       var effort = spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null);
       var output =
           agentRunner.run(project, agent, prompt, stage.reviewId(), credential, null, effort);
@@ -664,7 +666,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     try {
       var agent = spec.get().agent() != null ? spec.get().agent() : "claude-code";
       var credential =
-          startReviewRun(reviewId, project, specId, agent, spec.get().branch(), fixTask, "fix");
+          startReviewRun(
+              reviewId, project, specId, agent, spec.get().branch(), fixTask, Lane.FIX.wire());
       seedRoomDelivery(reviewId, built.renderedMessages());
       agentRunner.runFix(
           project,

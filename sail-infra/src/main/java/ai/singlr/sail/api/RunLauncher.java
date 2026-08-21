@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentCli;
@@ -133,7 +134,7 @@ public final class RunLauncher {
             unit,
             runId,
             runCredential,
-            "build",
+            Lane.BUILD.wire(),
             null));
   }
 

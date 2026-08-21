@@ -429,7 +429,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit) {
     return createReturningCredential(
-        reviewId, project, specId, node, owner, "review", agent, branch, task, null, null, logPath,
+        reviewId,
+        project,
+        specId,
+        node,
+        owner,
+        Lane.REVIEW.wire(),
+        agent,
+        branch,
+        task,
+        null,
+        null,
+        logPath,
         unit);
   }
 
@@ -869,12 +880,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var base = dash > 0 ? family.substring(0, dash) : family;
     var runId = Objects.requireNonNull(id, "run id");
     var marker =
-        switch (Objects.toString(role, "")) {
-          case "review" -> "review-";
-          case "fix" -> "fix-";
-          case "room" -> "room-";
-          case "invite", "invite-full" -> "invite-";
-          default -> "";
+        switch (Lane.of(role).orElse(null)) {
+          case REVIEW -> "review-";
+          case FIX -> "fix-";
+          case ROOM -> "room-";
+          case INVITE, INVITE_FULL -> "invite-";
+          case null, default -> "";
         };
     return base + "/" + marker + runId;
   }
