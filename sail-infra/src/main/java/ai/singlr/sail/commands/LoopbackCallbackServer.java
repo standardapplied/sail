@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -12,9 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -85,9 +84,7 @@ public final class LoopbackCallbackServer implements AutoCloseable {
 
   /** A fresh unguessable {@code state} nonce binding a browser callback to this CLI invocation. */
   public static String newState() {
-    var bytes = new byte[16];
-    new SecureRandom().nextBytes(bytes);
-    return HexFormat.of().formatHex(bytes);
+    return Secrets.hex(16);
   }
 
   public void start() {

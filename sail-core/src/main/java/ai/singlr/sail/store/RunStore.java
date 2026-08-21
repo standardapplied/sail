@@ -7,13 +7,12 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -857,9 +856,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   private String mintCredential(String id, Duration maxDuration) {
-    var bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    var credential = "sailrun_" + HexFormat.of().formatHex(bytes);
+    var credential = Secrets.mint("sailrun");
     var now = DateTimeUtils.now();
     var expiresAt =
         maxDuration == null ? null : now.plus(maxDuration).plus(CREDENTIAL_GRACE).toString();

@@ -6,11 +6,10 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import java.security.SecureRandom;
+import ai.singlr.sail.common.Secrets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Optional;
 
 /**
@@ -83,8 +82,6 @@ public final class PendingChallengeStore {
   private record Resolved(PendingChallenge challenge, String expiresAt) {}
 
   private static String generateId() {
-    var bytes = new byte[16];
-    new SecureRandom().nextBytes(bytes);
-    return "wac_" + HexFormat.of().formatHex(bytes);
+    return Secrets.mint("wac", 16);
   }
 }

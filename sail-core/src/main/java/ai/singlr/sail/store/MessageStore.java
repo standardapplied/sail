@@ -62,7 +62,7 @@ public final class MessageStore implements SyncedStore {
     }
     return db.transaction(
         () -> {
-          var id = Ids.newId().toString();
+          var id = DateTimeUtils.newId().toString();
           var row =
               new MessageRow(
                   id,
