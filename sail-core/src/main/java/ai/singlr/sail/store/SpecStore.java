@@ -12,10 +12,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -33,10 +31,12 @@ public final class SpecStore implements ConflictResolver {
 
   private final Sqlite db;
   private final ChangeLog changeLog;
+  private final RevisionJournal journal;
 
   public SpecStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
+    this.journal = new RevisionJournal(db, changeLog, new SpecSchema());
   }
 
   public record SpecRow(
@@ -493,52 +493,7 @@ public final class SpecStore implements ConflictResolver {
   }
 
   String recordRevision(String id, String origin, boolean deleted) {
-    return recordRevision(id, null, origin, deleted, false);
-  }
-
-  /**
-   * Appends a revision for the current state of {@code id}. With {@code explicitRev} null the rev
-   * is minted from the current counter; otherwise the caller-supplied rev is used verbatim (sync
-   * adopting main's authoritative rev). {@code setBaseRev} records that this revision is the new
-   * synced ancestor — set only when adopting from main, never on a local edit.
-   */
-  private String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
-    var spec = findById(id).orElse(null);
-    if (spec == null) {
-      return null;
-    }
-    var map = snapshotMap(spec);
-    if (deleted) {
-      map.put("_base_rev", rawBaseRev(id));
-    }
-    var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
-    if (!deleted) {
-      if (setBaseRev) {
-        db.execute("UPDATE specs SET rev = ?, base_rev = ? WHERE id = ?", rev, rev, id);
-      } else {
-        db.execute("UPDATE specs SET rev = ? WHERE id = ?", rev, id);
-      }
-    }
-    changeLog.append(ENTITY, id, rev, spec.updatedBy(), origin, deleted, snapshot);
-    return rev;
-  }
-
-  private String rawBaseRev(String id) {
-    var value =
-        db.queryOne("SELECT COALESCE(base_rev, '') FROM specs WHERE id = ?", row -> row.text(0), id)
-            .orElse("");
-    return value.isBlank() ? null : value;
-  }
-
-  private String currentRev(String id) {
-    return db.queryOne("SELECT COALESCE(rev, '') FROM specs WHERE id = ?", row -> row.text(0), id)
-        .orElse("");
-  }
-
-  private String snapshotJson(SpecRow spec) {
-    return YamlUtil.dumpJson(snapshotMap(spec));
+    return journal.recordRevision(id, origin, deleted);
   }
 
   private Map<String, Object> snapshotMap(SpecRow spec) {
@@ -695,38 +650,23 @@ public final class SpecStore implements ConflictResolver {
     return m;
   }
 
-  /**
-   * Reserved metadata key carrying the author of a revision through the sync protocol. It rides
-   * inside the comparable snapshot but {@link ConflictDetector} ignores reserved ({@code
-   * _}-prefixed) keys, so attribution propagates without ever causing a false conflict. The
-   * receiving side reads it to attribute the synced row to its real author instead of {@code sync}.
-   */
-
   /** Comparable snapshot of the current state, or null if the spec is absent/deleted. */
   public Map<String, Object> comparableSnapshot(String id) {
-    return findById(id).map(this::snapshotMap).map(SpecStore::comparable).orElse(null);
+    return journal.comparableSnapshot(id);
   }
 
   /** Comparable snapshot recorded at a given revision (the merge base), or null if not recorded. */
   public Map<String, Object> comparableAtRev(String id, String rev) {
-    if (Strings.isBlank(rev)) {
-      return null;
-    }
-    return changeLog
-        .at(ENTITY, id, rev)
-        .map(e -> comparable(YamlUtil.parseMap(e.snapshot())))
-        .orElse(null);
+    return journal.comparableAtRev(id, rev);
   }
 
   public String revOf(String id) {
-    var rev = currentRev(id);
-    return rev.isBlank() ? null : rev;
+    return journal.revOf(id);
   }
 
   /** The latest revision recorded for an entity, including a tombstone; null if never recorded. */
   public String latestRev(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return history.isEmpty() ? null : history.getLast().rev();
+    return journal.latestRev(id);
   }
 
   /**
@@ -736,24 +676,12 @@ public final class SpecStore implements ConflictResolver {
    * delete-vs-edit conflict.
    */
   public String baseRevOf(String id) {
-    if (findById(id).isPresent()) {
-      return rawBaseRev(id);
-    }
-    var tombstone = changeLog.history(ENTITY, id);
-    if (tombstone.isEmpty()) {
-      return null;
-    }
-    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
-    return baseRev == null ? null : baseRev.toString();
+    return journal.baseRevOf(id);
   }
 
   /** Every entity id this replica knows of, including those only present as a tombstone. */
   public Set<String> syncEntityIds() {
-    return new LinkedHashSet<>(
-        db.query(
-            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
-            row -> row.text(0),
-            ENTITY));
+    return journal.entityIds();
   }
 
   /** Attributes a spec solely for the retained versioned 0.14 data migration. */
@@ -780,23 +708,7 @@ public final class SpecStore implements ConflictResolver {
    * engine; the revision is journaled with origin {@code sync}.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
-    db.transaction(
-        () -> {
-          if (snapshot == null) {
-            if (findById(id).isPresent()) {
-              recordRevision(id, rev, "sync", true, false);
-              db.execute("DELETE FROM specs WHERE id = ?", id);
-            } else {
-              changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-            }
-          } else {
-            var full = new LinkedHashMap<>(snapshot);
-            full.put("id", id);
-            full.put("updated_by", Snapshots.actor(snapshot));
-            applySnapshot(id, full);
-            recordRevision(id, rev, "sync", false, true);
-          }
-        });
+    journal.applyRevision(id, snapshot, rev);
   }
 
   /**
@@ -807,25 +719,7 @@ public final class SpecStore implements ConflictResolver {
    * pushing the same row can never both win. Used by the sync engine on the main side.
    */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.immediateTransaction(
-        () -> {
-          if (!Objects.equals(latestRev(id), expectedRev)) {
-            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
-          }
-          if (snapshot == null) {
-            if (findById(id).isEmpty()) {
-              return new PushOutcome.Accepted(latestRev(id));
-            }
-            var rev = recordRevision(id, null, "sync", true, false);
-            db.execute("DELETE FROM specs WHERE id = ?", id);
-            return new PushOutcome.Accepted(rev);
-          }
-          var full = new LinkedHashMap<>(snapshot);
-          full.put("id", id);
-          full.put("updated_by", Snapshots.actor(snapshot));
-          applySnapshot(id, full);
-          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
-        });
+    return journal.commitRevision(id, snapshot, expectedRev);
   }
 
   /**
@@ -837,43 +731,9 @@ public final class SpecStore implements ConflictResolver {
    * earlier local version is still in the {@link ChangeLog}. A {@code null} side is a deletion.
    * Returns the rev the row now carries. No work is ever lost: every state is journaled.
    */
+  @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return db.transaction(
-        () -> {
-          var baseRev = adoptBase(id, remote);
-          if (sameContent(chosen, remote)) {
-            return baseRev;
-          }
-          return writeChosen(id, chosen);
-        });
-  }
-
-  private String adoptBase(String id, Map<String, Object> remote) {
-    if (remote == null) {
-      if (findById(id).isPresent()) {
-        var rev = recordRevision(id, null, "sync", true, false);
-        db.execute("DELETE FROM specs WHERE id = ?", id);
-        return rev;
-      }
-      var rev = Revisions.next(currentRev(id), "{}");
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-      return rev;
-    }
-    applySnapshot(id, withSync(id, remote));
-    return recordRevision(id, null, "sync", false, true);
-  }
-
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
-      if (findById(id).isEmpty()) {
-        return latestRev(id);
-      }
-      var rev = recordRevision(id, null, "resolve", true, false);
-      db.execute("DELETE FROM specs WHERE id = ?", id);
-      return rev;
-    }
-    applySnapshot(id, withSync(id, chosen));
-    return recordRevision(id, null, "resolve", false, false);
+    return journal.resolveConflict(id, chosen, remote);
   }
 
   private static Map<String, Object> withSync(String id, Map<String, Object> snapshot) {
@@ -883,16 +743,48 @@ public final class SpecStore implements ConflictResolver {
     return full;
   }
 
-  private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {
-    if (a == null || b == null) {
-      return a == b;
+  /** The spec's store-specific half of the shared {@link RevisionJournal} sync protocol. */
+  private final class SpecSchema implements EntitySchema {
+
+    @Override
+    public String entityType() {
+      return ENTITY;
     }
-    var keys = new LinkedHashSet<String>();
-    keys.addAll(a.keySet());
-    keys.addAll(b.keySet());
-    return keys.stream()
-        .filter(key -> !key.startsWith("_"))
-        .allMatch(key -> Objects.equals(a.get(key), b.get(key)));
+
+    @Override
+    public String table() {
+      return "specs";
+    }
+
+    @Override
+    public boolean exists(String id) {
+      return findById(id).isPresent();
+    }
+
+    @Override
+    public Map<String, Object> snapshotMap(String id) {
+      return findById(id).map(SpecStore.this::snapshotMap).orElse(null);
+    }
+
+    @Override
+    public String author(String id) {
+      return findById(id).map(SpecRow::updatedBy).orElse(null);
+    }
+
+    @Override
+    public void apply(String id, Map<String, Object> snapshot) {
+      applySnapshot(id, withSync(id, snapshot));
+    }
+
+    @Override
+    public Map<String, Object> comparable(Map<String, Object> full) {
+      return SpecStore.comparable(full);
+    }
+
+    @Override
+    public void deleteRow(String id) {
+      db.execute("DELETE FROM specs WHERE id = ?", id);
+    }
   }
 
   public Optional<SpecContent> getContent(String specId) {
