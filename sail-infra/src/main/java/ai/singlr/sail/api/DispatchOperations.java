@@ -19,13 +19,11 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.InvitePrompt;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.engine.RunRetention;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -35,7 +33,6 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -214,6 +211,7 @@ public final class DispatchOperations {
   private final LaunchAdmission admission;
   private final EngagementService engagementService;
   private final RoomCommitGuard roomCommitGuard;
+  private final RunLauncher runLauncher;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -255,6 +253,8 @@ public final class DispatchOperations {
     this.engagementService =
         new EngagementService(specStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
+    this.runLauncher =
+        new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -375,7 +375,7 @@ public final class DispatchOperations {
               task,
               request.mode());
       var launch =
-          launchAgent(
+          runLauncher.launchAgent(
               project,
               loaded.config(),
               targetRepos,
@@ -388,8 +388,9 @@ public final class DispatchOperations {
               runId,
               credential);
       var status =
-          finishLaunch(
-              new RunContext(project, unit, runId, nextSpec.id(), agentType, "build", background),
+          runLauncher.finishLaunch(
+              new RunLauncher.RunContext(
+                  project, unit, runId, nextSpec.id(), agentType, "build", background),
               launch);
       return new Dispatched(
           taskSpec,
@@ -439,8 +440,8 @@ public final class DispatchOperations {
     if (request.dryRun()) {
       listener.launching(
           background,
-          launchCommand(
-              new LaunchSpec(
+          RunLauncher.launchCommand(
+              new RunLauncher.LaunchSpec(
                   project,
                   config,
                   workDir,
@@ -466,8 +467,8 @@ public final class DispatchOperations {
     try {
       prepare(preparer);
       var launch =
-          launchSession(
-              new LaunchSpec(
+          runLauncher.launchSession(
+              new RunLauncher.LaunchSpec(
                   project,
                   config,
                   workDir,
@@ -486,8 +487,10 @@ public final class DispatchOperations {
                   "adhoc",
                   null));
       var status =
-          finishLaunch(
-              new RunContext(project, unit, runId, null, agentType, "adhoc", background), launch);
+          runLauncher.finishLaunch(
+              new RunLauncher.RunContext(
+                  project, unit, runId, null, agentType, "adhoc", background),
+              launch);
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
@@ -604,8 +607,8 @@ public final class DispatchOperations {
               ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
               : "/home/" + config.sshUser() + "/workspace";
       var launch =
-          launchSession(
-              new LaunchSpec(
+          runLauncher.launchSession(
+              new RunLauncher.LaunchSpec(
                   project,
                   config,
                   workDir,
@@ -623,7 +626,8 @@ public final class DispatchOperations {
                   credential,
                   role,
                   resumeSessionId));
-      finishLaunch(new RunContext(project, unit, runId, specId, agentType, role, true), launch);
+      runLauncher.finishLaunch(
+          new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
@@ -804,8 +808,8 @@ public final class DispatchOperations {
       }
       var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
       var launch =
-          launchSession(
-              new LaunchSpec(
+          runLauncher.launchSession(
+              new RunLauncher.LaunchSpec(
                   project,
                   config,
                   workDir,
@@ -823,8 +827,9 @@ public final class DispatchOperations {
                   credential,
                   role,
                   null));
-      finishLaunch(
-          new RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true), launch);
+      runLauncher.finishLaunch(
+          new RunLauncher.RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true),
+          launch);
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
       publishInviteFailed(project, specId, runId, snapshot, e);
@@ -1177,57 +1182,6 @@ public final class DispatchOperations {
   }
 
   /**
-   * The outcome of a launch attempt: the launch command's exit code (for foreground, the agent's
-   * own exit code, since its launch command blocks until the agent exits) and the guardrail
-   * watcher, if one was spawned (background only).
-   */
-  private record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
-
-  /**
-   * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
-   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, room, and invite
-   * lanes differ only in the fields they fill: a build carries a spec id, model, and reasoning
-   * effort; an ad-hoc a blank spec id; a room/invite a viewer role and no repo reservation. {@code
-   * task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused when only
-   * the launch command is built.
-   */
-  private record LaunchSpec(
-      String project,
-      SailYaml config,
-      String workDir,
-      boolean fullPermissions,
-      String model,
-      String reasoningEffort,
-      String specId,
-      String agentType,
-      String task,
-      String branch,
-      List<String> repoPaths,
-      boolean background,
-      AgentUnit unit,
-      String runId,
-      String runCredential,
-      String role,
-      String resumeSessionId) {}
-
-  /**
-   * The run identity the post-launch tail needs to verify the process, complete a foreground run,
-   * and publish {@code agent_session_started}. One value so every lane runs the identical tail —
-   * the reserve→launch→verify→publish sequence whose four hand-copied variants hosted the #142/#148
-   * field bugs — differing only in the {@code specId}/{@code role} it carries. A background run
-   * (room, invite, background dispatch/ad-hoc) skips the foreground completion via {@code
-   * background}.
-   */
-  private record RunContext(
-      String project,
-      AgentUnit unit,
-      String runId,
-      String specId,
-      String agentType,
-      String role,
-      boolean background) {}
-
-  /**
    * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
    * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
    * never becomes its authorization owner — the agent must act for the assignee whose spec it
@@ -1235,174 +1189,6 @@ public final class DispatchOperations {
    */
   private static String dispatchOwner(String localHandle) {
     return localHandle;
-  }
-
-  private LaunchOutcome launchAgent(
-      String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
-      String task,
-      String branch,
-      boolean background,
-      Spec spec,
-      String agentType,
-      AgentUnit unit,
-      String runId,
-      String runCredential) {
-    return launchSession(
-        new LaunchSpec(
-            project,
-            config,
-            AgentSession.launchWorkDir(config.sshUser(), targetRepos),
-            true,
-            spec.model(),
-            spec.reasoningEffort(),
-            spec.id(),
-            agentType,
-            task,
-            branch,
-            targetRepos.stream().map(SailYaml.Repo::path).toList(),
-            background,
-            unit,
-            runId,
-            runCredential,
-            "build",
-            null));
-  }
-
-  /**
-   * The one post-launch tail every lane runs: read the launched process's status, fail the launch
-   * if a concurrent cancel already claimed the run, complete a foreground run, and — once the agent
-   * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
-   * lane can build its own response. Replaces four hand-copied copies of this sequence.
-   */
-  private AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
-    var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
-    if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
-      throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
-    }
-    if (!ctx.background()) {
-      completeForegroundRun(ctx.runId(), launch.exitCode());
-    }
-    if (status != null && status.running()) {
-      publishAgentSessionStarted(
-          ctx.project(),
-          ctx.specId(),
-          ctx.agentType(),
-          status.pid(),
-          ctx.runId(),
-          ctx.role(),
-          launch.watcher());
-    }
-    return status;
-  }
-
-  /**
-   * The one launch sequence both the dispatch and ad-hoc lanes execute: stage the run-scoped task
-   * and session files, build the launch command for the run's own unit, run it, and — background
-   * only — verify the launch and arm the run-addressed watcher. The lanes differ only in what they
-   * pass: a dispatch carries its spec's identity and model, an ad-hoc session a blank spec id.
-   */
-  private LaunchOutcome launchSession(LaunchSpec s) {
-    try {
-      ensureSailSetup(s.project());
-      var session = new AgentSession(shell);
-      session.ensureDirectory(s.project());
-      session.writeTaskFile(s.project(), s.task(), s.unit());
-      session.writeSession(
-          s.project(),
-          s.task(),
-          Objects.requireNonNullElse(s.branch(), ""),
-          s.specId(),
-          s.agentType(),
-          s.runId(),
-          s.role(),
-          s.repoPaths(),
-          s.unit());
-      var command = launchCommand(s);
-      listener.launching(s.background(), redactCredential(command, s.runCredential()));
-      var exitCode = launcher.launch(command);
-      if (s.background()) {
-        if (exitCode != 0) {
-          throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
-        }
-        return new LaunchOutcome(
-            exitCode, launchWatcherIfAgent(s.project(), s.config(), s.runId(), s.unit()));
-      }
-      return new LaunchOutcome(exitCode, Optional.empty());
-    } catch (ApiException e) {
-      throw e;
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
-    }
-  }
-
-  /**
-   * The command as listeners may see it: the plaintext run credential replaced with a marker.
-   * Listeners print launch commands to terminals and logs, and a leaked live credential
-   * authenticates spec and event writes until the run finishes — only the launcher ever receives
-   * the real value.
-   */
-  private static List<String> redactCredential(List<String> command, String runCredential) {
-    if (Strings.isBlank(runCredential)) {
-      return command;
-    }
-    return command.stream()
-        .map(argument -> argument.equals(runCredential) ? "<redacted>" : argument)
-        .toList();
-  }
-
-  private static List<String> launchCommand(LaunchSpec s) {
-    var agentCli = AgentCli.fromYamlName(s.agentType());
-    return s.background()
-        ? AgentSession.buildBackgroundLaunchCommand(
-            s.project(),
-            s.config().sshUser(),
-            s.workDir(),
-            s.fullPermissions(),
-            agentCli,
-            s.model(),
-            s.reasoningEffort(),
-            s.specId(),
-            s.agentType(),
-            s.unit().logPath(),
-            s.runId(),
-            s.runCredential(),
-            s.role(),
-            s.resumeSessionId())
-        : AgentSession.buildForegroundTaskCommand(
-            s.project(),
-            s.config().sshUser(),
-            s.workDir(),
-            s.fullPermissions(),
-            agentCli,
-            s.model(),
-            s.reasoningEffort(),
-            s.specId(),
-            s.agentType(),
-            s.unit().logPath(),
-            s.runId(),
-            s.runCredential(),
-            s.role());
-  }
-
-  /**
-   * Spawns the detached run-addressed watcher whenever the project declares an agent block —
-   * supervision is on by default, with {@code Guardrails.defaults()} applying when none are
-   * declared, and the watcher is also the authoritative stop observer the review pipeline depends
-   * on. One watcher per dispatch, supervising exactly this run's recorded unit.
-   */
-  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(
-      String project, SailYaml config, String runId, AgentUnit unit) throws IOException {
-    if (config.agent() == null) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        watcherSpawner.spawnForRun(
-            project,
-            SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-            runId,
-            unit.unitName()));
   }
 
   /**
@@ -1470,25 +1256,6 @@ public final class DispatchOperations {
         .filter(run -> run.ownedBy(localHandle))
         .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.role(), run.repos()))
         .toList();
-  }
-
-  /**
-   * Installs or upgrades the in-container {@code sail spec} and event helpers before any agent
-   * launches. Failure aborts the launch: every local-socket route now requires the run's bearer
-   * credential, so an agent left with stale unauthenticated helpers would run apparently normally
-   * while every spec operation 401s and every lifecycle event is silently dropped.
-   */
-  private void ensureSailSetup(String project) {
-    try {
-      var result = ContainerSailSetup.ensureInstalled(shell, project);
-      listener.sailSetupUpdated(result == ContainerSailSetup.Result.UPDATED);
-    } catch (Exception e) {
-      throw new ApiException(
-          ErrorCode.AGENT_LAUNCH_FAILED,
-          "Failed to install the authenticated sail helpers in " + project + ".",
-          "Repair the container's sail socket mount and retry the dispatch.",
-          e);
-    }
   }
 
   /**
@@ -1633,90 +1400,6 @@ public final class DispatchOperations {
   }
 
   /**
-   * Stamps the run's process identity once launch has resolved it: the agent pid, its {@code /proc}
-   * start-time fingerprint (live processes only — the fingerprint exists to prove a pid still names
-   * the process this run launched, so a foreground session that already exited records its pid
-   * without one), and the fallback watcher pid.
-   *
-   * <p>Returns whether the run still owned its launch: the stamp commits only on a {@code running}
-   * row, so a {@code false} means an operator's cancel claimed the run during preparation and the
-   * caller must tear down whatever it started. A store error stays best-effort bookkeeping (the
-   * launch proceeds); only the definitive lost-race answer aborts it.
-   */
-  private boolean updateRunProcess(
-      String runId,
-      String project,
-      AgentSession.SessionInfo status,
-      Optional<WatcherSpawner.Spawned> watcher) {
-    if (runStore == null) {
-      return true;
-    }
-    Integer watcherPid =
-        watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback
-            ? (int) fallback.pid()
-            : null;
-    Integer pid = status != null ? status.pid() : null;
-    var pidTicks =
-        status != null && status.running() ? readStartTicks(project, status.pid()) : null;
-    try {
-      return runStore.updateProcess(runId, pid, pidTicks, watcherPid);
-    } catch (RuntimeException e) {
-      System.err.println(
-          "  [api] Warning: could not update run process " + runId + ": " + e.getMessage());
-      return true;
-    }
-  }
-
-  /**
-   * Tears down a launch whose run was cancelled during preparation: the operator's stop already
-   * recorded the terminal outcome, so the just-started agent must die rather than run unrecorded
-   * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
-   * halt that races the process's own exit is a no-op — and the conflict names what happened.
-   */
-  private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
-    try {
-      StopOperations.sessionHalter(shell).halt(project, unit);
-    } catch (Exception e) {
-      System.err.println(
-          "  [api] Warning: could not halt cancelled launch " + runId + ": " + e.getMessage());
-    }
-    return new ApiException(
-        ErrorCode.CONFLICT,
-        "Run " + runId + " was cancelled while its launch was preparing; the agent was torn down.",
-        "The cancel already recorded the run's outcome; no retry is needed.");
-  }
-
-  private Long readStartTicks(String project, int pid) {
-    try {
-      return new AgentSession(shell).readProcessStartTicks(project, pid);
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  /**
-   * Completes a foreground run explicitly: its launch command blocks until the agent exits, so the
-   * exit code is known here and the run must not be left {@code running} waiting for a terminal
-   * hook event that may never arrive. Compare-and-set from {@code running}, exactly like {@link
-   * RunTracker}: an operator stop that already recorded the run terminal wins, and this finisher
-   * only enriches the missing exit code instead of overwriting the cancel with {@code completed}.
-   */
-  private void completeForegroundRun(String runId, int exitCode) {
-    runBookkeeping(
-        "complete run " + runId,
-        () -> {
-          if (runStore.transition(
-              runId, "running", exitCode == 0 ? "completed" : "failed", exitCode)) {
-            return;
-          }
-          var current = runStore.findById(runId).orElse(null);
-          if (current != null && current.exitCode() == null) {
-            runStore.recordExitCode(runId, exitCode);
-          }
-        });
-  }
-
-  /**
    * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
    */
   /**
@@ -1772,48 +1455,8 @@ public final class DispatchOperations {
     }
   }
 
-  private void publishAgentSessionStarted(
-      String project,
-      String specId,
-      String agentType,
-      Integer pid,
-      String runId,
-      String role,
-      Optional<WatcherSpawner.Spawned> watcher) {
-    var data = new LinkedHashMap<String, Object>();
-    if (pid != null) {
-      data.put("pid", pid);
-    }
-    if (Strings.isNotBlank(runId)) {
-      data.put(Event.WellKnownData.RUN_ID, runId);
-    }
-    if (Strings.isNotBlank(role)) {
-      data.put(Event.WellKnownData.RUN_ROLE, role);
-    }
-    if (watcher.orElse(null) instanceof WatcherSpawner.Fallback fallback) {
-      data.put(Event.WellKnownData.WATCHER_PID, fallback.pid());
-    }
-    events.publish(
-        Event.of(
-            project,
-            specId,
-            Event.WellKnownTypes.AGENT_SESSION_STARTED,
-            agentType,
-            HostInfo.hostname(),
-            data));
-  }
-
   private void publish(String project, String specId, String type, Map<String, Object> data) {
     events.publish(Event.of(project, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
-  }
-
-  private AgentSession.SessionInfo querySession(
-      AgentSession session, String project, AgentUnit unit) {
-    try {
-      return session.queryStatus(project, unit);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
-    }
   }
 
   private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {

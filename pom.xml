@@ -188,6 +188,8 @@
                                         <exclude>ai.singlr.sail.api.DispatchOperations.*</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiClient</exclude>
                                         <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
+                                        <exclude>ai.singlr.sail.api.RunLauncher</exclude>
+                                        <exclude>ai.singlr.sail.api.RunLauncher.*</exclude>
                                         <exclude>ai.singlr.sail.api.AgentLogStreamer</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient.StopReadingException</exclude>
@@ -226,6 +228,39 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.93</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>1.0</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.RunLauncher</include>
+                                    </includes>
+                                    <!--
+                                        The run launch engine, extracted from the (excluded)
+                                        DispatchOperations. Every method is exercised (METHOD 1.0):
+                                        the happy path by the four lane suites, the post-launch tail's
+                                        defensive branches directly by RunLauncherTest (null status,
+                                        cancel-lost-the-launch, foreground completion, status-query
+                                        failure, live-run stamping). The uncovered lines are
+                                        defensive-only — the exception catches around a throwing
+                                        container shell (readStartTicks, launchLostToCancel's halt,
+                                        the run-store bookkeeping), the mid-finish recordExitCode race
+                                        (a run that goes terminal between the process update and the
+                                        foreground completion), and the no-agent watcher branch —
+                                        none reachable without fault injection. Floored just under the
+                                        actual.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.88</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>
