@@ -47,9 +47,9 @@ final class LocalApiRouter implements LocalApiHandler {
           Event.WellKnownTypes.AGENT_TOOL_FINISHED);
 
   private final EventBus bus;
-  private final Operations operations;
+  private final LocalLaneOperations operations;
 
-  LocalApiRouter(EventBus bus, Operations operations) {
+  LocalApiRouter(EventBus bus, LocalLaneOperations operations) {
     this.bus = bus;
     this.operations = operations;
   }
