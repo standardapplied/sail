@@ -390,17 +390,10 @@ public final class DispatchOperations {
               unit,
               runId,
               credential);
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (!background) {
-        completeForegroundRun(runId, launch.exitCode());
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, nextSpec.id(), agentType, status.pid(), runId, "build", launch.watcher());
-      }
+      var status =
+          finishLaunch(
+              new RunContext(project, unit, runId, nextSpec.id(), agentType, "build", background),
+              launch);
       return new Dispatched(
           taskSpec,
           branch,
@@ -495,17 +488,9 @@ public final class DispatchOperations {
                   credential,
                   "adhoc",
                   null));
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (!background) {
-        completeForegroundRun(runId, launch.exitCode());
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, null, agentType, status.pid(), runId, "adhoc", launch.watcher());
-      }
+      var status =
+          finishLaunch(
+              new RunContext(project, unit, runId, null, agentType, "adhoc", background), launch);
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
@@ -641,14 +626,7 @@ public final class DispatchOperations {
                   credential,
                   role,
                   resumeSessionId));
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, specId, agentType, status.pid(), runId, role, launch.watcher());
-      }
+      finishLaunch(new RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
@@ -848,14 +826,8 @@ public final class DispatchOperations {
                   credential,
                   role,
                   null));
-      var status = querySession(new AgentSession(shell), project, unit);
-      if (!updateRunProcess(runId, project, status, launch.watcher())) {
-        throw launchLostToCancel(runId, project, unit);
-      }
-      if (status != null && status.running()) {
-        publishAgentSessionStarted(
-            project, specId, agentCli.yamlName(), status.pid(), runId, role, launch.watcher());
-      }
+      finishLaunch(
+          new RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true), launch);
     } catch (RuntimeException e) {
       releaseIfAbsent(runId, project, unit);
       publishInviteFailed(project, specId, runId, snapshot, e);
@@ -1657,6 +1629,23 @@ public final class DispatchOperations {
       String resumeSessionId) {}
 
   /**
+   * The run identity the post-launch tail needs to verify the process, complete a foreground run,
+   * and publish {@code agent_session_started}. One value so every lane runs the identical tail —
+   * the reserve→launch→verify→publish sequence whose four hand-copied variants hosted the #142/#148
+   * field bugs — differing only in the {@code specId}/{@code role} it carries. A background run
+   * (room, invite, background dispatch/ad-hoc) skips the foreground completion via {@code
+   * background}.
+   */
+  private record RunContext(
+      String project,
+      AgentUnit unit,
+      String runId,
+      String specId,
+      String agentType,
+      String role,
+      boolean background) {}
+
+  /**
    * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
    * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
    * never becomes its authorization owner — the agent must act for the assignee whose spec it
@@ -1697,6 +1686,33 @@ public final class DispatchOperations {
             runCredential,
             "build",
             null));
+  }
+
+  /**
+   * The one post-launch tail every lane runs: read the launched process's status, fail the launch
+   * if a concurrent cancel already claimed the run, complete a foreground run, and — once the agent
+   * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
+   * lane can build its own response. Replaces four hand-copied copies of this sequence.
+   */
+  private AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
+    var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
+    if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
+      throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
+    }
+    if (!ctx.background()) {
+      completeForegroundRun(ctx.runId(), launch.exitCode());
+    }
+    if (status != null && status.running()) {
+      publishAgentSessionStarted(
+          ctx.project(),
+          ctx.specId(),
+          ctx.agentType(),
+          status.pid(),
+          ctx.runId(),
+          ctx.role(),
+          launch.watcher());
+    }
+    return status;
   }
 
   /**
