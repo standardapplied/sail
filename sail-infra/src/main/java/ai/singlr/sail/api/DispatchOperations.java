@@ -210,6 +210,7 @@ public final class DispatchOperations {
   private final RoomCommitGuard roomCommitGuard;
   private final RunLauncher runLauncher;
   private final RunReservation runReservation;
+  private final AdhocRunner adhocRunner;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -254,6 +255,7 @@ public final class DispatchOperations {
     this.runLauncher =
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
     this.runReservation = new RunReservation(runStore, shell, listener);
+    this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -427,75 +429,7 @@ public final class DispatchOperations {
 
   public AdhocSession startAdhoc(
       String project, AdhocRequest request, String localHandle, AdhocPreparer preparer) {
-    var loaded = projects.loadRunning(project);
-    var config = loaded.config();
-    var agentType =
-        config.agent() != null ? config.agent().type() : AgentCli.CLAUDE_CODE.yamlName();
-    var runId = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(runId);
-    var background = request.background();
-    var workDir = adhocWorkDir(config, request.path());
-    var fullPermissions = adhocFullPermissions(config);
-    if (request.dryRun()) {
-      listener.launching(
-          background,
-          RunLauncher.launchCommand(
-              new RunLauncher.LaunchSpec(
-                  project,
-                  config,
-                  workDir,
-                  fullPermissions,
-                  null,
-                  null,
-                  "",
-                  agentType,
-                  request.task(),
-                  request.branch(),
-                  List.of(),
-                  background,
-                  unit,
-                  runId,
-                  null,
-                  "adhoc",
-                  null)));
-      return new AdhocSession(runId, null, null, Optional.empty());
-    }
-    var credential =
-        reserveAdhocRun(
-            runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
-    try {
-      prepare(preparer);
-      var launch =
-          runLauncher.launchSession(
-              new RunLauncher.LaunchSpec(
-                  project,
-                  config,
-                  workDir,
-                  fullPermissions,
-                  null,
-                  null,
-                  "",
-                  agentType,
-                  request.task(),
-                  request.branch(),
-                  List.of(),
-                  background,
-                  unit,
-                  runId,
-                  credential,
-                  "adhoc",
-                  null));
-      var status =
-          runLauncher.finishLaunch(
-              new RunLauncher.RunContext(
-                  project, unit, runId, null, agentType, "adhoc", background),
-              launch);
-      return new AdhocSession(
-          runId, status, background ? null : launch.exitCode(), launch.watcher());
-    } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
-      throw e;
-    }
+    return adhocRunner.start(project, request, localHandle, preparer);
   }
 
   /**
@@ -904,26 +838,6 @@ public final class DispatchOperations {
     roomCommitGuard.guardRoomRun(project, runId);
   }
 
-  private static void prepare(AdhocPreparer preparer) {
-    try {
-      preparer.prepare();
-    } catch (Exception e) {
-      throw new ApiException(
-          ErrorCode.AGENT_LAUNCH_FAILED, "Failed to prepare the agent session.", e);
-    }
-  }
-
-  private static String adhocWorkDir(SailYaml config, String path) {
-    var workDir = "/home/" + config.sshUser() + "/workspace";
-    return Strings.isBlank(path) ? workDir : workDir + "/" + path;
-  }
-
-  private static boolean adhocFullPermissions(SailYaml config) {
-    return config.agent() != null
-        && config.agent().config() != null
-        && "full".equals(config.agent().config().get("permissions"));
-  }
-
   /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
   private record PreparedClaim(String snapshot, boolean branchCreated) {}
 
@@ -1246,31 +1160,6 @@ public final class DispatchOperations {
     }
     return runReservation.reserve(
         runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
-  }
-
-  /**
-   * Reserves an ad-hoc session through the identical transaction: {@code role='adhoc'}, no spec,
-   * and an empty repo set — which the gate reads as the whole project, so the session excludes and
-   * is excluded by every dispatch atomically. Unlike dispatch, an absent run store is a refusal,
-   * not a skip: the reservation is the only thing standing between two agents in one container, and
-   * an ad-hoc session without a row would also be invisible to stop, status, and retention.
-   */
-  private String reserveAdhocRun(
-      String runId,
-      String project,
-      String node,
-      String agentType,
-      String branch,
-      String task,
-      AgentUnit unit,
-      SailYaml config) {
-    if (runStore == null) {
-      throw new ApiException(
-          ErrorCode.COMMAND_FAILED,
-          "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
-    }
-    return runReservation.reserve(
-        runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit, config);
   }
 
   /**
