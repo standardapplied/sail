@@ -162,4 +162,21 @@ class YamlUtilTest {
     var result = YamlUtil.dumpToString(Map.of("name", "acme"));
     assertTrue(result.contains("name: acme"));
   }
+
+  @Test
+  void parseMapHandlesANonBmpCharacterOnEveryReaderBufferBoundary() {
+    for (var pad = 1000; pad <= 3100; pad++) {
+      var value = "x".repeat(pad) + "😀tail";
+      var result = YamlUtil.parseMap("{\"body\": \"" + value + "\"}");
+      assertEquals(
+          value, result.get("body"), "emoji straddling the parser buffer window at pad=" + pad);
+    }
+  }
+
+  @Test
+  void parseListHandlesANonBmpCharacterOnTheReaderBufferBoundary() {
+    var value = "x".repeat(1018) + "😀tail";
+    var result = YamlUtil.parseList("[{\"body\": \"" + value + "\"}]");
+    assertEquals(value, result.getFirst().get("body"));
+  }
 }

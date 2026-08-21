@@ -12,7 +12,7 @@ One binary, zero dependencies, fully declarative. Download it, run `sail host in
 
 - **Java 25** with virtual threads where applicable
 - **picocli** for CLI framework (GraalVM native-image ready)
-- **SnakeYAML Engine 3.0.1** for YAML + JSON parsing (YAML 1.2 is a JSON superset). Zero transitive dependencies.
+- **SnakeYAML Engine 3.1.1** for YAML + JSON parsing (YAML 1.2 is a JSON superset). Zero transitive dependencies.
 - **GraalVM native-image** for AOT compilation to a static Linux binary (<1ms startup)
 - No Spring. No Lombok. No annotation magic beyond picocli's `@Command`/`@Option`/`@Parameters`.
 - Minimal dependencies — two libraries total (picocli, SnakeYAML Engine). No reflection metadata needed.
@@ -84,7 +84,7 @@ Always write modern Java — leverage JDK 25 features, never write old-style cod
 | Dependency | Version | Group ID |
 |-----------|---------|----------|
 | picocli | 4.7.7 | info.picocli |
-| snakeyaml-engine | 3.0.1 | org.snakeyaml |
+| snakeyaml-engine | 3.1.1 | org.snakeyaml |
 | JUnit | 6.0.2 | org.junit |
 | native-maven-plugin | 0.11.4 | org.graalvm.buildtools |
 
