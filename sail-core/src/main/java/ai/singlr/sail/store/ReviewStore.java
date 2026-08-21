@@ -34,10 +34,12 @@ public final class ReviewStore implements ConflictResolver {
 
   private final Sqlite db;
   private final ChangeLog changeLog;
+  private final RevisionJournal revisions;
 
   public ReviewStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
+    this.revisions = new RevisionJournal(db, changeLog, new ReviewSchema());
   }
 
   /**
@@ -608,7 +610,13 @@ public final class ReviewStore implements ConflictResolver {
    * Journals a fresh revision of the whole aggregate for a local mutation, within its transaction.
    */
   private void journal(String reviewId) {
-    recordRevision(reviewId, null, "local", false, false);
+    revisions.recordRevision(reviewId, "local", false);
+  }
+
+  /** Backfills a revision for the one-time legacy data migration; delegates to the journal. */
+  String recordRevision(
+      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
+    return revisions.recordRevision(id, explicitRev, origin, deleted, setBaseRev);
   }
 
   /** Journals the aggregate a stage belongs to — a stage or finding change is a review revision. */
@@ -618,43 +626,23 @@ public final class ReviewStore implements ConflictResolver {
   }
 
   public Set<String> syncEntityIds() {
-    return new LinkedHashSet<>(
-        db.query(
-            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
-            row -> row.text(0),
-            ENTITY));
+    return revisions.entityIds();
   }
 
   public String latestRev(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return history.isEmpty() ? null : history.getLast().rev();
+    return revisions.latestRev(id);
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
-    var aggregate = aggregateMap(id);
-    return aggregate == null ? null : comparable(aggregate);
+    return revisions.comparableSnapshot(id);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
-    if (Strings.isBlank(rev)) {
-      return null;
-    }
-    return changeLog
-        .at(ENTITY, id, rev)
-        .map(e -> comparable(YamlUtil.parseMap(e.snapshot())))
-        .orElse(null);
+    return revisions.comparableAtRev(id, rev);
   }
 
   public String baseRevOf(String id) {
-    if (findReview(id).isPresent()) {
-      return rawBaseRev(id);
-    }
-    var tombstone = changeLog.history(ENTITY, id);
-    if (tombstone.isEmpty()) {
-      return null;
-    }
-    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
-    return baseRev == null ? null : baseRev.toString();
+    return revisions.baseRevOf(id);
   }
 
   /**
@@ -664,112 +652,17 @@ public final class ReviewStore implements ConflictResolver {
    * finding rows (which never replicate) that carry-forward and dispute resolution read.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
-    db.transaction(
-        () -> {
-          if (snapshot == null) {
-            adoptDeletion(id, rev);
-          } else {
-            if (!sameContent(aggregateMap(id), snapshot)) {
-              writeAggregate(id, snapshot);
-            }
-            recordRevision(id, rev, "sync", false, true);
-          }
-        });
+    revisions.applyRevision(id, snapshot, rev);
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.immediateTransaction(
-        () -> {
-          if (!Objects.equals(latestRev(id), expectedRev)) {
-            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
-          }
-          if (snapshot == null) {
-            if (findReview(id).isEmpty()) {
-              return new PushOutcome.Accepted(latestRev(id));
-            }
-            var rev = recordRevision(id, null, "sync", true, false);
-            deleteAggregate(id);
-            return new PushOutcome.Accepted(rev);
-          }
-          writeAggregate(id, snapshot);
-          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
-        });
+    return revisions.commitRevision(id, snapshot, expectedRev);
   }
 
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return db.transaction(
-        () -> {
-          var baseRev = adoptBase(id, remote);
-          if (sameContent(chosen, remote)) {
-            return baseRev;
-          }
-          return writeChosen(id, chosen);
-        });
-  }
-
-  private String adoptBase(String id, Map<String, Object> remote) {
-    if (remote == null) {
-      return adoptBaseDeletion(id);
-    }
-    writeAggregate(id, remote);
-    return recordRevision(id, null, "sync", false, true);
-  }
-
-  private String adoptBaseDeletion(String id) {
-    if (findReview(id).isEmpty()) {
-      var rev = Revisions.next(currentRev(id), "{}");
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-      return rev;
-    }
-    var rev = recordRevision(id, null, "sync", true, false);
-    deleteAggregate(id);
-    return rev;
-  }
-
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
-      if (findReview(id).isEmpty()) {
-        return latestRev(id);
-      }
-      var rev = recordRevision(id, null, "resolve", true, false);
-      deleteAggregate(id);
-      return rev;
-    }
-    writeAggregate(id, chosen);
-    return recordRevision(id, null, "resolve", false, false);
-  }
-
-  private void adoptDeletion(String id, String rev) {
-    if (findReview(id).isEmpty()) {
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
-      return;
-    }
-    recordRevision(id, rev, "sync", true, false);
-    deleteAggregate(id);
-  }
-
-  String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
-    var aggregate = aggregateMap(id);
-    if (aggregate == null) {
-      return null;
-    }
-    if (deleted) {
-      aggregate.put("_base_rev", rawBaseRev(id));
-    }
-    var snapshot = YamlUtil.dumpJson(aggregate);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
-    if (!deleted) {
-      if (setBaseRev) {
-        db.execute("UPDATE reviews SET rev = ?, base_rev = ? WHERE id = ?", rev, rev, id);
-      } else {
-        db.execute("UPDATE reviews SET rev = ? WHERE id = ?", rev, id);
-      }
-    }
-    changeLog.append(ENTITY, id, rev, specIdOf(id), origin, deleted, snapshot);
-    return rev;
+    return revisions.resolveConflict(id, chosen, remote);
   }
 
   /**
@@ -918,17 +811,55 @@ public final class ReviewStore implements ConflictResolver {
     return findReview(reviewId).map(ReviewRow::specId).orElse(null);
   }
 
-  private String rawBaseRev(String id) {
-    var value =
-        db.queryOne(
-                "SELECT COALESCE(base_rev, '') FROM reviews WHERE id = ?", row -> row.text(0), id)
-            .orElse("");
-    return value.isBlank() ? null : value;
-  }
+  /** The review's store-specific half of the shared {@link RevisionJournal} sync protocol. */
+  private final class ReviewSchema implements EntitySchema {
 
-  private String currentRev(String id) {
-    return db.queryOne("SELECT COALESCE(rev, '') FROM reviews WHERE id = ?", row -> row.text(0), id)
-        .orElse("");
+    @Override
+    public String entityType() {
+      return ENTITY;
+    }
+
+    @Override
+    public String table() {
+      return "reviews";
+    }
+
+    @Override
+    public boolean exists(String id) {
+      return findReview(id).isPresent();
+    }
+
+    @Override
+    public Map<String, Object> snapshotMap(String id) {
+      return aggregateMap(id);
+    }
+
+    @Override
+    public String author(String id) {
+      return specIdOf(id);
+    }
+
+    /**
+     * Adopts main's aggregate, but only when it actually differs: rebuilding rewrites the stage and
+     * finding rows, and the finding rows (which never replicate) carry data that carry-forward and
+     * dispute resolution read on the executing node.
+     */
+    @Override
+    public void apply(String id, Map<String, Object> snapshot) {
+      if (!sameContent(aggregateMap(id), snapshot)) {
+        writeAggregate(id, snapshot);
+      }
+    }
+
+    @Override
+    public Map<String, Object> comparable(Map<String, Object> full) {
+      return ReviewStore.comparable(full);
+    }
+
+    @Override
+    public void deleteRow(String id) {
+      deleteAggregate(id);
+    }
   }
 
   private ReviewRow mapReview(Sqlite.Row row) {
