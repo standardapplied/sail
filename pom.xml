@@ -190,6 +190,7 @@
                                         <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
                                         <exclude>ai.singlr.sail.api.RunLauncher</exclude>
                                         <exclude>ai.singlr.sail.api.RunLauncher.*</exclude>
+                                        <exclude>ai.singlr.sail.api.RunReservation</exclude>
                                         <exclude>ai.singlr.sail.api.AgentLogStreamer</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient</exclude>
                                         <exclude>ai.singlr.sail.api.EventStreamClient.StopReadingException</exclude>
@@ -261,6 +262,35 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.88</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>1.0</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>ai.singlr.sail.api.RunReservation</include>
+                                    </includes>
+                                    <!--
+                                        The shared reservation seam. Every method is exercised
+                                        (METHOD 1.0): the claim/refusal/release paths and the
+                                        best-effort cleanup's defensive branches directly by
+                                        RunReservationTest (prune failure, unprobeable agent, no-store
+                                        release, store failure during cleanup). The two uncovered
+                                        lines are the pruneRuns catch — unreachable because
+                                        RunRetention.prune is itself best-effort and swallows the
+                                        shell failure rather than propagating it. Floored just under
+                                        the actual.
+                                    -->
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.95</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>
