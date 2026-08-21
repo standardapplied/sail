@@ -244,6 +244,46 @@ class EngagementLifecycleTest {
   }
 
   @Test
+  void engagingAMissingSpecIsRefusedAsNotFound() throws Exception {
+    var ops = operations(shell());
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.engage(
+                    "ghost", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
+    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+  }
+
+  @Test
+  void disengagingAMissingSpecIsRefusedAsNotFound() throws Exception {
+    var ops = operations(shell());
+
+    var ex =
+        assertThrows(
+            ApiException.class, () -> ops.disengage("ghost", Actor.cliOperator(HANDLE), HANDLE));
+    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+  }
+
+  @Test
+  void aSpecDeletedDuringItsSnapshotPaymentPublishesEngageFailed() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+
+    var launch =
+        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
+    specStore.delete("auth");
+    launch.completion().run();
+
+    assertNull(specStore.findById("auth").orElse(null), "the spec is gone");
+    assertTrue(
+        ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty(),
+        "a spec that vanished mid-payment engages nobody");
+    assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGE_FAILED).size());
+  }
+
+  @Test
   void aReadOnlyEngagePersistsImmediatelyWithNoSnapshot() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
