@@ -67,9 +67,9 @@ class DispatchOperationsResolveSpecTest {
     return store.projectSpecs(PROJECT);
   }
 
-  private static DispatchOperations.SpecResolution resolve(
+  private static BuildDispatch.SpecResolution resolve(
       String specId, boolean restart, List<Spec> specs, SpecStore store) {
-    return DispatchOperations.resolveSpec(specs, specId, restart, OPERATOR, FDE);
+    return BuildDispatch.resolveSpec(specs, specId, restart, OPERATOR, FDE);
   }
 
   @Test
