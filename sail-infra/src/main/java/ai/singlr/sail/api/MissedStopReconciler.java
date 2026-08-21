@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -74,8 +75,6 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
-
-  private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("completed", "stopped", "failed");
 
   /** Answers whether a run's recorded agent identity is still active. */
   @FunctionalInterface
@@ -358,7 +357,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             .filter(RunStore.RunRow::buildRole)
             .findFirst()
             .filter(run -> run.ownedBy(node))
-            .filter(run -> TERMINAL_RUN_STATUSES.contains(run.status()));
+            .filter(run -> RunStatus.isTerminal(run.status()));
     if (latest.isEmpty() || unitStillActive(spec, latest.get())) {
       return false;
     }

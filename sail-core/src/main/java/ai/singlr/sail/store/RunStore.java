@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Duration;
 import java.time.Instant;
@@ -1083,14 +1084,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
                   + " WHERE id = ? AND status = ?",
               status,
-              TERMINAL_STATUSES.contains(status) ? DateTimeUtils.now().toString() : null,
+              RunStatus.isTerminal(status) ? DateTimeUtils.now().toString() : null,
               exitCode != null ? exitCode.longValue() : null,
               id,
               expected);
           if (db.changes() == 0) {
             return false;
           }
-          if (TERMINAL_STATUSES.contains(status)) {
+          if (RunStatus.isTerminal(status)) {
             revokeCredential(id);
           }
           alongside.run();
@@ -1127,8 +1128,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           return true;
         });
   }
-
-  private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "stopped", "failed");
 
   /** Marks a run finished with its final status and the agent process's exit code (nullable). */
   public void complete(String id, String status, Integer exitCode) {

@@ -5,13 +5,13 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.sync.SyncTransition;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -29,7 +29,6 @@ import java.util.function.Function;
 public final class SyncTransitionEvents {
 
   private static final String IN_PROGRESS = "in_progress";
-  private static final Set<String> TERMINAL_RUN_STATUSES = Set.of("completed", "stopped", "failed");
   private static final List<String> SEVERITY_ORDER = List.of("critical", "high", "medium", "low");
 
   private SyncTransitionEvents() {}
@@ -143,7 +142,7 @@ public final class SyncTransitionEvents {
   }
 
   private static boolean isTerminal(String status) {
-    return status != null && TERMINAL_RUN_STATUSES.contains(status);
+    return RunStatus.isTerminal(status);
   }
 
   private static List<Event> reviewEvents(
