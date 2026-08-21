@@ -389,18 +389,25 @@ class HostProvisionerTest {
   }
 
   @Test
-  void ufwNotInstalledSkipsFirewallStep() throws Exception {
+  void ufwNotInstalledSkipsFirewallStepInsteadOfCrashing() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus version", "6.3")
-            .onFail("ufw status", "command not found");
+            .onThrow(
+                "ufw",
+                new IOException("Cannot run program \"ufw\": error=2, No such file or directory"));
 
     var steps = new ArrayList<String>();
     var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
-
-    assertTrue(steps.stream().anyMatch(s -> s.contains("skipped:8/8:UFW not active")));
+    assertDoesNotThrow(
+        () ->
+            provisioner.provision(
+                "dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml")),
+        "a host without ufw must skip the firewall step, not abort init");
+    assertTrue(
+        steps.stream().anyMatch(s -> s.contains("skipped:8/8:UFW not installed")),
+        "step 8 skipped as not installed; steps=" + steps);
   }
 
   @Test

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.Set;
 public final class ScriptedShellExecutor implements ShellExec {
 
   private final Map<String, Result> scripts = new LinkedHashMap<>();
+  private final Map<String, IOException> throwing = new LinkedHashMap<>();
   private final Set<String> consumable = new HashSet<>();
   private final Set<String> consumed = new HashSet<>();
   private final List<String> invocations = new ArrayList<>();
@@ -57,6 +59,16 @@ public final class ScriptedShellExecutor implements ShellExec {
     return on(pattern, new Result(1, "", stderr));
   }
 
+  /**
+   * Command containing pattern throws — modeling a missing binary, where the real {@link
+   * ShellExecutor} fails at {@code ProcessBuilder.start} with {@link IOException} rather than
+   * returning a non-zero result.
+   */
+  public ScriptedShellExecutor onThrow(String pattern, IOException exception) {
+    throwing.put(pattern, exception);
+    return this;
+  }
+
   /** Shorthand: command containing pattern fails once, then falls through to default on reuse. */
   public ScriptedShellExecutor onceOnFail(String pattern, String stderr) {
     consumable.add(pattern);
@@ -77,14 +89,19 @@ public final class ScriptedShellExecutor implements ShellExec {
   }
 
   @Override
-  public Result exec(List<String> command) {
+  public Result exec(List<String> command) throws IOException {
     return exec(command, null, Duration.ZERO);
   }
 
   @Override
-  public Result exec(List<String> command, Path workDir, Duration timeout) {
+  public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
     var joined = String.join(" ", command);
     invocations.add(joined);
+    for (var entry : throwing.entrySet()) {
+      if (joined.contains(entry.getKey())) {
+        throw entry.getValue();
+      }
+    }
     for (var entry : scripts.entrySet()) {
       if (joined.contains(entry.getKey())) {
         if (consumed.contains(entry.getKey())) {
