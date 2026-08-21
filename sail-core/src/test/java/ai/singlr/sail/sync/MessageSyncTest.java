@@ -35,7 +35,7 @@ class MessageSyncTest {
   private final class Box implements AutoCloseable {
     final Sqlite db;
     final MessageStore messages;
-    final MessageReplica replica;
+    final StoreReplica replica;
 
     Box(String id) {
       db = Sqlite.open(tempDir.resolve(id + ".db"));
@@ -46,7 +46,7 @@ class MessageSyncTest {
           VALUES ('room', 'Room', 'acme', 'now', 'now')""");
       messages = new MessageStore(db);
       replica =
-          new MessageReplica(
+          new StoreReplica(
               id, messages, new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
     }
 

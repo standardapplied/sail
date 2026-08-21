@@ -25,7 +25,7 @@ import java.util.Set;
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
  * guarantee). {@code specs.rev} tracks the current revision.
  */
-public final class SpecStore implements ConflictResolver {
+public final class SpecStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "spec";
 
@@ -651,6 +651,11 @@ public final class SpecStore implements ConflictResolver {
   }
 
   /** Comparable snapshot of the current state, or null if the spec is absent/deleted. */
+  @Override
+  public String entityType() {
+    return ENTITY;
+  }
+
   public Map<String, Object> comparableSnapshot(String id) {
     return journal.comparableSnapshot(id);
   }

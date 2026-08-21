@@ -41,14 +41,14 @@ class FileSyncTest {
     final Sqlite db;
     final FileStore files;
     final SyncConflicts conflicts;
-    final FileReplica replica;
+    final StoreReplica replica;
 
     Box(String id) {
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.files = new FileStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica = new FileReplica(id, files, new ChangeLog(db), conflicts, new SyncState(db));
+      this.replica = new StoreReplica(id, files, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override

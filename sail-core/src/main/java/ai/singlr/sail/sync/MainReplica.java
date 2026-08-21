@@ -12,8 +12,8 @@ import java.util.Set;
  * The authoritative (main devbox) side of a sync round, as the {@link SyncEngine} sees it. Narrow
  * by design (interface segregation): main only ever reads its current state and commits a new
  * authoritative revision — it never adopts, tracks a base, or records conflicts (those are a
- * node-local concern). In brick 3b this is backed in-process by a {@code SpecReplica}; in brick 4 a
- * transport adapter over the SSH gateway implements the same contract.
+ * node-local concern). In brick 3b this is backed in-process by a {@code StoreReplica}; in brick 4
+ * a transport adapter over the SSH gateway implements the same contract.
  */
 public interface MainReplica {
 

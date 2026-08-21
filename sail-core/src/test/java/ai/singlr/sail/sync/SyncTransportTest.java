@@ -101,10 +101,10 @@ class SyncTransportTest {
     var mainFiles = new FileStore(main.db);
     var nodeFiles = new FileStore(nodeA.db);
     var nodeFileReplica =
-        new FileReplica(
+        new StoreReplica(
             "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
     var mainFileReplica =
-        new FileReplica(
+        new StoreReplica(
             "main",
             mainFiles,
             new ChangeLog(main.db),

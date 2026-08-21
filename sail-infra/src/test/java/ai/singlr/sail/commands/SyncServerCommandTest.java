@@ -24,8 +24,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.LocalReplica;
-import ai.singlr.sail.sync.RunReplica;
-import ai.singlr.sail.sync.SpecReplica;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
@@ -58,7 +57,7 @@ class SyncServerCommandTest {
   private Sqlite nodeDb;
   private SpecStore mainSpecs;
   private SpecStore nodeSpecs;
-  private SpecReplica nodeReplica;
+  private StoreReplica nodeReplica;
 
   @BeforeEach
   void setUp() {
@@ -72,7 +71,7 @@ class SyncServerCommandTest {
     mainSpecs = new SpecStore(mainDb);
     nodeSpecs = new SpecStore(nodeDb);
     nodeReplica =
-        new SpecReplica(
+        new StoreReplica(
             "node",
             nodeSpecs,
             new ChangeLog(nodeDb),
@@ -182,14 +181,15 @@ class SyncServerCommandTest {
     assertTrue(mainSpecs.findById("auth").isEmpty());
   }
 
-  private RunReplica nodeRunReplica() {
-    return new RunReplica(
+  private StoreReplica nodeRunReplica() {
+    var runStore = new RunStore(nodeDb);
+    return new StoreReplica(
         "uday",
-        "uday",
-        new RunStore(nodeDb),
+        runStore,
         new ChangeLog(nodeDb),
         new SyncConflicts(nodeDb),
-        new SyncState(nodeDb));
+        new SyncState(nodeDb),
+        id -> runStore.pushableFrom(id, "uday"));
   }
 
   private String createNodeRun(String node) {

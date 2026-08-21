@@ -25,7 +25,7 @@ import java.util.Optional;
  * entity type {@code file} within one transaction — the same revision/CAS/conflict machinery {@link
  * SpecStore} uses — so files get history, restore, and bidirectional conflict resolution for free.
  */
-public final class FileStore implements ConflictResolver {
+public final class FileStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "file";
 
@@ -103,6 +103,11 @@ public final class FileStore implements ConflictResolver {
         "SELECT project, path, content FROM project_files WHERE project = ? ORDER BY path",
         FileStore::mapRow,
         project);
+  }
+
+  @Override
+  public String entityType() {
+    return ENTITY;
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

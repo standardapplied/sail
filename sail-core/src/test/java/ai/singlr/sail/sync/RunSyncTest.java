@@ -41,14 +41,21 @@ class RunSyncTest {
     final Sqlite db;
     final RunStore runs;
     final SyncConflicts conflicts;
-    final RunReplica replica;
+    final StoreReplica replica;
 
     Box(String id) {
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.runs = new RunStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica = new RunReplica(id, id, runs, new ChangeLog(db), conflicts, new SyncState(db));
+      this.replica =
+          new StoreReplica(
+              id,
+              runs,
+              new ChangeLog(db),
+              conflicts,
+              new SyncState(db),
+              runId -> runs.pushableFrom(runId, id));
     }
 
     @Override

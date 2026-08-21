@@ -42,15 +42,14 @@ class ReviewSyncTest {
     final Sqlite db;
     final ReviewStore reviews;
     final SyncConflicts conflicts;
-    final ReviewReplica replica;
+    final StoreReplica replica;
 
     Box(String id) {
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.reviews = new ReviewStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica =
-          new ReviewReplica(id, reviews, new ChangeLog(db), conflicts, new SyncState(db));
+      this.replica = new StoreReplica(id, reviews, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override
