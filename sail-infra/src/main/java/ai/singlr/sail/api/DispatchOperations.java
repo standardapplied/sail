@@ -6,22 +6,12 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.config.SpecCatalog;
-import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.AgentTaskPrompt;
-import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.DispatchRepos;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -30,7 +20,6 @@ import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -175,25 +164,6 @@ public final class DispatchOperations {
     default void sailSetupUpdated(boolean updated) {}
   }
 
-  /**
-   * Outcome of {@link #resolveSpec}: the chosen spec, whether {@code restart} actually reset a
-   * non-pending status (so the executor publishes a {@code spec_restarted} event), and the status
-   * the spec held just before the reset.
-   */
-  record SpecResolution(Spec spec, boolean restarted, String previousStatus) {
-    static SpecResolution none() {
-      return new SpecResolution(null, false, null);
-    }
-
-    static SpecResolution of(Spec spec) {
-      return new SpecResolution(spec, false, null);
-    }
-
-    static SpecResolution restarted(Spec spec, String previousStatus) {
-      return new SpecResolution(spec, true, previousStatus);
-    }
-  }
-
   private final ShellExec shell;
   private final String file;
   private final ProjectLoader projects;
@@ -208,6 +178,7 @@ public final class DispatchOperations {
   private final AdhocRunner adhocRunner;
   private final RoomWakeLauncher roomWakeLauncher;
   private final InviteLauncher inviteLauncher;
+  private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -273,25 +244,25 @@ public final class DispatchOperations {
             runLauncher,
             this.events,
             shell);
+    this.buildDispatch =
+        new BuildDispatch(
+            projects,
+            specStore,
+            reviewStore,
+            runStore,
+            () -> messageStore,
+            admission,
+            runReservation,
+            runLauncher,
+            snapshotter,
+            listener,
+            this.events,
+            shell);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
     this.messageStore = Objects.requireNonNull(messages, "messages");
     return this;
-  }
-
-  /**
-   * Seeds the reserved run's delivery ledger with exactly the messages the task prompt rendered in
-   * full — by identity, from the same in-memory snapshot the prompt was built from, never
-   * re-queried and never range-matched. The prompt is the run's first delivery; anything the budget
-   * truncated or omitted, and any message that syncs in at any point — regardless of how its id
-   * sorts — has no ledger row and stays owed a full delivery through the relay or the stop gate.
-   */
-  private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> rendered) {
-    if (runStore == null || rendered.isEmpty()) {
-      return;
-    }
-    runStore.markDelivered(runId, rendered.stream().map(MessageStore.MessageRow::id).toList());
   }
 
   /**
@@ -304,128 +275,7 @@ public final class DispatchOperations {
    * released. Throws {@link ApiException} with a structured code on every refusal or failure.
    */
   public Outcome dispatch(String project, Request request, Actor actor, String localHandle) {
-    var loaded = projects.loadRunning(project);
-    if (!request.mode().equals("background") && !request.mode().equals("foreground")) {
-      throw new ApiException(
-          ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
-    }
-    if (Strings.isBlank(localHandle)) {
-      throw refusal(DispatchPolicy.nodeHandleUnset());
-    }
-    admission.requireTrustedRoster(localHandle);
-    if (loaded.config().agent() == null) {
-      throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
-    }
-
-    var specs = specStore.projectSpecs(project);
-    var resolution = resolveSpec(specs, request.specId(), request.restart(), actor, localHandle);
-    if (resolution.spec() == null) {
-      return new NoSpecs();
-    }
-    var nextSpec = resolution.spec();
-
-    var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
-    var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
-    var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-    var room =
-        messageStore == null
-            ? List.<MessageStore.MessageRow>of()
-            : messageStore.list(nextSpec.id(), null, 20);
-    var built =
-        AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room);
-    var task = built.prompt();
-    var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
-
-    if (request.dryRun()) {
-      requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
-      var prepared =
-          claimAndPrepare(
-              project,
-              loaded.config(),
-              targetRepos,
-              resolution,
-              taskSpec,
-              branch,
-              task,
-              request.mode());
-      return new Dispatched(
-          taskSpec,
-          branch,
-          agentType,
-          task,
-          null,
-          prepared.snapshot(),
-          prepared.branchCreated(),
-          resolution.restarted(),
-          null,
-          null,
-          Optional.empty());
-    }
-
-    var background = request.mode().equals("background");
-    var runId = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(runId);
-    var credential =
-        reserveRun(
-            runId,
-            project,
-            nextSpec.id(),
-            localHandle,
-            dispatchOwner(localHandle),
-            taskSpec.repos(),
-            agentType,
-            branch,
-            task,
-            unit,
-            loaded.config());
-    try {
-      seedRoomDelivery(runId, built.renderedMessages());
-      var prepared =
-          claimAndPrepare(
-              project,
-              loaded.config(),
-              targetRepos,
-              resolution,
-              taskSpec,
-              branch,
-              task,
-              request.mode());
-      var launch =
-          runLauncher.launchAgent(
-              project,
-              loaded.config(),
-              targetRepos,
-              task,
-              branch,
-              background,
-              taskSpec,
-              agentType,
-              unit,
-              runId,
-              credential);
-      var status =
-          runLauncher.finishLaunch(
-              new RunLauncher.RunContext(
-                  project, unit, runId, nextSpec.id(), agentType, "build", background),
-              launch);
-      return new Dispatched(
-          taskSpec,
-          branch,
-          agentType,
-          task,
-          runId,
-          prepared.snapshot(),
-          prepared.branchCreated(),
-          resolution.restarted(),
-          status,
-          background ? null : launch.exitCode(),
-          launch.watcher());
-    } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
-      throw e;
-    }
+    return buildDispatch.dispatch(project, request, actor, localHandle);
   }
 
   /**
@@ -539,54 +389,6 @@ public final class DispatchOperations {
     roomCommitGuard.guardRoomRun(project, runId);
   }
 
-  /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
-  private record PreparedClaim(String snapshot, boolean branchCreated) {}
-
-  /**
-   * The claim/branch phase, identical on the dry and live lanes: reset a restarted spec, claim it
-   * {@code in_progress} with its resolved repos and branch, supersede stale reviews, publish the
-   * lifecycle events, snapshot as configured, and check out the work branch. On the live lane this
-   * runs only after {@link #reserveRun} has won the repo reservation, so two concurrent dispatches
-   * can never both mutate spec state or race their checkouts in a shared repo.
-   */
-  private PreparedClaim claimAndPrepare(
-      String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
-      SpecResolution resolution,
-      Spec taskSpec,
-      String branch,
-      String task,
-      String mode) {
-    if (resolution.restarted()) {
-      specStore.updateStatus(taskSpec.id(), SpecStatus.PENDING);
-    }
-    specStore.updateReposAndStatus(taskSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
-    if (reviewStore != null) {
-      reviewStore.supersedeForSpec(taskSpec.id());
-    }
-    listener.claimed(taskSpec, task);
-    if (resolution.restarted()) {
-      publish(
-          project,
-          taskSpec.id(),
-          Event.WellKnownTypes.SPEC_RESTARTED,
-          Map.of("note", "restarted from " + resolution.previousStatus()));
-    }
-    publish(
-        project,
-        taskSpec.id(),
-        Event.WellKnownTypes.SPEC_DISPATCHED,
-        DispatchEvents.dispatchedData(branch, mode));
-    var snapshot = snapshotter.snapshot(project, config);
-    if (!snapshot.isEmpty()) {
-      publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
-    }
-    var branchCreated =
-        checkoutBranch(project, config, targetRepos, branch, resolution.restarted());
-    return new PreparedClaim(snapshot, branchCreated);
-  }
-
   /** The server-lane snapshotter: gated on {@code agent.auto_snapshot}, at most one per 24h. */
   public static Snapshotter autoSnapshotter(ShellExec shell) {
     return (project, config) -> {
@@ -627,243 +429,6 @@ public final class DispatchOperations {
   }
 
   /**
-   * Picks the spec to dispatch. Without {@code specId}, the next ready spec assigned to this box's
-   * FDE (or none) — unless {@code restart} is set, which {@link RestartResolution} refuses because
-   * a restart must name its target. With {@code specId}, the spec must exist and pass {@link
-   * DispatchPolicy}; {@link RestartResolution} then decides how its status is treated: pending
-   * dispatches normally with its dependencies met, and a non-pending status is either refused or —
-   * on {@code restart} — reported as restarted so the caller resets it and publishes {@code
-   * spec_restarted}. Pure: every refusal here (policy, readiness, the caller's later repo-overlap
-   * gate) fires before any mutation, so a refused caller can never reset a status.
-   */
-  static SpecResolution resolveSpec(
-      List<Spec> specs, String specId, boolean restart, Actor actor, String localHandle) {
-    var spec = Strings.isBlank(specId) ? null : SpecCatalog.findById(specs, specId);
-    if (spec == null) {
-      if (RestartResolution.decide(specId, null, restart)
-          instanceof RestartResolution.Refused refused) {
-        throw refusal(refused);
-      }
-      var next = SpecCatalog.nextReadyAssignedTo(specs, localHandle);
-      if (next == null) {
-        return SpecResolution.none();
-      }
-      LaunchAdmission.requireAllowed(actor, next, localHandle);
-      return SpecResolution.of(next);
-    }
-    LaunchAdmission.requireAllowed(actor, spec, localHandle);
-    return switch (RestartResolution.decide(specId, spec, restart)) {
-      case RestartResolution.Refused refused -> throw refusal(refused);
-      case RestartResolution.NotRestarted ignored -> {
-        if (!SpecCatalog.isReady(specs, spec)) {
-          throw new ApiException(
-              ErrorCode.SPEC_NOT_READY,
-              "Spec '" + specId + "' is not ready for dispatch.",
-              "Resolve dependencies or choose a ready spec.");
-        }
-        yield SpecResolution.of(spec);
-      }
-      case RestartResolution.Restarted restarted ->
-          SpecResolution.restarted(spec, restarted.previousStatus());
-    };
-  }
-
-  /**
-   * Checks out the work branch in every target repo that exists in the container: a fresh branch
-   * with {@code checkout -b}, or — on a restart — a forced {@code checkout -f} onto the existing
-   * branch so re-dispatch lands on the prior work even over a dirty tree the previous run left. A
-   * collision on a non-restart dispatch fails loud, pointing the operator at {@code --restart}.
-   */
-  private boolean checkoutBranch(
-      String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
-      String branch,
-      boolean restarted) {
-    if (Strings.isBlank(branch)) {
-      return false;
-    }
-    var created = false;
-    for (var repo : targetRepos) {
-      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
-      var repoExists =
-          exec(ContainerExec.asDevUser(project, List.of("test", "-d", repoDir + "/.git")));
-      if (!repoExists.ok()) {
-        continue;
-      }
-      var branchExists =
-          exec(ContainerExec.asDevUser(
-                  project,
-                  List.of(
-                      "git",
-                      "-C",
-                      repoDir,
-                      "rev-parse",
-                      "--verify",
-                      "--quiet",
-                      "refs/heads/" + branch)))
-              .ok();
-      List<String> checkoutArgs;
-      if (branchExists) {
-        checkoutArgs = RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted);
-      } else {
-        var base = baseBranch(project, repoDir, repo);
-        checkoutArgs =
-            RestartResolution.freshBranchArgs(
-                repoDir, branch, base, fetchLatestBase(project, repoDir, base));
-      }
-      var result = exec(ContainerExec.asDevUser(project, checkoutArgs));
-      if (!result.ok()) {
-        throw new ApiException(
-            ErrorCode.BRANCH_CREATE_FAILED,
-            "Failed to "
-                + (branchExists ? "check out" : "create")
-                + " branch '"
-                + branch
-                + "' in repo '"
-                + repo.path()
-                + "'.");
-      }
-      listener.branchReady(branch, repo.path(), branchExists);
-      created = true;
-    }
-    if (!created) {
-      listener.branchUnavailable(branch);
-    }
-    return created;
-  }
-
-  /**
-   * The mainline a fresh work branch forks from: the repo's configured branch when {@code
-   * sail.yaml} pins one, else origin's default branch (the clone's {@code origin/HEAD}), else
-   * blank. Deriving it from the repo config or the remote default — never the current {@code HEAD}
-   * — keeps a new branch off the mainline even when a prior dispatch left the checkout on an
-   * earlier work branch.
-   */
-  private String baseBranch(String project, String repoDir, SailYaml.Repo repo) {
-    if (Strings.isNotBlank(repo.branch())) {
-      return repo.branch();
-    }
-    var result =
-        exec(
-            ContainerExec.asDevUser(
-                project,
-                List.of("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "origin/HEAD")));
-    if (!result.ok()) {
-      return "";
-    }
-    var ref = result.stdout().trim();
-    return ref.startsWith("origin/") ? ref.substring("origin/".length()) : ref;
-  }
-
-  /**
-   * Fetches {@code base} from origin so a fresh work branch forks from the current upstream tip
-   * rather than a stale local checkout. Best-effort: returns true only when {@code origin/<base>}
-   * is available to branch from afterwards, so an offline box, a repo with no {@code origin}, or a
-   * detached base falls back to the local {@code HEAD} instead of failing the dispatch.
-   */
-  private boolean fetchLatestBase(String project, String repoDir, String base) {
-    if (Strings.isBlank(base) || "HEAD".equals(base)) {
-      return false;
-    }
-    exec(
-        ContainerExec.asDevUser(
-            project, List.of("git", "-C", repoDir, "fetch", "--quiet", "origin", base)));
-    return exec(ContainerExec.asDevUser(
-            project,
-            List.of(
-                "git",
-                "-C",
-                repoDir,
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "refs/remotes/origin/" + base)))
-        .ok();
-  }
-
-  /**
-   * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
-   * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
-   * never becomes its authorization owner — the agent must act for the assignee whose spec it
-   * builds, not for whoever pressed the button.
-   */
-  private static String dispatchOwner(String localHandle) {
-    return localHandle;
-  }
-
-  /**
-   * Refuses the dry-run dispatch when a local run of this project is still {@code running} with a
-   * reserved repo set intersecting the target's — the {@link DispatchGate} decision over run rows
-   * only. This read-only check serves the dry lane, which must not reserve; a live dispatch is
-   * gated atomically inside {@link #reserveRun} instead. A row whose agent already died without a
-   * stop signal is healed by the missed-stop sweep within its interval, so a stale row can only
-   * ever block briefly.
-   */
-  private void requireNoRepoOverlap(
-      String project, String localHandle, String specId, List<String> targetRepos) {
-    DispatchGate.decide(specId, "build", targetRepos, runningLocalRuns(project, localHandle))
-        .ifPresent(
-            conflict -> {
-              throw RunReservation.overlapRefusal(conflict);
-            });
-  }
-
-  /**
-   * The project's runs this box is executing right now, each with the repo set its dispatch
-   * reserved. Uses the same {@link #ownsLiveAgent} reading as the live reservation, so the dry lane
-   * counts a mid-stop ({@code stopping}) run as occupying its repos exactly like {@code
-   * reserveDispatch} does. A box that keeps no run aggregate has nothing to consult and allows the
-   * dispatch. A run recorded before repos were persisted reads as no repos, which the gate treats
-   * as whole-container: refusing is the safe reading of a row it cannot scope, and it heals when
-   * the run finishes.
-   */
-  private List<DispatchGate.RunningRun> runningLocalRuns(String project, String localHandle) {
-    if (runStore == null) {
-      return List.of();
-    }
-    return runStore.listForProject(project).stream()
-        .filter(DispatchOperations::ownsLiveAgent)
-        .filter(run -> run.ownedBy(localHandle))
-        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.role(), run.repos()))
-        .toList();
-  }
-
-  /**
-   * Atomically reserves the dispatch as a {@code running} run stamped with this box's handle and
-   * the target repo set: {@link RunStore#reserveDispatch} checks every running local run for a repo
-   * overlap and inserts the row in one {@code BEGIN IMMEDIATE} transaction, so two concurrent
-   * dispatches — even from separate processes — can never both claim the same repo. A conflict or a
-   * store failure aborts the dispatch before any spec mutation or launch: the row is what every
-   * later overlap check and provenance guard depends on, so proceeding without it is not safe. Also
-   * prunes the container's oldest run-log directories (best-effort). A run store is absent only on
-   * boxes that keep no run aggregate, which have nothing to reserve against.
-   *
-   * <p>A foreground dispatch records the same run-scoped unit name even though it launches no
-   * systemd service: the run's pid file carries the same identity, so stop, probe, and the
-   * missed-stop reconciler address a foreground session exactly like a background one. The
-   * foreground run completes when its blocking launcher returns.
-   */
-  private String reserveRun(
-      String runId,
-      String project,
-      String specId,
-      String node,
-      String owner,
-      List<String> repos,
-      String agentType,
-      String branch,
-      String task,
-      AgentUnit unit,
-      SailYaml config) {
-    if (runStore == null) {
-      return null;
-    }
-    return runReservation.reserve(
-        runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
-  }
-
-  /**
    * Whether a run may still own a live agent process, so its run-scoped files (the pid file the
    * stop's kill reads, the log an operator is following) must survive retention. A {@code stopping}
    * run is mid-stop, not terminal: pruning its directory would turn {@code killAgent} into a no-op
@@ -871,10 +436,6 @@ public final class DispatchOperations {
    */
   static boolean ownsLiveAgent(RunStore.RunRow run) {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
-  }
-
-  private void publish(String project, String specId, String type, Map<String, Object> data) {
-    events.publish(Event.of(project, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
   }
 
   private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {
@@ -892,22 +453,6 @@ public final class DispatchOperations {
               + "', taking one to be safe: "
               + e.getMessage());
       return true;
-    }
-  }
-
-  private static ApiException refusal(DispatchDecision.Refused refused) {
-    return new ApiException(refused.code(), refused.message(), refused.fix());
-  }
-
-  private static ApiException refusal(RestartResolution.Refused refused) {
-    return new ApiException(refused.code(), refused.message(), refused.fix());
-  }
-
-  private ShellExec.Result exec(List<String> command) {
-    try {
-      return shell.exec(command);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "A sail system command failed.", e);
     }
   }
 }
