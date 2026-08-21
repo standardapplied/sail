@@ -12,14 +12,12 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.InvitePrompt;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -31,7 +29,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -210,6 +207,7 @@ public final class DispatchOperations {
   private final RunReservation runReservation;
   private final AdhocRunner adhocRunner;
   private final RoomWakeLauncher roomWakeLauncher;
+  private final InviteLauncher inviteLauncher;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -264,6 +262,17 @@ public final class DispatchOperations {
             runReservation,
             runLauncher,
             roomCommitGuard);
+    this.inviteLauncher =
+        new InviteLauncher(
+            specStore,
+            projects,
+            () -> messageStore,
+            runStore,
+            admission,
+            runReservation,
+            runLauncher,
+            this.events,
+            shell);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -497,158 +506,8 @@ public final class DispatchOperations {
       String model,
       Actor actor,
       String localHandle) {
-    if (runStore == null) {
-      throw new ApiException(
-          ErrorCode.COMMAND_FAILED,
-          "This box keeps no run aggregate, so an invite cannot be reserved or tracked.");
-    }
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
-    admission.requireTrustedRoster(localHandle);
-    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
-    var inviteModel = LaunchAdmission.validateModel(model);
-    if (!full) {
-      throw new ApiException(
-          ErrorCode.BAD_REQUEST,
-          "Read-only invites are superseded by engagement: engage the agent in the room instead"
-              + " (POST /v1/specs/{id}/engage, or 'sail spec engage').",
-          "An engaged read-only agent stays in the room and answers every message — the one-shot"
-              + " read-only invite offered strictly less.");
-    }
-    var project = spec.project();
-    var loaded = projects.loadRunning(project);
-    var config = loaded.config();
-    if (config.agent() == null) {
-      throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
-    }
-    admission.requireInstalled(agentCli, project);
-    var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
-    var room =
-        messageStore == null
-            ? List.<MessageStore.MessageRow>of()
-            : messageStore.list(specId, null, 20);
-    var built = InvitePrompt.build(spec, body.isBlank() ? spec.title() : body, room);
-    var task = built.prompt();
-    var runId = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(runId);
-    var role = full ? DispatchGate.FULL_INVITE_ROLE : DispatchGate.READ_ONLY_INVITE_ROLE;
-    var targetRepos =
-        full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
-    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
-    var branch = full ? Objects.toString(spec.branch(), "") : "";
-    var owner = Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee();
-    var credential =
-        runReservation.reserve(
-            runId,
-            project,
-            specId,
-            localHandle,
-            owner,
-            role,
-            repoPaths,
-            agentCli.yamlName(),
-            Strings.isBlank(branch) ? null : branch,
-            task,
-            unit,
-            config);
-    try {
-      seedRoomDelivery(runId, built.renderedMessages());
-    } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
-      throw e;
-    }
-    var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
-    var snapshot = full && takeSnapshot ? "invite-" + runId : "";
-    Runnable completion =
-        () ->
-            completeInvite(
-                project,
-                config,
-                specId,
-                runId,
-                unit,
-                agentCli,
-                inviteModel,
-                task,
-                branch,
-                targetRepos,
-                repoPaths,
-                credential,
-                role,
-                snapshot);
-    return new InviteLaunch(runId, principal, full, snapshot, completion);
-  }
-
-  /**
-   * The deferred half of an invite, run off the request thread: take the pre-launch snapshot (full
-   * mode) or capture the room baseline (read only), then launch the session. The reservation is
-   * already held. A snapshot or launch failure releases it and publishes {@code snapshot_created}
-   * carrying an {@code error} — there is no caller left to throw to, so the room learns the invite
-   * failed through the stream.
-   */
-  private void completeInvite(
-      String project,
-      SailYaml config,
-      String specId,
-      String runId,
-      AgentUnit unit,
-      AgentCli agentCli,
-      String inviteModel,
-      String task,
-      String branch,
-      List<SailYaml.Repo> targetRepos,
-      List<String> repoPaths,
-      String credential,
-      String role,
-      String snapshot) {
-    try {
-      if (!Strings.isBlank(snapshot)) {
-        inviteSnapshot(project, specId, runId);
-      }
-      var workDir = AgentSession.launchWorkDir(config.sshUser(), targetRepos);
-      var launch =
-          runLauncher.launchSession(
-              new RunLauncher.LaunchSpec(
-                  project,
-                  config,
-                  workDir,
-                  true,
-                  inviteModel,
-                  null,
-                  specId,
-                  agentCli.yamlName(),
-                  task,
-                  branch,
-                  repoPaths,
-                  true,
-                  unit,
-                  runId,
-                  credential,
-                  role,
-                  null));
-      runLauncher.finishLaunch(
-          new RunLauncher.RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true),
-          launch);
-    } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
-      publishInviteFailed(project, specId, runId, snapshot, e);
-    }
-  }
-
-  private void publishInviteFailed(
-      String project, String specId, String runId, String snapshot, RuntimeException e) {
-    var data = new LinkedHashMap<String, Object>();
-    data.put("label", snapshot);
-    data.put(Event.WellKnownData.RUN_ID, runId);
-    data.put("error", Objects.requireNonNullElse(e.getMessage(), e.toString()));
-    publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, data);
+    return inviteLauncher.start(
+        specId, agentYamlName, full, takeSnapshot, model, actor, localHandle);
   }
 
   /**
@@ -670,32 +529,6 @@ public final class DispatchOperations {
   /** Delegates to {@link EngagementService}: dismisses the room's engaged agent. */
   public String disengage(String specId, Actor actor, String localHandle) {
     return engagementService.disengage(specId, actor, localHandle);
-  }
-
-  /**
-   * The full invite's mandatory pre-launch snapshot, labeled {@code invite-<runId>} so rollback is
-   * one visible step. Published with the spec id — unlike the container-scoped dispatch snapshot —
-   * so the {@code snapshot_created} event renders in the room the invite was made from. Failure
-   * aborts the invite: the snapshot is the payment for full access, and a YOLO session with no
-   * rollback point must not launch.
-   */
-  private String inviteSnapshot(String project, String specId, String runId) {
-    var label = "invite-" + runId;
-    try {
-      new SnapshotManager(shell).create(project, label, INVITE_SNAPSHOT_TIMEOUT);
-    } catch (Exception e) {
-      throw new ApiException(
-          ErrorCode.SNAPSHOT_FAILED,
-          "Failed to create the pre-invite snapshot, so the invite does not launch.",
-          "Check the host's snapshot capacity (incus storage) and retry.",
-          e);
-    }
-    publish(
-        project,
-        specId,
-        Event.WellKnownTypes.SNAPSHOT_CREATED,
-        Map.of("label", label, Event.WellKnownData.RUN_ID, runId));
-    return label;
   }
 
   /**
