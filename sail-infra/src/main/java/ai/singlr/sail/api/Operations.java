@@ -5,21 +5,13 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
-import java.util.List;
-import java.util.Optional;
-
-public interface Operations {
-
-  /**
-   * Resolves a run credential — the bearer the in-container agent lane presents over the local
-   * socket — to its live run row. Empty for an unknown, revoked, or expired credential, and on
-   * boxes that keep no run aggregate.
-   */
-  default Optional<RunStore.RunRow> runForCredential(String credential) {
-    return Optional.empty();
-  }
+/**
+ * The full control-plane surface served over the web API by {@link ApiRouter}. Extends {@link
+ * LocalLaneOperations} so the in-container local-socket surface is one shared contract, and adds
+ * the web-only lanes: project lifecycle, dispatch, snapshots, agent status, run control, events,
+ * and reviews.
+ */
+public interface Operations extends LocalLaneOperations {
 
   Result<ReviewListResponse> reviewsForSpec(String specId);
 
@@ -113,70 +105,8 @@ public interface Operations {
   /** Returns per-subscriber + bus stats for {@code /v1/events/stats}. */
   Result<EventBusStatsResponse> eventBusStats();
 
-  Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter);
-
-  Result<GlobalSpecDetailResponse> globalSpec(String specId);
-
-  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
-
   /** Drafts a follow-up spec from the open findings of a spec's latest non-superseded review. */
   Result<FollowupSpecResponse> createFollowupSpec(String specId, FollowupCreateRequest request);
-
-  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request, Actor actor);
-
-  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor);
-
-  Result<GlobalSpecContentResponse> globalSpecContent(String specId);
-
-  Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request, Actor actor);
-
-  /**
-   * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
-   * credential is unknown or its handle has left the roster. Serves the local socket's interactive
-   * lane; run credentials are resolved first and never reach this.
-   */
-  default Optional<Actor> boxActorForCredential(String credential) {
-    return Optional.empty();
-  }
-
-  Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, Actor actor, String author);
-
-  /**
-   * A page of a spec room: {@code before} pages backward from the newest (the default), {@code
-   * after} reads forward past a known message id. The two are exclusive.
-   */
-  Result<SpecMessagesResponse> specMessages(String specId, String before, String after, int limit);
-
-  /**
-   * The run's undelivered room messages: everything on the run's spec absent from the run's
-   * delivery ledger, minus what the run's own principal authored — a run is never told its own
-   * story. Tracked by exact message identity, so a message that synchronized in late is still owed
-   * a delivery no matter how its id sorts. {@code hasMore} reports that the batch was capped and
-   * another read is due. A run with no spec (ad-hoc) has an empty inbox.
-   */
-  Result<RunInboxResponse> runInbox(String runId);
-
-  /**
-   * Acknowledges exactly {@code delivered} — message ids the caller actually showed the run, each
-   * of which must name a message on the run's own spec. The credential names the run and the run
-   * names the spec, so a caller can never mark another run's ledger or point it off-spec.
-   * Idempotent: a replayed acknowledgement is a no-op.
-   */
-  Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered);
-
-  /**
-   * Records the hook-reported identity of the run's agent conversation: the session id (required),
-   * the start source, and the container-side transcript path (both optional, stored null when
-   * blank). Last write wins — a resume, clear, or compact restart re-reports and overwrites, so the
-   * row always names the conversation a human would attach to. The run credential is the write
-   * gate: revocation at run completion is what ends a run's ability to report, so there is no
-   * separate status check. A blank session id is rejected without touching a prior report.
-   */
-  Result<RunSessionResponse> recordRunSession(
-      String runId, String sessionId, String source, String transcriptPath);
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 
@@ -190,6 +120,4 @@ public interface Operations {
       String specId, EngageRequest request, Actor actor, String localHandle);
 
   Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle);
-
-  Result<GlobalBoardResponse> globalBoard(String project);
 }
