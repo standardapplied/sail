@@ -7,6 +7,11 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SpecCatalog;
+import ai.singlr.sail.engine.AgentReporter;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -123,6 +128,11 @@ record ProjectResponse(String name, String containerStatus, AgentConfigView agen
 }
 
 record AgentConfigView(String type, boolean autoSnapshot, boolean autoBranch) implements Mappable {
+  static AgentConfigView from(SailYaml config) {
+    var agent = config.agent();
+    return new AgentConfigView(agent.type(), agent.autoSnapshot(), agent.autoBranch());
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -213,6 +223,19 @@ record AgentStatusResponse(
     String logPath,
     List<AgentRunView> runs)
     implements Mappable {
+  static AgentStatusResponse from(
+      String name, AgentSession.SessionInfo info, List<AgentRunView> runs) {
+    return new AgentStatusResponse(
+        name,
+        info != null && info.running() || runs.stream().anyMatch(AgentRunView::running),
+        info != null ? info.pid() : null,
+        info != null ? info.task() : null,
+        info != null ? info.startedAt() : null,
+        info != null ? info.branch() : null,
+        info != null ? info.logPath() : null,
+        runs);
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -238,6 +261,17 @@ record AgentRunView(
     String startedAt,
     String logPath)
     implements Mappable {
+  static AgentRunView from(RunStore.RunRow run, AgentSession.SessionInfo info) {
+    return new AgentRunView(
+        run.id(),
+        run.specId(),
+        run.branch(),
+        info != null && info.running(),
+        info != null ? info.pid() : null,
+        run.startedAt(),
+        run.logPath());
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -268,6 +302,24 @@ record AgentReportResponse(
     boolean rolledBack,
     String rollbackSnapshot)
     implements Mappable {
+  static AgentReportResponse from(AgentReporter.Report report) {
+    return new AgentReportResponse(
+        report.name(),
+        report.sessionStatus(),
+        report.startedAt(),
+        report.endedAt(),
+        report.duration(),
+        report.branch(),
+        report.specs().stream().map(spec -> SpecView.from(report.specs(), spec)).toList(),
+        report.commitCount(),
+        report.lastCommitMinutesAgo() >= 0 ? report.lastCommitMinutesAgo() : null,
+        report.guardrailTriggered(),
+        report.guardrailReason(),
+        report.guardrailAction(),
+        report.rolledBack(),
+        report.rollbackSnapshot());
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -304,6 +356,23 @@ record SpecView(
     boolean blocked,
     List<String> unmetDependencies)
     implements Mappable {
+  static SpecView from(List<Spec> specs, Spec spec) {
+    return new SpecView(
+        spec.id(),
+        spec.title(),
+        spec.status().wire(),
+        spec.assignee(),
+        spec.dependsOn(),
+        spec.repos(),
+        spec.agent(),
+        spec.model(),
+        spec.reasoningEffort(),
+        spec.branch(),
+        SpecCatalog.isReady(specs, spec),
+        SpecCatalog.isBlocked(specs, spec),
+        SpecCatalog.unmetDependencies(specs, spec));
+  }
+
   public SpecView {
     dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
     repos = repos == null ? List.of() : List.copyOf(repos);
@@ -340,6 +409,18 @@ record DispatchedSpecView(
     String reasoningEffort,
     String branch)
     implements Mappable {
+  static DispatchedSpecView from(Spec spec, String branch) {
+    return new DispatchedSpecView(
+        spec.id(),
+        spec.title(),
+        "in_progress",
+        spec.repos(),
+        spec.agent(),
+        spec.model(),
+        spec.reasoningEffort(),
+        Strings.isNotBlank(branch) ? branch : null);
+  }
+
   public DispatchedSpecView {
     repos = repos == null ? List.of() : List.copyOf(repos);
   }
@@ -369,6 +450,18 @@ record AgentStatusView(
     String branch,
     String logPath)
     implements Mappable {
+  static AgentStatusView from(String type, String mode, AgentSession.SessionInfo info) {
+    return new AgentStatusView(
+        type,
+        mode,
+        info != null && info.running(),
+        info != null ? info.pid() : null,
+        info != null ? info.task() : null,
+        info != null ? info.startedAt() : null,
+        info != null ? info.branch() : null,
+        info != null ? info.logPath() : null);
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -386,6 +479,15 @@ record AgentStatusView(
 
 record SpecSummaryView(int pending, int inProgress, int review, int awaitingMerge, int done)
     implements Mappable {
+  static SpecSummaryView from(Map<String, Integer> counts) {
+    return new SpecSummaryView(
+        counts.getOrDefault("pending", 0),
+        counts.getOrDefault("in_progress", 0),
+        counts.getOrDefault("review", 0),
+        counts.getOrDefault("awaiting_merge", 0),
+        counts.getOrDefault("done", 0));
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -401,6 +503,14 @@ record SpecSummaryView(int pending, int inProgress, int review, int awaitingMerg
 record BoardSummaryView(
     SpecSummaryView counts, int readyCount, int blockedCount, String nextReadyId)
     implements Mappable {
+  static BoardSummaryView from(SpecCatalog.Summary summary) {
+    return new BoardSummaryView(
+        SpecSummaryView.from(summary.counts()),
+        summary.readyCount(),
+        summary.blockedCount(),
+        summary.nextReadyId());
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
