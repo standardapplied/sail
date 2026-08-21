@@ -340,7 +340,13 @@ public final class HostProvisioner {
       throws IOException, InterruptedException, TimeoutException {
     step(8, "Configuring UFW firewall rules...");
 
-    var status = shell.exec(List.of("ufw", "status"));
+    ShellExec.Result status;
+    try {
+      status = shell.exec(List.of("ufw", "status"));
+    } catch (IOException e) {
+      stepSkipped(8, "UFW not installed");
+      return;
+    }
     if (!status.ok() || !status.stdout().contains("Status: active")) {
       stepSkipped(8, "UFW not active");
       return;
