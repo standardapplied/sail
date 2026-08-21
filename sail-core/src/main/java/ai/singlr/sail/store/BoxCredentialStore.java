@@ -6,9 +6,8 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
-import java.security.SecureRandom;
-import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -32,9 +31,7 @@ public final class BoxCredentialStore {
     if (Strings.isBlank(handle)) {
       throw new IllegalArgumentException("box credential handle is required");
     }
-    var bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    var credential = "sailbox_" + HexFormat.of().formatHex(bytes);
+    var credential = Secrets.mint("sailbox");
     db.execute(
         """
         INSERT INTO box_credential (id, handle, credential_hash, created_at)

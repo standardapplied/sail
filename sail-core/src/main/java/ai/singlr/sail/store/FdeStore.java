@@ -6,11 +6,10 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.ssh.SshPublicKey;
-import java.security.SecureRandom;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -223,8 +222,6 @@ public final class FdeStore {
   }
 
   private static String generateId() {
-    var bytes = new byte[16];
-    new SecureRandom().nextBytes(bytes);
-    return "fde_" + HexFormat.of().formatHex(bytes);
+    return Secrets.mint("fde", 16);
   }
 }

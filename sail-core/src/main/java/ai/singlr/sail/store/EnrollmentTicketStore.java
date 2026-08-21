@@ -6,9 +6,9 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.webauthn.Hashes;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -89,9 +89,7 @@ public final class EnrollmentTicketStore {
   }
 
   private static String generateTicket() {
-    var bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    return "enr_" + HexFormat.of().formatHex(bytes);
+    return Secrets.mint("enr");
   }
 
   private static String sha256(String input) {

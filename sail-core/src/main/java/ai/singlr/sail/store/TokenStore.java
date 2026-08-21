@@ -6,10 +6,10 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Secrets;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -114,9 +114,7 @@ public final class TokenStore {
   }
 
   private static String generateToken() {
-    var bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    return "sail_" + HexFormat.of().formatHex(bytes);
+    return Secrets.mint("sail");
   }
 
   static String sha256(String input) {
