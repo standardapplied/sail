@@ -220,6 +220,7 @@ public final class DispatchOperations {
   private final ReviewStore reviewStore;
   private final RunStore runStore;
   private final LaunchAdmission admission;
+  private final EngagementService engagementService;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -258,6 +259,8 @@ public final class DispatchOperations {
     this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.listener = Objects.requireNonNull(listener, "listener");
+    this.engagementService =
+        new EngagementService(specStore, projects, admission, this.events, shell);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -843,23 +846,11 @@ public final class DispatchOperations {
     publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, data);
   }
 
-  /** A prepared engagement: the snapshot label a full mode will pay, and the deferred half. */
-  public record EngageLaunch(String agent, String mode, String snapshot, Runnable completion) {}
-
   /**
-   * Engages an agent in {@code specId}'s room: records the engagement on the spec row (synced,
-   * atomic — one JSON value) so the wake reactor answers every human message with a chat turn until
-   * a human disengages. Mode {@code full} is the default; {@code read-only} is the explicit narrow
-   * choice, offered only where the harness enforces it. A full engagement may take one engage-time
-   * rollback snapshot (never per turn), but the default is none — on the {@code dir} backend a
-   * snapshot is a slow full filesystem copy, so the rollback point is opt-in ({@code takeSnapshot})
-   * and the per-turn repo reservation remains the standing guard. A requested snapshot runs off the
-   * request thread ({@code completion}) because a {@code dir}-backend snapshot would blow the HTTP
-   * timeout; the engagement is then persisted only after the snapshot succeeds — the payment
-   * precedes the access — and a failure publishes {@code spec_engage_failed} into the room instead
-   * of engaging. Requires the dispatch tier on the spec, exactly like an invite.
+   * Delegates to {@link EngagementService}, the launch-free room-engagement lane. Kept on the
+   * dispatch surface so callers reach engagement and dispatch through one operations object.
    */
-  public EngageLaunch engage(
+  public EngagementService.EngageLaunch engage(
       String specId,
       String agentYamlName,
       String mode,
@@ -867,113 +858,13 @@ public final class DispatchOperations {
       boolean takeSnapshot,
       Actor actor,
       String localHandle) {
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
-    admission.requireTrustedRoster(localHandle);
-    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
-    Engagement engagement;
-    try {
-      engagement =
-          Engagement.of(
-              agentCli.yamlName(),
-              mode,
-              LaunchAdmission.validateModel(model),
-              DateTimeUtils.now().toString());
-    } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
-    }
-    if (!engagement.full() && !agentCli.supportsRoomLane()) {
-      throw new ApiException(
-          ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyInviteRefusal(),
-          "Engage " + agentCli.yamlName() + " with full access instead.");
-    }
-    var project = spec.project();
-    projects.loadRunning(project);
-    admission.requireInstalled(agentCli, project);
-    if (!engagement.full() || !takeSnapshot) {
-      persistEngagement(specId, engagement, actor);
-      publishEngaged(project, specId, engagement, "");
-      return new EngageLaunch(engagement.agent(), engagement.mode(), "", null);
-    }
-    var label = "engage-" + DateTimeUtils.newId();
-    Runnable completion = () -> completeEngage(project, specId, engagement, label, actor);
-    return new EngageLaunch(engagement.agent(), engagement.mode(), label, completion);
+    return engagementService.engage(
+        specId, agentYamlName, mode, model, takeSnapshot, actor, localHandle);
   }
 
-  private void completeEngage(
-      String project, String specId, Engagement engagement, String label, Actor actor) {
-    try {
-      try {
-        new SnapshotManager(shell).create(project, label, INVITE_SNAPSHOT_TIMEOUT);
-      } catch (Exception e) {
-        throw new ApiException(
-            ErrorCode.SNAPSHOT_FAILED,
-            "Failed to create the engage snapshot, so the engagement does not take effect.",
-            "Check the host's snapshot capacity (incus storage) and retry.",
-            e);
-      }
-      publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", label));
-      persistEngagement(specId, engagement, actor);
-      publishEngaged(project, specId, engagement, label);
-    } catch (RuntimeException e) {
-      var data = new LinkedHashMap<String, Object>();
-      data.put("agent", engagement.agent());
-      data.put("label", label);
-      data.put("error", Objects.requireNonNullElse(e.getMessage(), e.toString()));
-      publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGE_FAILED, data);
-    }
-  }
-
-  /** Dismisses the room's engaged agent. Idempotent: dismissing an empty room is a no-op. */
+  /** Delegates to {@link EngagementService}: dismisses the room's engaged agent. */
   public String disengage(String specId, Actor actor, String localHandle) {
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
-    var engagement = Engagement.fromJson(spec.engagement());
-    if (engagement == null) {
-      return null;
-    }
-    specStore.update(spec.withEngagement(null));
-    publish(
-        spec.project(),
-        specId,
-        Event.WellKnownTypes.SPEC_DISENGAGED,
-        Map.of("agent", engagement.agent(), "mode", engagement.mode()));
-    return engagement.agent();
-  }
-
-  private void persistEngagement(String specId, Engagement engagement, Actor actor) {
-    var current =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND,
-                        "Spec '" + specId + "' vanished while engaging."));
-    specStore.update(current.withEngagement(engagement.toJson()));
-  }
-
-  private void publishEngaged(String project, String specId, Engagement engagement, String label) {
-    var data = new LinkedHashMap<String, Object>();
-    data.put("agent", engagement.agent());
-    data.put("mode", engagement.mode());
-    if (!Strings.isBlank(label)) {
-      data.put("label", label);
-    }
-    publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGED, data);
+    return engagementService.disengage(specId, actor, localHandle);
   }
 
   /**
