@@ -9,7 +9,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.Engagement;
-import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -23,7 +22,6 @@ import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.InvitePrompt;
 import ai.singlr.sail.engine.RoomWakePrompt;
-import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -40,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /**
  * The single dispatch executor behind every lane. Owns the whole procedure — resolve, policy,
@@ -212,6 +209,7 @@ public final class DispatchOperations {
   private final EngagementService engagementService;
   private final RoomCommitGuard roomCommitGuard;
   private final RunLauncher runLauncher;
+  private final RunReservation runReservation;
   private MessageStore messageStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -255,6 +253,7 @@ public final class DispatchOperations {
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
+    this.runReservation = new RunReservation(runStore, shell, listener);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -405,7 +404,7 @@ public final class DispatchOperations {
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
     }
   }
@@ -494,7 +493,7 @@ public final class DispatchOperations {
       return new AdhocSession(
           runId, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
     }
   }
@@ -568,33 +567,20 @@ public final class DispatchOperations {
         full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
     var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
     var branch = full ? Objects.toString(spec.branch(), "") : "";
-    RunStore.Reservation reservation;
-    try {
-      reservation =
-          runStore.reserveDispatch(
-              runId,
-              project,
-              specId,
-              localHandle,
-              Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
-              role,
-              repoPaths,
-              agentType,
-              Strings.isBlank(branch) ? null : branch,
-              task,
-              unit.logPath(),
-              unit.unitName(),
-              configuredMaxDuration(config));
-    } catch (RuntimeException e) {
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the room wake run.", e);
-    }
-    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
-      throw overlapRefusal(conflicted.conflict());
-    }
-    if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
-      throw leaseRefusal(held);
-    }
-    var credential = ((RunStore.Reservation.Reserved) reservation).credential();
+    var credential =
+        runReservation.reserve(
+            runId,
+            project,
+            specId,
+            localHandle,
+            Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
+            role,
+            repoPaths,
+            agentType,
+            Strings.isBlank(branch) ? null : branch,
+            task,
+            unit,
+            config);
     try {
       seedRoomDelivery(runId, built.renderedMessages());
       if (!full) {
@@ -630,7 +616,7 @@ public final class DispatchOperations {
           new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
     }
   }
@@ -739,7 +725,7 @@ public final class DispatchOperations {
     var branch = full ? Objects.toString(spec.branch(), "") : "";
     var owner = Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee();
     var credential =
-        reserve(
+        runReservation.reserve(
             runId,
             project,
             specId,
@@ -755,7 +741,7 @@ public final class DispatchOperations {
     try {
       seedRoomDelivery(runId, built.renderedMessages());
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
     }
     var principal = runStore.findById(runId).map(RunStore.RunRow::principal).orElse("");
@@ -831,7 +817,7 @@ public final class DispatchOperations {
           new RunLauncher.RunContext(project, unit, runId, specId, agentCli.yamlName(), role, true),
           launch);
     } catch (RuntimeException e) {
-      releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, project, unit);
       publishInviteFailed(project, specId, runId, snapshot, e);
     }
   }
@@ -1204,38 +1190,8 @@ public final class DispatchOperations {
     DispatchGate.decide(specId, "build", targetRepos, runningLocalRuns(project, localHandle))
         .ifPresent(
             conflict -> {
-              throw overlapRefusal(conflict);
+              throw RunReservation.overlapRefusal(conflict);
             });
-  }
-
-  /**
-   * The refusal when an exclusive container operation (a snapshot restore) holds the container: no
-   * run of any role may start into a container that is about to be rolled back.
-   */
-  private static ApiException leaseRefusal(RunStore.Reservation.LeaseHeld held) {
-    return new ApiException(
-        ErrorCode.CONFLICT,
-        "A snapshot " + held.action() + " is in progress in this container.",
-        "Wait for its snapshot_restored event, then retry.");
-  }
-
-  private static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
-    var run = conflict.run();
-    var occupied =
-        Strings.isBlank(run.specId())
-            ? "Ad-hoc agent run " + run.runId() + " is occupying this container"
-            : "Agent run "
-                + run.runId()
-                + " is already working spec '"
-                + run.specId()
-                + "' in "
-                + (conflict.overlap().isEmpty()
-                    ? "this container"
-                    : "repo(s) " + conflict.overlap());
-    return new ApiException(
-        ErrorCode.AGENT_ALREADY_RUNNING,
-        occupied + ".",
-        "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
   }
 
   /**
@@ -1288,7 +1244,7 @@ public final class DispatchOperations {
     if (runStore == null) {
       return null;
     }
-    return reserve(
+    return runReservation.reserve(
         runId, project, specId, node, owner, "build", repos, agentType, branch, task, unit, config);
   }
 
@@ -1313,80 +1269,8 @@ public final class DispatchOperations {
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so an agent session cannot be reserved or tracked.");
     }
-    return reserve(
+    return runReservation.reserve(
         runId, project, "", node, node, "adhoc", List.of(), agentType, branch, task, unit, config);
-  }
-
-  private String reserve(
-      String runId,
-      String project,
-      String specId,
-      String node,
-      String owner,
-      String role,
-      List<String> repos,
-      String agentType,
-      String branch,
-      String task,
-      AgentUnit unit,
-      SailYaml config) {
-    RunStore.Reservation reservation;
-    try {
-      reservation =
-          runStore.reserveDispatch(
-              runId,
-              project,
-              specId,
-              node,
-              owner,
-              role,
-              repos,
-              agentType,
-              branch,
-              task,
-              unit.logPath(),
-              unit.unitName(),
-              configuredMaxDuration(config));
-    } catch (RuntimeException e) {
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
-    }
-    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
-      throw overlapRefusal(conflicted.conflict());
-    }
-    if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
-      throw leaseRefusal(held);
-    }
-    pruneRuns(project);
-    return ((RunStore.Reservation.Reserved) reservation).credential();
-  }
-
-  /**
-   * The run's configured hard lifetime, bounding its credential: {@code guardrails.max_duration},
-   * or null when unset — an unbounded run's credential is revoked by its verified finishers, never
-   * by a clock that could expire mid-work.
-   */
-  private static Duration configuredMaxDuration(SailYaml config) {
-    var agent = config.agent();
-    if (agent == null || agent.guardrails() == null) {
-      return null;
-    }
-    return Guardrails.parseDuration(agent.guardrails().maxDuration());
-  }
-
-  private void pruneRuns(String project) {
-    try {
-      var runs = runStore.listForProject(project);
-      var ids = runs.stream().map(RunStore.RunRow::id).toList();
-      var active =
-          runs.stream()
-              .filter(DispatchOperations::ownsLiveAgent)
-              .map(RunStore.RunRow::id)
-              .collect(Collectors.toUnmodifiableSet());
-      var pruned = RunRetention.prune(shell, project, ids, active, RunRetention.DEFAULT_KEEP);
-      listener.runsPruned(pruned.size());
-    } catch (Exception e) {
-      System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
-    }
   }
 
   /**
@@ -1397,62 +1281,6 @@ public final class DispatchOperations {
    */
   static boolean ownsLiveAgent(RunStore.RunRow run) {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
-  }
-
-  /**
-   * Marks a run failed when its launch throws, so a created-but-never-launched row is not orphaned.
-   */
-  /**
-   * Fails a run on a launch error, but only if the run is still {@code running}: a stop that
-   * cancelled the run mid-launch, or a watcher that already recorded the real exit, owns the
-   * terminal record and must not be overwritten by the launch's cleanup.
-   */
-  private void failRun(String runId) {
-    runBookkeeping(
-        "mark run failed " + runId,
-        () -> runStore.transition(runId, "running", "failed", (Integer) null));
-  }
-
-  /**
-   * Releases the run's repo reservation on a launch failure only when the agent is proven absent —
-   * probed on the run's own identity (systemd unit and run-scoped pid file), so the check covers
-   * background and foreground launches alike. A failure before or during launch leaves no live
-   * process, so the run is failed and its repo freed. But once the agent process exists — a
-   * background unit that started, a foreground child whose blocking wait threw — a later failure
-   * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
-   * session. An unprobeable identity is treated as live for the same reason — the missed-stop
-   * reconciler releases a genuinely dead run on its next pass.
-   */
-  private void releaseIfAbsent(String runId, String project, AgentUnit unit) {
-    if (agentLive(project, unit)) {
-      return;
-    }
-    failRun(runId);
-  }
-
-  private boolean agentLive(String project, AgentUnit unit) {
-    try {
-      var status = new AgentSession(shell).queryStatus(project, unit);
-      return status != null && status.running();
-    } catch (Exception e) {
-      return true;
-    }
-  }
-
-  /**
-   * Runs a best-effort run-store bookkeeping update. A missing store (a box that keeps no run
-   * aggregate) is a silent no-op, and a store error is logged but never propagated: bookkeeping
-   * must never fail a launch or mask the agent's real outcome.
-   */
-  private void runBookkeeping(String action, Runnable op) {
-    if (runStore == null) {
-      return;
-    }
-    try {
-      op.run();
-    } catch (RuntimeException e) {
-      System.err.println("  [api] Warning: could not " + action + ": " + e.getMessage());
-    }
   }
 
   private void publish(String project, String specId, String type, Map<String, Object> data) {
