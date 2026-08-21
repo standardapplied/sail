@@ -858,14 +858,14 @@ public final class ReviewStore implements ConflictResolver {
             decided_by, superseded_at, error)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         id,
-        text(snapshot, "spec_id"),
-        integer(snapshot, "iteration"),
-        text(snapshot, "status"),
-        text(snapshot, "created_at"),
-        text(snapshot, "completed_at"),
-        text(snapshot, "decided_by"),
-        text(snapshot, "superseded_at"),
-        text(snapshot, "error"));
+        Snapshots.text(snapshot, "spec_id"),
+        Snapshots.integer(snapshot, "iteration"),
+        Snapshots.text(snapshot, "status"),
+        Snapshots.text(snapshot, "created_at"),
+        Snapshots.text(snapshot, "completed_at"),
+        Snapshots.text(snapshot, "decided_by"),
+        Snapshots.text(snapshot, "superseded_at"),
+        Snapshots.text(snapshot, "error"));
     var stages = (List<Map<String, Object>>) snapshot.get("stages");
     if (stages != null) {
       for (var stage : stages) {
@@ -875,15 +875,15 @@ public final class ReviewStore implements ConflictResolver {
             INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
                 started_at, completed_at, error, finding_counts)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            text(stage, "id"),
+            Snapshots.text(stage, "id"),
             id,
-            text(stage, "name"),
-            text(stage, "stage_type"),
-            text(stage, "status"),
-            text(stage, "reviewer"),
-            text(stage, "started_at"),
-            text(stage, "completed_at"),
-            text(stage, "error"),
+            Snapshots.text(stage, "name"),
+            Snapshots.text(stage, "stage_type"),
+            Snapshots.text(stage, "status"),
+            Snapshots.text(stage, "reviewer"),
+            Snapshots.text(stage, "started_at"),
+            Snapshots.text(stage, "completed_at"),
+            Snapshots.text(stage, "error"),
             counts == null ? null : YamlUtil.dumpJson((Map<String, Object>) counts));
       }
     }
@@ -929,16 +929,6 @@ public final class ReviewStore implements ConflictResolver {
   private String currentRev(String id) {
     return db.queryOne("SELECT COALESCE(rev, '') FROM reviews WHERE id = ?", row -> row.text(0), id)
         .orElse("");
-  }
-
-  private static String text(Map<String, Object> map, String key) {
-    var value = map.get(key);
-    return value == null ? null : value.toString();
-  }
-
-  private static Integer integer(Map<String, Object> map, String key) {
-    var value = map.get(key);
-    return value instanceof Number n ? n.intValue() : null;
   }
 
   private ReviewRow mapReview(Sqlite.Row row) {
