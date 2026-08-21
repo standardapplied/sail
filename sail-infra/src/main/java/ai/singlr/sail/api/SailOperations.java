@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -720,7 +719,7 @@ public final class SailOperations implements Operations {
 
   private ProjectResponse projectValue(String project) {
     var loaded = projects.load(project);
-    var agent = loaded.config().agent() != null ? agentConfigView(loaded.config()) : null;
+    var agent = loaded.config().agent() != null ? AgentConfigView.from(loaded.config()) : null;
     return new ProjectResponse(project, statusName(loaded.state()), agent);
   }
 
@@ -784,9 +783,9 @@ public final class SailOperations implements Operations {
     var summary = SpecCatalog.summarize(specs);
     return new SpecsResponse(
         project,
-        specs.stream().map(spec -> specView(specs, spec)).toList(),
-        summaryView(summary.counts()),
-        boardSummaryView(summary));
+        specs.stream().map(spec -> SpecView.from(specs, spec)).toList(),
+        SpecSummaryView.from(summary.counts()),
+        BoardSummaryView.from(summary));
   }
 
   private SpecResponse specValue(String project, String specId) {
@@ -802,7 +801,7 @@ public final class SailOperations implements Operations {
             .map(SpecStore.SpecContent::body)
             .filter(body -> !body.isBlank())
             .orElse(null);
-    return new SpecResponse(project, specView(specs, spec), null, content != null, content);
+    return new SpecResponse(project, SpecView.from(specs, spec), null, content != null, content);
   }
 
   private DispatchResponse dispatchValue(
@@ -826,8 +825,8 @@ public final class SailOperations implements Operations {
               project,
               true,
               null,
-              dispatchedSpecView(dispatched.taskSpec(), dispatched.branch()),
-              agentStatusView(dispatched.agentType(), request.mode(), dispatched.session()),
+              DispatchedSpecView.from(dispatched.taskSpec(), dispatched.branch()),
+              AgentStatusView.from(dispatched.agentType(), request.mode(), dispatched.session()),
               dispatched.snapshotLabel(),
               dispatched.branchCreated(),
               dispatched.restarted());
@@ -852,41 +851,17 @@ public final class SailOperations implements Operations {
                 .filter(run -> run.ownedBy(localHandle))
                 .toList();
     if (running.isEmpty()) {
-      return agentStatusResponse(project, null, List.of());
+      return AgentStatusResponse.from(project, null, List.of());
     }
     var runs =
         running.stream()
             .map(
                 run ->
-                    agentRunView(
+                    AgentRunView.from(
                         run, querySession(agentSession, project, StopOperations.runUnit(run))))
             .toList();
     var newest = querySession(agentSession, project, StopOperations.runUnit(running.getFirst()));
-    return agentStatusResponse(project, newest, runs);
-  }
-
-  private static AgentStatusResponse agentStatusResponse(
-      String project, AgentSession.SessionInfo info, List<AgentRunView> runs) {
-    return new AgentStatusResponse(
-        project,
-        info != null && info.running() || runs.stream().anyMatch(AgentRunView::running),
-        info != null ? info.pid() : null,
-        info != null ? info.task() : null,
-        info != null ? info.startedAt() : null,
-        info != null ? info.branch() : null,
-        info != null ? info.logPath() : null,
-        runs);
-  }
-
-  private static AgentRunView agentRunView(RunStore.RunRow run, AgentSession.SessionInfo info) {
-    return new AgentRunView(
-        run.id(),
-        run.specId(),
-        run.branch(),
-        info != null && info.running(),
-        info != null ? info.pid() : null,
-        run.startedAt(),
-        run.logPath());
+    return AgentStatusResponse.from(project, newest, runs);
   }
 
   /**
@@ -925,7 +900,7 @@ public final class SailOperations implements Operations {
           runStore != null
               ? runStore.latestForProjectOnNode(project, localHandle).orElse(null)
               : null;
-      return agentReportView(
+      return AgentReportResponse.from(
           new AgentReporter(shell).generate(project, loaded.config(), specs, session));
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_REPORT_FAILED, "Failed to generate agent report.", e);
@@ -939,35 +914,6 @@ public final class SailOperations implements Operations {
       case ContainerState.NotCreated ignored -> "not_created";
       case ContainerState.Error ignored -> "error";
     };
-  }
-
-  private static SpecView specView(List<Spec> specs, Spec spec) {
-    return new SpecView(
-        spec.id(),
-        spec.title(),
-        spec.status().wire(),
-        spec.assignee(),
-        spec.dependsOn(),
-        spec.repos(),
-        spec.agent(),
-        spec.model(),
-        spec.reasoningEffort(),
-        spec.branch(),
-        SpecCatalog.isReady(specs, spec),
-        SpecCatalog.isBlocked(specs, spec),
-        SpecCatalog.unmetDependencies(specs, spec));
-  }
-
-  private static DispatchedSpecView dispatchedSpecView(Spec spec, String branch) {
-    return new DispatchedSpecView(
-        spec.id(),
-        spec.title(),
-        "in_progress",
-        spec.repos(),
-        spec.agent(),
-        spec.model(),
-        spec.reasoningEffort(),
-        Strings.isNotBlank(branch) ? branch : null);
   }
 
   /**
@@ -998,59 +944,6 @@ public final class SailOperations implements Operations {
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }
-  }
-
-  private static AgentConfigView agentConfigView(SailYaml config) {
-    var agent = config.agent();
-    return new AgentConfigView(agent.type(), agent.autoSnapshot(), agent.autoBranch());
-  }
-
-  private static AgentStatusView agentStatusView(
-      String agentType, String mode, AgentSession.SessionInfo info) {
-    return new AgentStatusView(
-        agentType,
-        mode,
-        info != null && info.running(),
-        info != null ? info.pid() : null,
-        info != null ? info.task() : null,
-        info != null ? info.startedAt() : null,
-        info != null ? info.branch() : null,
-        info != null ? info.logPath() : null);
-  }
-
-  private static AgentReportResponse agentReportView(AgentReporter.Report report) {
-    return new AgentReportResponse(
-        report.name(),
-        report.sessionStatus(),
-        report.startedAt(),
-        report.endedAt(),
-        report.duration(),
-        report.branch(),
-        report.specs().stream().map(spec -> specView(report.specs(), spec)).toList(),
-        report.commitCount(),
-        report.lastCommitMinutesAgo() >= 0 ? report.lastCommitMinutesAgo() : null,
-        report.guardrailTriggered(),
-        report.guardrailReason(),
-        report.guardrailAction(),
-        report.rolledBack(),
-        report.rollbackSnapshot());
-  }
-
-  private static SpecSummaryView summaryView(Map<String, Integer> counts) {
-    return new SpecSummaryView(
-        counts.getOrDefault("pending", 0),
-        counts.getOrDefault("in_progress", 0),
-        counts.getOrDefault("review", 0),
-        counts.getOrDefault("awaiting_merge", 0),
-        counts.getOrDefault("done", 0));
-  }
-
-  private static BoardSummaryView boardSummaryView(SpecCatalog.Summary summary) {
-    return new BoardSummaryView(
-        summaryView(summary.counts()),
-        summary.readyCount(),
-        summary.blockedCount(),
-        summary.nextReadyId());
   }
 
   private ShellExec.Result exec(List<String> command) {
