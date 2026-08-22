@@ -295,7 +295,7 @@ class EngagementLifecycleTest {
     assertNull(launch.completion(), "nothing is deferred — no payment to make");
     assertEquals("", launch.snapshot());
     var engagement = stored("auth");
-    assertEquals("read-only", engagement.mode());
+    assertEquals("read_only", engagement.mode());
     assertTrue(ofType(Event.WellKnownTypes.SNAPSHOT_CREATED).isEmpty());
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
   }

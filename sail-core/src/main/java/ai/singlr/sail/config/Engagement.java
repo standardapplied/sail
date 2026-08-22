@@ -13,16 +13,15 @@ import java.util.LinkedHashMap;
  * one compact JSON value so sync merges it atomically — an engagement is set and cleared as a
  * whole, and field-level merging across boxes must never stitch one box's agent to another box's
  * mode. {@code full} is the default mode: conversations produce artifacts (diagrams, drafts,
- * files), so write access is the normal case and {@code read-only} is the explicit narrow choice.
+ * files), so write access is the normal case and {@code read_only} is the explicit narrow choice.
  */
 public record Engagement(String agent, String mode, String model, String engagedAt) {
 
-  public static final String MODE_FULL = "full";
-  public static final String MODE_READ_ONLY = "read-only";
-
   /**
-   * A validated engagement. A blank mode defaults to {@link #MODE_FULL}; a blank model means the
-   * agent's default.
+   * A validated engagement. A blank mode defaults to {@link EngagementMode#FULL}; a blank model
+   * means the agent's default. The mode is normalized to its canonical wire form, so an engagement
+   * stored with the legacy {@code read-only} spelling reads back — and re-serializes — as {@code
+   * read_only}.
    */
   public static Engagement of(String agent, String mode, String model, String engagedAt) {
     if (Strings.isBlank(agent)) {
@@ -31,22 +30,13 @@ public record Engagement(String agent, String mode, String model, String engaged
     if (Strings.isBlank(engagedAt)) {
       throw new IllegalArgumentException("An engagement records when it began; got a blank time.");
     }
-    var effectiveMode = Strings.isBlank(mode) ? MODE_FULL : mode;
-    if (!MODE_FULL.equals(effectiveMode) && !MODE_READ_ONLY.equals(effectiveMode)) {
-      throw new IllegalArgumentException(
-          "Engagement mode must be '"
-              + MODE_FULL
-              + "' or '"
-              + MODE_READ_ONLY
-              + "', got '"
-              + mode
-              + "'.");
-    }
+    var effectiveMode =
+        (Strings.isBlank(mode) ? EngagementMode.FULL : EngagementMode.of(mode)).wire();
     return new Engagement(agent, effectiveMode, Strings.isBlank(model) ? null : model, engagedAt);
   }
 
   public boolean full() {
-    return MODE_FULL.equals(mode);
+    return EngagementMode.FULL.wire().equals(mode);
   }
 
   /** This engagement as the compact JSON the spec row stores. */

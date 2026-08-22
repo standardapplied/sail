@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
@@ -75,7 +76,7 @@ public final class ApiSpecEngageCommand implements Runnable {
     var config = connection.resolve();
     var body = new LinkedHashMap<String, Object>();
     body.put("agent", agent);
-    body.put("mode", readOnly ? "read-only" : "full");
+    body.put("mode", (readOnly ? EngagementMode.READ_ONLY : EngagementMode.FULL).wire());
     if (snapshot && !readOnly) {
       body.put("snapshot", true);
     }

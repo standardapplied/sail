@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -429,10 +430,10 @@ public final class SailOperations implements Operations {
                         cli.displayName(),
                         List.of(
                             new AgentModeView(
-                                "read_only",
+                                EngagementMode.READ_ONLY.wire(),
                                 cli.supportsReadOnlyInvite(),
                                 cli.readOnlyInviteRefusal()),
-                            new AgentModeView("full", true, null))))
+                            new AgentModeView(EngagementMode.FULL.wire(), true, null))))
             .toList();
     return Result.success(new AgentsResponse(agents));
   }
@@ -501,7 +502,7 @@ public final class SailOperations implements Operations {
     return new InviteResponse(
         launch.runId(),
         launch.principal(),
-        launch.full() ? "full" : "read_only",
+        launch.full() ? EngagementMode.FULL.wire() : EngagementMode.READ_ONLY.wire(),
         launch.snapshot());
   }
 
