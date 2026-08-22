@@ -18,7 +18,7 @@ class EngagementTest {
   @Test
   void fullIsTheDefaultMode() {
     var engagement = Engagement.of("claude-code", null, null, "2026-08-18T00:00:00Z");
-    assertEquals(Engagement.MODE_FULL, engagement.mode());
+    assertEquals(EngagementMode.FULL.wire(), engagement.mode());
     assertTrue(engagement.full());
     assertNull(engagement.model());
   }
@@ -26,9 +26,17 @@ class EngagementTest {
   @Test
   void readOnlyIsTheExplicitNarrowChoice() {
     var engagement =
-        Engagement.of("claude-code", Engagement.MODE_READ_ONLY, "opus", "2026-08-18T00:00:00Z");
+        Engagement.of(
+            "claude-code", EngagementMode.READ_ONLY.wire(), "opus", "2026-08-18T00:00:00Z");
     assertFalse(engagement.full());
     assertEquals("opus", engagement.model());
+  }
+
+  @Test
+  void aLegacyHyphenatedModeNormalizesToTheCanonicalSpelling() {
+    var engagement = Engagement.of("claude-code", "read-only", null, "2026-08-18T00:00:00Z");
+    assertEquals("read_only", engagement.mode());
+    assertEquals("read_only", Engagement.fromJson(engagement.toJson()).mode());
   }
 
   @Test
