@@ -12,12 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -60,6 +62,7 @@ class EngagementLifecycleTest {
   @TempDir Path tempDir;
 
   private SpecStore specStore;
+  private RoomStore roomStore;
   private RunStore runStore;
   private Sqlite db;
   private final List<Event> events = new ArrayList<>();
@@ -78,6 +81,7 @@ class EngagementLifecycleTest {
     db = Sqlite.open(tempDir.resolve("engage-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
+    roomStore = new RoomStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
     return new DispatchOperations(
@@ -92,7 +96,8 @@ class EngagementLifecycleTest {
             (project, config) -> "",
             command -> 0,
             DispatchOperations.Listener.NONE)
-        .useMessages(new MessageStore(db));
+        .useMessages(new MessageStore(db))
+        .useRooms(roomStore);
   }
 
   private StubShell shell() {
@@ -125,6 +130,13 @@ class EngagementLifecycleTest {
 
   private Engagement stored(String specId) {
     return Engagement.fromJson(specStore.findById(specId).orElseThrow().engagement());
+  }
+
+  private Engagement roomMember(String specId) {
+    return roomStore
+        .findById(specId)
+        .map(room -> Roster.fromJson(room.roster()).standing())
+        .orElse(null);
   }
 
   private List<Event> ofType(String type) {
@@ -352,6 +364,7 @@ class EngagementLifecycleTest {
                   new ReviewStore(db),
                   runStore)
               .useMessages(new MessageStore(db))
+              .useRooms(roomStore)
               .useInviteExecutor(Runnable::run);
 
       var engaged =
@@ -403,5 +416,93 @@ class EngagementLifecycleTest {
         ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),
         "dismissing an empty room is a no-op, not an error");
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_DISENGAGED).size());
+  }
+
+  @Test
+  void aBoxWithNoRoomAggregateRefusesMembershipLoudly() throws Exception {
+    var yaml = tempDir.resolve("sail-norooms.yaml");
+    Files.writeString(yaml, YAML);
+    db = Sqlite.open(tempDir.resolve("norooms-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    specStore = new SpecStore(db);
+    runStore = new RunStore(db);
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    var unwired =
+        new DispatchOperations(
+                shell(),
+                yaml.toString(),
+                specStore,
+                new ReviewStore(db),
+                runStore,
+                new FdeStore(db),
+                events::add,
+                new WatcherSpawner(shell(), (command, logPath) -> 4242L),
+                (project, config) -> "",
+                command -> 0,
+                DispatchOperations.Listener.NONE)
+            .useMessages(new MessageStore(db));
+    seedSpec("auth");
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                unwired.engage(
+                    "auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
+
+    assertEquals(ErrorCode.COMMAND_FAILED, refusal.failure().errorCode());
+    assertNull(stored("auth"), "nothing was seated");
+  }
+
+  @Test
+  void anEngageSeatsTheMemberOnTheRoomRowAsTheAuthoritativeHome() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+
+    ops.engage("auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE);
+
+    var member = roomMember("auth");
+    assertNotNull(member, "membership lives on the room row");
+    assertEquals("claude-code", member.agent());
+    assertTrue(member.full());
+    assertEquals(
+        member.toJson(),
+        stored("auth").toJson(),
+        "the spec's legacy engagement column is dual-written identically");
+    var room = roomStore.findById("auth").orElseThrow();
+    assertEquals("acme", room.project(), "the identity room was minted on demand");
+    assertEquals("OAuth flow", room.title());
+  }
+
+  @Test
+  void aDisengageClearsTheRoomRosterAndTheLegacyColumnTogether() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    assertNotNull(roomMember("auth"));
+
+    ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
+
+    assertNull(roomMember("auth"), "the roster empties");
+    assertNull(stored("auth"), "the legacy column clears with it");
+    assertNull(
+        roomStore.findById("auth").orElseThrow().roster(),
+        "an empty roster stores as null, matching the engagement convention");
+  }
+
+  @Test
+  void aDismissalOnTheRoomWinsEvenIfTheLegacyColumnIsStale() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    var spec = specStore.findById("auth").orElseThrow();
+    roomStore.update(
+        new RoomStore.RoomRow(
+            "auth", "acme", "OAuth flow", HANDLE, null, null, HANDLE, null, null, HANDLE));
+
+    assertNotNull(Engagement.fromJson(spec.engagement()), "the legacy column is now stale");
+    assertNull(
+        ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),
+        "the room row is authoritative: an empty roster means nobody is seated");
   }
 }

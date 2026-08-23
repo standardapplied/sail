@@ -29,6 +29,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
@@ -66,6 +67,7 @@ public final class SailOperations implements Operations {
   private final FdeStore fdeStore;
   private Executor inviteExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
+  private RoomStore roomStore;
   private BoxCredentialStore boxCredentialStore;
   private EventStore eventStore;
 
@@ -175,6 +177,13 @@ public final class SailOperations implements Operations {
   public SailOperations useMessages(MessageStore messageStore) {
     this.messageStore = Objects.requireNonNull(messageStore, "messageStore");
     this.dispatchOps.useMessages(messageStore);
+    return this;
+  }
+
+  /** Wires the room store — the authoritative home of membership state; returns {@code this}. */
+  public SailOperations useRooms(RoomStore roomStore) {
+    this.roomStore = Objects.requireNonNull(roomStore, "roomStore");
+    this.dispatchOps.useRooms(roomStore);
     return this;
   }
 
@@ -341,7 +350,8 @@ public final class SailOperations implements Operations {
     this.fdeStore = fdeStore;
     this.projects = new ProjectLoader(shell, file);
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
-    this.globalSpecOps = new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore);
+    this.globalSpecOps =
+        new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore, () -> roomStore);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
     this.dispatchOps =
         new DispatchOperations(

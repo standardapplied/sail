@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
@@ -16,6 +15,7 @@ import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
@@ -37,6 +37,7 @@ public final class RoomWakeLauncher {
 
   private final ProjectLoader projects;
   private final SpecStore specStore;
+  private final Supplier<RoomStore> roomStore;
   private final Supplier<MessageStore> messageStore;
   private final RunStore runStore;
   private final RunReservation runReservation;
@@ -46,6 +47,7 @@ public final class RoomWakeLauncher {
   public RoomWakeLauncher(
       ProjectLoader projects,
       SpecStore specStore,
+      Supplier<RoomStore> roomStore,
       Supplier<MessageStore> messageStore,
       RunStore runStore,
       RunReservation runReservation,
@@ -53,6 +55,7 @@ public final class RoomWakeLauncher {
       RoomCommitGuard roomCommitGuard) {
     this.projects = projects;
     this.specStore = specStore;
+    this.roomStore = roomStore;
     this.messageStore = messageStore;
     this.runStore = runStore;
     this.runReservation = runReservation;
@@ -80,7 +83,7 @@ public final class RoomWakeLauncher {
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-    var engagement = Engagement.fromJson(spec.engagement());
+    var engagement = MembershipService.stateOf(roomStore.get(), spec).standing();
     var agentType =
         engagement != null
             ? engagement.agent()

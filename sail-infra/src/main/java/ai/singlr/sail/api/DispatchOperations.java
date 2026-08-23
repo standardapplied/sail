@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -171,7 +172,7 @@ public final class DispatchOperations {
   private final ReviewStore reviewStore;
   private final RunStore runStore;
   private final LaunchAdmission admission;
-  private final EngagementService engagementService;
+  private final MembershipService membership;
   private final RoomCommitGuard roomCommitGuard;
   private final RunLauncher runLauncher;
   private final RunReservation runReservation;
@@ -180,6 +181,7 @@ public final class DispatchOperations {
   private final InviteLauncher inviteLauncher;
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
+  private RoomStore roomStore;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
   private final Snapshotter snapshotter;
@@ -217,8 +219,8 @@ public final class DispatchOperations {
     this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.listener = Objects.requireNonNull(listener, "listener");
-    this.engagementService =
-        new EngagementService(specStore, projects, admission, this.events, shell);
+    this.membership =
+        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
@@ -228,6 +230,7 @@ public final class DispatchOperations {
         new RoomWakeLauncher(
             projects,
             specStore,
+            () -> roomStore,
             () -> messageStore,
             runStore,
             runReservation,
@@ -262,6 +265,12 @@ public final class DispatchOperations {
 
   public DispatchOperations useMessages(MessageStore messages) {
     this.messageStore = Objects.requireNonNull(messages, "messages");
+    return this;
+  }
+
+  /** Wires the room store — the authoritative home of membership state; returns {@code this}. */
+  public DispatchOperations useRooms(RoomStore rooms) {
+    this.roomStore = Objects.requireNonNull(rooms, "rooms");
     return this;
   }
 
@@ -364,7 +373,7 @@ public final class DispatchOperations {
    * Delegates to {@link EngagementService}, the launch-free room-engagement lane. Kept on the
    * dispatch surface so callers reach engagement and dispatch through one operations object.
    */
-  public EngagementService.EngageLaunch engage(
+  public MembershipService.EngageLaunch engage(
       String specId,
       String agentYamlName,
       String mode,
@@ -372,13 +381,12 @@ public final class DispatchOperations {
       boolean takeSnapshot,
       Actor actor,
       String localHandle) {
-    return engagementService.engage(
-        specId, agentYamlName, mode, model, takeSnapshot, actor, localHandle);
+    return membership.engage(specId, agentYamlName, mode, model, takeSnapshot, actor, localHandle);
   }
 
   /** Delegates to {@link EngagementService}: dismisses the room's engaged agent. */
   public String disengage(String specId, Actor actor, String localHandle) {
-    return engagementService.disengage(specId, actor, localHandle);
+    return membership.disengage(specId, actor, localHandle);
   }
 
   /**

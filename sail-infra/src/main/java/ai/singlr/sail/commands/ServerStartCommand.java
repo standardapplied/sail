@@ -53,6 +53,7 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
@@ -176,6 +177,7 @@ public final class ServerStartCommand implements Runnable {
       System.out.println();
     }
     var specStore = new SpecStore(db);
+    var roomStore = new RoomStore(db);
     var eventStore = new EventStore(db);
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
@@ -200,6 +202,7 @@ public final class ServerStartCommand implements Runnable {
                 syncScheduler,
                 new FdeStore(db))
             .useMessages(messageStore)
+            .useRooms(roomStore)
             .useBoxCredentials(boxCredentialStore)
             .useEvents(eventStore);
     var orphaned = reviewStore.failOrphanedRunning();
@@ -230,6 +233,7 @@ public final class ServerStartCommand implements Runnable {
     var roomWake =
         new RoomWakeReactor(
             specStore,
+            roomStore,
             runStore,
             messageStore,
             NodeIdentity::handle,

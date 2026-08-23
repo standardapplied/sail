@@ -12,11 +12,13 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -30,6 +32,7 @@ final class GlobalSpecOperations {
   private final ReviewStore reviewStore;
   private final EventBus eventBus;
   private final RunStore runStore;
+  private final Supplier<RoomStore> rooms;
 
   GlobalSpecOperations(SpecStore specStore) {
     this(specStore, null, null);
@@ -45,10 +48,20 @@ final class GlobalSpecOperations {
 
   GlobalSpecOperations(
       SpecStore specStore, ReviewStore reviewStore, EventBus eventBus, RunStore runStore) {
+    this(specStore, reviewStore, eventBus, runStore, () -> null);
+  }
+
+  GlobalSpecOperations(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      RunStore runStore,
+      Supplier<RoomStore> rooms) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
     this.runStore = runStore;
+    this.rooms = rooms;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -127,6 +140,7 @@ final class GlobalSpecOperations {
           Objects.requireNonNullElse(request.plan(), ""));
     }
     var created = specStore.findById(request.id()).orElseThrow();
+    mintIdentityRoom(created);
     publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
     return new GlobalSpecCreatedResponse(GlobalSpecView.from(created));
   }
@@ -158,6 +172,7 @@ final class GlobalSpecOperations {
             request.repos() != null ? request.repos() : existing.repos(),
             request.wake() != null ? validWake(request.wake()) : existing.wake());
     specStore.update(updated);
+    dualWriteWake(updated, request);
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
@@ -184,6 +199,53 @@ final class GlobalSpecOperations {
    * general mutate policy (assignee or admin, creator or admin when unassigned). Runs before the
    * status-based claim lock so identity is validated first.
    */
+  /**
+   * Mints the spec's identity room — same id, the conversation surface every spec gets — when this
+   * box keeps a room aggregate. Membership writes {@code ensureFor} the room defensively, so a box
+   * without the aggregate here loses nothing; this keeps the room's birth beside the spec's.
+   */
+  private void mintIdentityRoom(SpecStore.SpecRow spec) {
+    var store = rooms.get();
+    if (store == null) {
+      return;
+    }
+    store.ensureFor(
+        spec.id(), spec.project(), spec.title(), spec.assignee(), spec.wake(), spec.createdBy());
+  }
+
+  /**
+   * Dual-writes an explicit wake edit onto the room row — the authoritative conversation-side home
+   * — beside the spec column the readers that have not moved yet still consult.
+   */
+  private void dualWriteWake(SpecStore.SpecRow updated, SpecUpdateRequest request) {
+    var store = rooms.get();
+    if (store == null || request.wake() == null) {
+      return;
+    }
+    var room =
+        store.ensureFor(
+            updated.id(),
+            updated.project(),
+            updated.title(),
+            updated.assignee(),
+            updated.wake(),
+            request.updatedBy());
+    if (!Objects.equals(room.wake(), updated.wake())) {
+      store.update(
+          new RoomStore.RoomRow(
+              room.id(),
+              room.project(),
+              room.title(),
+              room.assignee(),
+              updated.wake(),
+              room.roster(),
+              room.createdBy(),
+              room.createdAt(),
+              null,
+              request.updatedBy()));
+    }
+  }
+
   private static void authorizeUpdate(
       Actor actor, SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());

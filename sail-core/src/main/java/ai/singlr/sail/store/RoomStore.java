@@ -103,6 +103,31 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * The room for {@code id}, created on demand from the identity fields when absent — the seam that
+   * keeps membership writes safe for a spec whose room predates or postdates the backfill.
+   */
+  public RoomRow ensureFor(
+      String id, String project, String title, String assignee, String wake, String actor) {
+    return findById(id)
+        .orElseGet(
+            () -> {
+              create(
+                  new RoomRow(id, project, title, assignee, wake, null, actor, null, null, actor));
+              return findById(id).orElseThrow();
+            });
+  }
+
+  /** Every room with at least one member — the rooms the engagement sweeper walks. */
+  public List<RoomRow> listEngaged() {
+    return db.query(
+        """
+        SELECT id, project, title, assignee, wake, roster, created_by, created_at,
+            updated_at, updated_by
+        FROM rooms WHERE roster IS NOT NULL""",
+        RoomStore::mapRoom);
+  }
+
   public Optional<RoomRow> findById(String id) {
     return db.queryOne(
         """
