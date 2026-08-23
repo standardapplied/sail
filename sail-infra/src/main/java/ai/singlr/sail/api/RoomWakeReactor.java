@@ -7,8 +7,8 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -78,6 +78,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private static final Set<String> LIVE_STATUSES = Set.of("running", "stopping");
 
   private final SpecStore specStore;
+  private final RoomStore roomStore;
   private final RunStore runStore;
   private final MessageStore messageStore;
   private final Supplier<String> localHandle;
@@ -95,6 +96,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   public RoomWakeReactor(
       SpecStore specStore,
+      RoomStore roomStore,
       RunStore runStore,
       MessageStore messageStore,
       Supplier<String> localHandle,
@@ -102,6 +104,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       Guard guard) {
     this(
         specStore,
+        roomStore,
         runStore,
         messageStore,
         localHandle,
@@ -117,6 +120,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   RoomWakeReactor(
       SpecStore specStore,
+      RoomStore roomStore,
       RunStore runStore,
       MessageStore messageStore,
       Supplier<String> localHandle,
@@ -129,6 +133,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       Delay delay,
       Supplier<Instant> clock) {
     this.specStore = Objects.requireNonNull(specStore, "specStore");
+    this.roomStore = Objects.requireNonNull(roomStore, "roomStore");
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.messageStore = messageStore;
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
@@ -181,10 +186,11 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (spec == null || !spec.assignedTo(localHandle.get())) {
       return;
     }
-    var engaged = Engagement.fromJson(spec.engagement()) != null;
+    var state = MembershipService.stateOf(roomStore, spec);
+    var engaged = state.standing() != null;
     var message = messageOf(event);
     if (!RoomWakePolicy.shouldWake(
-        spec.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
+        state.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
       return;
     }
     schedule(specId, message, engaged);
@@ -214,9 +220,10 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       if (spec == null || !spec.assignedTo(localHandle.get())) {
         return;
       }
-      var engaged = Engagement.fromJson(spec.engagement()) != null;
+      var state = MembershipService.stateOf(roomStore, spec);
+      var engaged = state.standing() != null;
       if (!RoomWakePolicy.shouldWake(
-          spec.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
+          state.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
         return;
       }
       var runs = runStore.listForSpec(specId);
@@ -270,7 +277,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     var spec = specStore.findById(specId).orElse(null);
     if (spec == null
         || !spec.assignedTo(localHandle.get())
-        || Engagement.fromJson(spec.engagement()) == null) {
+        || MembershipService.stateOf(roomStore, spec).standing() == null) {
       return;
     }
     var owed = owedMessage(specId);
@@ -317,14 +324,15 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
    * lost event, or a turn deferred behind a build must never strand a conversation.
    */
   public void sweepEngagedRooms() {
-    for (var spec : specStore.listEngaged()) {
+    for (var room : roomStore.listEngaged()) {
       try {
-        if (spec.assignedTo(localHandle.get())) {
+        var spec = specStore.findById(room.id()).orElse(null);
+        if (spec != null && spec.assignedTo(localHandle.get())) {
           refireOwedTurn(spec.id());
         }
       } catch (RuntimeException e) {
         System.err.println(
-            "room-wake: engagement sweep of spec " + spec.id() + " failed: " + e.getMessage());
+            "room-wake: engagement sweep of room " + room.id() + " failed: " + e.getMessage());
       }
     }
   }

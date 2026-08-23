@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -42,6 +43,7 @@ class RoomWakeReactorTest {
   @TempDir Path tempDir;
   private Sqlite db;
   private SpecStore specStore;
+  private RoomStore roomStore;
   private RunStore runStore;
   private MessageStore messageStore;
   private RecordingLauncher launcher;
@@ -116,6 +118,7 @@ class RoomWakeReactorTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
+    roomStore = new RoomStore(db);
     runStore = new RunStore(db);
     messageStore = new MessageStore(db);
     launcher = new RecordingLauncher();
@@ -138,6 +141,7 @@ class RoomWakeReactorTest {
       java.util.concurrent.ExecutorService executor, MessageStore messages) {
     return new RoomWakeReactor(
         specStore,
+        roomStore,
         runStore,
         messages,
         handle::get,
@@ -175,9 +179,22 @@ class RoomWakeReactorTest {
 
   private void engage(String id, String agent, String mode) {
     var spec = specStore.findById(id).orElseThrow();
-    specStore.update(
-        spec.withEngagement(
-            ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString()).toJson()));
+    var member = ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString());
+    specStore.update(spec.withEngagement(member.toJson()));
+    var room =
+        roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), spec.wake(), "uday");
+    roomStore.update(
+        new RoomStore.RoomRow(
+            room.id(),
+            room.project(),
+            room.title(),
+            room.assignee(),
+            room.wake(),
+            ai.singlr.sail.config.Roster.solo(member).toJson(),
+            room.createdBy(),
+            room.createdAt(),
+            null,
+            "uday"));
   }
 
   private String chatRun(String specId, String role, String status, Instant startedAt) {
@@ -524,6 +541,7 @@ class RoomWakeReactorTest {
     var reactor =
         new RoomWakeReactor(
             specStore,
+            roomStore,
             runStore,
             messageStore,
             handle::get,
@@ -603,6 +621,7 @@ class RoomWakeReactorTest {
     var reactor =
         new RoomWakeReactor(
             specStore,
+            roomStore,
             runStore,
             messageStore,
             handle::get,
@@ -934,7 +953,8 @@ class RoomWakeReactorTest {
     assertEquals(Duration.ofSeconds(30), RoomWakeReactor.DEBOUNCE);
     assertEquals(Duration.ofMinutes(10), RoomWakeReactor.COOLDOWN);
     try (var reactor =
-        new RoomWakeReactor(specStore, runStore, messageStore, handle::get, launcher, launcher)) {
+        new RoomWakeReactor(
+            specStore, roomStore, runStore, messageStore, handle::get, launcher, launcher)) {
       assertEquals("room-wake", reactor.name());
     }
   }
@@ -943,9 +963,73 @@ class RoomWakeReactorTest {
   void constructorRejectsMissingCollaborators() {
     assertThrows(
         NullPointerException.class,
-        () -> new RoomWakeReactor(null, runStore, messageStore, handle::get, launcher, launcher));
+        () ->
+            new RoomWakeReactor(
+                null, roomStore, runStore, messageStore, handle::get, launcher, launcher));
     assertThrows(
         NullPointerException.class,
-        () -> new RoomWakeReactor(specStore, runStore, messageStore, handle::get, null, launcher));
+        () ->
+            new RoomWakeReactor(
+                specStore, roomStore, runStore, messageStore, handle::get, null, launcher));
+  }
+
+  @Test
+  void aMemberRecordedOnlyOnTheRoomRowWakesTheAgent() {
+    seed("auth", "in_progress", "uday", "off");
+    roomStore.ensureFor("auth", "acme", "auth", "uday", "off", "uday");
+    roomStore.update(
+        new RoomStore.RoomRow(
+            "auth",
+            "acme",
+            "auth",
+            "uday",
+            "off",
+            "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+            "uday",
+            null,
+            null,
+            "uday"));
+
+    var reactor = reactor();
+    reactor.onEvent(message("auth", "uday", "hello"));
+
+    assertEquals(1, launcher.woken.size(), "the room row is the authoritative membership home");
+  }
+
+  @Test
+  void aDismissalRecordedOnTheRoomWinsOverAStaleSpecColumn() {
+    seed("auth", "in_progress", "uday", "off");
+    engage("auth", "claude-code", "full");
+    var room = roomStore.findById("auth").orElseThrow();
+    roomStore.update(
+        new RoomStore.RoomRow(
+            room.id(),
+            room.project(),
+            room.title(),
+            room.assignee(),
+            room.wake(),
+            null,
+            room.createdBy(),
+            room.createdAt(),
+            null,
+            "uday"));
+
+    var reactor = reactor();
+    reactor.onEvent(message("auth", "uday", "hello"));
+
+    assertTrue(
+        launcher.woken.isEmpty(),
+        "a present room with an empty roster is authoritative — no stale-column resurrection");
+  }
+
+  @Test
+  void theWakeModeStoredOnTheRoomRowGovernsTheDecision() {
+    seed("auth", "in_progress", "uday", "off");
+    roomStore.ensureFor("auth", "acme", "auth", "uday", "on", "uday");
+
+    var reactor = reactor();
+    reactor.onEvent(message("auth", "uday", "hello"));
+
+    assertEquals(1, launcher.woken.size(), "the room's wake mode overrides the spec column");
   }
 }

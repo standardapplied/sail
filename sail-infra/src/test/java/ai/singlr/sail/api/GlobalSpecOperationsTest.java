@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -712,5 +713,71 @@ class GlobalSpecOperationsTest {
                 () -> noStore.restore("x", new SpecRestoreRequest("1-a"), ADMIN))
             .failure()
             .errorCode());
+  }
+
+  @Test
+  void createMintsTheSpecsIdentityRoomWhenARoomAggregateIsWired() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+                java.util.Map.of("id", "roomy", "title", "Roomy spec", "project", "acme"))
+            .withCreatedBy("uday"));
+
+    var room = rooms.findById("roomy").orElseThrow();
+    assertEquals("Roomy spec", room.title());
+    assertEquals("acme", room.project());
+    assertEquals("uday", room.assignee(), "an unassigned create defaults assignee to its creator");
+    assertNull(room.roster(), "a fresh room seats nobody");
+  }
+
+  @Test
+  void createWithoutARoomAggregateStillCreatesTheSpec() {
+    ops.create(
+        SpecCreateRequest.fromMap(
+            java.util.Map.of(
+                "id", "plain", "title", "Plain spec", "project", "acme", "created_by", "uday")));
+
+    assertTrue(specStore.findById("plain").isPresent());
+  }
+
+  @Test
+  void anExplicitWakeEditDualWritesTheRoomRow() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+            java.util.Map.of(
+                "id", "wakey", "title", "Wakey spec", "project", "acme", "created_by", "uday")));
+
+    withRooms.update(
+        "wakey",
+        SpecUpdateRequest.fromMap(java.util.Map.of("wake", "mention", "updated_by", "uday")),
+        ADMIN);
+
+    assertEquals("mention", specStore.findById("wakey").orElseThrow().wake());
+    assertEquals(
+        "mention",
+        rooms.findById("wakey").orElseThrow().wake(),
+        "the room row carries the authoritative conversation-side wake");
+  }
+
+  @Test
+  void anEditWithoutAWakeChangeLeavesTheRoomRowAlone() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+            java.util.Map.of(
+                "id", "still", "title", "Still spec", "project", "acme", "created_by", "uday")));
+    var before = rooms.latestRev("still");
+
+    withRooms.update(
+        "still",
+        SpecUpdateRequest.fromMap(java.util.Map.of("title", "Renamed", "updated_by", "uday")),
+        ADMIN);
+
+    assertEquals(before, rooms.latestRev("still"), "no wake edit, no room write");
   }
 }

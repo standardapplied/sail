@@ -179,6 +179,33 @@ class RoomStoreTest {
   }
 
   @Test
+  void ensureForReturnsTheExistingRoomOrMintsTheIdentityRoom() {
+    rooms.create(room("auth"));
+    var existing = rooms.ensureFor("auth", "other", "Other title", null, null, "sam");
+    assertEquals("Auth design", existing.title(), "an existing room is returned untouched");
+
+    var minted = rooms.ensureFor("fresh", "acme", "Fresh spec", "uday", "on", "uday");
+    assertEquals("Fresh spec", minted.title());
+    assertEquals("uday", minted.assignee());
+    assertEquals("on", minted.wake());
+    assertNull(minted.roster(), "a minted room starts with no members");
+    assertNotNull(rooms.latestRev("fresh"), "the minted room is journaled for sync");
+  }
+
+  @Test
+  void listEngagedReturnsOnlyRoomsWithMembers() {
+    rooms.create(room("auth"));
+    rooms.create(
+        new RoomStore.RoomRow(
+            "empty", "acme", "Empty room", null, null, null, "uday", null, null, "uday"));
+
+    var engaged = rooms.listEngaged();
+
+    assertEquals(1, engaged.size());
+    assertEquals("auth", engaged.getFirst().id());
+  }
+
+  @Test
   void listReturnsOnlyTheProjectsRooms() {
     rooms.create(room("auth"));
     rooms.create(
