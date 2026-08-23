@@ -65,9 +65,12 @@ public final class SailRoomRelay {
       # batch retries next check, so the worst case is a duplicate delivery,
       # never a lost one.
       # Every unexpected condition exits 0 silently: delivery is best-effort and
-      # must never break a build. An interval stamp under the run dir keeps the
+      # must never break a build. The hook payload on stdin is drained before
+      # any guard can exit, so the hook writer never takes an EPIPE. An interval stamp under the run dir keeps the
       # relay to at most one API round-trip per __CHECK_INTERVAL__ seconds.
       set -u
+
+      cat >/dev/null 2>&1 || true
 
       RUN_ID="${SAIL_RUN_ID:-}"
       [ -n "$RUN_ID" ] || exit 0

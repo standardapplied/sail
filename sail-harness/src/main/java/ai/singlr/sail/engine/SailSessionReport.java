@@ -54,8 +54,11 @@ public final class SailSessionReport {
       # sessions are inert. Last write wins server-side: a resume, clear, or
       # compact restart simply re-reports the new conversation.
       # Every unexpected condition exits 0 silently: a session report must
-      # never block or fail an agent.
+      # never block or fail an agent. Stdin is drained before any guard can
+      # exit, so the hook writer never takes an EPIPE from an early return.
       set -u
+
+      PAYLOAD="$(cat 2>/dev/null || true)"
 
       RUN_ID="${SAIL_RUN_ID:-}"
       [ -n "$RUN_ID" ] || exit 0
@@ -66,7 +69,7 @@ public final class SailSessionReport {
       command -v curl >/dev/null 2>&1 || exit 0
       command -v python3 >/dev/null 2>&1 || exit 0
 
-      BODY="$(python3 -c '
+      BODY="$(printf '%s' "$PAYLOAD" | python3 -c '
       import json, sys, urllib.parse
       try:
           payload = json.load(sys.stdin)
