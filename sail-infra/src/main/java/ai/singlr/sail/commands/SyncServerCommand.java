@@ -20,6 +20,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -100,6 +101,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     var replicas =
         Map.<String, MainReplica>of(
             "spec", new StoreReplica(mainId, new SpecStore(db), changeLog, conflicts, syncState),
+            "room", new StoreReplica(mainId, new RoomStore(db), changeLog, conflicts, syncState),
             "file", new StoreReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
             "project",
                 new StoreReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),

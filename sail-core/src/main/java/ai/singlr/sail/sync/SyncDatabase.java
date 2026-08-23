@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.RoomsBackfillMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -44,13 +45,19 @@ public final class SyncDatabase implements AutoCloseable {
     var db = Sqlite.open(dbPath);
     try {
       new SchemaManager(db).migrate();
-      if (db.queryOne(
-              "SELECT 1 FROM data_migrations WHERE name = ?",
-              row -> row.integer(0),
-              LegacyDataMigration.NAME)
-          .isEmpty()) {
+      var pending = List.of(LegacyDataMigration.NAME, RoomsBackfillMigration.NAME);
+      if (pending.stream()
+          .anyMatch(
+              name ->
+                  db.queryOne(
+                          "SELECT 1 FROM data_migrations WHERE name = ?",
+                          row -> row.integer(0),
+                          name)
+                      .isEmpty())) {
         MigrationRunner.applyAll(
-            db, List.of(new LegacyDataMigration()), DataMigration.Prompter.NON_INTERACTIVE);
+            db,
+            List.of(new LegacyDataMigration(), new RoomsBackfillMigration()),
+            DataMigration.Prompter.NON_INTERACTIVE);
       }
     } catch (SchemaManager.PreFloorException e) {
       db.close();
