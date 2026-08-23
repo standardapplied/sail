@@ -375,7 +375,22 @@ public final class SchemaManager {
           "ALTER TABLE review_findings_v3 RENAME TO review_findings",
           "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
           "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
-          BACKFILL_SHIPPED_RESIDUE);
+          BACKFILL_SHIPPED_RESIDUE,
+          """
+          CREATE TABLE rooms (
+              id TEXT PRIMARY KEY,
+              project TEXT,
+              title TEXT NOT NULL,
+              assignee TEXT,
+              wake TEXT CHECK (wake IN ('on', 'mention', 'off')),
+              roster TEXT,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              updated_by TEXT,
+              rev TEXT,
+              base_rev TEXT
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

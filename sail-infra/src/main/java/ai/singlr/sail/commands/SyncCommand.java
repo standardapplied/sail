@@ -25,6 +25,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
@@ -131,10 +132,12 @@ public final class SyncCommand implements Callable<Integer> {
     var fileStore = new FileStore(db);
     var projectStore = new ProjectStore(db);
     var specStore = new SpecStore(db);
+    var roomStore = new RoomStore(db);
     var messageStore = new MessageStore(db);
     var runStore = new RunStore(db);
     return new Boxes(
         new StoreReplica(host, specStore, changeLog, conflicts, syncState),
+        new StoreReplica(host, roomStore, changeLog, conflicts, syncState),
         new StoreReplica(host, fileStore, changeLog, conflicts, syncState),
         new StoreReplica(host, projectStore, changeLog, conflicts, syncState),
         new StoreReplica(
@@ -155,6 +158,7 @@ public final class SyncCommand implements Callable<Integer> {
 
   private record Boxes(
       StoreReplica spec,
+      StoreReplica room,
       StoreReplica file,
       StoreReplica project,
       StoreReplica run,
@@ -240,6 +244,7 @@ public final class SyncCommand implements Callable<Integer> {
     try (var channel = SshSyncChannel.open(target);
         var session = new SyncSession(channel.reader(), channel.writer())) {
       var specReport = new SyncEngine().reconcile(boxes.spec(), session.replica("spec"));
+      var roomReport = new SyncEngine().reconcile(boxes.room(), session.replica("room"));
       var fileReport = new SyncEngine().reconcile(boxes.file(), session.replica("file"));
       var projectReport = new SyncEngine().reconcile(boxes.project(), session.replica("project"));
       var runReport = new SyncEngine().reconcile(boxes.run(), session.replica("run"));
@@ -264,7 +269,9 @@ public final class SyncCommand implements Callable<Integer> {
       return new Round(
           combine(
               combine(
-                  combine(combine(combine(specReport, fileReport), projectReport), runReport),
+                  combine(
+                      combine(combine(combine(specReport, roomReport), fileReport), projectReport),
+                      runReport),
                   reviewReport),
               messageReport),
           pulledMessages);

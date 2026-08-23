@@ -360,6 +360,11 @@ class SchemaManagerTest {
             .contains("spec_messages"));
     assertTrue(
         db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rooms'",
+                r -> r.text(0))
+            .contains("rooms"));
+    assertTrue(
+        db.query(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'box_credential'",
                 r -> r.text(0))
             .contains("box_credential"));
