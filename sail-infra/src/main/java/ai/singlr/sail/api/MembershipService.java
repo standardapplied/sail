@@ -231,23 +231,15 @@ public final class MembershipService {
   private void writeRoster(SpecStore.SpecRow spec, Roster roster, Actor actor) {
     var store = requireRooms();
     var handle = actor == null ? spec.updatedBy() : actor.handle();
-    var room =
-        store.ensureFor(
-            spec.id(), spec.project(), spec.title(), spec.assignee(), spec.wake(), handle);
-    store.update(
-        new RoomStore.RoomRow(
-            room.id(),
-            room.project(),
-            room.title(),
-            room.assignee(),
-            room.wake(),
-            roster.toJson(),
-            room.createdBy(),
-            room.createdAt(),
-            null,
-            handle));
     var standing = roster.standing();
-    specStore.update(spec.withEngagement(standing == null ? null : standing.toJson()));
+    specStore.atomically(
+        () -> {
+          store.ensureFor(
+              spec.id(), spec.project(), spec.title(), spec.assignee(), spec.wake(), handle);
+          store.updateRoster(spec.id(), roster.toJson(), handle);
+          specStore.updateEngagement(spec.id(), standing == null ? null : standing.toJson());
+          return null;
+        });
   }
 
   private RoomStore requireRooms() {

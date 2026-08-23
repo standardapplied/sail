@@ -231,18 +231,7 @@ final class GlobalSpecOperations {
             updated.wake(),
             request.updatedBy());
     if (!Objects.equals(room.wake(), updated.wake())) {
-      store.update(
-          new RoomStore.RoomRow(
-              room.id(),
-              room.project(),
-              room.title(),
-              room.assignee(),
-              updated.wake(),
-              room.roster(),
-              room.createdBy(),
-              room.createdAt(),
-              null,
-              request.updatedBy()));
+      store.updateWake(updated.id(), updated.wake(), request.updatedBy());
     }
   }
 
@@ -280,7 +269,15 @@ final class GlobalSpecOperations {
     requireStore();
     var existing = findOrThrow(specId);
     SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
-    specStore.delete(specId);
+    var store = rooms.get();
+    specStore.atomically(
+        () -> {
+          specStore.delete(specId);
+          if (store != null) {
+            store.delete(specId);
+          }
+          return null;
+        });
     publishBoardUpdated(existing.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecDeletedResponse(specId);
   }
