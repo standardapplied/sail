@@ -87,33 +87,58 @@ class RoomStoreTest {
   }
 
   @Test
-  void updateJournalsANewRevisionAndKeepsCreationIdentity() {
+  void narrowUpdatesTouchOnlyTheirColumnAndJournalARevision() {
     rooms.create(room("auth"));
     var created = rooms.findById("auth").orElseThrow();
     var firstRev = rooms.latestRev("auth");
 
-    rooms.update(
-        new RoomStore.RoomRow(
-            "auth",
-            "acme",
-            "Auth design v2",
-            "sam",
-            "mention",
-            null,
-            "ignored",
-            null,
-            null,
-            "sam"));
-
-    var updated = rooms.findById("auth").orElseThrow();
-    assertEquals("Auth design v2", updated.title());
-    assertEquals("sam", updated.assignee());
-    assertEquals("mention", updated.wake());
-    assertNull(updated.roster());
-    assertEquals("sam", updated.updatedBy());
-    assertEquals(created.createdBy(), updated.createdBy());
-    assertEquals(created.createdAt(), updated.createdAt());
+    rooms.updateRoster("auth", null, "sam");
+    var afterRoster = rooms.findById("auth").orElseThrow();
+    assertNull(afterRoster.roster());
+    assertEquals(created.wake(), afterRoster.wake(), "a roster write never touches wake");
+    assertEquals(created.title(), afterRoster.title());
+    assertEquals("sam", afterRoster.updatedBy());
     assertFalse(firstRev.equals(rooms.latestRev("auth")), "an edit mints a new revision");
+
+    rooms.updateWake("auth", "mention", "ada");
+    var afterWake = rooms.findById("auth").orElseThrow();
+    assertEquals("mention", afterWake.wake());
+    assertNull(afterWake.roster(), "a wake write never resurrects the roster");
+    assertEquals(created.createdAt(), afterWake.createdAt());
+  }
+
+  @Test
+  void deleteTombstonesTheRoomSoTheDeletionPropagates() {
+    rooms.create(room("auth"));
+
+    assertTrue(rooms.delete("auth"));
+
+    assertTrue(rooms.findById("auth").isEmpty());
+    assertNotNull(rooms.latestRev("auth"), "the tombstone stays journaled for sync");
+    assertTrue(rooms.syncEntityIds().contains("auth"));
+    assertFalse(rooms.delete("auth"), "deleting an absent room is a no-op");
+  }
+
+  @Test
+  void createJournaledWritesVerbatimTimestampsWithNoSyncedAncestor() {
+    rooms.createJournaled(
+        new RoomStore.RoomRow(
+            "seed",
+            "acme",
+            "Seeded",
+            "uday",
+            "on",
+            null,
+            "uday",
+            "t-created",
+            "t-updated",
+            "uday"));
+
+    var row = rooms.findById("seed").orElseThrow();
+    assertEquals("t-created", row.createdAt());
+    assertEquals("t-updated", row.updatedAt());
+    assertNotNull(rooms.latestRev("seed"));
+    assertNull(rooms.baseRevOf("seed"), "a local genesis has no synced ancestor");
   }
 
   @Test

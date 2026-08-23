@@ -378,6 +378,33 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * Composes writes across stores sharing this database into one atomic transaction — nested store
+   * transactions join the outermost scope (see {@link Sqlite#transaction}), the same seam {@code
+   * StoreReplica.atomically} rides. Lets a caller pair a room write with its spec mirror so a crash
+   * can never persist one half.
+   */
+  public <T> T atomically(java.util.function.Supplier<T> work) {
+    return db.transaction(work);
+  }
+
+  /**
+   * Stores a new engagement mirror as a local edit — a single-column write, so it can never revert
+   * a concurrent status transition or reassignment the way a full-row rewrite from a stale read
+   * would.
+   */
+  public void updateEngagement(String id, String engagement) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE specs SET engagement = ?, updated_at = ? WHERE id = ?",
+              engagement,
+              DateTimeUtils.now().toString(),
+              id);
+          recordRevision(id, "local", false);
+        });
+  }
+
   public void updateStatus(String id, SpecStatus status) {
     db.transaction(
         () -> {

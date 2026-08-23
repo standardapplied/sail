@@ -181,20 +181,8 @@ class RoomWakeReactorTest {
     var spec = specStore.findById(id).orElseThrow();
     var member = ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString());
     specStore.update(spec.withEngagement(member.toJson()));
-    var room =
-        roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), spec.wake(), "uday");
-    roomStore.update(
-        new RoomStore.RoomRow(
-            room.id(),
-            room.project(),
-            room.title(),
-            room.assignee(),
-            room.wake(),
-            ai.singlr.sail.config.Roster.solo(member).toJson(),
-            room.createdBy(),
-            room.createdAt(),
-            null,
-            "uday"));
+    roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), spec.wake(), "uday");
+    roomStore.updateRoster(id, ai.singlr.sail.config.Roster.solo(member).toJson(), "uday");
   }
 
   private String chatRun(String specId, String role, String status, Instant startedAt) {
@@ -974,21 +962,26 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void theSweepStillRescuesALegacyColumnEngagementWithNoRoomRow() {
+    seed("legacy", "in_progress", "uday", "on");
+    var spec = specStore.findById("legacy").orElseThrow();
+    specStore.update(
+        spec.withEngagement(
+            ai.singlr.sail.config.Engagement.of("claude-code", "full", null, now.get().toString())
+                .toJson()));
+    messageStore.append("legacy", "uday", "anyone there?", null);
+
+    reactor().sweepEngagedRooms();
+
+    assertEquals(1, launcher.woken.size(), "the sweep unions the legacy column until it retires");
+  }
+
+  @Test
   void aMemberRecordedOnlyOnTheRoomRowWakesTheAgent() {
     seed("auth", "in_progress", "uday", "off");
     roomStore.ensureFor("auth", "acme", "auth", "uday", "off", "uday");
-    roomStore.update(
-        new RoomStore.RoomRow(
-            "auth",
-            "acme",
-            "auth",
-            "uday",
-            "off",
-            "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
-            "uday",
-            null,
-            null,
-            "uday"));
+    roomStore.updateRoster(
+        "auth", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]", "uday");
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));
@@ -1000,19 +993,7 @@ class RoomWakeReactorTest {
   void aDismissalRecordedOnTheRoomWinsOverAStaleSpecColumn() {
     seed("auth", "in_progress", "uday", "off");
     engage("auth", "claude-code", "full");
-    var room = roomStore.findById("auth").orElseThrow();
-    roomStore.update(
-        new RoomStore.RoomRow(
-            room.id(),
-            room.project(),
-            room.title(),
-            room.assignee(),
-            room.wake(),
-            null,
-            room.createdBy(),
-            room.createdAt(),
-            null,
-            "uday"));
+    roomStore.updateRoster("auth", null, "uday");
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));

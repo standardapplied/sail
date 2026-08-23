@@ -8,6 +8,8 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -627,6 +629,26 @@ class SpecStoreTest {
 
     assertEquals(List.of("auth"), store.findById("billing").orElseThrow().dependsOn());
     assertTrue(store.findById("auth").isEmpty(), "the dependency need not exist");
+  }
+
+  @Test
+  void updateEngagementTouchesOnlyTheMirrorColumnAndJournals() {
+    store.create(spec("auth", "OAuth", "draft"));
+    store.updateStatus("auth", SpecStatus.IN_PROGRESS);
+    var before = store.findById("auth").orElseThrow();
+    var rev = store.revOf("auth");
+
+    store.updateEngagement("auth", "{\"agent\":\"claude-code\",\"engaged_at\":\"t0\"}");
+
+    var after = store.findById("auth").orElseThrow();
+    assertEquals(SpecStatus.IN_PROGRESS, after.status(), "a mirror write never touches status");
+    assertEquals(before.assignee(), after.assignee());
+    assertEquals(before.title(), after.title());
+    assertNotNull(after.engagement());
+    assertNotEquals(rev, store.revOf("auth"), "the mirror write journals a revision");
+
+    store.updateEngagement("auth", null);
+    assertNull(store.findById("auth").orElseThrow().engagement());
   }
 
   @Test

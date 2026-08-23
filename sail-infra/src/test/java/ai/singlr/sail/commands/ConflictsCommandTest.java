@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -221,6 +222,7 @@ class ConflictsCommandTest {
     assertInstanceOf(FileStore.class, ConflictsCommand.resolverFor(db, "file"));
     assertInstanceOf(SpecStore.class, ConflictsCommand.resolverFor(db, "spec"));
     assertInstanceOf(ProjectStore.class, ConflictsCommand.resolverFor(db, "project"));
+    assertInstanceOf(RoomStore.class, ConflictsCommand.resolverFor(db, "room"));
   }
 
   @Test

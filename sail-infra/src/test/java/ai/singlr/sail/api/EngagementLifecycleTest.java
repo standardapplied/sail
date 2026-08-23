@@ -511,6 +511,27 @@ class EngagementLifecycleTest {
   }
 
   @Test
+  void anEngageNeverRevertsAConcurrentStatusTransition() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+    var launch =
+        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
+    specStore.compareAndSetStatus(
+        "auth",
+        ai.singlr.sail.config.SpecStatus.DRAFT,
+        ai.singlr.sail.config.SpecStatus.IN_PROGRESS);
+
+    launch.completion().run();
+
+    var after = specStore.findById("auth").orElseThrow();
+    assertEquals(
+        ai.singlr.sail.config.SpecStatus.IN_PROGRESS,
+        after.status(),
+        "the engagement mirror is a single-column write — it cannot clobber a status race");
+    assertNotNull(Engagement.fromJson(after.engagement()));
+  }
+
+  @Test
   void membersReadsTheRosterRoomFirstThroughTheLifecycle() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
@@ -535,9 +556,7 @@ class EngagementLifecycleTest {
     seedSpec("auth");
     ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
     var spec = specStore.findById("auth").orElseThrow();
-    roomStore.update(
-        new RoomStore.RoomRow(
-            "auth", "acme", "OAuth flow", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    roomStore.updateRoster("auth", null, HANDLE);
 
     assertNotNull(Engagement.fromJson(spec.engagement()), "the legacy column is now stale");
     assertNull(

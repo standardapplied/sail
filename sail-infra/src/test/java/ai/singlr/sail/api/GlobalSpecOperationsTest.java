@@ -743,6 +743,29 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void deleteTombstonesTheIdentityRoomAndAReusedIdGetsAFreshRoom() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+                java.util.Map.of("id", "reused", "title", "First life", "project", "acme"))
+            .withCreatedBy("uday"));
+    rooms.updateRoster(
+        "reused", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]", "uday");
+
+    withRooms.delete("reused", ADMIN);
+    assertTrue(rooms.findById("reused").isEmpty(), "the identity room dies with its spec");
+
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+                java.util.Map.of("id", "reused", "title", "Second life", "project", "acme"))
+            .withCreatedBy("uday"));
+    var reborn = rooms.findById("reused").orElseThrow();
+    assertEquals("Second life", reborn.title(), "a reused id mints a fresh room");
+    assertNull(reborn.roster(), "no ghost member resurrects from the first life");
+  }
+
+  @Test
   void anExplicitWakeEditDualWritesTheRoomRow() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);

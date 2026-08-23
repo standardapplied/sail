@@ -82,23 +82,78 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         });
   }
 
-  /** Updates a room's mutable fields as a local edit; creation identity is immutable. */
-  public void update(RoomRow room) {
+  /**
+   * Seats a new roster as a local edit — a single-column write, so a concurrent wake edit is never
+   * clobbered by a stale full-row rewrite.
+   */
+  public void updateRoster(String id, String roster, String actor) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE rooms SET roster = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+              roster,
+              DateTimeUtils.now().toString(),
+              actor,
+              id);
+          journal.recordRevision(id, "local", false);
+        });
+  }
+
+  /** Stores a new wake mode as a local edit — single-column, mirror of {@link #updateRoster}. */
+  public void updateWake(String id, String wake, String actor) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE rooms SET wake = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+              wake,
+              DateTimeUtils.now().toString(),
+              actor,
+              id);
+          journal.recordRevision(id, "local", false);
+        });
+  }
+
+  /** Tombstones a room so the deletion propagates; a no-op if it is already absent. */
+  public boolean delete(String id) {
+    return db.transaction(
+        () -> {
+          if (findById(id).isEmpty()) {
+            return false;
+          }
+          journal.recordRevision(id, "local", true);
+          db.execute("DELETE FROM rooms WHERE id = ?", id);
+          return true;
+        });
+  }
+
+  /**
+   * Writes a row verbatim — timestamps included — and journals it as a LOCAL revision with no
+   * synced ancestor. The backfill's write: every field derives from the synced spec row, so each
+   * box mints a byte-identical revision, and a room main never minted pushes up on first sync
+   * instead of reading as a remote deletion (which a synced-ancestor write would).
+   */
+  public void createJournaled(RoomRow room) {
+    Strings.requireNonBlank(room.id(), "A room needs an id");
+    Strings.requireNonBlank(room.title(), "A room needs a title");
+    Strings.requireNonBlank(room.createdAt(), "A journaled create carries its creation time");
+    Strings.requireNonBlank(room.updatedAt(), "A journaled create carries its update time");
     db.transaction(
         () -> {
           db.execute(
               """
-              UPDATE rooms SET project = ?, title = ?, assignee = ?, wake = ?, roster = ?,
-                  updated_at = ?, updated_by = ?
-              WHERE id = ?""",
+              INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,
+                  created_at, updated_at, updated_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              room.id(),
               room.project(),
               room.title(),
               room.assignee(),
               room.wake(),
               room.roster(),
-              DateTimeUtils.now().toString(),
-              room.updatedBy(),
-              room.id());
+              room.createdBy(),
+              room.createdAt(),
+              room.updatedAt(),
+              room.updatedBy());
           journal.recordRevision(room.id(), "local", false);
         });
   }
@@ -109,13 +164,16 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    */
   public RoomRow ensureFor(
       String id, String project, String title, String assignee, String wake, String actor) {
-    return findById(id)
-        .orElseGet(
-            () -> {
-              create(
-                  new RoomRow(id, project, title, assignee, wake, null, actor, null, null, actor));
-              return findById(id).orElseThrow();
-            });
+    return db.immediateTransaction(
+        () ->
+            findById(id)
+                .orElseGet(
+                    () -> {
+                      create(
+                          new RoomRow(
+                              id, project, title, assignee, wake, null, actor, null, null, actor));
+                      return findById(id).orElseThrow();
+                    }));
   }
 
   /** Every room with at least one member — the rooms the engagement sweeper walks. */

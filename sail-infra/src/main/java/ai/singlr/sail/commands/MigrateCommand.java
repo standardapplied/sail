@@ -18,12 +18,11 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.RoomsBackfillMigration;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -54,8 +53,7 @@ import picocli.CommandLine.Spec;
 public final class MigrateCommand implements Runnable {
 
   /** Every one-shot data migration tracked in {@code data_migrations}. Add new ones at the end. */
-  public static final List<DataMigration> REGISTRY =
-      List.of(new LegacyDataMigration(), new RoomsBackfillMigration());
+  public static final List<DataMigration> REGISTRY = DataMigrations.ALL;
 
   @Option(
       names = "--non-interactive",

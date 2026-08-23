@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.ProjectRegistry;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.Roster;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
@@ -16,11 +16,12 @@ import java.util.List;
  * conversation-side state (wake, engagement-as-roster, assignee) onto the new rooms table. Runs
  * exactly once per database via the {@code data_migrations} marker.
  *
- * <p>Every field of the backfilled snapshot — including its revision — is derived solely from the
- * spec row, so two boxes that hold the same synced spec mint a byte-identical room at an identical
- * content-hash rev, recorded as its own synced ancestor ({@code base_rev = rev}). The first fleet
- * sync after an upgrade therefore converges every backfilled room with zero pushes, pulls, or
- * conflicts; rooms diverge only where the underlying specs had genuinely diverged, which sync then
+ * <p>Every field of the backfilled row — and therefore its content-hash revision — derives solely
+ * from the spec row, so two boxes holding the same synced spec mint a byte-identical room at an
+ * identical rev. The write is journaled as LOCAL with no synced ancestor: boxes that both
+ * backfilled a room converge as a no-op (equal revs), and a room main never minted — a spec that
+ * reached main only by sync — pushes up on the first round instead of reading back as a remote
+ * deletion. Rooms diverge only where the underlying specs had genuinely diverged, which sync
  * surfaces through the ordinary conflict path.
  */
 public final class RoomsBackfillMigration implements DataMigration {
@@ -39,7 +40,7 @@ public final class RoomsBackfillMigration implements DataMigration {
         db.query(
             """
             SELECT id, project, title, assignee, wake, engagement, created_by, created_at,
-                updated_by
+                updated_by, updated_at
             FROM specs ORDER BY id""",
             row ->
                 Arrays.asList(
@@ -51,39 +52,40 @@ public final class RoomsBackfillMigration implements DataMigration {
                     text(row, 5),
                     text(row, 6),
                     text(row, 7),
-                    text(row, 8)));
+                    text(row, 8),
+                    text(row, 9)));
     var created = 0;
     for (var spec : specs) {
       var id = spec.get(0);
       if (rooms.findById(id).isPresent()) {
         continue;
       }
-      var snapshot = roomSnapshot(spec);
-      rooms.applyRevision(id, snapshot, Revisions.next(null, YamlUtil.dumpJson(snapshot)));
+      rooms.createJournaled(roomRow(spec));
       created++;
     }
     return new Report(created, 0, 0, List.of());
   }
 
   /**
-   * The comparable-shaped snapshot sync itself would deliver: the room's work-carrying fields plus
-   * the {@code _actor} attribution resolved into {@code updated_by} on apply. Field values come
-   * from the spec row verbatim; the engagement JSON object becomes the roster's one-element array.
+   * The room row a spec backfills to, every field taken from the spec row verbatim — timestamps
+   * included — so each box mints a byte-identical local revision with no synced ancestor. The
+   * engagement column rides through {@link Engagement#fromJson}'s corruption tolerance before
+   * becoming the roster's genesis value: a corrupt or blank engagement backfills as no members,
+   * exactly as it already read.
    */
-  private static LinkedHashMap<String, Object> roomSnapshot(List<String> spec) {
-    var engagement = spec.get(5);
-    var snapshot = new LinkedHashMap<String, Object>();
-    snapshot.put("project", spec.get(1));
-    snapshot.put("title", spec.get(2));
-    snapshot.put("assignee", spec.get(3));
-    snapshot.put("wake", spec.get(4));
-    snapshot.put("roster", engagement == null ? null : "[" + engagement + "]");
-    snapshot.put("created_by", spec.get(6));
-    snapshot.put("created_at", spec.get(7));
-    if (spec.get(8) != null) {
-      snapshot.put(Snapshots.ACTOR, spec.get(8));
-    }
-    return snapshot;
+  private static RoomStore.RoomRow roomRow(List<String> spec) {
+    var member = Engagement.fromJson(spec.get(5));
+    return new RoomStore.RoomRow(
+        spec.get(0),
+        spec.get(1),
+        spec.get(2),
+        spec.get(3),
+        spec.get(4),
+        member == null ? null : Roster.solo(member).toJson(),
+        spec.get(6),
+        spec.get(7),
+        spec.get(9),
+        spec.get(8));
   }
 
   private static String text(Sqlite.Row row, int index) {

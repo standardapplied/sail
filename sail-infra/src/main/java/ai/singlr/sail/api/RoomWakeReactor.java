@@ -324,15 +324,18 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
    * lost event, or a turn deferred behind a build must never strand a conversation.
    */
   public void sweepEngagedRooms() {
-    for (var room : roomStore.listEngaged()) {
+    var engaged = new java.util.LinkedHashSet<String>();
+    roomStore.listEngaged().forEach(room -> engaged.add(room.id()));
+    specStore.listEngaged().forEach(spec -> engaged.add(spec.id()));
+    for (var id : engaged) {
       try {
-        var spec = specStore.findById(room.id()).orElse(null);
+        var spec = specStore.findById(id).orElse(null);
         if (spec != null && spec.assignedTo(localHandle.get())) {
           refireOwedTurn(spec.id());
         }
       } catch (RuntimeException e) {
         System.err.println(
-            "room-wake: engagement sweep of room " + room.id() + " failed: " + e.getMessage());
+            "room-wake: engagement sweep of room " + id + " failed: " + e.getMessage());
       }
     }
   }

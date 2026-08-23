@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.ConflictResolver;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -119,6 +120,7 @@ public final class ConflictsCommand implements Callable<Integer> {
       case SPEC -> new SpecStore(db);
       case FILE -> new FileStore(db);
       case PROJECT -> new ProjectStore(db);
+      case "room" -> new RoomStore(db);
       default -> throw new IllegalStateException("Unknown conflict entity type: " + entityType);
     };
   }

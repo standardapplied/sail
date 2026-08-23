@@ -70,17 +70,17 @@ class RoomsBackfillMigrationTest {
     assertEquals("acme", auth.project());
     assertEquals("uday", auth.assignee());
     assertEquals("on", auth.wake());
-    assertEquals(
-        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
-        auth.roster(),
-        "the engagement object becomes the roster's one-element array");
+    var seated = ai.singlr.sail.config.Roster.fromJson(auth.roster()).standing();
+    assertEquals("claude-code", seated.agent(), "the engagement becomes the roster's one member");
+    assertEquals("full", seated.mode());
+    assertEquals("t0", seated.engagedAt());
     assertEquals("2026-08-01T00:00:00Z", auth.createdAt());
     assertEquals("uday", auth.updatedBy());
     assertNull(rooms.findById("billing").orElseThrow().roster(), "no engagement, empty roster");
-    assertEquals(
-        rooms.latestRev("auth"),
+    assertNull(
         rooms.baseRevOf("auth"),
-        "a backfilled room is its own synced ancestor");
+        "a backfilled room is a local genesis, so a room main lacks pushes up instead of"
+            + " reading back as a remote deletion");
   }
 
   @Test
@@ -142,6 +142,51 @@ class RoomsBackfillMigrationTest {
 
       assertEquals(0, report.total(), "the first fleet sync after backfill moves nothing");
     }
+  }
+
+  @Test
+  void aRoomMainNeverMintedPushesUpOnFirstSyncInsteadOfBeingDeleted() {
+    try (var node = Sqlite.open(tempDir.resolve("node.db"))) {
+      new SchemaManager(node).migrate();
+      seedSpec(node, "node-only", null);
+      backfill(node);
+      backfill(db);
+
+      var mainRooms = new RoomStore(db);
+      var nodeRooms = new RoomStore(node);
+      var report =
+          new SyncEngine()
+              .reconcile(
+                  new StoreReplica(
+                      "node",
+                      nodeRooms,
+                      new ChangeLog(node),
+                      new SyncConflicts(node),
+                      new SyncState(node)),
+                  new StoreReplica(
+                      "main",
+                      mainRooms,
+                      new ChangeLog(db),
+                      new SyncConflicts(db),
+                      new SyncState(db)));
+
+      assertEquals(1, report.pushed(), "the node's room reaches main");
+      assertTrue(nodeRooms.findById("node-only").isPresent(), "the node keeps its room");
+      assertTrue(mainRooms.findById("node-only").isPresent());
+    }
+  }
+
+  @Test
+  void aCorruptEngagementBackfillsAsNoMembersNeverAPoisonedRoster() {
+    seedSpec(db, "corrupt", "not json {{{");
+    seedSpec(db, "blank", "");
+
+    backfill(db);
+
+    var rooms = new RoomStore(db);
+    assertNull(rooms.findById("corrupt").orElseThrow().roster());
+    assertNull(rooms.findById("blank").orElseThrow().roster(), "blank never mints roster='[]'");
+    assertTrue(rooms.listEngaged().isEmpty(), "no empty room counts as engaged");
   }
 
   @Test
