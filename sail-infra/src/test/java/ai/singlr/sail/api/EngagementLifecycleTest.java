@@ -387,6 +387,26 @@ class EngagementLifecycleTest {
               HANDLE);
       assertTrue(refused instanceof Result.Failure<EngageResponse>);
 
+      var membersAdd =
+          sailOps.addRoomMember(
+              "auth",
+              new EngageRequest("claude-code", "read_only", null, false),
+              Actor.cliOperator(HANDLE),
+              HANDLE);
+      assertTrue(membersAdd instanceof Result.Success<EngageResponse>);
+      assertEquals("read_only", ((Result.Success<EngageResponse>) membersAdd).value().mode());
+      var listed = sailOps.roomMembers("auth");
+      assertTrue(listed instanceof Result.Success<RoomMembersResponse>);
+      assertEquals(1, ((Result.Success<RoomMembersResponse>) listed).value().members().size());
+      var removed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
+      assertTrue(removed instanceof Result.Success<DisengageResponse>);
+      assertEquals("claude-code", ((Result.Success<DisengageResponse>) removed).value().agent());
+      sailOps.engageToSpec(
+          "auth",
+          new EngageRequest("claude-code", null, null, true),
+          Actor.cliOperator(HANDLE),
+          HANDLE);
+
       var dismissed = sailOps.disengageSpec("auth", Actor.cliOperator(HANDLE), HANDLE);
       assertTrue(dismissed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) dismissed).value().agent());
@@ -488,6 +508,25 @@ class EngagementLifecycleTest {
     assertNull(
         roomStore.findById("auth").orElseThrow().roster(),
         "an empty roster stores as null, matching the engagement convention");
+  }
+
+  @Test
+  void membersReadsTheRosterRoomFirstThroughTheLifecycle() throws Exception {
+    var ops = operations(shell());
+    seedSpec("auth");
+    assertTrue(ops.roomMembers("auth").isEmpty(), "a fresh room seats nobody");
+
+    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    var members = ops.roomMembers("auth");
+    assertEquals(1, members.size());
+    assertEquals("claude-code", members.getFirst().agent());
+    assertEquals("read_only", members.getFirst().mode());
+
+    ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
+    assertTrue(ops.roomMembers("auth").isEmpty(), "dismissal empties the roster");
+
+    var missing = assertThrows(ApiException.class, () -> ops.roomMembers("ghost"));
+    assertEquals(ErrorCode.SPEC_NOT_FOUND, missing.failure().errorCode());
   }
 
   @Test

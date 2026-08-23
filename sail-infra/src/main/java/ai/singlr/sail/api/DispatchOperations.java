@@ -389,6 +389,11 @@ public final class DispatchOperations {
     return membership.disengage(specId, actor, localHandle);
   }
 
+  /** The members of {@code roomId}'s roster, room-first. */
+  public List<ai.singlr.sail.config.Engagement> roomMembers(String roomId) {
+    return membership.members(roomId);
+  }
+
   /**
    * Delegates to {@link RoomCommitGuard}: the read-only room contract's backstop, run when a room
    * run stops. Kept on the dispatch surface so the server and the wake reactor reach it here.

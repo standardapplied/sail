@@ -96,6 +96,24 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<RoomMembersResponse> roomMembers(String roomId) {
+    return Result.success(new RoomMembersResponse(java.util.List.of()));
+  }
+
+  @Override
+  public Result<EngageResponse> addRoomMember(
+      String roomId, EngageRequest request, Actor actor, String localHandle) {
+    return Result.success(
+        new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode(), ""));
+  }
+
+  @Override
+  public Result<DisengageResponse> removeRoomMember(
+      String roomId, Actor actor, String localHandle) {
+    return Result.success(new DisengageResponse(null));
+  }
+
+  @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null));
   }

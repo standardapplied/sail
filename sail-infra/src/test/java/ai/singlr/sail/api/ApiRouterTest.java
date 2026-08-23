@@ -1065,6 +1065,46 @@ class ApiRouterTest {
   }
 
   @Test
+  void roomMembersRoutesReadAddAndRemoveThroughThePort() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var listed = get(server, "/v1/rooms/auth-flow/members", "token");
+      assertEquals(200, listed.statusCode());
+      assertTrue(listed.body().contains("\"agent\": \"claude-code\""));
+      assertTrue(listed.body().contains("\"count\": 1"));
+      assertTrue(listed.body().contains("\"model\": \"opus-x\""));
+      assertEquals("auth-flow", ops.lastMembersRoom);
+
+      var added =
+          post(
+              server,
+              "/v1/rooms/auth-flow/members",
+              "token",
+              "{\"agent\": \"claude-code\", \"mode\": \"read_only\"}");
+      assertEquals(200, added.statusCode());
+      assertTrue(added.body().contains("\"mode\": \"read_only\""));
+      assertEquals("auth-flow", ops.lastAddMember.specId());
+      assertEquals("read_only", ops.lastAddMember.request().mode());
+
+      var removed = delete(server, "/v1/rooms/auth-flow/members", "token");
+      assertEquals(200, removed.statusCode());
+      assertTrue(removed.body().contains("\"disengaged\": true"));
+      assertEquals("auth-flow", ops.lastRemoveMember);
+    }
+  }
+
+  @Test
+  void theRoomsSurfaceRefusesUnknownShapesAndMethods() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      assertEquals(404, get(server, "/v1/rooms", "token").statusCode());
+      assertEquals(404, get(server, "/v1/rooms/auth-flow", "token").statusCode());
+      assertEquals(404, get(server, "/v1/rooms/auth-flow/messages", "token").statusCode());
+      assertEquals(405, put(server, "/v1/rooms/auth-flow/members", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
   void engageRequiresPostAndDisengageRoutesTheSpec() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
@@ -1511,6 +1551,9 @@ class ApiRouterTest {
 
     Engage lastEngage;
     String lastDisengage;
+    String lastMembersRoom;
+    Engage lastAddMember;
+    String lastRemoveMember;
 
     record Engage(String specId, EngageRequest request, String localHandle) {}
 
@@ -1523,6 +1566,32 @@ class ApiRouterTest {
               request.agent(),
               request.mode() == null ? "full" : request.mode(),
               request.snapshot() ? "engage-1" : ""));
+    }
+
+    @Override
+    public Result<RoomMembersResponse> roomMembers(String roomId) {
+      lastMembersRoom = roomId;
+      return Result.success(
+          new RoomMembersResponse(
+              java.util.List.of(
+                  ai.singlr.sail.config.Engagement.of(
+                      "claude-code", "full", "opus-x", "2026-08-23T00:00:00Z"))));
+    }
+
+    @Override
+    public Result<EngageResponse> addRoomMember(
+        String roomId, EngageRequest request, Actor actor, String localHandle) {
+      lastAddMember = new Engage(roomId, request, localHandle);
+      return Result.success(
+          new EngageResponse(
+              request.agent(), request.mode() == null ? "full" : request.mode(), ""));
+    }
+
+    @Override
+    public Result<DisengageResponse> removeRoomMember(
+        String roomId, Actor actor, String localHandle) {
+      lastRemoveMember = roomId;
+      return Result.success(new DisengageResponse("claude-code"));
     }
 
     @Override

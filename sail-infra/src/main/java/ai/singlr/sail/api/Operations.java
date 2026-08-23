@@ -120,4 +120,11 @@ public interface Operations extends LocalLaneOperations {
       String specId, EngageRequest request, Actor actor, String localHandle);
 
   Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle);
+
+  Result<RoomMembersResponse> roomMembers(String roomId);
+
+  Result<EngageResponse> addRoomMember(
+      String roomId, EngageRequest request, Actor actor, String localHandle);
+
+  Result<DisengageResponse> removeRoomMember(String roomId, Actor actor, String localHandle);
 }
