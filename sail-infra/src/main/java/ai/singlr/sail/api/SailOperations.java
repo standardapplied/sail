@@ -487,6 +487,24 @@ public final class SailOperations implements Operations {
   }
 
   @Override
+  public Result<RoomMembersResponse> roomMembers(String roomId) {
+    freshenForRead();
+    return safe(() -> new RoomMembersResponse(dispatchOps.roomMembers(roomId)));
+  }
+
+  @Override
+  public Result<EngageResponse> addRoomMember(
+      String roomId, EngageRequest request, Actor actor, String localHandle) {
+    return engageToSpec(roomId, request, actor, localHandle);
+  }
+
+  @Override
+  public Result<DisengageResponse> removeRoomMember(
+      String roomId, Actor actor, String localHandle) {
+    return disengageSpec(roomId, actor, localHandle);
+  }
+
+  @Override
   public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
     freshenForRead();
     var result =

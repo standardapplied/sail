@@ -72,10 +72,35 @@ public final class MembershipService {
   public static RoomState stateOf(RoomStore rooms, SpecStore.SpecRow spec) {
     var room = rooms == null ? null : rooms.findById(spec.id()).orElse(null);
     if (room == null) {
-      return new RoomState(spec.wake(), Engagement.fromJson(spec.engagement()));
+      return new RoomState(spec.wake(), rosterOf(null, spec).standing());
     }
     var wake = room.wake() != null ? room.wake() : spec.wake();
     return new RoomState(wake, Roster.fromJson(room.roster()).standing());
+  }
+
+  /**
+   * The full membership of a spec's room — the room row's roster when one exists (authoritative,
+   * even when empty), else the spec's legacy engagement column as a one-member roster.
+   */
+  public static Roster rosterOf(RoomStore rooms, SpecStore.SpecRow spec) {
+    var room = rooms == null ? null : rooms.findById(spec.id()).orElse(null);
+    if (room != null) {
+      return Roster.fromJson(room.roster());
+    }
+    var legacy = Engagement.fromJson(spec.engagement());
+    return legacy == null ? Roster.EMPTY : Roster.solo(legacy);
+  }
+
+  /** The members of {@code roomId}'s roster, room-first. The room's spec must exist. */
+  public java.util.List<Engagement> members(String roomId) {
+    var spec =
+        specStore
+            .findById(roomId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    return rosterOf(rooms.get(), spec).members();
   }
 
   /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */

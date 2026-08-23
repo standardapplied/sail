@@ -788,6 +788,31 @@ record DisengageResponse(String agent) implements Mappable {
   }
 }
 
+/** Response of {@code GET /v1/rooms/{id}/members}: the room's roster, room-first. */
+record RoomMembersResponse(List<ai.singlr.sail.config.Engagement> members) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put(
+        "members",
+        members.stream()
+            .map(
+                member -> {
+                  var one = new LinkedHashMap<String, Object>();
+                  one.put("agent", member.agent());
+                  one.put("mode", member.mode());
+                  if (member.model() != null) {
+                    one.put("model", member.model());
+                  }
+                  one.put("engaged_at", member.engagedAt());
+                  return one;
+                })
+            .toList());
+    m.put("count", members.size());
+    return m;
+  }
+}
+
 record InviteRequest(String agent, String model, boolean full, boolean snapshot) {
   static InviteRequest fromMap(Map<String, Object> map) {
     return new InviteRequest(

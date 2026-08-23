@@ -60,6 +60,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String MESSAGES = "messages";
   private static final String INVITE = "invite";
   private static final String ENGAGE = "engage";
+  private static final String ROOMS = "rooms";
+  private static final String MEMBERS = "members";
   private static final String DISENGAGE = "disengage";
   private static final String AGENTS = "agents";
   private static final String SNAPSHOTS = "snapshots";
@@ -191,6 +193,10 @@ public final class ApiRouter implements HttpHandler {
       return routeGlobalSpecs(exchange, request);
     }
 
+    if (request.hasRoomsPrefix()) {
+      return routeRooms(exchange, request);
+    }
+
     if (request.hasReviewsPrefix()) {
       return routeReviews(exchange, request);
     }
@@ -301,6 +307,33 @@ public final class ApiRouter implements HttpHandler {
         Objects.toString(exchange.getAttribute("token.fde"), null),
         Role.fromAttribute(exchange.getAttribute("token.role")),
         Actor.Lane.API);
+  }
+
+  /**
+   * Routes the rooms membership surface — {@code GET|POST|DELETE /v1/rooms/{id}/members}. A room id
+   * is a spec id while rooms and specs share identity; the write forms reuse the engage shapes and
+   * semantics, so the spec-shaped doors can retire without a behavior change.
+   */
+  private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
+    if (request.size() != 4 || !MEMBERS.equals(request.segments().get(3))) {
+      throw notFound();
+    }
+    var roomId = request.segments().get(2);
+    NameValidator.requireValidSpecId(roomId);
+    return switch (request.method()) {
+      case GET -> ApiResponse.from(operations.roomMembers(roomId));
+      case POST ->
+          ApiResponse.from(
+              operations.addRoomMember(
+                  roomId,
+                  EngageRequest.fromMap(JsonBody.readMap(exchange)),
+                  actorOf(exchange),
+                  nodeHandle.get()));
+      case DELETE ->
+          ApiResponse.from(
+              operations.removeRoomMember(roomId, actorOf(exchange), nodeHandle.get()));
+      default -> throw methodNotAllowed();
+    };
   }
 
   private ApiResponse routeGlobalSpecs(HttpExchange exchange, RouteRequest request)
@@ -772,6 +805,10 @@ public final class ApiRouter implements HttpHandler {
 
     boolean hasGlobalSpecsPrefix() {
       return segments.size() >= 2 && V1.equals(segments.get(0)) && SPECS.equals(segments.get(1));
+    }
+
+    boolean hasRoomsPrefix() {
+      return segments.size() >= 2 && V1.equals(segments.get(0)) && ROOMS.equals(segments.get(1));
     }
 
     boolean hasReviewsPrefix() {
