@@ -398,6 +398,16 @@ class EngagementLifecycleTest {
       var listed = sailOps.roomMembers("auth");
       assertTrue(listed instanceof Result.Success<RoomMembersResponse>);
       assertEquals(1, ((Result.Success<RoomMembersResponse>) listed).value().members().size());
+      var posted =
+          sailOps.postRoomMessage(
+              "auth",
+              new SpecMessageRequest("hello room", null, false),
+              Actor.cliOperator(HANDLE),
+              HANDLE);
+      assertTrue(posted instanceof Result.Success<SpecMessageResponse>);
+      var roomList = sailOps.roomMessages("auth", null, null, 10);
+      assertTrue(roomList instanceof Result.Success<SpecMessagesResponse>);
+      assertEquals(1, ((Result.Success<SpecMessagesResponse>) roomList).value().messages().size());
       var removed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
       assertTrue(removed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) removed).value().agent());

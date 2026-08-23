@@ -45,12 +45,13 @@ public final class SyncWire {
 
   /**
    * The fleet floor both sides must advertise before exchanging rows: the release that carries the
-   * v1 schema baseline. Bumped from {@code 0.14.0} with the baseline because a pre-baseline peer's
-   * schema lacks post-floor columns and must not receive v1 snapshots — the refusal names 'sail
-   * upgrade' as the remedy. Bump again only when a change makes older peers unsafe, never for a
-   * routine release.
+   * v1 schema baseline. Bumped from {@code 0.14.0} with the baseline, and from {@code 0.15.0} to
+   * {@code 0.31.0} with the room-spec decouple's message re-key: message snapshots now carry {@code
+   * room_id} and a pre-split peer would corrupt or refuse them mid-exchange, so it must be refused
+   * up front — the refusal names 'sail upgrade' as the remedy. Bump again only when a change makes
+   * older peers unsafe, never for a routine release.
    */
-  public static final String V1_UPGRADE_FLOOR = "0.15.0";
+  public static final String V1_UPGRADE_FLOOR = "0.31.0";
 
   /**
    * Hard ceiling on one framed message, bounding the memory a single read can claim. A sync message

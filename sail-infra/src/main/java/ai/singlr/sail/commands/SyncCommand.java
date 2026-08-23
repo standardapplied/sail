@@ -295,12 +295,12 @@ public final class SyncCommand implements Callable<Integer> {
         .map(
             row ->
                 specs
-                    .findById(row.specId())
+                    .findById(row.roomId())
                     .map(
                         spec ->
                             SyncTransitionEvents.messagePosted(
                                 spec.project(),
-                                row.specId(),
+                                row.roomId(),
                                 row.id(),
                                 row.author(),
                                 row.body(),

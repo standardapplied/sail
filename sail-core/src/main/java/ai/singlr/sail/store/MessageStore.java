@@ -20,13 +20,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** Append-only messages attached to specs and journaled as independently synced records. */
+/** Append-only messages attached to rooms and journaled as independently synced records. */
 public final class MessageStore implements SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
   private static final String COLUMNS =
-      "id, spec_id, author, body, reply_to, created_at, rev, base_rev, question";
+      "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -38,7 +38,7 @@ public final class MessageStore implements SyncedStore {
 
   public record MessageRow(
       String id,
-      String specId,
+      String roomId,
       String author,
       String body,
       String replyTo,
@@ -47,12 +47,12 @@ public final class MessageStore implements SyncedStore {
       String baseRev,
       boolean question) {}
 
-  public MessageRow append(String specId, String author, String body, String replyTo) {
-    return append(specId, author, body, replyTo, false);
+  public MessageRow append(String roomId, String author, String body, String replyTo) {
+    return append(roomId, author, body, replyTo, false);
   }
 
   public MessageRow append(
-      String specId, String author, String body, String replyTo, boolean question) {
+      String roomId, String author, String body, String replyTo, boolean question) {
     requireBody(body);
     if (Strings.isBlank(author)) {
       throw new IllegalArgumentException("message author is required");
@@ -66,7 +66,7 @@ public final class MessageStore implements SyncedStore {
           var row =
               new MessageRow(
                   id,
-                  specId,
+                  roomId,
                   author.strip(),
                   body,
                   replyTo,
@@ -84,7 +84,7 @@ public final class MessageStore implements SyncedStore {
         });
   }
 
-  public List<MessageRow> list(String specId, String before, int limit) {
+  public List<MessageRow> list(String roomId, String before, int limit) {
     if (before != null) {
       Ids.requireUuid(before);
     }
@@ -96,18 +96,18 @@ public final class MessageStore implements SyncedStore {
             ? db.query(
                 "SELECT "
                     + COLUMNS
-                    + " FROM spec_messages WHERE spec_id = ?"
+                    + " FROM room_messages WHERE room_id = ?"
                     + " ORDER BY id DESC LIMIT ?",
                 MessageStore::map,
-                specId,
+                roomId,
                 limit)
             : db.query(
                 "SELECT "
                     + COLUMNS
-                    + " FROM spec_messages WHERE spec_id = ? AND id < ?"
+                    + " FROM room_messages WHERE room_id = ? AND id < ?"
                     + " ORDER BY id DESC LIMIT ?",
                 MessageStore::map,
-                specId,
+                roomId,
                 before,
                 limit);
     var oldest = new ArrayList<>(newest);
@@ -116,12 +116,12 @@ public final class MessageStore implements SyncedStore {
   }
 
   /**
-   * Messages of {@code specId} strictly newer than {@code after} (a message id, or null for all),
+   * Messages of {@code roomId} strictly newer than {@code after} (a message id, or null for all),
    * oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id > ?} is mint-time
    * order — a forward paging cursor for room reads. Not a delivery primitive: mint order is not
    * arrival order across synced boxes, so delivery goes through {@link #listUndelivered}.
    */
-  public List<MessageRow> listAfter(String specId, String after, int limit) {
+  public List<MessageRow> listAfter(String roomId, String after, int limit) {
     if (after != null) {
       Ids.requireUuid(after);
     }
@@ -130,56 +130,56 @@ public final class MessageStore implements SyncedStore {
     }
     if (after == null) {
       return db.query(
-          "SELECT " + COLUMNS + " FROM spec_messages WHERE spec_id = ? ORDER BY id ASC LIMIT ?",
+          "SELECT " + COLUMNS + " FROM room_messages WHERE room_id = ? ORDER BY id ASC LIMIT ?",
           MessageStore::map,
-          specId,
+          roomId,
           limit);
     }
     return db.query(
         "SELECT "
             + COLUMNS
-            + " FROM spec_messages WHERE spec_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+            + " FROM room_messages WHERE room_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
         MessageStore::map,
-        specId,
+        roomId,
         after,
         limit);
   }
 
   /**
-   * Messages of {@code specId} absent from {@code runId}'s delivery ledger and not authored by
+   * Messages of {@code roomId} absent from {@code runId}'s delivery ledger and not authored by
    * {@code excludeAuthor} (a run is never told its own story), oldest first, capped at {@code
    * limit}. Delivery is by exact identity, so a message that synchronized in with an older id after
    * newer messages were already delivered still appears here.
    */
   public List<MessageRow> listUndelivered(
-      String specId, String runId, String excludeAuthor, int limit) {
+      String roomId, String runId, String excludeAuthor, int limit) {
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
     return db.query(
         "SELECT "
             + COLUMNS
-            + " FROM spec_messages WHERE spec_id = ? AND author != ?"
+            + " FROM room_messages WHERE room_id = ? AND author != ?"
             + " AND NOT EXISTS (SELECT 1 FROM run_delivered_messages"
-            + " WHERE run_id = ? AND message_id = spec_messages.id)"
+            + " WHERE run_id = ? AND message_id = room_messages.id)"
             + " ORDER BY id ASC LIMIT ?",
         MessageStore::map,
-        specId,
+        roomId,
         excludeAuthor,
         runId,
         limit);
   }
 
   /** The id of the room's newest message, or empty for a silent room. */
-  public Optional<String> newestId(String specId) {
+  public Optional<String> newestId(String roomId) {
     return db.queryOne(
-        "SELECT id FROM spec_messages WHERE spec_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM room_messages WHERE room_id = ? ORDER BY id DESC LIMIT 1",
         row -> row.text(0),
-        specId);
+        roomId);
   }
 
   /**
-   * Each spec whose latest agent-authored question is still unanswered, mapped to that question's
+   * Each room whose latest agent-authored question is still unanswered, mapped to that question's
    * message id — one aggregate query. A question is answered by any later human message in the
    * room; the author classes are structural, mirroring {@code RoomWakePolicy.humanAuthor}: an agent
    * principal always carries a {@code /}, the orchestrator posts as the literal {@code sail}, and
@@ -198,12 +198,12 @@ public final class MessageStore implements SyncedStore {
     var open = new LinkedHashMap<String, String>();
     for (var entry :
         db.query(
-            "SELECT q.spec_id, MAX(q.id) FROM spec_messages q"
+            "SELECT q.room_id, MAX(q.id) FROM room_messages q"
                 + " WHERE q.question != 0 AND q.author LIKE '%/%'"
-                + " AND NOT EXISTS (SELECT 1 FROM spec_messages h"
-                + " WHERE h.spec_id = q.spec_id AND h.id > q.id"
+                + " AND NOT EXISTS (SELECT 1 FROM room_messages h"
+                + " WHERE h.room_id = q.room_id AND h.id > q.id"
                 + " AND h.author NOT LIKE '%/%' AND h.author != 'sail')"
-                + " GROUP BY q.spec_id",
+                + " GROUP BY q.room_id",
             row -> Map.entry(row.text(0), row.text(1)))) {
       open.put(entry.getKey(), entry.getValue());
     }
@@ -211,11 +211,11 @@ public final class MessageStore implements SyncedStore {
   }
 
   /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
-  public Map<String, String> latestBySpec() {
+  public Map<String, String> latestByRoom() {
     var latest = new LinkedHashMap<String, String>();
     for (var entry :
         db.query(
-            "SELECT spec_id, MAX(created_at) FROM spec_messages GROUP BY spec_id",
+            "SELECT room_id, MAX(created_at) FROM room_messages GROUP BY room_id",
             row -> Map.entry(row.text(0), row.text(1)))) {
       latest.put(entry.getKey(), entry.getValue());
     }
@@ -224,7 +224,7 @@ public final class MessageStore implements SyncedStore {
 
   public Optional<MessageRow> findById(String id) {
     return db.queryOne(
-        "SELECT " + COLUMNS + " FROM spec_messages WHERE id = ?", MessageStore::map, id);
+        "SELECT " + COLUMNS + " FROM room_messages WHERE id = ?", MessageStore::map, id);
   }
 
   @Override
@@ -306,7 +306,7 @@ public final class MessageStore implements SyncedStore {
           var rev = Revisions.next(null, json);
           var row = fromSnapshot(id, snapshot);
           var peer = SyncPeer.current();
-          if (!mayPostAs(peer, row.author(), row.specId())) {
+          if (!mayPostAs(peer, row.author(), row.roomId())) {
             throw new IllegalArgumentException(
                 "sync principal '" + peer + "' may not post as '" + row.author() + "'");
           }
@@ -317,7 +317,7 @@ public final class MessageStore implements SyncedStore {
         });
   }
 
-  private boolean mayPostAs(String peer, String author, String specId) {
+  private boolean mayPostAs(String peer, String author, String roomId) {
     if (peer == null) {
       return false;
     }
@@ -329,7 +329,7 @@ public final class MessageStore implements SyncedStore {
                         + " WHERE rp.run_id = r.id AND rp.principal = ?)) LIMIT 1",
                     row -> true,
                     peer,
-                    specId,
+                    roomId,
                     author,
                     author)
                 .orElse(false);
@@ -337,13 +337,13 @@ public final class MessageStore implements SyncedStore {
       return false;
     }
     return db.queryOne(
-            "SELECT 1 FROM specs s LEFT JOIN fdes f ON f.handle = ? "
+            "SELECT 1 FROM rooms s LEFT JOIN fdes f ON f.handle = ? "
                 + "WHERE s.id = ? AND (lower(coalesce(f.role, '')) = 'admin' "
                 + "OR s.assignee = ? OR "
                 + "(trim(coalesce(s.assignee, '')) = '' AND s.created_by = ?)) LIMIT 1",
             row -> true,
             peer,
-            specId,
+            roomId,
             peer,
             peer)
         .orElse(false);
@@ -352,12 +352,12 @@ public final class MessageStore implements SyncedStore {
   private void write(MessageRow row, String rev, String baseRev) {
     db.execute(
         """
-        INSERT INTO spec_messages
-            (id, spec_id, author, body, reply_to, created_at, rev, base_rev, question)
+        INSERT INTO room_messages
+            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET rev = excluded.rev, base_rev = excluded.base_rev""",
         row.id(),
-        row.specId(),
+        row.roomId(),
         row.author(),
         row.body(),
         row.replyTo(),
@@ -370,10 +370,10 @@ public final class MessageStore implements SyncedStore {
   private void requireReplyTarget(MessageRow row) {
     if (row.replyTo() != null
         && findById(row.replyTo())
-            .filter(parent -> parent.specId().equals(row.specId()))
+            .filter(parent -> parent.roomId().equals(row.roomId()))
             .isEmpty()) {
       throw new IllegalArgumentException(
-          "reply_to must reference a message on spec '" + row.specId() + "'");
+          "reply_to must reference a message in room '" + row.roomId() + "'");
     }
   }
 
@@ -391,7 +391,7 @@ public final class MessageStore implements SyncedStore {
     }
     return new MessageRow(
         id,
-        required(snapshot, "spec_id"),
+        roomIdOf(snapshot),
         author,
         body,
         replyTo,
@@ -401,9 +401,19 @@ public final class MessageStore implements SyncedStore {
         Boolean.parseBoolean(Objects.toString(snapshot.get("question"), "false")));
   }
 
+  /**
+   * The room a snapshot belongs to: {@code room_id}, falling back to the {@code spec_id} key that
+   * pre-rename journal entries and pre-rename revisions carry — rooms kept the spec's id at the
+   * split, so the value is the same room either way.
+   */
+  private static String roomIdOf(Map<String, Object> snapshot) {
+    var roomId = Objects.toString(snapshot.get("room_id"), null);
+    return roomId != null ? roomId : required(snapshot, "spec_id");
+  }
+
   private static Map<String, Object> snapshot(MessageRow row) {
     var map = new LinkedHashMap<String, Object>();
-    map.put("spec_id", row.specId());
+    map.put("room_id", row.roomId());
     map.put("author", row.author());
     map.put("body", row.body());
     if (row.replyTo() != null) {

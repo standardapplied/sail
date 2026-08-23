@@ -42,7 +42,7 @@ class MessageSyncTest {
       new SchemaManager(db).migrate();
       db.execute(
           """
-          INSERT INTO specs (id, title, project, created_at, updated_at)
+          INSERT INTO rooms (id, title, project, created_at, updated_at)
           VALUES ('room', 'Room', 'acme', 'now', 'now')""");
       messages = new MessageStore(db);
       replica =
@@ -91,7 +91,7 @@ class MessageSyncTest {
   @Test
   void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
-    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new ai.singlr.sail.store.RunStore(main.db);
     runs.createReview(runId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var principal = runs.findById(runId).orElseThrow().principal();
@@ -112,7 +112,7 @@ class MessageSyncTest {
 
   @Test
   void syncedMessagesCannotBeChangedOrDeleted() {
-    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);
     SyncPeer.with("node", () -> new SyncEngine().reconcile(node.replica, main.replica));
     var changed = new LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
@@ -129,7 +129,7 @@ class MessageSyncTest {
   @Test
   void aMessageAuthoredBeforePrincipalRotationStillSyncs() {
     var reviewId = "019fee00-0000-7000-8000-0000000000aa";
-    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new ai.singlr.sail.store.RunStore(main.db);
     runs.createReview(reviewId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
@@ -169,7 +169,7 @@ class MessageSyncTest {
 
   @Test
   void authenticatedPeerCannotPostToForeignOrMissingSpec() {
-    main.db.execute("UPDATE specs SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
+    main.db.execute("UPDATE rooms SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
 
     assertThrows(
         IllegalArgumentException.class,
@@ -197,7 +197,7 @@ class MessageSyncTest {
 
   @Test
   void authenticatedPeerMayPostAsItsRunPrincipalOnlyOnThatRunsSpec() {
-    main.db.execute("UPDATE specs SET assignee = 'node' WHERE id = 'room'");
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     main.db.execute(
         """
         INSERT INTO runs
@@ -216,7 +216,7 @@ class MessageSyncTest {
 
     main.db.execute(
         """
-        INSERT INTO specs (id, title, project, created_at, updated_at)
+        INSERT INTO rooms (id, title, project, created_at, updated_at)
         VALUES ('other-room', 'Other room', 'acme', 'now', 'now')""");
     assertThrows(
         IllegalArgumentException.class,

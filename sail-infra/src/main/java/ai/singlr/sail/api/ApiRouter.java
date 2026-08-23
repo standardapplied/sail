@@ -315,25 +315,58 @@ public final class ApiRouter implements HttpHandler {
    * semantics, so the spec-shaped doors can retire without a behavior change.
    */
   private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
-    if (request.size() != 4 || !MEMBERS.equals(request.segments().get(3))) {
+    if (request.size() != 4) {
       throw notFound();
     }
     var roomId = request.segments().get(2);
     NameValidator.requireValidSpecId(roomId);
-    return switch (request.method()) {
-      case GET -> ApiResponse.from(operations.roomMembers(roomId));
-      case POST ->
-          ApiResponse.from(
-              operations.addRoomMember(
+    var sub = request.segments().get(3);
+    if (MEMBERS.equals(sub)) {
+      return switch (request.method()) {
+        case GET -> ApiResponse.from(operations.roomMembers(roomId));
+        case POST ->
+            ApiResponse.from(
+                operations.addRoomMember(
+                    roomId,
+                    EngageRequest.fromMap(JsonBody.readMap(exchange)),
+                    actorOf(exchange),
+                    nodeHandle.get()));
+        case DELETE ->
+            ApiResponse.from(
+                operations.removeRoomMember(roomId, actorOf(exchange), nodeHandle.get()));
+        default -> throw methodNotAllowed();
+      };
+    }
+    if (MESSAGES.equals(sub)) {
+      return switch (request.method()) {
+        case GET -> {
+          var params = QueryParameters.from(request.uri()).values();
+          yield ApiResponse.from(
+              operations.roomMessages(
                   roomId,
-                  EngageRequest.fromMap(JsonBody.readMap(exchange)),
-                  actorOf(exchange),
-                  nodeHandle.get()));
-      case DELETE ->
-          ApiResponse.from(
-              operations.removeRoomMember(roomId, actorOf(exchange), nodeHandle.get()));
-      default -> throw methodNotAllowed();
-    };
+                  params.get("before"),
+                  params.get("after"),
+                  clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
+        }
+        case POST -> {
+          var principal = actorOf(exchange);
+          if (principal.handle() == null) {
+            throw new ApiException(
+                ErrorCode.FORBIDDEN,
+                "Room messages require an FDE-bound credential so authorship can be"
+                    + " synchronized.");
+          }
+          yield ApiResponse.fromCreated(
+              operations.postRoomMessage(
+                  roomId,
+                  SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
+                  principal,
+                  principal.handle()));
+        }
+        default -> throw methodNotAllowed();
+      };
+    }
+    throw notFound();
   }
 
   private ApiResponse routeGlobalSpecs(HttpExchange exchange, RouteRequest request)

@@ -390,7 +390,11 @@ public final class SchemaManager {
               updated_by TEXT,
               rev TEXT,
               base_rev TEXT
-          )""");
+          )""",
+          "ALTER TABLE spec_messages RENAME TO room_messages",
+          "ALTER TABLE room_messages RENAME COLUMN spec_id TO room_id",
+          "DROP INDEX idx_spec_messages_page",
+          "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

@@ -1094,12 +1094,42 @@ class ApiRouterTest {
   }
 
   @Test
+  void roomMessagesRouteReadAndPostThroughThePort() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWithOwnedToken(ops, true)) {
+      var listed = get(server, "/v1/rooms/auth-flow/messages?limit=10", "token");
+      assertEquals(200, listed.statusCode());
+      assertEquals("auth-flow", ops.lastRoomMessagesRoom);
+
+      var posted =
+          post(server, "/v1/rooms/auth-flow/messages", "token", "{\"body\": \"hello room\"}");
+      assertEquals(201, posted.statusCode());
+      assertEquals("auth-flow:hello room", ops.lastRoomPost);
+
+      assertEquals(405, delete(server, "/v1/rooms/auth-flow/messages", "token").statusCode());
+    }
+  }
+
+  @Test
+  void roomMessagePostsRejectUnownedCredentialsLikeTheSpecDoor() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var response =
+          post(server, "/v1/rooms/auth-flow/messages", "token", "{\"body\":\"progress\"}");
+
+      assertEquals(403, response.statusCode());
+      assertTrue(response.body().contains("FDE-bound credential"));
+      assertNull(ops.lastRoomPost);
+    }
+  }
+
+  @Test
   void theRoomsSurfaceRefusesUnknownShapesAndMethods() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
       assertEquals(404, get(server, "/v1/rooms", "token").statusCode());
       assertEquals(404, get(server, "/v1/rooms/auth-flow", "token").statusCode());
-      assertEquals(404, get(server, "/v1/rooms/auth-flow/messages", "token").statusCode());
+      assertEquals(404, get(server, "/v1/rooms/auth-flow/bogus", "token").statusCode());
       assertEquals(405, put(server, "/v1/rooms/auth-flow/members", "token", "{}").statusCode());
     }
   }
@@ -1592,6 +1622,32 @@ class ApiRouterTest {
         String roomId, Actor actor, String localHandle) {
       lastRemoveMember = roomId;
       return Result.success(new DisengageResponse("claude-code"));
+    }
+
+    String lastRoomMessagesRoom;
+    String lastRoomPost;
+
+    @Override
+    public Result<SpecMessagesResponse> roomMessages(
+        String roomId, String before, String after, int limit) {
+      lastRoomMessagesRoom = roomId;
+      return Result.success(new SpecMessagesResponse(roomId, java.util.List.of()));
+    }
+
+    @Override
+    public Result<SpecMessageResponse> postRoomMessage(
+        String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+      lastRoomPost = roomId + ":" + request.body();
+      return Result.success(
+          new SpecMessageResponse(
+              new SpecMessageView(
+                  "00000000-0000-7000-8000-000000000001",
+                  roomId,
+                  "uday",
+                  request.body(),
+                  null,
+                  "2026-08-23T00:00:00Z",
+                  false)));
     }
 
     @Override

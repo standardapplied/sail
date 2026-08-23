@@ -1144,7 +1144,7 @@ record SpecMessageView(
   static SpecMessageView from(MessageStore.MessageRow row) {
     return new SpecMessageView(
         row.id(),
-        row.specId(),
+        row.roomId(),
         row.author(),
         row.body(),
         row.replyTo(),
