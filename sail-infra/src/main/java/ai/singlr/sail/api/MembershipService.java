@@ -72,35 +72,40 @@ public final class MembershipService {
   public static RoomState stateOf(RoomStore rooms, SpecStore.SpecRow spec) {
     var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
     if (room == null) {
-      return new RoomState(spec.wake(), rosterOf(null, spec).standing());
+      return new RoomState(spec.wake(), legacyRosterOf(spec).standing());
     }
     var wake = room.wake() != null ? room.wake() : spec.wake();
     return new RoomState(wake, Roster.fromJson(room.roster()).standing());
   }
 
   /**
-   * The full membership of a spec's room — the room row's roster when one exists (authoritative,
-   * even when empty), else the spec's legacy engagement column as a one-member roster.
+   * The spec's legacy engagement column read as a one-member roster — the fallback every room-first
+   * reader uses when no room row exists for pre-decouple data.
    */
-  public static Roster rosterOf(RoomStore rooms, SpecStore.SpecRow spec) {
-    var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
-    if (room != null) {
-      return Roster.fromJson(room.roster());
-    }
+  public static Roster legacyRosterOf(SpecStore.SpecRow spec) {
     var legacy = Engagement.fromJson(spec.engagement());
     return legacy == null ? Roster.EMPTY : Roster.solo(legacy);
   }
 
-  /** The members of {@code roomId}'s roster, room-first. The room's spec must exist. */
+  /**
+   * The members of {@code roomId}'s roster. A present room row is the authoritative home — a
+   * chat-only room needs no spec; a missing row falls back to a spec's legacy column so a
+   * pre-decouple box's data still reads.
+   */
   public java.util.List<Engagement> members(String roomId) {
+    var store = rooms.get();
+    var room = store == null ? null : store.findById(roomId).orElse(null);
+    if (room != null) {
+      return Roster.fromJson(room.roster()).members();
+    }
     var spec =
         specStore
             .findById(roomId)
             .orElseThrow(
                 () ->
                     new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    return rosterOf(rooms.get(), spec).members();
+                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    return legacyRosterOf(spec).members();
   }
 
   /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */

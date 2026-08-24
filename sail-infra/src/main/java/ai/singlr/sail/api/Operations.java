@@ -132,4 +132,12 @@ public interface Operations extends LocalLaneOperations {
       String roomId, EngageRequest request, Actor actor, String localHandle);
 
   Result<DisengageResponse> removeRoomMember(String roomId, Actor actor, String localHandle);
+
+  Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor);
+
+  Result<RoomsListResponse> rooms(String project);
+
+  Result<RoomDetailResponse> room(String roomId);
+
+  Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor);
 }

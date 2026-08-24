@@ -1124,12 +1124,51 @@ class ApiRouterTest {
   }
 
   @Test
+  void roomsCrudRoutesThroughThePort() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      var listed = get(server, "/v1/rooms?project=acme", "token");
+      assertEquals(200, listed.statusCode());
+      assertEquals("acme", ops.lastRoomsProject);
+      assertTrue(listed.body().contains("\"design-room\""));
+      assertTrue(listed.body().contains("\"last_activity_at\": \"t9\""));
+      assertTrue(listed.body().contains("\"spec_ids\""));
+
+      var all = get(server, "/v1/rooms", "token");
+      assertEquals(200, all.statusCode());
+      assertNull(ops.lastRoomsProject);
+
+      var created =
+          post(
+              server,
+              "/v1/rooms",
+              "token",
+              "{\"id\": \"fresh-room\", \"project\": \"acme\", \"title\": \"Fresh\"}");
+      assertEquals(201, created.statusCode());
+      assertEquals("fresh-room", ops.lastRoomCreate.id());
+      assertNotNull(ops.lastRoomCreate.createdBy(), "the router stamps the creator");
+
+      var one = get(server, "/v1/rooms/design-room", "token");
+      assertEquals(200, one.statusCode());
+      assertEquals("design-room", ops.lastRoomGet);
+      assertTrue(one.body().contains("\"needs_reply\": false"));
+
+      var gone = delete(server, "/v1/rooms/design-room", "token");
+      assertEquals(200, gone.statusCode());
+      assertEquals("design-room", ops.lastRoomDelete);
+      assertTrue(gone.body().contains("\"deleted\": true"));
+
+      assertEquals(405, put(server, "/v1/rooms/design-room", "token", "{}").statusCode());
+      assertEquals(405, delete(server, "/v1/rooms", "token").statusCode());
+    }
+  }
+
+  @Test
   void theRoomsSurfaceRefusesUnknownShapesAndMethods() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
-      assertEquals(404, get(server, "/v1/rooms", "token").statusCode());
-      assertEquals(404, get(server, "/v1/rooms/auth-flow", "token").statusCode());
       assertEquals(404, get(server, "/v1/rooms/auth-flow/bogus", "token").statusCode());
+      assertEquals(404, get(server, "/v1/rooms/auth-flow/members/extra", "token").statusCode());
       assertEquals(405, put(server, "/v1/rooms/auth-flow/members", "token", "{}").statusCode());
     }
   }
@@ -1626,6 +1665,80 @@ class ApiRouterTest {
 
     String lastRoomMessagesRoom;
     String lastRoomPost;
+    RoomCreateRequest lastRoomCreate;
+    String lastRoomsProject = "unset";
+    String lastRoomGet;
+    String lastRoomDelete;
+
+    @Override
+    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+      lastRoomCreate = request;
+      return Result.success(
+          new RoomDetailResponse(
+              new RoomView(
+                  request.id(),
+                  request.project(),
+                  request.title(),
+                  request.createdBy(),
+                  request.wake(),
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  request.createdBy(),
+                  "t0",
+                  "t0",
+                  request.createdBy()),
+              null,
+              null));
+    }
+
+    @Override
+    public Result<RoomsListResponse> rooms(String project) {
+      lastRoomsProject = project;
+      return Result.success(
+          new RoomsListResponse(
+              java.util.List.of(
+                  new RoomView(
+                      "design-room",
+                      "acme",
+                      "Design talk",
+                      "uday",
+                      "on",
+                      java.util.List.of(),
+                      java.util.List.of("attached-spec"),
+                      "uday",
+                      "t0",
+                      "t1",
+                      "uday")),
+              java.util.Map.of("design-room", "t9"),
+              java.util.Map.of()));
+    }
+
+    @Override
+    public Result<RoomDetailResponse> room(String roomId) {
+      lastRoomGet = roomId;
+      return Result.success(
+          new RoomDetailResponse(
+              new RoomView(
+                  roomId,
+                  "acme",
+                  "Design talk",
+                  "uday",
+                  "on",
+                  java.util.List.of(),
+                  java.util.List.of(),
+                  "uday",
+                  "t0",
+                  "t1",
+                  "uday"),
+              "t9",
+              null));
+    }
+
+    @Override
+    public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+      lastRoomDelete = roomId;
+      return Result.success(new RoomDeletedResponse(roomId));
+    }
 
     @Override
     public Result<SpecMessagesResponse> roomMessages(

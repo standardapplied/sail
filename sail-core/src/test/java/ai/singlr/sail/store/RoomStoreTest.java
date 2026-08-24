@@ -231,6 +231,20 @@ class RoomStoreTest {
   }
 
   @Test
+  void listAllSpansProjectsInCreationOrder() {
+    rooms.create(room("auth"));
+    rooms.create(
+        new RoomStore.RoomRow(
+            "other", "beta", "Beta room", null, null, null, "sam", null, null, "sam"));
+
+    var all = rooms.listAll();
+
+    assertEquals(2, all.size());
+    assertEquals("auth", all.getFirst().id());
+    assertEquals("other", all.getLast().id());
+  }
+
+  @Test
   void listReturnsOnlyTheProjectsRooms() {
     rooms.create(room("auth"));
     rooms.create(

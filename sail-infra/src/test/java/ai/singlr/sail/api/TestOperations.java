@@ -101,6 +101,26 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+    return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
+  }
+
+  @Override
+  public Result<RoomsListResponse> rooms(String project) {
+    return Result.success(new RoomsListResponse(java.util.List.of(), null, null));
+  }
+
+  @Override
+  public Result<RoomDetailResponse> room(String roomId) {
+    return Result.failure(ErrorCode.ROOM_NOT_FOUND, "no rooms in this fake");
+  }
+
+  @Override
+  public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+    return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
+  }
+
+  @Override
   public Result<SpecMessagesResponse> roomMessages(
       String roomId, String before, String after, int limit) {
     return Result.success(new SpecMessagesResponse(roomId, java.util.List.of()));
