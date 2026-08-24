@@ -977,6 +977,47 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void aSpeclessRoomWithASeatedMemberWakesOnItsOwnersBox() {
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "chat-room", "acme", "Chat", "uday", null, null, "uday", null, null, "uday"));
+    roomStore.updateRoster(
+        "chat-room",
+        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+        "uday");
+
+    reactor().onEvent(message("chat-room", "uday", "hello"));
+
+    assertEquals(1, launcher.woken.size(), "a conversation without a spec still gets its agent");
+  }
+
+  @Test
+  void aSpeclessRoomWithNoMemberStaysSilentRegardlessOfWakeMode() {
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "quiet-room", "acme", "Quiet", "uday", "on", null, "uday", null, null, "uday"));
+
+    reactor().onEvent(message("quiet-room", "uday", "anyone?"));
+
+    assertTrue(launcher.woken.isEmpty(), "the wake vocabulary presumes a work-item; members wake");
+  }
+
+  @Test
+  void aSpeclessRoomIsSilentOnABoxThatDoesNotOwnIt() {
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "foreign-room", "acme", "Foreign", "ada", null, null, "ada", null, null, "ada"));
+    roomStore.updateRoster(
+        "foreign-room",
+        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+        "ada");
+
+    reactor().onEvent(message("foreign-room", "uday", "hello"));
+
+    assertTrue(launcher.woken.isEmpty(), "exactly one waker per room: its owner's box");
+  }
+
+  @Test
   void aMemberRecordedOnlyOnTheRoomRowWakesTheAgent() {
     seed("auth", "in_progress", "uday", "off");
     roomStore.ensureFor("auth", "acme", "auth", "uday", "off", "uday");

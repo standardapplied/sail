@@ -76,13 +76,10 @@ public final class RoomWakeLauncher {
           ErrorCode.COMMAND_FAILED,
           "This box keeps no run aggregate, so a room wake cannot be reserved or tracked.");
     }
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    var spec = specStore.findById(specId).orElse(null);
+    if (spec == null) {
+      return wakeSpecless(project, specId, config, localHandle);
+    }
     var engagement = MembershipService.stateOf(roomStore.get(), spec).standing();
     var agentType =
         engagement != null
@@ -167,6 +164,102 @@ public final class RoomWakeLauncher {
                   resumeSessionId));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
+      return runId;
+    } catch (RuntimeException e) {
+      runReservation.releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+  }
+
+  /**
+   * Wakes a room with no attached spec — the collaborator lane. Only a seated member wakes (the
+   * reactor guarantees it; this refuses defensively), the prompt carries no spec framing, the run
+   * reserves with a null spec and the room id as its serialization scope, and full mode claims the
+   * project's whole repo set — a conversation has no work-item to narrow it.
+   */
+  private String wakeSpecless(String project, String roomId, SailYaml config, String localHandle) {
+    var rooms = roomStore.get();
+    var room = rooms == null ? null : rooms.findById(roomId).orElse(null);
+    if (room == null) {
+      throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+    }
+    var member = ai.singlr.sail.config.Roster.fromJson(room.roster()).standing();
+    if (member == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "Room '" + roomId + "' has no seated member, so there is nobody to wake.");
+    }
+    var agentType = member.agent();
+    var full = member.full();
+    if (!full && !AgentCli.fromYamlName(agentType).supportsRoomLane()) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED,
+          "Room wake needs a harness-enforced read-only session, and "
+              + agentType
+              + " has none inside a sail container. Engage claude-code in this room, or engage "
+              + agentType
+              + " with full access.");
+    }
+    var messages = messageStore.get();
+    var conversation =
+        messages == null ? List.<MessageStore.MessageRow>of() : messages.list(roomId, null, 20);
+    var built = RoomWakePrompt.buildForRoom(roomId, room.title(), conversation, member);
+    var task = built.prompt();
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
+    var targetRepos = full ? config.repos() : List.<SailYaml.Repo>of();
+    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
+    var owner =
+        room.assignee() == null || room.assignee().isBlank()
+            ? Objects.toString(room.createdBy(), localHandle)
+            : room.assignee();
+    var credential =
+        runReservation.reserve(
+            runId,
+            project,
+            null,
+            roomId,
+            localHandle,
+            owner,
+            role,
+            repoPaths,
+            agentType,
+            null,
+            task,
+            unit,
+            config);
+    try {
+      seedRoomDelivery(runId, built.renderedMessages());
+      if (!full) {
+        roomCommitGuard.captureRoomBaseline(project, config, runId);
+      }
+      var workDir =
+          full
+              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
+              : "/home/" + config.sshUser() + "/workspace";
+      var launch =
+          runLauncher.launchSession(
+              new RunLauncher.LaunchSpec(
+                  project,
+                  config,
+                  workDir,
+                  full,
+                  member.model(),
+                  null,
+                  roomId,
+                  agentType,
+                  task,
+                  "",
+                  repoPaths,
+                  true,
+                  unit,
+                  runId,
+                  credential,
+                  role,
+                  null));
+      runLauncher.finishLaunch(
+          new RunLauncher.RunContext(project, unit, runId, roomId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);

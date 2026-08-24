@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -162,6 +164,106 @@ class RoomWakeLaunchTest {
     ops.startRoomRun("acme", "auth", HANDLE);
 
     assertNotNull(launched.get(), "a box without a message store still wakes, room empty");
+  }
+
+  @Test
+  void aSpeclessRoomWakeLaunchesTheCollaboratorPrompt() throws Exception {
+    var ops = operations(liveAgentShell());
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "chat-room", "acme", "Chat", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    rooms.updateRoster(
+        "chat-room",
+        "[{\"agent\":\"claude-code\",\"mode\":\"read_only\",\"engaged_at\":\"t0\"}]",
+        HANDLE);
+    ops.useRooms(rooms);
+
+    var runId = ops.startRoomRun("acme", "chat-room", HANDLE);
+
+    assertNotNull(launched.get());
+    var run = runStore.findById(runId).orElseThrow();
+    assertNull(run.specId(), "a spec-less turn carries no work-item");
+    assertEquals(
+        "chat-room",
+        db.queryOne("SELECT room_id FROM runs WHERE id = ?", r -> r.text(0), runId).orElseThrow(),
+        "the run is tracked by its room");
+    var task = run.task();
+    assertTrue(task.contains("collaborator in the room"), task.substring(0, 80));
+    assertFalse(task.contains("standing agent of spec"));
+  }
+
+  @Test
+  void aSpeclessFullWakeClaimsTheRepoSetAndOwnerFallsToTheWaker() throws Exception {
+    var ops = operations(liveAgentShell());
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "full-room", "acme", "Full", " ", null, null, null, null, null, null));
+    rooms.updateRoster(
+        "full-room",
+        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+        HANDLE);
+    ops.useRooms(rooms);
+
+    var runId = ops.startRoomRun("acme", "full-room", HANDLE);
+
+    var run = runStore.findById(runId).orElseThrow();
+    assertEquals("room-full", run.role());
+    assertTrue(run.task().contains("Collaborator Turn (full access)"));
+    assertEquals(HANDLE, run.owner(), "a room with no owner falls to the waking box");
+  }
+
+  @Test
+  void aSpeclessCodexReadOnlyMemberRefusesTheWake() throws Exception {
+    var ops = operations(liveAgentShellFor("codex"));
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "codex-room", "acme", "Codex", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    rooms.updateRoster(
+        "codex-room",
+        "[{\"agent\":\"codex\",\"mode\":\"read_only\",\"engaged_at\":\"t0\"}]",
+        HANDLE);
+    ops.useRooms(rooms);
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "codex-room", HANDLE));
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, ex.failure().errorCode());
+  }
+
+  @Test
+  void aFailedSpeclessLaunchReleasesTheReservationAndRethrows() throws Exception {
+    var ops = operations(liveAgentShell(), YAML, true, command -> 1);
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "crash-room", "acme", "Crash", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    rooms.updateRoster(
+        "crash-room",
+        "[{\"agent\":\"claude-code\",\"mode\":\"read_only\",\"engaged_at\":\"t0\"}]",
+        HANDLE);
+    ops.useRooms(rooms);
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "crash-room", HANDLE));
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, ex.failure().errorCode());
+    assertEquals(
+        1,
+        runStore.listForRoom("crash-room").size(),
+        "the failed turn stays on the room's ledger — released now or by the missed-stop"
+            + " reconciler, per releaseIfAbsent's live-agent contract");
+  }
+
+  @Test
+  void aSpeclessRoomWithNoMemberRefusesTheWake() throws Exception {
+    var ops = operations(liveAgentShell());
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "empty-room", "acme", "Empty", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    ops.useRooms(rooms);
+
+    var ex = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "empty-room", HANDLE));
+    assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
   }
 
   @Test
@@ -953,7 +1055,7 @@ class RoomWakeLaunchTest {
     var ops = operations(liveAgentShell());
 
     var missing = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "ghost", HANDLE));
-    assertEquals(ErrorCode.SPEC_NOT_FOUND, missing.failure().errorCode());
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
   }
 
   @Test

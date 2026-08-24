@@ -60,6 +60,26 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
+    return reserve(
+        runId, project, specId, null, node, owner, role, repos, agentType, branch, task, unit,
+        config);
+  }
+
+  /** Reservation variant for chat lanes that may serve a spec-less room. */
+  public String reserve(
+      String runId,
+      String project,
+      String specId,
+      String roomId,
+      String node,
+      String owner,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      SailYaml config) {
     RunStore.Reservation reservation;
     try {
       reservation =
@@ -67,6 +87,7 @@ public final class RunReservation {
               runId,
               project,
               specId,
+              roomId,
               node,
               owner,
               role,

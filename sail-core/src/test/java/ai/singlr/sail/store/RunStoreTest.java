@@ -1948,4 +1948,57 @@ class RunStoreTest {
         store.consumeRoomGuardBaseline(id).isEmpty(),
         "consumed on first read — a replayed stop checks nothing twice");
   }
+
+  @Test
+  void aRoomKeyedReservationTracksAndSerializesByRoom(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+    try (var roomDb = Sqlite.open(dir.resolve("room-runs.db"))) {
+      new SchemaManager(roomDb).migrate();
+      var runs = new RunStore(roomDb);
+
+      var first =
+          runs.reserveDispatch(
+              "run-1",
+              "acme",
+              null,
+              "chat-room",
+              "uday",
+              "uday",
+              "room",
+              java.util.List.of(),
+              "claude-code",
+              null,
+              "t",
+              "l",
+              "u",
+              null);
+      org.junit.jupiter.api.Assertions.assertInstanceOf(RunStore.Reservation.Reserved.class, first);
+      org.junit.jupiter.api.Assertions.assertNull(
+          runs.findById("run-1").orElseThrow().specId(), "no work-item on a chat turn");
+      org.junit.jupiter.api.Assertions.assertEquals(
+          1, runs.listForRoom("chat-room").size(), "the turn is tracked by its room");
+      org.junit.jupiter.api.Assertions.assertTrue(runs.listForRoom("other-room").isEmpty());
+
+      var second =
+          runs.reserveDispatch(
+              "run-2",
+              "acme",
+              null,
+              "chat-room",
+              "uday",
+              "uday",
+              "room",
+              java.util.List.of(),
+              "claude-code",
+              null,
+              "t",
+              "l",
+              "u",
+              null);
+      org.junit.jupiter.api.Assertions.assertInstanceOf(
+          RunStore.Reservation.Conflicted.class,
+          second,
+          "two live turns of one spec-less room must conflict — the room is the gate scope");
+    }
+  }
 }
