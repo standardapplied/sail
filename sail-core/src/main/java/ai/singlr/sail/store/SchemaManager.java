@@ -421,7 +421,8 @@ public final class SchemaManager {
           "DROP TABLE spec_messages",
           "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)",
           "ALTER TABLE specs ADD COLUMN room_id TEXT",
-          "UPDATE specs SET room_id = id WHERE room_id IS NULL");
+          "UPDATE specs SET room_id = id WHERE room_id IS NULL",
+          "ALTER TABLE runs ADD COLUMN room_id TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

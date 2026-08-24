@@ -119,4 +119,40 @@ class RoomWakePromptTest {
     assertTrue(built.prompt().contains("git commands are denied too"));
     assertFalse(built.prompt().contains("read-only git (log, show, diff"));
   }
+
+  @Test
+  void aSpeclessRoomPromptCarriesNoSpecFraming() {
+    var member =
+        ai.singlr.sail.config.Engagement.of(
+            "claude-code", "read_only", null, "2026-08-24T00:00:00Z");
+
+    var built =
+        RoomWakePrompt.buildForRoom("design-room", "Design talk", java.util.List.of(), member);
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("collaborator in the room \"Design talk\""));
+    org.junit.jupiter.api.Assertions.assertFalse(
+        built.prompt().contains("standing agent of spec"), "the spec leak dies here");
+    org.junit.jupiter.api.Assertions.assertFalse(built.prompt().contains("## Spec body"));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("Collaborator Turn (read only)"));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("spec comment design-room"), "posting still rides the CLI");
+  }
+
+  @Test
+  void aFullCollaboratorTurnOffersSpecCreationNeverStatusChanges() {
+    var member =
+        ai.singlr.sail.config.Engagement.of("claude-code", "full", null, "2026-08-24T00:00:00Z");
+
+    var built =
+        RoomWakePrompt.buildForRoom("design-room", "Design talk", java.util.List.of(), member);
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("Collaborator Turn (full access)"));
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("spec create"), "the promote flow is the collaborator's output");
+    org.junit.jupiter.api.Assertions.assertTrue(
+        built.prompt().contains("never set a status yourself"));
+  }
 }

@@ -366,6 +366,9 @@ class SchemaManagerTest {
         "auth",
         db.queryOne("SELECT room_id FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow(),
         "a pre-decouple spec backfills its identity room id");
+    assertTrue(
+        db.query("PRAGMA table_info(runs)", r -> r.text(1)).contains("room_id"),
+        "chat runs can carry their room");
   }
 
   private void stageAtVersion(int version) {

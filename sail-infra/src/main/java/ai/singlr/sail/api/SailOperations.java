@@ -552,36 +552,32 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * The room behind {@code roomId} — the room row when one exists, else a spec's identity room
-   * rendered as a room shape so pre-decouple data keeps answering on the room door.
+   * The conversation behind {@code roomId}, resolved spec-first: a spec's identity keeps its
+   * ownership fields authoritative for policy, and a genuinely spec-less room answers from its own
+   * row. {@code ROOM_NOT_FOUND} otherwise.
    */
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
+    var spec = specStore == null ? null : specStore.findById(roomId).orElse(null);
+    if (spec != null) {
+      return new RoomStore.RoomRow(
+          spec.id(),
+          spec.project(),
+          spec.title(),
+          spec.assignee(),
+          spec.wake(),
+          null,
+          spec.createdBy(),
+          spec.createdAt(),
+          spec.updatedAt(),
+          spec.updatedBy());
+    }
     if (roomStore != null) {
       var room = roomStore.findById(roomId).orElse(null);
       if (room != null) {
         return room;
       }
     }
-    var spec =
-        specStore == null
-            ? java.util.Optional.<SpecStore.SpecRow>empty()
-            : specStore.findById(roomId);
-    return spec.map(
-            row ->
-                new RoomStore.RoomRow(
-                    row.id(),
-                    row.project(),
-                    row.title(),
-                    row.assignee(),
-                    row.wake(),
-                    null,
-                    row.createdBy(),
-                    row.createdAt(),
-                    row.updatedAt(),
-                    row.updatedBy()))
-        .orElseThrow(
-            () ->
-                new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
   @Override

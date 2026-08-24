@@ -640,6 +640,44 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit,
       Duration maxDuration) {
+    return reserveDispatch(
+        id,
+        project,
+        specId,
+        null,
+        node,
+        owner,
+        role,
+        repos,
+        agent,
+        branch,
+        task,
+        logPath,
+        unit,
+        maxDuration);
+  }
+
+  /**
+   * Reservation for a chat lane that may serve a room with no spec: {@code roomId} is stored on the
+   * run (a sync-local column, like the credential and delivery ledger — never journaled) and
+   * substitutes for the spec in the gate's serialization scope, so two wakes of the same spec-less
+   * room still conflict.
+   */
+  public Reservation reserveDispatch(
+      String id,
+      String project,
+      String specId,
+      String roomId,
+      String node,
+      String owner,
+      String role,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit,
+      Duration maxDuration) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
     return db.immediateTransaction(
         () -> {
@@ -649,35 +687,28 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           var running =
               db.query(
-                  "SELECT "
-                      + COLUMNS
-                      + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
+                  "SELECT id, IFNULL(spec_id, room_id), role, repos FROM runs"
+                      + " WHERE project = ? AND status IN ('running', 'stopping')"
                       + " AND IFNULL(node, '') = ?",
-                  this::mapRow,
+                  row ->
+                      new DispatchGate.RunningRun(
+                          row.text(0), row.text(1), row.text(2), repoList(row.text(3))),
                   project,
                   ownerKey(node));
           var conflict =
-              DispatchGate.decide(
-                  specId,
-                  role,
-                  reserved,
-                  running.stream()
-                      .map(
-                          run ->
-                              new DispatchGate.RunningRun(
-                                  run.id(), run.specId(), run.role(), run.repos()))
-                      .toList());
+              DispatchGate.decide(specId != null ? specId : roomId, role, reserved, running);
           if (conflict.isPresent()) {
             return new Reservation.Conflicted(conflict.get());
           }
           db.execute(
               """
-              INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, status,
-                  started_at, log_path, unit, repos, principal, owner)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)""",
+              INSERT INTO runs (id, project, spec_id, room_id, node, role, agent, branch, task,
+                  status, started_at, log_path, unit, repos, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
+              roomId,
               node,
               role,
               agent,
@@ -694,6 +725,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
         });
+  }
+
+  private static List<String> repoList(String json) {
+    return json == null ? List.of() : YamlUtil.parseStringList(json);
   }
 
   public Optional<RunRow> findById(String id) {
@@ -1006,6 +1041,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         "SELECT " + COLUMNS + " FROM runs WHERE project = ? ORDER BY started_at DESC",
         this::mapRow,
         project);
+  }
+
+  /** Chat runs of a room — spec-less rooms track their turns here; a sync-local read. */
+  public List<RunRow> listForRoom(String roomId) {
+    return db.query(
+        "SELECT " + COLUMNS + " FROM runs WHERE room_id = ? ORDER BY started_at DESC, id DESC",
+        this::mapRow,
+        roomId);
   }
 
   public List<RunRow> listForSpec(String specId) {

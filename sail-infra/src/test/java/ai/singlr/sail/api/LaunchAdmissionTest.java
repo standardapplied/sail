@@ -186,4 +186,53 @@ class LaunchAdmissionTest {
     var ex = assertThrows(ApiException.class, () -> LaunchAdmission.validateModel("bad model!"));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
+
+  @org.junit.jupiter.api.Test
+  void roomAdmissionRefusesEachRuleWithItsOwnReason() {
+    var agent =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ApiException.class,
+            () ->
+                LaunchAdmission.requireAllowedForRoom(
+                    Actor.agentPrincipal("claude/x", "uday"), "chat", "uday", "uday"));
+    org.junit.jupiter.api.Assertions.assertEquals(ErrorCode.FORBIDDEN, agent.failure().errorCode());
+
+    var noHandle =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ApiException.class,
+            () ->
+                LaunchAdmission.requireAllowedForRoom(
+                    Actor.cliOperator("uday"), "chat", "uday", " "));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        ErrorCode.COMMAND_FAILED, noHandle.failure().errorCode());
+
+    var foreign =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ApiException.class,
+            () ->
+                LaunchAdmission.requireAllowedForRoom(
+                    Actor.cliOperator("uday"), "chat", "ada", "uday"));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
+
+    var readOnly =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ApiException.class,
+            () ->
+                LaunchAdmission.requireAllowedForRoom(
+                    new Actor("uday", Role.VIEWER, Actor.Lane.API, null), "chat", "uday", "uday"));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
+
+    var notOwner =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ApiException.class,
+            () ->
+                LaunchAdmission.requireAllowedForRoom(
+                    new Actor("sam", Role.MEMBER, Actor.Lane.API, null), "chat", "uday", "uday"));
+    org.junit.jupiter.api.Assertions.assertEquals(
+        ErrorCode.NOT_YOUR_SPEC, notOwner.failure().errorCode());
+
+    LaunchAdmission.requireAllowedForRoom(Actor.cliOperator("uday"), "chat", "uday", "uday");
+  }
 }

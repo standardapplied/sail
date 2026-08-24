@@ -35,6 +35,45 @@ public final class LaunchAdmission {
    * Refuses when the actor may not act on {@code spec} from the box identified by {@code
    * localHandle}.
    */
+  /**
+   * Refuses when the actor may not act on a spec-less room from this box: same four rules as the
+   * spec path — no agent lane, node handle set, this box owns the room (assignee, else creator),
+   * write credential, admin-or-owner — with room wording, since no work-item is involved.
+   */
+  public static void requireAllowedForRoom(
+      Actor actor, String roomId, String owner, String localHandle) {
+    if (actor.agentLane()) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN,
+          "Agent credentials cannot manage room membership.",
+          "Ask the engineer in the room to do it.");
+    }
+    if (Strings.isBlank(localHandle)) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box has no FDE handle, so room ownership cannot be established.",
+          "Set it with: sail host config set sync-handle <handle>");
+    }
+    if (!localHandle.equals(owner)) {
+      throw new ApiException(
+          ErrorCode.NOT_YOUR_SPEC,
+          "Room '" + roomId + "' belongs to '" + owner + "', whose box serves its agents.",
+          "Manage the room from that box, or have an admin reassign it.");
+    }
+    if (!actor.canWrite()) {
+      throw new ApiException(
+          ErrorCode.READ_ONLY_CREDENTIAL,
+          "Your credential is read-only and cannot change room membership.",
+          "Ask an admin for a member or admin credential.");
+    }
+    if (!actor.isAdmin() && !owner.equals(actor.handle())) {
+      throw new ApiException(
+          ErrorCode.NOT_YOUR_SPEC,
+          "Room '" + roomId + "' belongs to '" + owner + "', not you.",
+          "Ask " + owner + " to manage it, or have an admin do it.");
+    }
+  }
+
   public static void requireAllowed(Actor actor, Spec spec, String localHandle) {
     if (DispatchPolicy.check(actor, spec, localHandle)
         instanceof DispatchDecision.Refused refused) {

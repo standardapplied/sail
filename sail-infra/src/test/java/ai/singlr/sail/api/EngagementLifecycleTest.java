@@ -265,7 +265,7 @@ class EngagementLifecycleTest {
             () ->
                 ops.engage(
                     "ghost", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
-    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
 
   @Test
@@ -275,7 +275,7 @@ class EngagementLifecycleTest {
     var ex =
         assertThrows(
             ApiException.class, () -> ops.disengage("ghost", Actor.cliOperator(HANDLE), HANDLE));
-    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
 
   @Test
@@ -482,6 +482,93 @@ class EngagementLifecycleTest {
 
     assertEquals(ErrorCode.COMMAND_FAILED, refusal.failure().errorCode());
     assertNull(stored("auth"), "nothing was seated");
+  }
+
+  @Test
+  void aSpeclessRoomSeatsAndDismissesItsCollaborator() throws Exception {
+    var ops = operations(shell());
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "chat-room", "acme", "Chat", HANDLE, null, null, HANDLE, null, null, HANDLE));
+
+    var launch =
+        ops.engage(
+            "chat-room",
+            "claude-code",
+            "read-only",
+            null,
+            false,
+            Actor.cliOperator(HANDLE),
+            HANDLE);
+    assertEquals("read_only", launch.mode());
+    assertNull(launch.completion(), "no spec, no snapshot offer — nothing to anchor a rollback");
+    assertNotNull(roomMember("chat-room"), "the collaborator is seated on the room row");
+    assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
+
+    assertEquals("claude-code", ops.disengage("chat-room", Actor.cliOperator(HANDLE), HANDLE));
+    assertNull(roomMember("chat-room"));
+    assertNull(
+        ops.disengage("chat-room", Actor.cliOperator(HANDLE), HANDLE),
+        "dismissing an empty room is a no-op");
+  }
+
+  @Test
+  void aSpeclessRoomRefusesBogusModesAndUnsandboxedReadOnlyAgents() throws Exception {
+    var ops = operations(shell());
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "picky-room", "acme", "Picky", HANDLE, null, null, HANDLE, null, null, HANDLE));
+
+    var badMode =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.engage(
+                    "picky-room",
+                    "claude-code",
+                    "yolo",
+                    null,
+                    false,
+                    Actor.cliOperator(HANDLE),
+                    HANDLE));
+    assertEquals(ErrorCode.BAD_REQUEST, badMode.failure().errorCode());
+
+    var codexReadOnly =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.engage(
+                    "picky-room",
+                    "codex",
+                    "read-only",
+                    null,
+                    false,
+                    Actor.cliOperator(HANDLE),
+                    HANDLE));
+    assertEquals(ErrorCode.BAD_REQUEST, codexReadOnly.failure().errorCode());
+    assertNull(roomMember("picky-room"), "no refused engage seats anyone");
+  }
+
+  @Test
+  void aSpeclessRoomRefusesMembershipFromANonOwner() throws Exception {
+    var ops = operations(shell());
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "ada-room", "acme", "Ada's", "ada", null, null, "ada", null, null, "ada"));
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.engage(
+                    "ada-room",
+                    "claude-code",
+                    null,
+                    null,
+                    false,
+                    Actor.cliOperator(HANDLE),
+                    HANDLE));
+    assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
   }
 
   @Test

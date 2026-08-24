@@ -13,6 +13,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -180,20 +181,59 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     }
   }
 
+  /**
+   * The conversation a message event targets: a spec (with its room state) when one exists — the
+   * work-item lane, unchanged — else the room row alone, the collaborator lane. Spec-less rooms
+   * wake only for a seated member (the wake vocabulary presumes dispatch history a conversation
+   * does not have), their waker box is the room's owner, and their turns are tracked by room id.
+   */
+  private record Target(
+      String id,
+      String project,
+      boolean owned,
+      MembershipService.RoomState state,
+      boolean dispatched,
+      List<RunStore.RunRow> runs) {}
+
+  private Target resolveTarget(String id) {
+    var spec = specStore.findById(id).orElse(null);
+    if (spec != null) {
+      return new Target(
+          id,
+          spec.project(),
+          spec.assignedTo(localHandle.get()),
+          MembershipService.stateOf(roomStore, spec),
+          dispatchedAtLeastOnce(id),
+          runStore.listForSpec(id));
+    }
+    var room = roomStore.findById(id).orElse(null);
+    if (room == null) {
+      return null;
+    }
+    var owner =
+        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
+    var standing = ai.singlr.sail.config.Roster.fromJson(room.roster()).standing();
+    return new Target(
+        id,
+        room.project(),
+        owner != null && owner.equals(localHandle.get()),
+        new MembershipService.RoomState(null, standing),
+        false,
+        runStore.listForRoom(id));
+  }
+
   private void handleMessage(Event event) {
-    var specId = event.spec();
-    var spec = specStore.findById(specId).orElse(null);
-    if (spec == null || !spec.assignedTo(localHandle.get())) {
+    var target = resolveTarget(event.spec());
+    if (target == null || !target.owned()) {
       return;
     }
-    var state = MembershipService.stateOf(roomStore, spec);
-    var engaged = state.standing() != null;
+    var engaged = target.state().standing() != null;
     var message = messageOf(event);
     if (!RoomWakePolicy.shouldWake(
-        state.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
+        target.state().wake(), target.dispatched(), engaged, message.author(), message.body())) {
       return;
     }
-    schedule(specId, message, engaged);
+    schedule(event.spec(), message, engaged);
   }
 
   private void schedule(String specId, Message message, boolean engaged) {
@@ -216,17 +256,16 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   private void fire(String specId, Message message) {
     try {
-      var spec = specStore.findById(specId).orElse(null);
-      if (spec == null || !spec.assignedTo(localHandle.get())) {
+      var target = resolveTarget(specId);
+      if (target == null || !target.owned()) {
         return;
       }
-      var state = MembershipService.stateOf(roomStore, spec);
-      var engaged = state.standing() != null;
+      var engaged = target.state().standing() != null;
       if (!RoomWakePolicy.shouldWake(
-          state.wake(), dispatchedAtLeastOnce(specId), engaged, message.author(), message.body())) {
+          target.state().wake(), target.dispatched(), engaged, message.author(), message.body())) {
         return;
       }
-      var runs = runStore.listForSpec(specId);
+      var runs = target.runs();
       if (engaged) {
         if (runs.stream().anyMatch(run -> LIVE_STATUSES.contains(run.status()) && run.chatRole())) {
           return;
@@ -239,7 +278,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
           return;
         }
       }
-      waker.wake(spec.project(), specId);
+      waker.wake(target.project(), specId);
     } catch (Exception e) {
       System.err.println("room-wake: wake of spec " + specId + " failed: " + e.getMessage());
     }
@@ -274,13 +313,11 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
    * after the newest chat turn started, so no turn has read it.
    */
   private void refireOwedTurn(String specId) {
-    var spec = specStore.findById(specId).orElse(null);
-    if (spec == null
-        || !spec.assignedTo(localHandle.get())
-        || MembershipService.stateOf(roomStore, spec).standing() == null) {
+    var target = resolveTarget(specId);
+    if (target == null || !target.owned() || target.state().standing() == null) {
       return;
     }
-    var owed = owedMessage(spec);
+    var owed = owedMessage(specId, target);
     if (owed == null) {
       return;
     }
@@ -288,12 +325,13 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   }
 
   /** The newest human message no chat turn has started after, or {@code null} when none is owed. */
-  private Message owedMessage(SpecStore.SpecRow spec) {
+  private Message owedMessage(String id, Target target) {
     if (messageStore == null) {
       return null;
     }
+    var roomId = specStore.findById(id).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(id);
     var newestHuman =
-        messageStore.list(spec.roomIdOrIdentity(), null, 20).stream()
+        messageStore.list(roomId, null, 20).stream()
             .filter(row -> RoomWakePolicy.humanAuthor(row.author()))
             .reduce((first, second) -> second)
             .orElse(null);
@@ -305,7 +343,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return null;
     }
     var newestChatStart =
-        runStore.listForSpec(spec.id()).stream()
+        target.runs().stream()
             .filter(RunStore.RunRow::chatRole)
             .map(RunStore.RunRow::startedAt)
             .filter(Strings::isNotBlank)
@@ -329,10 +367,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     specStore.listEngaged().forEach(spec -> engaged.add(spec.id()));
     for (var id : engaged) {
       try {
-        var spec = specStore.findById(id).orElse(null);
-        if (spec != null && spec.assignedTo(localHandle.get())) {
-          refireOwedTurn(spec.id());
-        }
+        refireOwedTurn(id);
       } catch (RuntimeException e) {
         System.err.println(
             "room-wake: engagement sweep of room " + id + " failed: " + e.getMessage());

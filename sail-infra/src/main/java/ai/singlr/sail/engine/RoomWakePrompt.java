@@ -67,6 +67,83 @@ public final class RoomWakePrompt {
     return new Built(prompt, conversation.fullyRendered());
   }
 
+  /**
+   * The collaborator prompt for a room with no attached spec: no spec framing at all — the agent is
+   * a standing participant in a conversation, not the custodian of a work-item. Same delivery
+   * contract as an engaged turn; the identity line is the only thing that changes, which is the
+   * point.
+   */
+  public static Built buildForRoom(
+      String roomId, String title, List<MessageStore.MessageRow> messages, Engagement engagement) {
+    var conversation =
+        PromptConversation.renderNewest(
+            messages,
+            message ->
+                message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n");
+    var conversationBlock =
+        conversation.text().isEmpty()
+            ? ""
+            : "## Conversation in this room\n\n" + conversation.text();
+    var prompt =
+        "You are a collaborator in the room \""
+            + title
+            + "\" (id: "
+            + roomId
+            + "). Humans and agents talk here; no spec is attached — this is a conversation,"
+            + " not a work-item. You are engaged as a standing participant: humans post, you"
+            + " answer, and the conversation continues across turns.\n\n"
+            + conversationBlock
+            + collaboratorDuty(roomId, engagement);
+    return new Built(prompt, conversation.fullyRendered());
+  }
+
+  private static String collaboratorDuty(String roomId, Engagement engagement) {
+    if (engagement != null && engagement.full()) {
+      return """
+          ## Collaborator Turn (full access)
+
+          Read the newest human messages above, then help however the conversation asks:
+          answer, critique, brainstorm, draft, or work in the workspace.
+
+          - Post to the room with `spec comment %s --body <text>` (or `--body -` for
+            stdin). For a question only a human can settle, add `--question` — the flag
+            pages the engineer on the board until a human replies.
+          - When the conversation shapes real work, capture it as a spec with
+            `spec create --id <id> --title "<title>" --body-file <file>`. New specs are
+            born draft; a human promotes them on the board — never set a status yourself.
+          - Work in the workspace freely when asked — diagrams, files, experiments: this
+            turn holds the repo reservation.
+
+          This is one turn of a continuing conversation. Replies posted while you work are
+          delivered into your context automatically after a tool call finishes, and unread
+          messages block your first attempt to stop. When you have done what was asked,
+          post your reply and end your turn — you remain in the room and will be resumed
+          for the next message. Never say goodbye; the room continues.
+          """
+          .formatted(roomId);
+    }
+    return """
+        ## Collaborator Turn (read only)
+
+        Read the newest human messages above, investigate in the workspace as needed, and
+        answer in the room with `spec comment %s --body <text>` (or `--body -` for stdin).
+
+        This engagement is read only, and the harness enforces it: file edits are denied,
+        and the only shell commands that run are the `spec` CLI and `cd` — use the Read
+        and Grep tools for files. Do not fight a denial; work within the lane. When the
+        conversation shapes real work, describe the spec it deserves — a human (or a
+        full-access turn) can create it. For a question only a human can settle, use
+        `spec comment %s --question --body <text>`.
+
+        This is one turn of a continuing conversation. Replies posted while you work are
+        delivered into your context automatically after a tool call finishes, and unread
+        messages block your first attempt to stop. When you have answered, post your reply
+        and end your turn — you remain in the room and will be resumed for the next
+        message. Never say goodbye; the room continues.
+        """
+        .formatted(roomId, roomId);
+  }
+
   private static String duty(String specId, Engagement engagement) {
     if (engagement == null) {
       return wakeDuty(specId);

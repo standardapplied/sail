@@ -133,13 +133,10 @@ public final class MembershipService {
       boolean takeSnapshot,
       Actor actor,
       String localHandle) {
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    var spec = specStore.findById(specId).orElse(null);
+    if (spec == null) {
+      return engageSpecless(specId, agentYamlName, mode, model, actor, localHandle);
+    }
     LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
     admission.requireTrustedRoster(localHandle);
     requireRooms();
@@ -174,6 +171,56 @@ public final class MembershipService {
     return new EngageLaunch(member.agent(), member.mode(), label, completion);
   }
 
+  /**
+   * Seats a member in a room with no attached spec — the collaborator lane. Same guards, same
+   * roster write, same events (keyed by the room id); no spec column exists to mirror, and the
+   * engage-time snapshot is not offered — a spec-less room's full turns still pay per-turn
+   * reservations, and there is no work-item whose rollback point a snapshot would anchor.
+   */
+  private EngageLaunch engageSpecless(
+      String roomId,
+      String agentYamlName,
+      String mode,
+      String model,
+      Actor actor,
+      String localHandle) {
+    var store = requireRooms();
+    var room =
+        store
+            .findById(roomId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    var owner =
+        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
+    LaunchAdmission.requireAllowedForRoom(actor, roomId, owner, localHandle);
+    admission.requireTrustedRoster(localHandle);
+    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
+    Engagement member;
+    try {
+      member =
+          Engagement.of(
+              agentCli.yamlName(),
+              mode,
+              LaunchAdmission.validateModel(model),
+              DateTimeUtils.now().toString());
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
+    }
+    if (!member.full() && !agentCli.supportsRoomLane()) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          agentCli.readOnlyInviteRefusal(),
+          "Engage " + agentCli.yamlName() + " with full access instead.");
+    }
+    projects.loadRunning(room.project());
+    admission.requireInstalled(agentCli, room.project());
+    store.updateRoster(roomId, Roster.solo(member).toJson(), actor.handle());
+    publishEngaged(room.project(), roomId, member, "");
+    return new EngageLaunch(member.agent(), member.mode(), "", null);
+  }
+
   private void completeEngage(
       String project, String specId, Engagement member, String label, Actor actor) {
     try {
@@ -200,13 +247,10 @@ public final class MembershipService {
 
   /** Dismisses the room's standing member. Idempotent: dismissing an empty room is a no-op. */
   public String disengage(String specId, Actor actor, String localHandle) {
-    var spec =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    var spec = specStore.findById(specId).orElse(null);
+    if (spec == null) {
+      return disengageSpecless(specId, actor, localHandle);
+    }
     LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
     var standing = stateOf(rooms.get(), spec).standing();
     if (standing == null) {
@@ -216,6 +260,31 @@ public final class MembershipService {
     publish(
         spec.project(),
         specId,
+        Event.WellKnownTypes.SPEC_DISENGAGED,
+        Map.of("agent", standing.agent(), "mode", standing.mode()));
+    return standing.agent();
+  }
+
+  private String disengageSpecless(String roomId, Actor actor, String localHandle) {
+    var store = requireRooms();
+    var room =
+        store
+            .findById(roomId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    var owner =
+        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
+    LaunchAdmission.requireAllowedForRoom(actor, roomId, owner, localHandle);
+    var standing = Roster.fromJson(room.roster()).standing();
+    if (standing == null) {
+      return null;
+    }
+    store.updateRoster(roomId, null, actor.handle());
+    publish(
+        room.project(),
+        roomId,
         Event.WellKnownTypes.SPEC_DISENGAGED,
         Map.of("agent", standing.agent(), "mode", standing.mode()));
     return standing.agent();
