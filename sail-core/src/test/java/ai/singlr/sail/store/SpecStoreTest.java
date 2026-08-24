@@ -632,6 +632,22 @@ class SpecStoreTest {
   }
 
   @Test
+  void roomIdRidesTheSnapshotAndLegacySnapshotsFallBackToIdentity() {
+    store.create(spec("auth", "OAuth", "draft").withRoomId("design-room"));
+    assertEquals("design-room", store.findById("auth").orElseThrow().roomIdOrIdentity());
+    var snapshot = store.comparableSnapshot("auth");
+    assertEquals("design-room", snapshot.get("room_id"), "the room link syncs");
+
+    var legacy = new java.util.LinkedHashMap<String, Object>(snapshot);
+    legacy.remove("room_id");
+    store.applyRevision("auth", legacy, "9-legacy");
+    assertEquals(
+        "auth",
+        store.findById("auth").orElseThrow().roomIdOrIdentity(),
+        "a pre-decouple snapshot falls back to the identity room");
+  }
+
+  @Test
   void updateEngagementTouchesOnlyTheMirrorColumnAndJournals() {
     store.create(spec("auth", "OAuth", "draft"));
     store.updateStatus("auth", SpecStatus.IN_PROGRESS);

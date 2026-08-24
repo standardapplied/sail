@@ -766,6 +766,60 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void anEditPreservesTheEngagementMirrorAndTheRoomLink() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+                java.util.Map.of("id", "kept", "title", "Kept", "project", "acme"))
+            .withCreatedBy("uday"));
+    var seeded = specStore.findById("kept").orElseThrow();
+    specStore.update(
+        seeded.withEngagement(
+            "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}"));
+
+    withRooms.update(
+        "kept",
+        SpecUpdateRequest.fromMap(java.util.Map.of("title", "Kept v2", "updated_by", "uday")),
+        ADMIN);
+
+    var after = specStore.findById("kept").orElseThrow();
+    assertEquals("Kept v2", after.title());
+    assertNotNull(after.engagement(), "an ordinary edit must never wipe the engagement mirror");
+    assertEquals("kept", after.roomIdOrIdentity(), "the room link survives every edit");
+  }
+
+  @Test
+  void createIntoAnExistingRoomAttachesInsteadOfMinting() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "design-room", "acme", "Design talk", "uday", "on", null, "uday", null, null, "uday"));
+
+    withRooms.create(
+        SpecCreateRequest.fromMap(
+                java.util.Map.of(
+                    "id",
+                    "attached",
+                    "title",
+                    "Attached spec",
+                    "project",
+                    "acme",
+                    "room_id",
+                    "design-room"))
+            .withCreatedBy("uday"));
+
+    var spec = specStore.findById("attached").orElseThrow();
+    assertEquals("design-room", spec.roomIdOrIdentity(), "the spec lives in the given room");
+    assertEquals(
+        "Design talk",
+        rooms.findById("design-room").orElseThrow().title(),
+        "attaching never rewrites the existing room");
+    assertTrue(rooms.findById("attached").isEmpty(), "no identity room is minted beside it");
+  }
+
+  @Test
   void anExplicitWakeEditDualWritesTheRoomRow() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);

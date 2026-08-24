@@ -133,6 +133,38 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void aWakeWithoutAMessageStoreLaunchesWithAnEmptyRoom() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, YAML);
+    db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    specStore = new SpecStore(db);
+    runStore = new RunStore(db);
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    var ops =
+        new DispatchOperations(
+            liveAgentShell(),
+            yaml.toString(),
+            specStore,
+            new ReviewStore(db),
+            runStore,
+            new FdeStore(db),
+            events::add,
+            new WatcherSpawner(liveAgentShell(), (command, logPath) -> 4242L),
+            (project, config) -> "",
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            DispatchOperations.Listener.NONE);
+    seedSpec("auth");
+
+    ops.startRoomRun("acme", "auth", HANDLE);
+
+    assertNotNull(launched.get(), "a box without a message store still wakes, room empty");
+  }
+
+  @Test
   void aWakeWithoutAnAgentBlockIsRefused() throws Exception {
     var ops = operations(liveAgentShell(), YAML_NO_AGENT, true, command -> 0);
 

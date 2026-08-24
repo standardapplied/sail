@@ -294,8 +294,8 @@ public final class SyncCommand implements Callable<Integer> {
         .flatMap(Optional::stream)
         .map(
             row ->
-                specs
-                    .findById(row.roomId())
+                specs.listByRoom(row.roomId()).stream()
+                    .findFirst()
                     .map(
                         spec ->
                             SyncTransitionEvents.messagePosted(

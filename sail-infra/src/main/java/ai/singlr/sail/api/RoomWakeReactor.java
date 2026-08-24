@@ -280,7 +280,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
         || MembershipService.stateOf(roomStore, spec).standing() == null) {
       return;
     }
-    var owed = owedMessage(specId);
+    var owed = owedMessage(spec);
     if (owed == null) {
       return;
     }
@@ -288,12 +288,12 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   }
 
   /** The newest human message no chat turn has started after, or {@code null} when none is owed. */
-  private Message owedMessage(String specId) {
+  private Message owedMessage(SpecStore.SpecRow spec) {
     if (messageStore == null) {
       return null;
     }
     var newestHuman =
-        messageStore.list(specId, null, 20).stream()
+        messageStore.list(spec.roomIdOrIdentity(), null, 20).stream()
             .filter(row -> RoomWakePolicy.humanAuthor(row.author()))
             .reduce((first, second) -> second)
             .orElse(null);
@@ -305,7 +305,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return null;
     }
     var newestChatStart =
-        runStore.listForSpec(specId).stream()
+        runStore.listForSpec(spec.id()).stream()
             .filter(RunStore.RunRow::chatRole)
             .map(RunStore.RunRow::startedAt)
             .filter(Strings::isNotBlank)

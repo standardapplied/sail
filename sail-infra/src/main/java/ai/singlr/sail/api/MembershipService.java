@@ -70,7 +70,7 @@ public final class MembershipService {
    * dismissal recorded on the room can never be resurrected by a stale spec column.
    */
   public static RoomState stateOf(RoomStore rooms, SpecStore.SpecRow spec) {
-    var room = rooms == null ? null : rooms.findById(spec.id()).orElse(null);
+    var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
     if (room == null) {
       return new RoomState(spec.wake(), rosterOf(null, spec).standing());
     }
@@ -83,7 +83,7 @@ public final class MembershipService {
    * even when empty), else the spec's legacy engagement column as a one-member roster.
    */
   public static Roster rosterOf(RoomStore rooms, SpecStore.SpecRow spec) {
-    var room = rooms == null ? null : rooms.findById(spec.id()).orElse(null);
+    var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
     if (room != null) {
       return Roster.fromJson(room.roster());
     }
@@ -235,8 +235,13 @@ public final class MembershipService {
     specStore.atomically(
         () -> {
           store.ensureFor(
-              spec.id(), spec.project(), spec.title(), spec.assignee(), spec.wake(), handle);
-          store.updateRoster(spec.id(), roster.toJson(), handle);
+              spec.roomIdOrIdentity(),
+              spec.project(),
+              spec.title(),
+              spec.assignee(),
+              spec.wake(),
+              handle);
+          store.updateRoster(spec.roomIdOrIdentity(), roster.toJson(), handle);
           specStore.updateEngagement(spec.id(), standing == null ? null : standing.toJson());
           return null;
         });

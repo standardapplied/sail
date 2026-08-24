@@ -306,7 +306,7 @@ class SchemaManagerTest {
 
   @Test
   void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
-    var staged = SchemaManager.CURRENT_VERSION - 8;
+    var staged = SchemaManager.CURRENT_VERSION - 10;
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
@@ -346,6 +346,26 @@ class SchemaManagerTest {
         0,
         db.query("SELECT run_id FROM run_delivered_messages", r -> r.text(0)).size(),
         "the delivery ledger's FK followed the rename and still cascades");
+  }
+
+  @Test
+  void specsGainRoomIdBackfilledToTheirOwnIdOnUpgrade() {
+    var staged = SchemaManager.CURRENT_VERSION - 2;
+    stageAtBaseline();
+    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
+      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
+    }
+    db.execute(
+        "INSERT INTO specs (id, title, status, priority, created_at, updated_at, project,"
+            + " updated_by) VALUES ('auth', 'OAuth', 'done', 0, 'c', 'u', 'acme', 'uday')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(
+        "auth",
+        db.queryOne("SELECT room_id FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow(),
+        "a pre-decouple spec backfills its identity room id");
   }
 
   private void stageAtVersion(int version) {

@@ -721,12 +721,16 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * conversation enriches the prompt, it is not a precondition — a dead message store must degrade
    * the review, never error it.
    */
+  private String roomOf(String specId) {
+    return specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
+  }
+
   private List<MessageStore.MessageRow> roomMessages(String specId) {
     if (messageStore == null) {
       return List.of();
     }
     try {
-      return messageStore.list(specId, null, 20);
+      return messageStore.list(roomOf(specId), null, 20);
     } catch (RuntimeException e) {
       System.err.println(
           "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());
@@ -751,7 +755,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private void postRoom(String specId, String body) {
     if (messageStore == null) return;
     try {
-      messageStore.append(specId, Event.SAIL_AGENT, body, null);
+      messageStore.append(roomOf(specId), Event.SAIL_AGENT, body, null);
       syncTrigger.run();
     } catch (RuntimeException e) {
       System.err.println(

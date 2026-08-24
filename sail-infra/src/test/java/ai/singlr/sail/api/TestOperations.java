@@ -305,6 +305,7 @@ class TestOperations implements Operations {
                 null,
                 "",
                 "",
+                null,
                 null),
             null,
             null,
@@ -335,7 +336,8 @@ class TestOperations implements Operations {
                 request.createdBy(),
                 "",
                 "",
-                request.createdBy()),
+                request.createdBy(),
+                null),
             specId,
             "r1",
             2));
@@ -363,6 +365,7 @@ class TestOperations implements Operations {
                 null,
                 "",
                 "",
+                null,
                 null)));
   }
 
@@ -389,6 +392,7 @@ class TestOperations implements Operations {
                 null,
                 "",
                 "",
+                null,
                 null)));
   }
 

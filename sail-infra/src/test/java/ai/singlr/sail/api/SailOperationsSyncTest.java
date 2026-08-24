@@ -255,7 +255,8 @@ class SailOperationsSyncTest {
         List.of(),
         null,
         null,
-        "uday");
+        "uday",
+        null);
   }
 
   private static SpecUpdateRequest update(String status) {
