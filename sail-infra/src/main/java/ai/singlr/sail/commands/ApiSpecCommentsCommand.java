@@ -45,7 +45,7 @@ public final class ApiSpecCommentsCommand implements Runnable {
   private void execute() throws Exception {
     NameValidator.requireValidSpecId(specId);
     var path =
-        new StringBuilder("/v1/specs/").append(specId).append("/messages?limit=").append(limit);
+        new StringBuilder("/v1/rooms/").append(specId).append("/messages?limit=").append(limit);
     if (before != null) {
       path.append("&before=").append(URLEncoder.encode(before, StandardCharsets.UTF_8));
     }

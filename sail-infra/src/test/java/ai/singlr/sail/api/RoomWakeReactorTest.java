@@ -173,15 +173,14 @@ class RoomWakeReactorTest {
             "",
             null,
             List.of(),
-            List.of(),
-            wake));
+            List.of()));
+    roomStore.ensureFor(id, "acme", id, assignee, wake, "uday");
   }
 
   private void engage(String id, String agent, String mode) {
     var spec = specStore.findById(id).orElseThrow();
     var member = ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString());
-    specStore.update(spec.withEngagement(member.toJson()));
-    roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), spec.wake(), "uday");
+    roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), null, "uday");
     roomStore.updateRoster(id, ai.singlr.sail.config.Roster.solo(member).toJson(), "uday");
   }
 
@@ -427,11 +426,11 @@ class RoomWakeReactorTest {
     var reactor = reactor(executor);
 
     reactor.onEvent(message("auth", "uday", "hello"));
-    specStore.update(specStore.findById("auth").orElseThrow().withWake("off"));
+    roomStore.updateWake("auth", "off", "uday");
     executor.drain();
     assertTrue(launcher.woken.isEmpty(), "a mode flipped off mid-debounce wins");
 
-    specStore.update(specStore.findById("auth").orElseThrow().withWake("on"));
+    roomStore.updateWake("auth", "on", "uday");
     reactor.onEvent(message("auth", "uday", "hello again"));
     buildRun("auth", "running");
     executor.drain();
@@ -962,21 +961,6 @@ class RoomWakeReactorTest {
   }
 
   @Test
-  void theSweepStillRescuesALegacyColumnEngagementWithNoRoomRow() {
-    seed("legacy", "in_progress", "uday", "on");
-    var spec = specStore.findById("legacy").orElseThrow();
-    specStore.update(
-        spec.withEngagement(
-            ai.singlr.sail.config.Engagement.of("claude-code", "full", null, now.get().toString())
-                .toJson()));
-    messageStore.append("legacy", "uday", "anyone there?", null);
-
-    reactor().sweepEngagedRooms();
-
-    assertEquals(1, launcher.woken.size(), "the sweep unions the legacy column until it retires");
-  }
-
-  @Test
   void aSpeclessRoomWithASeatedMemberWakesOnItsOwnersBox() {
     roomStore.create(
         new RoomStore.RoomRow(
@@ -1031,7 +1015,58 @@ class RoomWakeReactorTest {
   }
 
   @Test
-  void aDismissalRecordedOnTheRoomWinsOverAStaleSpecColumn() {
+  void aChatRoomMessageFiresAWakeOnItsOwnersBox() {
+    roomStore.create(
+        new RoomStore.RoomRow(
+            "lounge",
+            "acme",
+            "Lounge",
+            "uday",
+            "on",
+            "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+            "uday",
+            "t0",
+            "t0",
+            "uday"));
+    messageStore.append("lounge", "uday", "anyone around?", null);
+    var executor = new ManualExecutorService();
+    var reactor = reactor(executor);
+
+    reactor.onEvent(message("lounge", "uday", "anyone around?"));
+    executor.drain();
+
+    assertEquals(1, launcher.woken.size(), "a seated chat room wakes through the fire path");
+  }
+
+  @Test
+  void aConversationDeletedMidDebounceFiresNothing() {
+    seed("auth", "in_progress", "uday", "on");
+    engage("auth", "claude-code", "full");
+    var executor = new ManualExecutorService();
+    var reactor = reactor(executor);
+
+    reactor.onEvent(message("auth", "uday", "hello"));
+    specStore.delete("auth");
+    roomStore.delete("auth");
+    executor.drain();
+
+    assertTrue(
+        launcher.woken.isEmpty(), "a conversation deleted mid-debounce resolves to no target");
+  }
+
+  @Test
+  void aGhostConversationFiresNothing() {
+    var executor = new ManualExecutorService();
+    var reactor = reactor(executor);
+
+    reactor.onEvent(message("ghost", "uday", "hello?"));
+    executor.drain();
+
+    assertTrue(launcher.woken.isEmpty(), "no spec and no room resolves to no target");
+  }
+
+  @Test
+  void aDismissalRecordedOnTheRoomLeavesNobodyToWake() {
     seed("auth", "in_progress", "uday", "off");
     engage("auth", "claude-code", "full");
     roomStore.updateRoster("auth", null, "uday");
@@ -1039,19 +1074,17 @@ class RoomWakeReactorTest {
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));
 
-    assertTrue(
-        launcher.woken.isEmpty(),
-        "a present room with an empty roster is authoritative — no stale-column resurrection");
+    assertTrue(launcher.woken.isEmpty(), "a present room with an empty roster seats nobody");
   }
 
   @Test
   void theWakeModeStoredOnTheRoomRowGovernsTheDecision() {
     seed("auth", "in_progress", "uday", "off");
-    roomStore.ensureFor("auth", "acme", "auth", "uday", "on", "uday");
+    roomStore.updateWake("auth", "on", "uday");
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));
 
-    assertEquals(1, launcher.woken.size(), "the room's wake mode overrides the spec column");
+    assertEquals(1, launcher.woken.size(), "the room's wake mode is the decision");
   }
 }

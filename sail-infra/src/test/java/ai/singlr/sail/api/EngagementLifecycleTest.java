@@ -129,10 +129,13 @@ class EngagementLifecycleTest {
   }
 
   private Engagement stored(String specId) {
-    return Engagement.fromJson(specStore.findById(specId).orElseThrow().engagement());
+    return roomMember(specId);
   }
 
   private Engagement roomMember(String specId) {
+    if (roomStore == null) {
+      return null;
+    }
     return roomStore
         .findById(specId)
         .map(room -> Roster.fromJson(room.roster()).standing())
@@ -368,7 +371,7 @@ class EngagementLifecycleTest {
               .useInviteExecutor(Runnable::run);
 
       var engaged =
-          sailOps.engageToSpec(
+          sailOps.addRoomMember(
               "auth",
               new EngageRequest("claude-code", null, null, true),
               Actor.cliOperator(HANDLE),
@@ -380,7 +383,7 @@ class EngagementLifecycleTest {
       assertNotNull(stored("auth"), "the deferred snapshot ran inline and engaged the room");
 
       var refused =
-          sailOps.engageToSpec(
+          sailOps.addRoomMember(
               "auth",
               new EngageRequest("codex", "read-only", null, false),
               Actor.cliOperator(HANDLE),
@@ -411,18 +414,18 @@ class EngagementLifecycleTest {
       var removed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
       assertTrue(removed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) removed).value().agent());
-      sailOps.engageToSpec(
+      sailOps.addRoomMember(
           "auth",
           new EngageRequest("claude-code", null, null, true),
           Actor.cliOperator(HANDLE),
           HANDLE);
 
-      var dismissed = sailOps.disengageSpec("auth", Actor.cliOperator(HANDLE), HANDLE);
+      var dismissed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
       assertTrue(dismissed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) dismissed).value().agent());
       assertNull(stored("auth"));
 
-      var empty = sailOps.disengageSpec("auth", Actor.cliOperator(HANDLE), HANDLE);
+      var empty = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
       assertTrue(empty instanceof Result.Success<DisengageResponse>);
       assertNull(((Result.Success<DisengageResponse>) empty).value().agent());
     }
@@ -601,7 +604,7 @@ class EngagementLifecycleTest {
     ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
 
     assertNull(roomMember("auth"), "the roster empties");
-    assertNull(stored("auth"), "the legacy column clears with it");
+    assertNull(stored("auth"), "the roster clears with it");
     assertNull(
         roomStore.findById("auth").orElseThrow().roster(),
         "an empty roster stores as null, matching the engagement convention");
@@ -624,14 +627,16 @@ class EngagementLifecycleTest {
     assertEquals(
         ai.singlr.sail.config.SpecStatus.IN_PROGRESS,
         after.status(),
-        "the engagement mirror is a single-column write — it cannot clobber a status race");
-    assertNotNull(Engagement.fromJson(after.engagement()));
+        "a membership write never touches the spec row — it cannot clobber a status race");
+    assertNotNull(roomMember("auth"));
   }
 
   @Test
   void membersReadsTheRosterRoomFirstThroughTheLifecycle() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
+    var seeded = specStore.findById("auth").orElseThrow();
+    roomStore.ensureFor("auth", seeded.project(), seeded.title(), seeded.assignee(), null, HANDLE);
     assertTrue(ops.roomMembers("auth").isEmpty(), "a fresh room seats nobody");
 
     ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
@@ -648,7 +653,7 @@ class EngagementLifecycleTest {
   }
 
   @Test
-  void stateAndRosterFallBackToSpecColumnsWithoutARoomStore() {
+  void stateReadsAsNobodySeatedWithoutARoomRow() {
     var spec =
         new SpecStore.SpecRow(
             "solo",
@@ -666,39 +671,31 @@ class EngagementLifecycleTest {
             "",
             HANDLE,
             List.of(),
-            List.of(),
-            "on",
-            "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}",
-            null);
+            List.of());
 
-    assertEquals("on", MembershipService.stateOf(null, spec).wake());
-    assertEquals("claude-code", MembershipService.stateOf(null, spec).standing().agent());
-    assertEquals(1, MembershipService.legacyRosterOf(spec).members().size());
+    var state = MembershipService.stateOf(null, spec);
+
+    assertNull(state.wake(), "no room row means default wake — the legacy columns are gone");
+    assertNull(state.standing(), "no room row seats nobody");
   }
 
   @Test
-  void membersFallBackToTheLegacyColumnWhenNoRoomRowExists() throws Exception {
+  void membersRequireTheRoomRow() throws Exception {
     var ops = operations(shell());
     seedSpec("orphan");
-    var spec = specStore.findById("orphan").orElseThrow();
-    specStore.update(
-        spec.withEngagement("{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}"));
 
-    var members = ops.roomMembers("orphan");
+    var missing = assertThrows(ApiException.class, () -> ops.roomMembers("orphan"));
 
-    assertEquals(1, members.size(), "a pre-decouple engagement still reads without a room row");
-    assertEquals("claude-code", members.getFirst().agent());
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
   }
 
   @Test
-  void aDismissalOnTheRoomWinsEvenIfTheLegacyColumnIsStale() throws Exception {
+  void anEmptiedRosterMeansNobodyIsSeated() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
     ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
-    var spec = specStore.findById("auth").orElseThrow();
     roomStore.updateRoster("auth", null, HANDLE);
 
-    assertNotNull(Engagement.fromJson(spec.engagement()), "the legacy column is now stale");
     assertNull(
         ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),
         "the room row is authoritative: an empty roster means nobody is seated");

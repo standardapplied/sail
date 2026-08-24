@@ -36,6 +36,13 @@ class RoomsBackfillMigrationTest {
   }
 
   private static void seedSpec(Sqlite target, String id, String engagement) {
+    if (target
+        .query(
+            "SELECT name FROM pragma_table_info('specs') WHERE name = 'wake'", row -> row.text(0))
+        .isEmpty()) {
+      target.execute("ALTER TABLE specs ADD COLUMN wake TEXT");
+      target.execute("ALTER TABLE specs ADD COLUMN engagement TEXT");
+    }
     target.execute(
         """
         INSERT INTO specs (id, project, title, status, assignee, wake, engagement, created_by,
@@ -54,6 +61,19 @@ class RoomsBackfillMigrationTest {
 
   private ProjectRegistry noProjects() {
     return ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects"));
+  }
+
+  @Test
+  void aSchemaWithoutTheRetiredColumnsBackfillsAsACleanNoOp() {
+    db.execute(
+        """
+        INSERT INTO specs (id, project, title, status, created_by, created_at, updated_at)
+        VALUES ('modern', 'acme', 'Modern', 'pending', 'uday', 't0', 't0')""");
+
+    var report = backfill(db);
+
+    assertEquals(0, report.applied(), "nothing to backfill once the columns are gone");
+    assertTrue(new RoomStore(db).findById("modern").isEmpty());
   }
 
   @Test

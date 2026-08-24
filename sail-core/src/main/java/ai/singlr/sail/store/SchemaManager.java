@@ -422,7 +422,39 @@ public final class SchemaManager {
           "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)",
           "ALTER TABLE specs ADD COLUMN room_id TEXT",
           "UPDATE specs SET room_id = id WHERE room_id IS NULL",
-          "ALTER TABLE runs ADD COLUMN room_id TEXT");
+          "ALTER TABLE runs ADD COLUMN room_id TEXT",
+          """
+          CREATE TABLE specs_v2 (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
+                      'done', 'cancelled', 'archived')),
+              assignee TEXT,
+              agent TEXT,
+              model TEXT,
+              reasoning_effort TEXT
+                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN
+                      ('none', 'low', 'medium', 'high', 'xhigh')),
+              branch TEXT,
+              priority INTEGER NOT NULL DEFAULT 0,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              project TEXT NOT NULL DEFAULT 'unassigned',
+              updated_by TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              room_id TEXT
+          )""",
+          "INSERT INTO specs_v2 (id, title, status, assignee, agent, model, reasoning_effort,"
+              + " branch, priority, created_by, created_at, updated_at, project, updated_by, rev,"
+              + " base_rev, room_id) SELECT id, title, status, assignee, agent, model,"
+              + " reasoning_effort, branch, priority, created_by, created_at, updated_at, project,"
+              + " updated_by, rev, base_rev, room_id FROM specs",
+          "DROP TABLE specs",
+          "ALTER TABLE specs_v2 RENAME TO specs",
+          "CREATE INDEX idx_specs_project ON specs(project)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

@@ -190,24 +190,29 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
-  void updateSetsClearsAndRejectsTheWakeMode() {
-    ops.create(createReq(Map.of()));
+  void updateSetsClearsAndRejectsTheWakeModeOnTheRoom() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    withRooms.create(createReq(Map.of()));
 
-    var set = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "mention")), ADMIN);
+    var set = withRooms.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "mention")), ADMIN);
     assertEquals("mention", set.spec().wake());
     assertEquals("mention", set.spec().toMap().get("wake"));
+    assertEquals("mention", rooms.findById("auth").orElseThrow().wake(), "the room is the home");
 
-    var untouched = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "T2")), ADMIN);
+    var untouched =
+        withRooms.update("auth", SpecUpdateRequest.fromMap(Map.of("title", "T2")), ADMIN);
     assertEquals("mention", untouched.spec().wake(), "an unrelated edit never wipes the mode");
 
-    var cleared = ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "")), ADMIN);
+    var cleared = withRooms.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "")), ADMIN);
     assertNull(cleared.spec().wake(), "an empty wake clears the mode back to the default");
     assertFalse(cleared.spec().toMap().containsKey("wake"));
 
     var refusal =
         assertThrows(
             ApiException.class,
-            () -> ops.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "loud")), ADMIN));
+            () ->
+                withRooms.update("auth", SpecUpdateRequest.fromMap(Map.of("wake", "loud")), ADMIN));
     assertTrue(refusal.getMessage().contains("on, mention, or off"));
   }
 
@@ -773,10 +778,8 @@ class GlobalSpecOperationsTest {
         SpecCreateRequest.fromMap(
                 java.util.Map.of("id", "kept", "title", "Kept", "project", "acme"))
             .withCreatedBy("uday"));
-    var seeded = specStore.findById("kept").orElseThrow();
-    specStore.update(
-        seeded.withEngagement(
-            "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}"));
+    rooms.updateRoster(
+        "kept", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]", "uday");
 
     withRooms.update(
         "kept",
@@ -785,7 +788,9 @@ class GlobalSpecOperationsTest {
 
     var after = specStore.findById("kept").orElseThrow();
     assertEquals("Kept v2", after.title());
-    assertNotNull(after.engagement(), "an ordinary edit must never wipe the engagement mirror");
+    assertNotNull(
+        rooms.findById("kept").orElseThrow().roster(),
+        "an ordinary edit must never unseat the room's member");
     assertEquals("kept", after.roomIdOrIdentity(), "the room link survives every edit");
   }
 
@@ -820,7 +825,7 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
-  void anExplicitWakeEditDualWritesTheRoomRow() {
+  void anExplicitWakeEditWritesTheRoomRow() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
     withRooms.create(
@@ -833,11 +838,10 @@ class GlobalSpecOperationsTest {
         SpecUpdateRequest.fromMap(java.util.Map.of("wake", "mention", "updated_by", "uday")),
         ADMIN);
 
-    assertEquals("mention", specStore.findById("wakey").orElseThrow().wake());
     assertEquals(
         "mention",
         rooms.findById("wakey").orElseThrow().wake(),
-        "the room row carries the authoritative conversation-side wake");
+        "the room row is the one home the wake mode has");
   }
 
   @Test

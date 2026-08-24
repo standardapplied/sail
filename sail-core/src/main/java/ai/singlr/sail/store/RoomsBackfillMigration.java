@@ -36,6 +36,9 @@ public final class RoomsBackfillMigration implements DataMigration {
   @Override
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
     var rooms = new RoomStore(db);
+    if (!hasLegacyColumns(db)) {
+      return new Report(0, 0, 0, List.of());
+    }
     var specs =
         db.query(
             """
@@ -86,6 +89,18 @@ public final class RoomsBackfillMigration implements DataMigration {
         spec.get(7),
         spec.get(9),
         spec.get(8));
+  }
+
+  /**
+   * Whether the specs table still carries the pre-decouple {@code wake}/{@code engagement} columns
+   * this backfill reads. A schema without them has nothing left to backfill — either the database
+   * was born after the columns retired, or the backfill already ran before the retiring migration
+   * dropped them — so the answer is a clean no-op, never a missing-column error.
+   */
+  private static boolean hasLegacyColumns(Sqlite db) {
+    return !db.query(
+            "SELECT name FROM pragma_table_info('specs') WHERE name = 'wake'", row -> row.text(0))
+        .isEmpty();
   }
 
   private static String text(Sqlite.Row row, int index) {

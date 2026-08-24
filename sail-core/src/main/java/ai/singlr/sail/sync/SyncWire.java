@@ -51,7 +51,7 @@ public final class SyncWire {
    * up front — the refusal names 'sail upgrade' as the remedy. Bump again only when a change makes
    * older peers unsafe, never for a routine release.
    */
-  public static final String V1_UPGRADE_FLOOR = "0.32.0";
+  public static final String V1_UPGRADE_FLOOR = "0.34.0";
 
   /**
    * Hard ceiling on one framed message, bounding the memory a single read can claim. A sync message

@@ -364,7 +364,6 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   public void sweepEngagedRooms() {
     var engaged = new java.util.LinkedHashSet<String>();
     roomStore.listEngaged().forEach(room -> engaged.add(room.id()));
-    specStore.listEngaged().forEach(spec -> engaged.add(spec.id()));
     for (var id : engaged) {
       try {
         refireOwedTurn(id);

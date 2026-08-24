@@ -56,11 +56,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       String updatedBy,
       List<String> dependsOn,
       List<String> repos,
-      String wake,
-      String engagement,
       String roomId) {
 
-    /** A row with no explicit wake mode — the default every spec has until an operator sets one. */
+    /** A row with no room attachment yet — the shape a spec has at creation time. */
     public SpecRow(
         String id,
         String project,
@@ -95,80 +93,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           updatedBy,
           dependsOn,
           repos,
-          null,
-          null,
           null);
     }
 
-    /** A row with no engagement — the state every spec has until a human engages an agent. */
-    public SpecRow(
-        String id,
-        String project,
-        String title,
-        SpecStatus status,
-        String assignee,
-        String agent,
-        String model,
-        String reasoningEffort,
-        String branch,
-        int priority,
-        String createdBy,
-        String createdAt,
-        String updatedAt,
-        String updatedBy,
-        List<String> dependsOn,
-        List<String> repos,
-        String wake) {
-      this(
-          id,
-          project,
-          title,
-          status,
-          assignee,
-          agent,
-          model,
-          reasoningEffort,
-          branch,
-          priority,
-          createdBy,
-          createdAt,
-          updatedAt,
-          updatedBy,
-          dependsOn,
-          repos,
-          wake,
-          null,
-          null);
-    }
-
-    /** This row with {@code wake} replaced — the single-field edit the wake surfaces use. */
-    public SpecRow withWake(String wake) {
-      return new SpecRow(
-          id,
-          project,
-          title,
-          status,
-          assignee,
-          agent,
-          model,
-          reasoningEffort,
-          branch,
-          priority,
-          createdBy,
-          createdAt,
-          updatedAt,
-          updatedBy,
-          dependsOn,
-          repos,
-          wake,
-          engagement,
-          roomId);
-    }
-
-    /**
-     * This row with {@code engagement} replaced ({@code null} disengages) — the single-field edit
-     * the engage and disengage surfaces use.
-     */
+    /** This row with {@code roomId} replaced — the create-time attachment to its room. */
     public SpecRow withRoomId(String roomId) {
       return new SpecRow(
           id,
@@ -187,37 +115,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           updatedBy,
           dependsOn,
           repos,
-          wake,
-          engagement,
           roomId);
     }
 
     /** The room this spec lives in — its own id for every spec born before rooms decoupled. */
     public String roomIdOrIdentity() {
       return roomId == null || roomId.isBlank() ? id : roomId;
-    }
-
-    public SpecRow withEngagement(String engagement) {
-      return new SpecRow(
-          id,
-          project,
-          title,
-          status,
-          assignee,
-          agent,
-          model,
-          reasoningEffort,
-          branch,
-          priority,
-          createdBy,
-          createdAt,
-          updatedAt,
-          updatedBy,
-          dependsOn,
-          repos,
-          wake,
-          engagement,
-          roomId);
     }
 
     /**
@@ -274,8 +177,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               """
               INSERT INTO specs (id, project, title, status, assignee, agent, model,
                   reasoning_effort, branch, priority, created_by, created_at, updated_at,
-                  updated_by, wake, engagement, room_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  updated_by, room_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               spec.id(),
               spec.project(),
               spec.title(),
@@ -290,8 +193,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               now,
               now,
               spec.updatedBy(),
-              spec.wake(),
-              spec.engagement(),
               spec.roomIdOrIdentity());
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
@@ -308,8 +209,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return db.query(
         """
         SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-            branch, priority, created_by, created_at, updated_at, updated_by, wake,
-            engagement, room_id
+            branch, priority, created_by, created_at, updated_at, updated_by, room_id
         FROM specs WHERE room_id = ? ORDER BY created_at, id""",
         this::mapSpec,
         roomId);
@@ -319,8 +219,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return db.queryOne(
             """
             SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-                branch, priority, created_by, created_at, updated_at, updated_by, wake,
-                engagement, room_id
+                branch, priority, created_by, created_at, updated_at, updated_by, room_id
             FROM specs WHERE id = ?""",
             this::mapSpec,
             id)
@@ -331,7 +230,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var sql = new StringBuilder("SELECT DISTINCT s.id, s.project, s.title, s.status, s.assignee,");
     sql.append(
         " s.agent, s.model, s.reasoning_effort, s.branch, s.priority, s.created_by, s.created_at,"
-            + " s.updated_at, s.updated_by, s.wake, s.engagement, s.room_id FROM specs s");
+            + " s.updated_at, s.updated_by, s.room_id FROM specs s");
     var params = new ArrayList<>();
     var where = new ArrayList<String>();
 
@@ -400,7 +299,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               """
               UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?,
                   model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?,
-                  updated_by = ?, wake = ?, engagement = ?
+                  updated_by = ?
               WHERE id = ?""",
               spec.project(),
               spec.title(),
@@ -413,8 +312,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.priority(),
               now,
               spec.updatedBy(),
-              spec.wake(),
-              spec.engagement(),
               spec.id());
           db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", spec.id());
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", spec.id());
@@ -432,23 +329,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    */
   public <T> T atomically(java.util.function.Supplier<T> work) {
     return db.transaction(work);
-  }
-
-  /**
-   * Stores a new engagement mirror as a local edit — a single-column write, so it can never revert
-   * a concurrent status transition or reassignment the way a full-row rewrite from a stale read
-   * would.
-   */
-  public void updateEngagement(String id, String engagement) {
-    db.transaction(
-        () -> {
-          db.execute(
-              "UPDATE specs SET engagement = ?, updated_at = ? WHERE id = ?",
-              engagement,
-              DateTimeUtils.now().toString(),
-              id);
-          recordRevision(id, "local", false);
-        });
   }
 
   public void updateStatus(String id, SpecStatus status) {
@@ -588,8 +468,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     map.put("updated_at", spec.updatedAt());
     map.put("depends_on", spec.dependsOn());
     map.put("repos", spec.repos());
-    map.put("wake", spec.wake());
-    map.put("engagement", spec.engagement());
     map.put("room_id", spec.roomIdOrIdentity());
     map.put("body", content.body());
     map.put("plan", content.plan());
@@ -604,7 +482,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
               reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
-              wake = ?, engagement = ?, room_id = ?
+              room_id = ?
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -617,8 +495,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           spec.priority(),
           now,
           spec.updatedBy(),
-          spec.wake(),
-          spec.engagement(),
           spec.roomIdOrIdentity(),
           id);
       db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", id);
@@ -627,9 +503,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       db.execute(
           """
           INSERT INTO specs (id, project, title, status, assignee, agent, model, reasoning_effort,
-              branch, priority, created_by, created_at, updated_at, updated_by, wake, engagement,
-              room_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              branch, priority, created_by, created_at, updated_at, updated_by, room_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
           id,
           spec.project(),
           spec.title(),
@@ -644,8 +519,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           spec.createdAt() == null || spec.createdAt().isBlank() ? now : spec.createdAt(),
           now,
           spec.updatedBy(),
-          spec.wake(),
-          spec.engagement(),
           spec.roomIdOrIdentity());
     }
     insertDependencies(id, spec.dependsOn());
@@ -688,8 +561,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         Snapshots.text(s, "updated_by"),
         (List<String>) s.getOrDefault("depends_on", List.of()),
         (List<String>) s.getOrDefault("repos", List.of()),
-        Snapshots.text(s, "wake"),
-        Snapshots.text(s, "engagement"),
         roomIdOf(s));
   }
 
@@ -706,8 +577,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           "priority",
           "depends_on",
           "repos",
-          "wake",
-          "engagement",
           "body",
           "plan",
           "room_id");
@@ -883,17 +752,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         specId);
   }
 
-  /** Every spec with a standing engagement — the rooms the engagement sweeper walks. */
-  public List<SpecRow> listEngaged() {
-    return db.query(
-        """
-        SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-            branch, priority, created_by, created_at, updated_at, updated_by, wake,
-            engagement, room_id
-        FROM specs WHERE engagement IS NOT NULL""",
-        this::mapSpec);
-  }
-
   public List<SpecRow> readySpecs() {
     return readySpecs(null);
   }
@@ -904,7 +762,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             """
             SELECT s.id, s.project, s.title, s.status, s.assignee, s.agent, s.model,
                 s.reasoning_effort, s.branch, s.priority, s.created_by, s.created_at, s.updated_at,
-                s.updated_by, s.wake, s.engagement, s.room_id
+                s.updated_by, s.room_id
             FROM specs s
             WHERE s.status = 'pending'
             AND (? IS NULL OR s.project = ?)
@@ -982,9 +840,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         row.text(13),
         List.of(),
         List.of(),
-        row.text(14),
-        row.text(15),
-        row.text(16));
+        row.text(14));
   }
 
   private SpecRow hydrate(SpecRow spec) {
@@ -1012,8 +868,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         spec.updatedBy(),
         deps,
         repos,
-        spec.wake(),
-        spec.engagement(),
         spec.roomId());
   }
 

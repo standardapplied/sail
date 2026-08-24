@@ -64,48 +64,26 @@ public final class MembershipService {
   public record RoomState(String wake, Engagement standing) {}
 
   /**
-   * The conversation-side state a spec's room runs under — the room row when one exists (the
-   * authoritative home), the spec's legacy columns otherwise. A present room is authoritative for
-   * the standing member even when its roster is empty; only a missing row falls back, so a
-   * dismissal recorded on the room can never be resurrected by a stale spec column.
+   * The conversation-side state a spec's room runs under — the room row, the one home this state
+   * has. A missing row (a box without the room aggregate, or a synced spec whose room has not
+   * arrived yet) reads as default wake with nobody seated; the legacy spec columns are gone.
    */
   public static RoomState stateOf(RoomStore rooms, SpecStore.SpecRow spec) {
     var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
     if (room == null) {
-      return new RoomState(spec.wake(), legacyRosterOf(spec).standing());
+      return new RoomState(null, null);
     }
-    var wake = room.wake() != null ? room.wake() : spec.wake();
-    return new RoomState(wake, Roster.fromJson(room.roster()).standing());
+    return new RoomState(room.wake(), Roster.fromJson(room.roster()).standing());
   }
 
-  /**
-   * The spec's legacy engagement column read as a one-member roster — the fallback every room-first
-   * reader uses when no room row exists for pre-decouple data.
-   */
-  public static Roster legacyRosterOf(SpecStore.SpecRow spec) {
-    var legacy = Engagement.fromJson(spec.engagement());
-    return legacy == null ? Roster.EMPTY : Roster.solo(legacy);
-  }
-
-  /**
-   * The members of {@code roomId}'s roster. A present room row is the authoritative home — a
-   * chat-only room needs no spec; a missing row falls back to a spec's legacy column so a
-   * pre-decouple box's data still reads.
-   */
+  /** The members of {@code roomId}'s roster — the room row is the only home a roster has. */
   public java.util.List<Engagement> members(String roomId) {
     var store = rooms.get();
     var room = store == null ? null : store.findById(roomId).orElse(null);
-    if (room != null) {
-      return Roster.fromJson(room.roster()).members();
+    if (room == null) {
+      throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
     }
-    var spec =
-        specStore
-            .findById(roomId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    return legacyRosterOf(spec).members();
+    return Roster.fromJson(room.roster()).members();
   }
 
   /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */
@@ -113,17 +91,17 @@ public final class MembershipService {
 
   /**
    * Seats an agent in {@code specId}'s room: records the member on the room row's roster (synced,
-   * atomic — one JSON array) and dual-writes the spec's legacy engagement column, so the wake
-   * reactor answers every human message with a chat turn until a human dismisses the member. Mode
-   * {@code full} is the default; {@code read-only} is the explicit narrow choice, offered only
-   * where the harness enforces it. A full membership may take one engage-time rollback snapshot
-   * (never per turn), but the default is none — on the {@code dir} backend a snapshot is a slow
-   * full filesystem copy, so the rollback point is opt-in ({@code takeSnapshot}) and the per-turn
-   * repo reservation remains the standing guard. A requested snapshot runs off the request thread
-   * ({@code completion}) because a {@code dir}-backend snapshot would blow the HTTP timeout; the
-   * membership is then persisted only after the snapshot succeeds — the payment precedes the access
-   * — and a failure publishes {@code spec_engage_failed} into the room instead of seating anyone.
-   * Requires the dispatch tier on the spec, exactly like an invite.
+   * atomic — one JSON array), so the wake reactor answers every human message with a chat turn
+   * until a human dismisses the member. Mode {@code full} is the default; {@code read-only} is the
+   * explicit narrow choice, offered only where the harness enforces it. A full membership may take
+   * one engage-time rollback snapshot (never per turn), but the default is none — on the {@code
+   * dir} backend a snapshot is a slow full filesystem copy, so the rollback point is opt-in ({@code
+   * takeSnapshot}) and the per-turn repo reservation remains the standing guard. A requested
+   * snapshot runs off the request thread ({@code completion}) because a {@code dir}-backend
+   * snapshot would blow the HTTP timeout; the membership is then persisted only after the snapshot
+   * succeeds — the payment precedes the access — and a failure publishes {@code spec_engage_failed}
+   * into the room instead of seating anyone. Requires the dispatch tier on the spec, exactly like
+   * an invite.
    */
   public EngageLaunch engage(
       String specId,
@@ -305,18 +283,11 @@ public final class MembershipService {
   private void writeRoster(SpecStore.SpecRow spec, Roster roster, Actor actor) {
     var store = requireRooms();
     var handle = actor == null ? spec.updatedBy() : actor.handle();
-    var standing = roster.standing();
     specStore.atomically(
         () -> {
           store.ensureFor(
-              spec.roomIdOrIdentity(),
-              spec.project(),
-              spec.title(),
-              spec.assignee(),
-              spec.wake(),
-              handle);
+              spec.roomIdOrIdentity(), spec.project(), spec.title(), spec.assignee(), null, handle);
           store.updateRoster(spec.roomIdOrIdentity(), roster.toJson(), handle);
-          specStore.updateEngagement(spec.id(), standing == null ? null : standing.toJson());
           return null;
         });
   }

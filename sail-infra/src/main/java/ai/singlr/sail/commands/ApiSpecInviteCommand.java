@@ -23,7 +23,7 @@ import picocli.CommandLine.Spec;
  * Runs a task-shaped invite: one full-access agent turn in the spec's room, paid with a pre-launch
  * snapshot and the repo reservation. Joining a room conversationally is {@code sail spec engage} —
  * this lane is for "do this now" work. The server owns the whole launch, so this command is a thin
- * client of {@code POST /v1/specs/{id}/invite} and renders the server's refusals verbatim.
+ * client of {@code POST /v1/rooms/{id}/invite} and renders the server's refusals verbatim.
  */
 @Command(
     name = "invite",
@@ -66,7 +66,7 @@ public final class ApiSpecInviteCommand implements Runnable {
     }
     body.put("full", true);
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var result = client.post("/v1/specs/" + specId + "/invite", Map.copyOf(body));
+      var result = client.post("/v1/rooms/" + specId + "/invite", Map.copyOf(body));
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));

@@ -67,7 +67,7 @@ final class GlobalSpecOperations {
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
     requireStore();
     try {
-      var specs = specStore.list(filter).stream().map(GlobalSpecView::from).toList();
+      var specs = specStore.list(filter).stream().map(this::viewOf).toList();
       return new GlobalSpecsListResponse(specs, specs.size());
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
@@ -79,7 +79,7 @@ final class GlobalSpecOperations {
     var row = findOrThrow(specId);
     var content = specStore.getContent(specId).orElse(null);
     return new GlobalSpecDetailResponse(
-        GlobalSpecView.from(row),
+        viewOf(row),
         content != null ? content.body() : null,
         content != null ? content.plan() : null,
         openFindingCount(specId),
@@ -144,7 +144,7 @@ final class GlobalSpecOperations {
     var created = specStore.findById(request.id()).orElseThrow();
     mintIdentityRoom(created);
     publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
-    return new GlobalSpecCreatedResponse(GlobalSpecView.from(created));
+    return new GlobalSpecCreatedResponse(viewOf(created));
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {
@@ -172,11 +172,9 @@ final class GlobalSpecOperations {
             request.updatedBy(),
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
-            request.wake() != null ? validWake(request.wake()) : existing.wake(),
-            existing.engagement(),
             existing.roomIdOrIdentity());
     specStore.update(updated);
-    dualWriteWake(updated, request);
+    writeWake(updated, request);
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
@@ -194,7 +192,7 @@ final class GlobalSpecOperations {
     } else {
       publishBoardUpdated(result.project(), specId, principal(request.updatedBy()));
     }
-    return new GlobalSpecUpdatedResponse(GlobalSpecView.from(result));
+    return new GlobalSpecUpdatedResponse(viewOf(result));
   }
 
   /**
@@ -208,6 +206,13 @@ final class GlobalSpecOperations {
    * box keeps a room aggregate. Membership writes {@code ensureFor} the room defensively, so a box
    * without the aggregate here loses nothing; this keeps the room's birth beside the spec's.
    */
+  /** The row as a wire view, wake and roster decorated from its room — the fields' only home. */
+  private GlobalSpecView viewOf(SpecStore.SpecRow row) {
+    var store = rooms.get();
+    return GlobalSpecView.from(
+        row, store == null ? null : store.findById(row.roomIdOrIdentity()).orElse(null));
+  }
+
   private void mintIdentityRoom(SpecStore.SpecRow spec) {
     var store = rooms.get();
     if (store == null) {
@@ -218,29 +223,31 @@ final class GlobalSpecOperations {
         spec.project(),
         spec.title(),
         spec.assignee(),
-        spec.wake(),
+        null,
         spec.createdBy());
   }
 
   /**
-   * Dual-writes an explicit wake edit onto the room row — the authoritative conversation-side home
-   * — beside the spec column the readers that have not moved yet still consult.
+   * Writes an explicit wake edit onto the room row — the one home the wake mode has. The spec
+   * update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still works;
+   * the value lands only on the room.
    */
-  private void dualWriteWake(SpecStore.SpecRow updated, SpecUpdateRequest request) {
+  private void writeWake(SpecStore.SpecRow updated, SpecUpdateRequest request) {
     var store = rooms.get();
     if (store == null || request.wake() == null) {
       return;
     }
+    var wake = validWake(request.wake());
     var room =
         store.ensureFor(
             updated.id(),
             updated.project(),
             updated.title(),
             updated.assignee(),
-            updated.wake(),
+            null,
             request.updatedBy());
-    if (!Objects.equals(room.wake(), updated.wake())) {
-      store.updateWake(updated.id(), updated.wake(), request.updatedBy());
+    if (!Objects.equals(room.wake(), wake)) {
+      store.updateWake(updated.id(), wake, request.updatedBy());
     }
   }
 
@@ -361,7 +368,7 @@ final class GlobalSpecOperations {
     specStore.restore(specId, request.rev());
     var row = specStore.findById(specId).orElseThrow();
     publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
-    return new GlobalSpecRestoredResponse(GlobalSpecView.from(row), request.rev());
+    return new GlobalSpecRestoredResponse(viewOf(row), request.rev());
   }
 
   private String revisionAssignee(String specId, String rev) {

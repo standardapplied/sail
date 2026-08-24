@@ -287,19 +287,19 @@ final class LocalApiRouter implements LocalApiHandler {
         var before = request.query().get("before");
         var after = request.query().get("after");
         var result =
-            operations.specMessages(id, before, after, clampedLimit(request.query().get("limit")));
+            operations.roomMessages(id, before, after, clampedLimit(request.query().get("limit")));
         markDeliveredOnSelfRead(caller, id, result);
         yield ApiResponse.from(result);
       }
       case "POST" -> {
         if (caller instanceof Caller.Run(var run)
             && run.readOnlyLane()
-            && !id.equals(run.specId())) {
-          yield problem(403, "A room session posts only to its own spec's room.");
+            && !id.equals(run.conversationId())) {
+          yield problem(403, "A room session posts only to its own room.");
         }
         var form = request.form();
         yield ApiResponse.fromCreated(
-            operations.postSpecMessage(
+            operations.postRoomMessage(
                 id,
                 new SpecMessageRequest(
                     form.get("body"),

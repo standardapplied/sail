@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -769,7 +770,7 @@ record EngageRequest(String agent, String mode, String model, boolean snapshot) 
   }
 }
 
-/** Response of {@code POST /v1/specs/{id}/engage}: the recorded (or pending) engagement. */
+/** Response of {@code POST /v1/rooms/{id}/members}: the recorded (or pending) membership. */
 record EngageResponse(String agent, String mode, String snapshot) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -1076,6 +1077,16 @@ record GlobalSpecView(
     String roomId)
     implements Mappable {
   static GlobalSpecView from(SpecStore.SpecRow row) {
+    return from(row, null);
+  }
+
+  /**
+   * The view with its conversation-side fields — {@code wake} and {@code engagement} — decorated
+   * from the spec's room row, their only home since the legacy spec columns retired. A null room (a
+   * box without the aggregate, or a synced spec whose room has not arrived) reads as default wake
+   * with nobody seated.
+   */
+  static GlobalSpecView from(SpecStore.SpecRow row, RoomStore.RoomRow room) {
     return new GlobalSpecView(
         row.id(),
         row.project(),
@@ -1089,8 +1100,8 @@ record GlobalSpecView(
         row.priority(),
         row.dependsOn(),
         row.repos(),
-        row.wake(),
-        engagementMap(row.engagement()),
+        room == null ? null : room.wake(),
+        engagementMap(room == null ? null : Roster.fromJson(room.roster()).standing()),
         row.createdBy(),
         row.createdAt(),
         row.updatedAt(),
@@ -1098,8 +1109,7 @@ record GlobalSpecView(
         row.roomIdOrIdentity());
   }
 
-  private static Map<String, Object> engagementMap(String stored) {
-    var engagement = ai.singlr.sail.config.Engagement.fromJson(stored);
+  private static Map<String, Object> engagementMap(ai.singlr.sail.config.Engagement engagement) {
     if (engagement == null) {
       return null;
     }

@@ -113,13 +113,8 @@ public interface Operations extends LocalLaneOperations {
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request, Actor actor);
 
-  Result<InviteResponse> inviteToSpec(
+  Result<InviteResponse> inviteToRoom(
       String specId, InviteRequest request, Actor actor, String localHandle);
-
-  Result<EngageResponse> engageToSpec(
-      String specId, EngageRequest request, Actor actor, String localHandle);
-
-  Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle);
 
   Result<RoomMembersResponse> roomMembers(String roomId);
 

@@ -299,15 +299,15 @@ class RunDeliveryOperationsTest {
     var first = messages.append("room", "ada", "one", null);
     var second = messages.append("room", "ada", "two", null);
 
-    var page = operations.specMessages("room", null, first.id(), 50).orThrow();
+    var page = operations.roomMessages("room", null, first.id(), 50).orThrow();
     assertEquals(List.of(second.id()), page.messages().stream().map(m -> m.id()).toList());
 
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.specMessages("room", first.id(), second.id(), 50).asFailure().errorCode(),
+        operations.roomMessages("room", first.id(), second.id(), 50).asFailure().errorCode(),
         "before and after are exclusive");
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.specMessages("room", null, "not-a-uuid", 50).asFailure().errorCode());
+        operations.roomMessages("room", null, "not-a-uuid", 50).asFailure().errorCode());
   }
 }

@@ -86,7 +86,7 @@ class SpecMessageOperationsTest {
 
     var posted =
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "room",
                 new SpecMessageRequest("Progress\n  update", null, false),
                 member("ada"),
@@ -101,7 +101,7 @@ class SpecMessageOperationsTest {
     assertEquals(posted.message().id(), event.get().data().get("message_id"));
     assertEquals("Progress update", event.get().data().get("preview"));
 
-    var listed = operations.specMessages("room", null, null, 50).orThrow();
+    var listed = operations.roomMessages("room", null, null, 50).orThrow();
     assertEquals(1, listed.messages().size());
     assertEquals(posted.message().id(), listed.messages().getFirst().id());
   }
@@ -109,38 +109,38 @@ class SpecMessageOperationsTest {
   @Test
   void validatesUnknownSpecsBodiesCursorsAndLongPreviews() {
     assertEquals(
-        ErrorCode.SPEC_NOT_FOUND,
+        ErrorCode.ROOM_NOT_FOUND,
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "missing", new SpecMessageRequest("body", null, false), member("ada"), "ada")
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
         operations
-            .postSpecMessage("room", new SpecMessageRequest(" ", null, false), member("ada"), "ada")
+            .postRoomMessage("room", new SpecMessageRequest(" ", null, false), member("ada"), "ada")
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations.specMessages("room", "not-a-uuid", null, 50).asFailure().errorCode());
+        operations.roomMessages("room", "not-a-uuid", null, 50).asFailure().errorCode());
     assertEquals(
-        ErrorCode.SPEC_NOT_FOUND,
-        operations.specMessages("missing", null, null, 50).asFailure().errorCode());
+        ErrorCode.ROOM_NOT_FOUND,
+        operations.roomMessages("missing", null, null, 50).asFailure().errorCode());
 
     var longMessage = "x".repeat(200);
     operations
-        .postSpecMessage(
+        .postRoomMessage(
             "room", new SpecMessageRequest(longMessage, null, false), member("ada"), "ada")
         .orThrow();
-    assertEquals(1, operations.specMessages("room", null, null, 50).orThrow().messages().size());
+    assertEquals(1, operations.roomMessages("room", null, null, 50).orThrow().messages().size());
   }
 
   @Test
   void onlyTheSpecOwnerOrAnAdminCanPost() {
     var refused =
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "room",
                 new SpecMessageRequest("foreign instruction", null, false),
                 member("mallory"),
@@ -148,12 +148,12 @@ class SpecMessageOperationsTest {
             .asFailure();
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.errorCode());
-    assertTrue(operations.specMessages("room", null, null, 50).orThrow().messages().isEmpty());
+    assertTrue(operations.roomMessages("room", null, null, 50).orThrow().messages().isEmpty());
 
     var agent = Actor.agentPrincipal("codex/run-1", "ada");
     var posted =
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "room", new SpecMessageRequest("owner update", null, false), agent, agent.handle())
             .orThrow();
     assertEquals(agent.handle(), posted.message().author());
@@ -169,7 +169,7 @@ class SpecMessageOperationsTest {
     db.execute("UPDATE specs SET updated_at = '2026-07-01T00:00:00Z' WHERE id = 'room'");
     var posted =
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "room", new SpecMessageRequest("activity", null, false), member("ada"), "ada")
             .orThrow();
 
@@ -238,7 +238,7 @@ class SpecMessageOperationsTest {
     var agent = Actor.agentPrincipal("claude/run-1", "ada");
     var posted =
         operations
-            .postSpecMessage(
+            .postRoomMessage(
                 "room", new SpecMessageRequest("Which flow?", null, true), agent, agent.handle())
             .orThrow();
 
@@ -259,7 +259,7 @@ class SpecMessageOperationsTest {
     assertEquals(1, operations.globalBoard("acme").orThrow().toMap().get("needs_reply"));
 
     operations
-        .postSpecMessage(
+        .postRoomMessage(
             "room", new SpecMessageRequest("use PKCE", null, false), member("ada"), "ada")
         .orThrow();
 

@@ -526,7 +526,7 @@ class InviteLaunchTest {
               .useInviteExecutor(Runnable::run);
 
       var launched =
-          sailOps.inviteToSpec(
+          sailOps.inviteToRoom(
               "auth",
               new InviteRequest("claude-code", null, true, true),
               Actor.cliOperator(HANDLE),
@@ -537,7 +537,7 @@ class InviteLaunchTest {
       assertEquals("invite-full", runStore.findById(response.runId()).orElseThrow().role());
 
       var refused =
-          sailOps.inviteToSpec(
+          sailOps.inviteToRoom(
               "auth",
               new InviteRequest("codex", null, false, true),
               Actor.cliOperator(HANDLE),

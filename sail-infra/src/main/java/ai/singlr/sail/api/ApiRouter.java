@@ -59,10 +59,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String FOLLOWUP = "followup";
   private static final String MESSAGES = "messages";
   private static final String INVITE = "invite";
-  private static final String ENGAGE = "engage";
   private static final String ROOMS = "rooms";
   private static final String MEMBERS = "members";
-  private static final String DISENGAGE = "disengage";
   private static final String AGENTS = "agents";
   private static final String SNAPSHOTS = "snapshots";
   private static final int DEFAULT_MESSAGES = 50;
@@ -310,9 +308,10 @@ public final class ApiRouter implements HttpHandler {
   }
 
   /**
-   * Routes the rooms membership surface — {@code GET|POST|DELETE /v1/rooms/{id}/members}. A room id
-   * is a spec id while rooms and specs share identity; the write forms reuse the engage shapes and
-   * semantics, so the spec-shaped doors can retire without a behavior change.
+   * Routes the rooms surface: the room resource itself, its membership ({@code GET|POST|DELETE
+   * /v1/rooms/{id}/members}), its conversation ({@code /v1/rooms/{id}/messages}), and one-shot
+   * invites ({@code POST /v1/rooms/{id}/invite}). The spec-shaped conversation doors are retired;
+   * every id resolves spec-first, so a spec's room answers under the spec's id unchanged.
    */
   private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
     if (request.size() == 2) {
@@ -360,6 +359,15 @@ public final class ApiRouter implements HttpHandler {
                 operations.removeRoomMember(roomId, actorOf(exchange), nodeHandle.get()));
         default -> throw methodNotAllowed();
       };
+    }
+    if (INVITE.equals(sub)) {
+      requireMethod(request, POST);
+      return ApiResponse.from(
+          operations.inviteToRoom(
+              roomId,
+              InviteRequest.fromMap(JsonBody.readMap(exchange)),
+              actorOf(exchange),
+              nodeHandle.get()));
     }
     if (MESSAGES.equals(sub)) {
       return switch (request.method()) {
@@ -482,58 +490,6 @@ public final class ApiRouter implements HttpHandler {
                 specId,
                 FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))
                     .withCreatedBy(actor(exchange))));
-      }
-      if (INVITE.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.from(
-            operations.inviteToSpec(
-                specId,
-                InviteRequest.fromMap(JsonBody.readMap(exchange)),
-                actorOf(exchange),
-                nodeHandle.get()));
-      }
-      if (ENGAGE.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.from(
-            operations.engageToSpec(
-                specId,
-                EngageRequest.fromMap(JsonBody.readMap(exchange)),
-                actorOf(exchange),
-                nodeHandle.get()));
-      }
-      if (DISENGAGE.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.from(
-            operations.disengageSpec(specId, actorOf(exchange), nodeHandle.get()));
-      }
-      if (MESSAGES.equals(sub)) {
-        return switch (request.method()) {
-          case GET -> {
-            var params = QueryParameters.from(request.uri()).values();
-            yield ApiResponse.from(
-                operations.specMessages(
-                    specId,
-                    params.get("before"),
-                    params.get("after"),
-                    clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
-          }
-          case POST -> {
-            var principal = actorOf(exchange);
-            if (principal.handle() == null) {
-              throw new ApiException(
-                  ErrorCode.FORBIDDEN,
-                  "Spec messages require an FDE-bound credential so authorship can be"
-                      + " synchronized.");
-            }
-            yield ApiResponse.fromCreated(
-                operations.postSpecMessage(
-                    specId,
-                    SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
-                    principal,
-                    principal.handle()));
-          }
-          default -> throw methodNotAllowed();
-        };
       }
     }
     throw notFound();
