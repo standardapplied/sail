@@ -1950,6 +1950,43 @@ class RunStoreTest {
   }
 
   @Test
+  void aRoomKeyedRunSyncsItsRoomAcrossTheFleet(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+    try (var ownerDb = Sqlite.open(dir.resolve("owner.db"));
+        var peerDb = Sqlite.open(dir.resolve("peer.db"))) {
+      new SchemaManager(ownerDb).migrate();
+      new SchemaManager(peerDb).migrate();
+      var owner = new RunStore(ownerDb);
+      var peer = new RunStore(peerDb);
+      owner.reserveDispatch(
+          "0195a2f0-0000-7000-8000-0000000000c1",
+          "acme",
+          null,
+          "chat-room",
+          "uday",
+          "uday",
+          "room",
+          java.util.List.of(),
+          "claude-code",
+          null,
+          "t",
+          "l",
+          "u",
+          null);
+      var snapshot = owner.comparableSnapshot("0195a2f0-0000-7000-8000-0000000000c1");
+      org.junit.jupiter.api.Assertions.assertEquals(
+          "chat-room", snapshot.get("room_id"), "the room key rides the run snapshot");
+
+      peer.applyRevision("0195a2f0-0000-7000-8000-0000000000c1", snapshot, "1-remote");
+
+      var replicated = peer.findById("0195a2f0-0000-7000-8000-0000000000c1").orElseThrow();
+      org.junit.jupiter.api.Assertions.assertEquals("chat-room", replicated.conversationId());
+      org.junit.jupiter.api.Assertions.assertEquals(
+          1, peer.listForRoom("chat-room").size(), "a peer box can key the turn by its room");
+    }
+  }
+
+  @Test
   void aRoomKeyedReservationTracksAndSerializesByRoom(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
     try (var roomDb = Sqlite.open(dir.resolve("room-runs.db"))) {

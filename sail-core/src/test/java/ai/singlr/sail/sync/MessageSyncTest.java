@@ -151,6 +151,25 @@ class MessageSyncTest {
   }
 
   @Test
+  void aSpecRowGrantsPostingAuthorityBeforeItsRoomRowArrives() {
+    main.db.execute(
+        """
+        INSERT INTO specs (id, project, title, status, created_at, updated_at, assignee, room_id)
+        VALUES ('orphan', 'acme', 'Orphan', 'pending', 'now', 'now', 'node', 'orphan')""");
+
+    var accepted =
+        SyncPeer.with(
+            "node",
+            () ->
+                main.messages.commitRevision(
+                    "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
+
+    assertTrue(
+        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        "a spec's ownership fields are authoritative for policy before its room row exists");
+  }
+
+  @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
     var messageId = "00000000-0000-7000-8000-000000000001";
 

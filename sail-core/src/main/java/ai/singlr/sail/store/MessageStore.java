@@ -324,11 +324,12 @@ public final class MessageStore implements SyncedStore {
     var ownsAuthor =
         peer.equals(author)
             || db.queryOne(
-                    "SELECT 1 FROM runs r WHERE r.owner = ? AND r.spec_id = ?"
+                    "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?)"
                         + " AND (r.principal = ? OR EXISTS (SELECT 1 FROM run_principals rp"
                         + " WHERE rp.run_id = r.id AND rp.principal = ?)) LIMIT 1",
                     row -> true,
                     peer,
+                    roomId,
                     roomId,
                     author,
                     author)
@@ -336,11 +337,24 @@ public final class MessageStore implements SyncedStore {
     if (!ownsAuthor) {
       return false;
     }
+    return postAuthority(peer, "FROM rooms s", "s.id = ?", roomId)
+        || postAuthority(peer, "FROM specs s", "s.room_id = ?", roomId);
+  }
+
+  /**
+   * Whether {@code peer}'s box holds posting authority over the conversation: an admin FDE, the
+   * assignee, or the creator of an unassigned surface. Resolved against the room row and against
+   * any spec attached to the room — a spec's ownership fields stay authoritative for policy even
+   * when its room row has not been minted or has not arrived yet (a synced-in or imported spec).
+   */
+  private boolean postAuthority(String peer, String from, String where, String roomId) {
     return db.queryOne(
-            "SELECT 1 FROM rooms s LEFT JOIN fdes f ON f.handle = ? "
-                + "WHERE s.id = ? AND (lower(coalesce(f.role, '')) = 'admin' "
-                + "OR s.assignee = ? OR "
-                + "(trim(coalesce(s.assignee, '')) = '' AND s.created_by = ?)) LIMIT 1",
+            "SELECT 1 "
+                + from
+                + " LEFT JOIN fdes f ON f.handle = ? WHERE "
+                + where
+                + " AND (lower(coalesce(f.role, '')) = 'admin' OR s.assignee = ?"
+                + " OR (trim(coalesce(s.assignee, '')) = '' AND s.created_by = ?)) LIMIT 1",
             row -> true,
             peer,
             roomId,

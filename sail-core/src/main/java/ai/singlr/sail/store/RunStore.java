@@ -1313,8 +1313,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
-            principal, owner, session_id, session_source, transcript_path, last_activity_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            principal, owner, session_id, session_source, transcript_path, last_activity_at,
+            room_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1325,7 +1326,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             principal = excluded.principal, owner = excluded.owner,
             session_id = excluded.session_id, session_source = excluded.session_source,
             transcript_path = excluded.transcript_path,
-            last_activity_at = excluded.last_activity_at""",
+            last_activity_at = excluded.last_activity_at, room_id = excluded.room_id""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1349,7 +1350,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.sessionId(),
         row.sessionSource(),
         row.transcriptPath(),
-        row.lastActivityAt());
+        row.lastActivityAt(),
+        row.roomId());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1378,6 +1380,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("session_source", run.sessionSource());
     map.put("transcript_path", run.transcriptPath());
     map.put("last_activity_at", run.lastActivityAt());
+    map.put("room_id", run.roomId());
     return map;
   }
 
@@ -1427,7 +1430,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "session_source"),
         Snapshots.text(snapshot, "transcript_path"),
         Snapshots.text(snapshot, "last_activity_at"),
-        null);
+        Snapshots.text(snapshot, "room_id"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
