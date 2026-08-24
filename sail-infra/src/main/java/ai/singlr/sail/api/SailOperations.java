@@ -487,6 +487,18 @@ public final class SailOperations implements Operations {
   }
 
   @Override
+  public Result<SpecMessagesResponse> roomMessages(
+      String roomId, String before, String after, int limit) {
+    return specMessages(roomId, before, after, limit);
+  }
+
+  @Override
+  public Result<SpecMessageResponse> postRoomMessage(
+      String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+    return postSpecMessage(roomId, request, principal, authorHandle);
+  }
+
+  @Override
   public Result<RoomMembersResponse> roomMembers(String roomId) {
     freshenForRead();
     return safe(() -> new RoomMembersResponse(dispatchOps.roomMembers(roomId)));
@@ -1164,7 +1176,7 @@ public final class SailOperations implements Operations {
           return new GlobalSpecsListResponse(
               listed.specs(),
               listed.total(),
-              messageStore.latestBySpec(),
+              messageStore.latestByRoom(),
               messageStore.openQuestions());
         });
   }
@@ -1320,7 +1332,7 @@ public final class SailOperations implements Operations {
                 !Strings.isBlank(messageId)
                     && store
                         .findById(messageId)
-                        .filter(message -> message.specId().equals(run.specId()))
+                        .filter(message -> message.roomId().equals(run.specId()))
                         .isPresent();
             if (!onSpec) {
               throw new ApiException(

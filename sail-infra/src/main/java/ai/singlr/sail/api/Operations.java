@@ -123,6 +123,11 @@ public interface Operations extends LocalLaneOperations {
 
   Result<RoomMembersResponse> roomMembers(String roomId);
 
+  Result<SpecMessagesResponse> roomMessages(String roomId, String before, String after, int limit);
+
+  Result<SpecMessageResponse> postRoomMessage(
+      String roomId, SpecMessageRequest request, Actor principal, String authorHandle);
+
   Result<EngageResponse> addRoomMember(
       String roomId, EngageRequest request, Actor actor, String localHandle);
 

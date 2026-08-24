@@ -32,7 +32,7 @@ class MessageStoreTest {
     new SchemaManager(db).migrate();
     db.execute(
         """
-        INSERT INTO specs (id, title, project, created_at, updated_at)
+        INSERT INTO rooms (id, title, project, created_at, updated_at)
         VALUES ('room', 'Room', 'acme', 'now', 'now')""");
     messages = new MessageStore(db);
   }
@@ -86,31 +86,31 @@ class MessageStoreTest {
 
   @Test
   void latestBySpecReportsEachRoomsNewestMessageTime() {
-    assertEquals(Map.of(), messages.latestBySpec());
+    assertEquals(Map.of(), messages.latestByRoom());
 
     messages.append("room", "uday", "first", null);
     var second = messages.append("room", "uday", "second", null);
     db.execute(
         """
-        INSERT INTO specs (id, title, project, created_at, updated_at)
+        INSERT INTO rooms (id, title, project, created_at, updated_at)
         VALUES ('other', 'Other', 'acme', 'now', 'now')""");
     var other = messages.append("other", "uday", "solo", null);
 
     assertEquals(
-        Map.of("room", second.createdAt(), "other", other.createdAt()), messages.latestBySpec());
+        Map.of("room", second.createdAt(), "other", other.createdAt()), messages.latestByRoom());
   }
 
   @Test
-  void acceptsTheExactByteCapAndSurvivesSpecLifecycleChanges() {
+  void acceptsTheExactByteCapAndSurvivesRoomRowChanges() {
     var row = messages.append("room", "ada", "x".repeat(MessageStore.MAX_BODY_BYTES), null);
-    db.execute("UPDATE specs SET status = 'archived' WHERE id = 'room'");
+    db.execute("UPDATE rooms SET title = 'Renamed', assignee = 'ada' WHERE id = 'room'");
     assertEquals(row.id(), messages.list("room", null, 10).getFirst().id());
 
-    db.execute("DELETE FROM specs WHERE id = 'room'");
+    db.execute("DELETE FROM rooms WHERE id = 'room'");
     assertEquals(row.id(), messages.findById(row.id()).orElseThrow().id());
     db.execute(
         """
-        INSERT INTO specs (id, title, project, created_at, updated_at)
+        INSERT INTO rooms (id, title, project, created_at, updated_at)
         VALUES ('room', 'Room restored', 'acme', 'later', 'later')""");
     assertEquals(row.id(), messages.list("room", null, 10).getFirst().id());
   }

@@ -738,13 +738,13 @@ class RoomWakeReactorTest {
     reactor(new DirectExecutorService(), null).onEvent(roomStop("chat", run));
     assertTrue(launcher.woken.isEmpty(), "no message store, no owed check");
 
-    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE id = ?", second.id());
-    db.execute("UPDATE spec_messages SET created_at = 'garbage' WHERE spec_id = 'chat'");
+    db.execute("UPDATE room_messages SET created_at = 'garbage' WHERE id = ?", second.id());
+    db.execute("UPDATE room_messages SET created_at = 'garbage' WHERE room_id = 'chat'");
     reactor().onEvent(roomStop("chat", run));
     assertTrue(launcher.woken.isEmpty(), "an unparseable timestamp is never owed");
 
     db.execute(
-        "UPDATE spec_messages SET created_at = ? WHERE spec_id = 'chat'", now.get().toString());
+        "UPDATE room_messages SET created_at = ? WHERE room_id = 'chat'", now.get().toString());
     reactor().onEvent(roomStop("chat", run));
     assertEquals(List.of("acme/chat"), launcher.woken, "the newest of several messages decides");
   }

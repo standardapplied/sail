@@ -101,6 +101,18 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<SpecMessagesResponse> roomMessages(
+      String roomId, String before, String after, int limit) {
+    return Result.success(new SpecMessagesResponse(roomId, java.util.List.of()));
+  }
+
+  @Override
+  public Result<SpecMessageResponse> postRoomMessage(
+      String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+    return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
+  }
+
+  @Override
   public Result<EngageResponse> addRoomMember(
       String roomId, EngageRequest request, Actor actor, String localHandle) {
     return Result.success(

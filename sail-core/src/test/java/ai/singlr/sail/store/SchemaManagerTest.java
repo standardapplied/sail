@@ -301,7 +301,51 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_events_timestamp"));
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
-    assertTrue(indexes.contains("idx_spec_messages_page"));
+    assertTrue(indexes.contains("idx_room_messages_page"));
+  }
+
+  @Test
+  void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
+    var staged = SchemaManager.CURRENT_VERSION - 4;
+    stageAtBaseline();
+    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
+      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
+    }
+    db.execute(
+        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev, question)"
+            + " VALUES ('0195a2f0-0000-7000-8000-00000000000a', 'auth', 'uday', 'hi', 't0',"
+            + " '1-a', 1)");
+    db.execute(
+        "INSERT INTO runs (id, project, agent, status, started_at)"
+            + " VALUES ('r-keep', 'acme', 'claude-code', 'completed', 't0')");
+    db.execute(
+        "INSERT INTO run_delivered_messages (run_id, message_id)"
+            + " VALUES ('r-keep', '0195a2f0-0000-7000-8000-00000000000a')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(
+        "auth",
+        db.queryOne(
+                "SELECT room_id FROM room_messages"
+                    + " WHERE id = '0195a2f0-0000-7000-8000-00000000000a'",
+                r -> r.text(0))
+            .orElseThrow(),
+        "the re-key is a pure rename: rows carry over with the same room id");
+    assertEquals(
+        1,
+        db.queryOne(
+                "SELECT question FROM room_messages"
+                    + " WHERE id = '0195a2f0-0000-7000-8000-00000000000a'",
+                r -> r.integer(0))
+            .orElseThrow());
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute("DELETE FROM room_messages WHERE id = '0195a2f0-0000-7000-8000-00000000000a'");
+    assertEquals(
+        0,
+        db.query("SELECT run_id FROM run_delivered_messages", r -> r.text(0)).size(),
+        "the delivery ledger's FK followed the rename and still cascades");
   }
 
   private void stageAtVersion(int version) {
@@ -355,9 +399,9 @@ class SchemaManagerTest {
             .contains("run_delivered_messages"));
     assertTrue(
         db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'spec_messages'",
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'room_messages'",
                 r -> r.text(0))
-            .contains("spec_messages"));
+            .contains("room_messages"));
     assertTrue(
         db.query(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rooms'",
@@ -610,7 +654,7 @@ class SchemaManagerTest {
         0L,
         (long)
             db.queryOne(
-                    "SELECT question FROM spec_messages"
+                    "SELECT question FROM room_messages"
                         + " WHERE id = '0195a2f0-0000-7000-8000-000000000002'",
                     r -> r.integer(0))
                 .orElseThrow(),
