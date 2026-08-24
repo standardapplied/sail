@@ -391,9 +391,34 @@ public final class SchemaManager {
               rev TEXT,
               base_rev TEXT
           )""",
-          "ALTER TABLE spec_messages RENAME TO room_messages",
-          "ALTER TABLE room_messages RENAME COLUMN spec_id TO room_id",
-          "DROP INDEX idx_spec_messages_page",
+          """
+          CREATE TABLE room_messages (
+              id TEXT PRIMARY KEY,
+              room_id TEXT NOT NULL,
+              author TEXT NOT NULL,
+              body TEXT NOT NULL,
+              reply_to TEXT REFERENCES room_messages(id),
+              created_at TEXT NOT NULL,
+              rev TEXT NOT NULL,
+              base_rev TEXT,
+              question INTEGER NOT NULL DEFAULT 0
+          )""",
+          """
+          INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev,
+                  base_rev, question)
+              SELECT id, spec_id, author, body, reply_to, created_at, rev, base_rev, question
+              FROM spec_messages""",
+          """
+          CREATE TABLE run_delivered_messages_v2 (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              message_id TEXT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
+              PRIMARY KEY (run_id, message_id)
+          )""",
+          "INSERT INTO run_delivered_messages_v2 SELECT run_id, message_id"
+              + " FROM run_delivered_messages",
+          "DROP TABLE run_delivered_messages",
+          "ALTER TABLE run_delivered_messages_v2 RENAME TO run_delivered_messages",
+          "DROP TABLE spec_messages",
           "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)");
 
   /** The schema version this binary converges every database to. */

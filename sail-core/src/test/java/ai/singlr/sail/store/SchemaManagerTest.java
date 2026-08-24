@@ -306,7 +306,7 @@ class SchemaManagerTest {
 
   @Test
   void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
-    var staged = SchemaManager.CURRENT_VERSION - 4;
+    var staged = SchemaManager.CURRENT_VERSION - 8;
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
