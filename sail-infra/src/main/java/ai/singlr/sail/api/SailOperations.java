@@ -1195,7 +1195,7 @@ public final class SailOperations implements Operations {
               detail.plan(),
               detail.openFindings(),
               detail.latestRun(),
-              messageStore.openQuestions().get(specId));
+              messageStore.openQuestions().get(detail.spec().roomId()));
         });
   }
 
@@ -1249,7 +1249,12 @@ public final class SailOperations implements Operations {
           MessageStore.MessageRow row;
           try {
             row =
-                store.append(specId, author, request.body(), request.replyTo(), request.question());
+                store.append(
+                    spec.roomIdOrIdentity(),
+                    author,
+                    request.body(),
+                    request.replyTo(),
+                    request.question());
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
           }
@@ -1280,17 +1285,21 @@ public final class SailOperations implements Operations {
             throw new ApiException(
                 ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
           }
-          if (specStore.findById(specId).isEmpty()) {
-            throw new ApiException(
-                ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
-          }
+          var spec =
+              specStore
+                  .findById(specId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+          var roomId = spec.roomIdOrIdentity();
           List<SpecMessageView> messages;
           try {
             var store = requireMessageStore();
             var rows =
                 after != null
-                    ? store.listAfter(specId, after, limit)
-                    : store.list(specId, before, limit);
+                    ? store.listAfter(roomId, after, limit)
+                    : store.list(roomId, before, limit);
             messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
@@ -1310,11 +1319,22 @@ public final class SailOperations implements Operations {
           var store = requireMessageStore();
           var fetched =
               store.listUndelivered(
-                  run.specId(), runId, Objects.toString(run.principal(), ""), INBOX_LIMIT + 1);
+                  runRoomId(run), runId, Objects.toString(run.principal(), ""), INBOX_LIMIT + 1);
           var hasMore = fetched.size() > INBOX_LIMIT;
           var fresh = fetched.stream().limit(INBOX_LIMIT).map(SpecMessageView::from).toList();
           return new RunInboxResponse(runId, run.specId(), fresh, hasMore);
         });
+  }
+
+  /** The room a run's messages live in: its spec's room, or the raw id for a spec-less run. */
+  private String runRoomId(RunStore.RunRow run) {
+    if (Strings.isBlank(run.specId()) || specStore == null) {
+      return run.specId();
+    }
+    return specStore
+        .findById(run.specId())
+        .map(SpecStore.SpecRow::roomIdOrIdentity)
+        .orElse(run.specId());
   }
 
   @Override
@@ -1332,7 +1352,7 @@ public final class SailOperations implements Operations {
                 !Strings.isBlank(messageId)
                     && store
                         .findById(messageId)
-                        .filter(message -> message.roomId().equals(run.specId()))
+                        .filter(message -> message.roomId().equals(runRoomId(run)))
                         .isPresent();
             if (!onSpec) {
               throw new ApiException(

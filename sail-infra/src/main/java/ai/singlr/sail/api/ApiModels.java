@@ -610,7 +610,8 @@ record SpecCreateRequest(
     List<String> repos,
     String body,
     String plan,
-    String createdBy) {
+    String createdBy,
+    String roomId) {
 
   @SuppressWarnings("unchecked")
   static SpecCreateRequest fromMap(Map<String, Object> map) {
@@ -629,7 +630,8 @@ record SpecCreateRequest(
         map.containsKey("repos") ? (List<String>) map.get("repos") : List.of(),
         (String) map.get("body"),
         (String) map.get("plan"),
-        null);
+        null,
+        (String) map.get("room_id"));
   }
 
   /**
@@ -652,7 +654,8 @@ record SpecCreateRequest(
         repos,
         body,
         plan,
-        actor);
+        actor,
+        roomId);
   }
 }
 
@@ -938,7 +941,8 @@ record GlobalSpecView(
     String createdBy,
     String createdAt,
     String updatedAt,
-    String updatedBy)
+    String updatedBy,
+    String roomId)
     implements Mappable {
   static GlobalSpecView from(SpecStore.SpecRow row) {
     return new GlobalSpecView(
@@ -959,7 +963,8 @@ record GlobalSpecView(
         row.createdBy(),
         row.createdAt(),
         row.updatedAt(),
-        row.updatedBy());
+        row.updatedBy(),
+        row.roomIdOrIdentity());
   }
 
   private static Map<String, Object> engagementMap(String stored) {
@@ -996,6 +1001,7 @@ record GlobalSpecView(
     m.put("created_at", createdAt);
     m.put("updated_at", updatedAt);
     if (updatedBy != null) m.put("updated_by", updatedBy);
+    m.put("room_id", roomId);
     return m;
   }
 }
@@ -1039,7 +1045,7 @@ record GlobalSpecsListResponse(
                     spec.put(
                         "last_activity_at",
                         message != null && message.compareTo(updated) > 0 ? message : updated);
-                    var question = openQuestions.get(view.id());
+                    var question = openQuestions.get(view.roomId());
                     if (question != null) {
                       spec.put("needs_reply", true);
                       spec.put("question_message_id", question);

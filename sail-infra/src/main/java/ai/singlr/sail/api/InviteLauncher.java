@@ -121,7 +121,9 @@ public final class InviteLauncher {
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var messages = messageStore.get();
     var room =
-        messages == null ? List.<MessageStore.MessageRow>of() : messages.list(specId, null, 20);
+        messages == null
+            ? List.<MessageStore.MessageRow>of()
+            : messages.list(spec.roomIdOrIdentity(), null, 20);
     var built = InvitePrompt.build(spec, body.isBlank() ? spec.title() : body, room);
     var task = built.prompt();
     var runId = DateTimeUtils.newId().toString();

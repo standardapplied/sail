@@ -37,7 +37,8 @@ class GlobalSpecViewTest {
         List.of(),
         List.of(),
         null,
-        engagement);
+        engagement,
+        null);
   }
 
   @Test

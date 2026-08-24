@@ -114,6 +114,8 @@ final class GlobalSpecOperations {
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
     var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
+    var roomId = Strings.isBlank(request.roomId()) ? request.id() : request.roomId();
+    NameValidator.requireValidSpecId(roomId);
     var row =
         new SpecStore.SpecRow(
             request.id(),
@@ -132,7 +134,7 @@ final class GlobalSpecOperations {
             request.createdBy(),
             request.dependsOn(),
             request.repos());
-    specStore.create(row);
+    specStore.create(row.withRoomId(roomId));
     if (request.body() != null || request.plan() != null) {
       specStore.setContent(
           request.id(),
@@ -170,7 +172,9 @@ final class GlobalSpecOperations {
             request.updatedBy(),
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
-            request.wake() != null ? validWake(request.wake()) : existing.wake());
+            request.wake() != null ? validWake(request.wake()) : existing.wake(),
+            existing.engagement(),
+            existing.roomIdOrIdentity());
     specStore.update(updated);
     dualWriteWake(updated, request);
     if (updated.status() == SpecStatus.DONE
@@ -210,7 +214,12 @@ final class GlobalSpecOperations {
       return;
     }
     store.ensureFor(
-        spec.id(), spec.project(), spec.title(), spec.assignee(), spec.wake(), spec.createdBy());
+        spec.roomIdOrIdentity(),
+        spec.project(),
+        spec.title(),
+        spec.assignee(),
+        spec.wake(),
+        spec.createdBy());
   }
 
   /**

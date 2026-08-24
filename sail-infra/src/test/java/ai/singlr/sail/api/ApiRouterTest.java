@@ -1865,6 +1865,7 @@ class ApiRouterTest {
                   null,
                   "",
                   "",
+                  null,
                   null),
               null,
               null,
@@ -1896,7 +1897,8 @@ class ApiRouterTest {
                   request.createdBy(),
                   "",
                   "",
-                  request.createdBy()),
+                  request.createdBy(),
+                  null),
               specId,
               "r1",
               2));
@@ -1924,6 +1926,7 @@ class ApiRouterTest {
                   null,
                   "",
                   "",
+                  null,
                   null)));
     }
 
@@ -1950,6 +1953,7 @@ class ApiRouterTest {
                   null,
                   "",
                   "",
+                  null,
                   null)));
     }
 
