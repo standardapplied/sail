@@ -196,6 +196,16 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         id);
   }
 
+  /** Every current room across all projects, in creation order — the rooms front door. */
+  public List<RoomRow> listAll() {
+    return db.query(
+        """
+        SELECT id, project, title, assignee, wake, roster, created_by, created_at,
+            updated_at, updated_by
+        FROM rooms ORDER BY created_at, id""",
+        RoomStore::mapRoom);
+  }
+
   /** Every current room of a project, newest activity last by creation order. */
   public List<RoomRow> list(String project) {
     return db.query(

@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -489,13 +490,243 @@ public final class SailOperations implements Operations {
   @Override
   public Result<SpecMessagesResponse> roomMessages(
       String roomId, String before, String after, int limit) {
-    return specMessages(roomId, before, after, limit);
+    return safeRead(
+        () -> {
+          if (before != null && after != null) {
+            throw new ApiException(
+                ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
+          }
+          requireRoomOrSpec(roomId);
+          List<SpecMessageView> messages;
+          try {
+            var store = requireMessageStore();
+            var rows =
+                after != null
+                    ? store.listAfter(roomId, after, limit)
+                    : store.list(roomId, before, limit);
+            messages = rows.stream().map(SpecMessageView::from).toList();
+          } catch (IllegalArgumentException invalid) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+          }
+          return new SpecMessagesResponse(roomId, messages);
+        });
   }
 
   @Override
   public Result<SpecMessageResponse> postRoomMessage(
       String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
-    return postSpecMessage(roomId, request, principal, authorHandle);
+    return safeWrite(
+        () -> {
+          var room = requireRoomOrSpec(roomId);
+          SpecPolicy.post(principal, room.id(), room.assignee(), room.createdBy()).enforce();
+          return appendMessage(room.project(), roomId, request, authorHandle);
+        });
+  }
+
+  /** Appends into a room and publishes {@code spec_message_posted}, scoped by the room id. */
+  private SpecMessageResponse appendMessage(
+      String project, String roomId, SpecMessageRequest request, String author) {
+    var store = requireMessageStore();
+    MessageStore.MessageRow row;
+    try {
+      row = store.append(roomId, author, request.body(), request.replyTo(), request.question());
+    } catch (IllegalArgumentException invalid) {
+      throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+    }
+    var data = new LinkedHashMap<String, Object>();
+    data.put("message_id", row.id());
+    data.put("preview", preview(row.body()));
+    if (row.question()) {
+      data.put("question", true);
+    }
+    publishOnBus(
+        Event.of(
+            project,
+            roomId,
+            Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+            author,
+            HostInfo.hostname(),
+            data));
+    triggerSyncAfterWrite();
+    return new SpecMessageResponse(SpecMessageView.from(row));
+  }
+
+  /**
+   * The room behind {@code roomId} — the room row when one exists, else a spec's identity room
+   * rendered as a room shape so pre-decouple data keeps answering on the room door.
+   */
+  private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
+    if (roomStore != null) {
+      var room = roomStore.findById(roomId).orElse(null);
+      if (room != null) {
+        return room;
+      }
+    }
+    var spec =
+        specStore == null
+            ? java.util.Optional.<SpecStore.SpecRow>empty()
+            : specStore.findById(roomId);
+    return spec.map(
+            row ->
+                new RoomStore.RoomRow(
+                    row.id(),
+                    row.project(),
+                    row.title(),
+                    row.assignee(),
+                    row.wake(),
+                    null,
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt(),
+                    row.updatedBy()))
+        .orElseThrow(
+            () ->
+                new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+  }
+
+  @Override
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+    freshenForRead();
+    var result =
+        safe(
+            () -> {
+              var store = requireRoomStore();
+              if (request.id() == null || request.id().isBlank()) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "room id is required.");
+              }
+              if (request.title() == null || request.title().isBlank()) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "room title is required.");
+              }
+              if (request.project() == null || request.project().isBlank()) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "room project is required.");
+              }
+              NameValidator.requireValidSpecId(request.id());
+              requireValidWake(request.wake());
+              if (!actor.canWrite()) {
+                throw new ApiException(
+                    ErrorCode.READ_ONLY_CREDENTIAL,
+                    "Your credential is read-only and cannot create rooms.");
+              }
+              if (store.findById(request.id()).isPresent()) {
+                throw new ApiException(
+                    ErrorCode.CONFLICT, "Room '" + request.id() + "' already exists.");
+              }
+              store.create(
+                  new RoomStore.RoomRow(
+                      request.id(),
+                      request.project(),
+                      request.title(),
+                      request.createdBy(),
+                      request.wake(),
+                      null,
+                      request.createdBy(),
+                      null,
+                      null,
+                      request.createdBy()));
+              return detailOf(store.findById(request.id()).orElseThrow());
+            });
+    if (result instanceof Result.Success<RoomDetailResponse>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
+  @Override
+  public Result<RoomsListResponse> rooms(String project) {
+    return safeRead(
+        () -> {
+          var store = requireRoomStore();
+          var rows = project == null || project.isBlank() ? store.listAll() : store.list(project);
+          var views = rows.stream().map(row -> RoomView.from(row, specIdsOf(row.id()))).toList();
+          if (messageStore == null) {
+            return new RoomsListResponse(views, Map.of(), Map.of());
+          }
+          return new RoomsListResponse(
+              views, messageStore.latestByRoom(), messageStore.openQuestions());
+        });
+  }
+
+  @Override
+  public Result<RoomDetailResponse> room(String roomId) {
+    return safeRead(
+        () -> {
+          var store = requireRoomStore();
+          var row =
+              store
+                  .findById(roomId)
+                  .orElseThrow(
+                      () ->
+                          new ApiException(
+                              ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+          return detailOf(row);
+        });
+  }
+
+  @Override
+  public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+    freshenForRead();
+    var result =
+        safe(
+            () -> {
+              var store = requireRoomStore();
+              var row =
+                  store
+                      .findById(roomId)
+                      .orElseThrow(
+                          () ->
+                              new ApiException(
+                                  ErrorCode.ROOM_NOT_FOUND,
+                                  "Room '" + roomId + "' was not found."));
+              SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
+              var attached = specIdsOf(roomId);
+              if (!attached.isEmpty()) {
+                throw new ApiException(
+                    ErrorCode.CONFLICT,
+                    "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
+                    "Delete or re-home its specs first: " + String.join(", ", attached));
+              }
+              store.delete(roomId);
+              return new RoomDeletedResponse(roomId);
+            });
+    if (result instanceof Result.Success<RoomDeletedResponse>) {
+      triggerSyncAfterWrite();
+    }
+    return result;
+  }
+
+  private RoomDetailResponse detailOf(RoomStore.RoomRow row) {
+    var view = RoomView.from(row, specIdsOf(row.id()));
+    if (messageStore == null) {
+      return new RoomDetailResponse(view, null, null);
+    }
+    return new RoomDetailResponse(
+        view,
+        messageStore.latestByRoom().get(row.id()),
+        messageStore.openQuestions().get(row.id()));
+  }
+
+  private List<String> specIdsOf(String roomId) {
+    if (specStore == null) {
+      return List.of();
+    }
+    return specStore.listByRoom(roomId).stream().map(SpecStore.SpecRow::id).toList();
+  }
+
+  private RoomStore requireRoomStore() {
+    if (roomStore == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "This box keeps no room aggregate, so rooms cannot be served.",
+          "Wire the room store (useRooms) on this box's operations.");
+    }
+    return roomStore;
+  }
+
+  private static void requireValidWake(String wake) {
+    if (wake != null && !java.util.Set.of("on", "mention", "off").contains(wake)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST, "wake must be one of on, mention, off; got '" + wake + "'.");
+    }
   }
 
   @Override
@@ -1246,33 +1477,7 @@ public final class SailOperations implements Operations {
                           new ApiException(
                               ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
           SpecPolicy.post(actor, spec.id(), spec.assignee(), spec.createdBy()).enforce();
-          MessageStore.MessageRow row;
-          try {
-            row =
-                store.append(
-                    spec.roomIdOrIdentity(),
-                    author,
-                    request.body(),
-                    request.replyTo(),
-                    request.question());
-          } catch (IllegalArgumentException invalid) {
-            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
-          }
-          var data = new LinkedHashMap<String, Object>();
-          data.put("message_id", row.id());
-          data.put("preview", preview(row.body()));
-          if (row.question()) {
-            data.put("question", true);
-          }
-          publishOnBus(
-              Event.of(
-                  spec.project(),
-                  specId,
-                  Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
-                  author,
-                  HostInfo.hostname(),
-                  data));
-          return new SpecMessageResponse(SpecMessageView.from(row));
+          return appendMessage(spec.project(), spec.roomIdOrIdentity(), request, author);
         });
   }
 

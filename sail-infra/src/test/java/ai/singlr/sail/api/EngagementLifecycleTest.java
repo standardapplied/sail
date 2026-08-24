@@ -557,7 +557,50 @@ class EngagementLifecycleTest {
     assertTrue(ops.roomMembers("auth").isEmpty(), "dismissal empties the roster");
 
     var missing = assertThrows(ApiException.class, () -> ops.roomMembers("ghost"));
-    assertEquals(ErrorCode.SPEC_NOT_FOUND, missing.failure().errorCode());
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
+  }
+
+  @Test
+  void stateAndRosterFallBackToSpecColumnsWithoutARoomStore() {
+    var spec =
+        new SpecStore.SpecRow(
+            "solo",
+            "acme",
+            "Solo",
+            ai.singlr.sail.config.SpecStatus.DRAFT,
+            HANDLE,
+            null,
+            null,
+            null,
+            null,
+            0,
+            HANDLE,
+            "",
+            "",
+            HANDLE,
+            List.of(),
+            List.of(),
+            "on",
+            "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}",
+            null);
+
+    assertEquals("on", MembershipService.stateOf(null, spec).wake());
+    assertEquals("claude-code", MembershipService.stateOf(null, spec).standing().agent());
+    assertEquals(1, MembershipService.legacyRosterOf(spec).members().size());
+  }
+
+  @Test
+  void membersFallBackToTheLegacyColumnWhenNoRoomRowExists() throws Exception {
+    var ops = operations(shell());
+    seedSpec("orphan");
+    var spec = specStore.findById("orphan").orElseThrow();
+    specStore.update(
+        spec.withEngagement("{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}"));
+
+    var members = ops.roomMembers("orphan");
+
+    assertEquals(1, members.size(), "a pre-decouple engagement still reads without a room row");
+    assertEquals("claude-code", members.getFirst().agent());
   }
 
   @Test

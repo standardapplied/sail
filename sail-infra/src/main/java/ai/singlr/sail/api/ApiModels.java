@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
@@ -787,6 +788,136 @@ record DisengageResponse(String agent) implements Mappable {
     var m = new LinkedHashMap<String, Object>();
     if (agent != null) m.put("agent", agent);
     m.put("disengaged", agent != null);
+    return m;
+  }
+}
+
+record RoomCreateRequest(String id, String project, String title, String wake, String createdBy) {
+  static RoomCreateRequest fromMap(Map<String, Object> map) {
+    return new RoomCreateRequest(
+        (String) map.get("id"),
+        (String) map.get("project"),
+        (String) map.get("title"),
+        (String) map.get("wake"),
+        null);
+  }
+
+  RoomCreateRequest withCreatedBy(String actor) {
+    return new RoomCreateRequest(id, project, title, wake, actor);
+  }
+}
+
+/** One room as the API renders it: identity, conversation state, and its attached specs. */
+record RoomView(
+    String id,
+    String project,
+    String title,
+    String assignee,
+    String wake,
+    List<ai.singlr.sail.config.Engagement> members,
+    List<String> specIds,
+    String createdBy,
+    String createdAt,
+    String updatedAt,
+    String updatedBy)
+    implements Mappable {
+
+  static RoomView from(RoomStore.RoomRow row, List<String> specIds) {
+    return new RoomView(
+        row.id(),
+        row.project(),
+        row.title(),
+        row.assignee(),
+        row.wake(),
+        ai.singlr.sail.config.Roster.fromJson(row.roster()).members(),
+        specIds,
+        row.createdBy(),
+        row.createdAt(),
+        row.updatedAt(),
+        row.updatedBy());
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("project", project);
+    m.put("title", title);
+    if (assignee != null) m.put("assignee", assignee);
+    if (wake != null) m.put("wake", wake);
+    m.put(
+        "members",
+        members.stream()
+            .map(
+                member -> {
+                  var one = new LinkedHashMap<String, Object>();
+                  one.put("agent", member.agent());
+                  one.put("mode", member.mode());
+                  if (member.model() != null) one.put("model", member.model());
+                  one.put("engaged_at", member.engagedAt());
+                  return one;
+                })
+            .toList());
+    m.put("spec_ids", specIds);
+    if (createdBy != null) m.put("created_by", createdBy);
+    m.put("created_at", createdAt);
+    m.put("updated_at", updatedAt);
+    if (updatedBy != null) m.put("updated_by", updatedBy);
+    return m;
+  }
+}
+
+/** Response of {@code GET /v1/rooms}: every room, decorated with conversation activity. */
+record RoomsListResponse(
+    List<RoomView> rooms, Map<String, String> latestByRoom, Map<String, String> openQuestions)
+    implements Mappable {
+  RoomsListResponse {
+    latestByRoom = latestByRoom == null ? Map.of() : latestByRoom;
+    openQuestions = openQuestions == null ? Map.of() : openQuestions;
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put(
+        "rooms",
+        rooms.stream()
+            .map(
+                view -> {
+                  var one = view.toMap();
+                  var latest = latestByRoom.get(view.id());
+                  if (latest != null) one.put("last_activity_at", latest);
+                  var question = openQuestions.get(view.id());
+                  one.put("needs_reply", question != null);
+                  if (question != null) one.put("question_message_id", question);
+                  return one;
+                })
+            .toList());
+    m.put("count", rooms.size());
+    return m;
+  }
+}
+
+/** Response of {@code POST /v1/rooms} and {@code GET /v1/rooms/{id}}: one decorated room. */
+record RoomDetailResponse(RoomView room, String lastActivityAt, String questionMessageId)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = room.toMap();
+    if (lastActivityAt != null) m.put("last_activity_at", lastActivityAt);
+    m.put("needs_reply", questionMessageId != null);
+    if (questionMessageId != null) m.put("question_message_id", questionMessageId);
+    return m;
+  }
+}
+
+/** Response of {@code DELETE /v1/rooms/{id}}: the tombstoned room. */
+record RoomDeletedResponse(String id) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", id);
+    m.put("deleted", true);
     return m;
   }
 }

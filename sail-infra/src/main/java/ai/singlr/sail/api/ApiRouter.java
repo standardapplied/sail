@@ -315,6 +315,30 @@ public final class ApiRouter implements HttpHandler {
    * semantics, so the spec-shaped doors can retire without a behavior change.
    */
   private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
+    if (request.size() == 2) {
+      return switch (request.method()) {
+        case GET -> {
+          var params = QueryParameters.from(request.uri()).values();
+          yield ApiResponse.from(operations.rooms(params.get("project")));
+        }
+        case POST ->
+            ApiResponse.fromCreated(
+                operations.createRoom(
+                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange))
+                        .withCreatedBy(actor(exchange)),
+                    actorOf(exchange)));
+        default -> throw methodNotAllowed();
+      };
+    }
+    if (request.size() == 3) {
+      var soloRoom = request.segments().get(2);
+      NameValidator.requireValidSpecId(soloRoom);
+      return switch (request.method()) {
+        case GET -> ApiResponse.from(operations.room(soloRoom));
+        case DELETE -> ApiResponse.from(operations.deleteRoom(soloRoom, actorOf(exchange)));
+        default -> throw methodNotAllowed();
+      };
+    }
     if (request.size() != 4) {
       throw notFound();
     }
