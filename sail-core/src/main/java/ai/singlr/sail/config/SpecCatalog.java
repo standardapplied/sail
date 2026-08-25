@@ -19,6 +19,12 @@ import java.util.stream.Collectors;
 public final class SpecCatalog {
 
   /** Statuses an engineer may assign by hand via {@code sail spec status}. */
+  /**
+   * Statuses hidden from the agent-facing task counts: a draft is not yet a task and an archived
+   * spec is history, so neither belongs in a workload summary. Every other status counts.
+   */
+  public static final Set<SpecStatus> AGENT_HIDDEN = Set.of(SpecStatus.DRAFT, SpecStatus.ARCHIVED);
+
   public static final Set<SpecStatus> CLI_SETTABLE =
       Set.of(
           SpecStatus.PENDING,
@@ -115,22 +121,7 @@ public final class SpecCatalog {
       throw new IllegalArgumentException("Spec '" + specId + "' not found");
     }
     return specs.stream()
-        .map(
-            spec ->
-                spec.id().equals(specId)
-                    ? new Spec(
-                        spec.id(),
-                        spec.project(),
-                        spec.title(),
-                        newStatus,
-                        spec.assignee(),
-                        spec.dependsOn(),
-                        spec.repos(),
-                        spec.agent(),
-                        spec.model(),
-                        spec.reasoningEffort(),
-                        spec.branch())
-                    : spec)
+        .map(spec -> spec.id().equals(specId) ? spec.withStatus(newStatus) : spec)
         .toList();
   }
 
@@ -180,12 +171,11 @@ public final class SpecCatalog {
    */
   public static Map<String, Integer> statusCounts(List<Spec> specs) {
     var counts = new LinkedHashMap<String, Integer>();
-    counts.put(SpecStatus.PENDING.wire(), 0);
-    counts.put(SpecStatus.IN_PROGRESS.wire(), 0);
-    counts.put(SpecStatus.REVIEW.wire(), 0);
-    counts.put(SpecStatus.AWAITING_MERGE.wire(), 0);
-    counts.put(SpecStatus.DONE.wire(), 0);
-    counts.put(SpecStatus.CANCELLED.wire(), 0);
+    for (var status : SpecStatus.values()) {
+      if (!AGENT_HIDDEN.contains(status)) {
+        counts.put(status.wire(), 0);
+      }
+    }
     for (var spec : specs) {
       counts.merge(spec.status().wire(), 1, Integer::sum);
     }

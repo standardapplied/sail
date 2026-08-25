@@ -114,6 +114,59 @@ class SpecStoreTest {
   }
 
   @Test
+  void toSpecProjectsEveryPersistedFieldLosslessly() {
+    store.create(
+        new SpecStore.SpecRow(
+            "auth",
+            "acme",
+            "OAuth",
+            SpecStatus.PENDING,
+            "uday",
+            "claude-code",
+            "opus-x",
+            "high",
+            "feat/auth",
+            40,
+            "uday",
+            "",
+            "",
+            "mady",
+            List.of("base"),
+            List.of("api"),
+            "lounge"));
+
+    var spec = store.findById("auth").orElseThrow().toSpec();
+
+    assertEquals(40, spec.priority(), "priority survives the projection");
+    assertEquals("uday", spec.createdBy());
+    assertEquals("mady", spec.updatedBy());
+    assertFalse(spec.createdAt().isBlank(), "the store's stamp rides through");
+    assertFalse(spec.updatedAt().isBlank());
+    assertEquals("lounge", spec.roomId(), "the room link is never dropped");
+    assertEquals(List.of("base"), spec.dependsOn());
+    assertEquals(List.of("api"), spec.repos());
+  }
+
+  @Test
+  void boardCountsEveryStatusTheSchemaAdmits() {
+    for (var status : SpecStatus.values()) {
+      store.create(spec("spec-" + status.wire(), "S", "pending"));
+      store.updateStatus("spec-" + status.wire(), status);
+    }
+
+    var board = store.board();
+
+    assertEquals(1, board.draft());
+    assertEquals(1, board.pending());
+    assertEquals(1, board.inProgress());
+    assertEquals(1, board.review());
+    assertEquals(1, board.awaitingMerge());
+    assertEquals(1, board.done());
+    assertEquals(1, board.cancelled());
+    assertEquals(1, board.archived());
+  }
+
+  @Test
   void findByIdReturnsEmptyForMissing() {
     assertTrue(store.findById("nonexistent").isEmpty());
   }

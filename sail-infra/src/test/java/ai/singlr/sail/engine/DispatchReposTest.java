@@ -25,7 +25,17 @@ class DispatchReposTest {
         DispatchRepos.resolve(
             config("api", "web"),
             new Spec(
-                "ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of("web"), "feat/ui"),
+                "ui",
+                "test",
+                "UI",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of("web"),
+                null,
+                null,
+                null,
+                "feat/ui"),
             List.of());
 
     assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
@@ -37,7 +47,17 @@ class DispatchReposTest {
         DispatchRepos.resolve(
             config("api", "web"),
             new Spec(
-                "ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of("api"), "feat/ui"),
+                "ui",
+                "test",
+                "UI",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of("api"),
+                null,
+                null,
+                null,
+                "feat/ui"),
             List.of("web"));
 
     assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
@@ -48,7 +68,18 @@ class DispatchReposTest {
     var targets =
         DispatchRepos.resolve(
             config("api"),
-            new Spec("ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of(), "feat/ui"),
+            new Spec(
+                "ui",
+                "test",
+                "UI",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                "feat/ui"),
             List.of());
 
     assertEquals(List.of("api"), targets.stream().map(SailYaml.Repo::path).toList());
@@ -59,7 +90,18 @@ class DispatchReposTest {
     var targets =
         DispatchRepos.resolve(
             config("api", "web"),
-            new Spec("ui", "test", "UI", SpecStatus.PENDING, null, List.of(), List.of(), "feat/ui"),
+            new Spec(
+                "ui",
+                "test",
+                "UI",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                "feat/ui"),
             List.of());
 
     assertTrue(targets.isEmpty());
@@ -80,6 +122,9 @@ class DispatchReposTest {
                     null,
                     List.of(),
                     List.of("web"),
+                    null,
+                    null,
+                    null,
                     "feat/ui"),
                 List.of()));
   }

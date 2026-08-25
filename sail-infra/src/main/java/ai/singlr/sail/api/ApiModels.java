@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.ChangeLog;
@@ -415,7 +416,7 @@ record DispatchedSpecView(
     return new DispatchedSpecView(
         spec.id(),
         spec.title(),
-        "in_progress",
+        SpecStatus.IN_PROGRESS.wire(),
         spec.repos(),
         spec.agent(),
         spec.model(),
@@ -483,11 +484,11 @@ record SpecSummaryView(int pending, int inProgress, int review, int awaitingMerg
     implements Mappable {
   static SpecSummaryView from(Map<String, Integer> counts) {
     return new SpecSummaryView(
-        counts.getOrDefault("pending", 0),
-        counts.getOrDefault("in_progress", 0),
-        counts.getOrDefault("review", 0),
-        counts.getOrDefault("awaiting_merge", 0),
-        counts.getOrDefault("done", 0));
+        counts.getOrDefault(SpecStatus.PENDING.wire(), 0),
+        counts.getOrDefault(SpecStatus.IN_PROGRESS.wire(), 0),
+        counts.getOrDefault(SpecStatus.REVIEW.wire(), 0),
+        counts.getOrDefault(SpecStatus.AWAITING_MERGE.wire(), 0),
+        counts.getOrDefault(SpecStatus.DONE.wire(), 0));
   }
 
   @Override
@@ -1087,26 +1088,27 @@ record GlobalSpecView(
    * with nobody seated.
    */
   static GlobalSpecView from(SpecStore.SpecRow row, RoomStore.RoomRow room) {
+    var spec = row.toSpec();
     return new GlobalSpecView(
-        row.id(),
-        row.project(),
-        row.title(),
-        row.status().wire(),
-        row.assignee(),
-        row.agent(),
-        row.model(),
-        row.reasoningEffort(),
-        row.branch(),
-        row.priority(),
-        row.dependsOn(),
-        row.repos(),
+        spec.id(),
+        spec.project(),
+        spec.title(),
+        spec.status().wire(),
+        spec.assignee(),
+        spec.agent(),
+        spec.model(),
+        spec.reasoningEffort(),
+        spec.branch(),
+        spec.priority(),
+        spec.dependsOn(),
+        spec.repos(),
         room == null ? null : room.wake(),
         engagementMap(room == null ? null : Roster.fromJson(room.roster()).standing()),
-        row.createdBy(),
-        row.createdAt(),
-        row.updatedAt(),
-        row.updatedBy(),
-        row.roomIdOrIdentity());
+        spec.createdBy(),
+        spec.createdAt(),
+        spec.updatedAt(),
+        spec.updatedBy(),
+        spec.roomId());
   }
 
   private static Map<String, Object> engagementMap(ai.singlr.sail.config.Engagement engagement) {
@@ -1381,14 +1383,14 @@ record GlobalBoardResponse(SpecStore.BoardSummary board, int doneOpenFindings, i
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("draft", board.draft());
-    m.put("pending", board.pending());
-    m.put("in_progress", board.inProgress());
-    m.put("review", board.review());
-    m.put("awaiting_merge", board.awaitingMerge());
-    m.put("done", board.done());
-    m.put("cancelled", board.cancelled());
-    m.put("archived", board.archived());
+    m.put(SpecStatus.DRAFT.wire(), board.draft());
+    m.put(SpecStatus.PENDING.wire(), board.pending());
+    m.put(SpecStatus.IN_PROGRESS.wire(), board.inProgress());
+    m.put(SpecStatus.REVIEW.wire(), board.review());
+    m.put(SpecStatus.AWAITING_MERGE.wire(), board.awaitingMerge());
+    m.put(SpecStatus.DONE.wire(), board.done());
+    m.put(SpecStatus.CANCELLED.wire(), board.cancelled());
+    m.put(SpecStatus.ARCHIVED.wire(), board.archived());
     m.put("next_ready_id", board.nextReadyId());
     m.put("done_open_findings", doneOpenFindings);
     m.put("needs_reply", needsReply);

@@ -19,6 +19,60 @@ import org.junit.jupiter.api.Test;
 class SpecTest {
 
   @Test
+  void fromMapReadsStoreOwnedFieldsWhenPresentAndDefaultsThemOtherwise() {
+    var full =
+        Spec.fromMap(
+            Map.<String, Object>of(
+                "id", "t1",
+                "project", "test",
+                "priority", 40,
+                "created_by", "uday",
+                "created_at", "t0",
+                "updated_at", "t1",
+                "updated_by", "mady",
+                "room_id", "lounge"));
+    assertEquals(40, full.priority());
+    assertEquals("uday", full.createdBy());
+    assertEquals("t0", full.createdAt());
+    assertEquals("t1", full.updatedAt());
+    assertEquals("mady", full.updatedBy());
+    assertEquals("lounge", full.roomId());
+
+    var bare = Spec.fromMap(Map.of("id", "t2", "project", "test"));
+    assertEquals(0, bare.priority());
+    assertNull(bare.createdBy());
+    assertNull(bare.roomId());
+  }
+
+  @Test
+  void withCopiesReplaceExactlyOneField() {
+    var spec = Spec.fromMap(Map.<String, Object>of("id", "t1", "project", "test", "priority", 40));
+
+    var moved = spec.withStatus(SpecStatus.REVIEW);
+    assertEquals(SpecStatus.REVIEW, moved.status());
+    assertEquals(40, moved.priority());
+    assertEquals(spec.id(), moved.id());
+
+    var repointed = spec.withRepos(List.of("api"));
+    assertEquals(List.of("api"), repointed.repos());
+    assertEquals(spec.status(), repointed.status());
+  }
+
+  @Test
+  void toMapStaysDefinitionShapedNeverEmittingStoreOwnedState() {
+    var spec =
+        Spec.fromMap(
+            Map.<String, Object>of(
+                "id", "t1", "project", "test", "priority", 40, "created_by", "uday"));
+
+    var map = spec.toMap();
+
+    assertFalse(map.containsKey("priority"), "priority is store-owned, not definition");
+    assertFalse(map.containsKey("created_by"));
+    assertFalse(map.containsKey("room_id"));
+  }
+
+  @Test
   void parsesCompleteSpec() {
     var map =
         Map.<String, Object>of(
@@ -120,6 +174,10 @@ class SpecTest {
             SpecStatus.DONE,
             "bob",
             List.of("setup"),
+            List.of(),
+            null,
+            null,
+            null,
             "feat/auth");
 
     var map = spec.toMap();
@@ -185,6 +243,9 @@ class SpecTest {
             "bob",
             List.of("setup"),
             List.of("web"),
+            null,
+            null,
+            null,
             "feat/auth");
 
     var map = spec.toMap();
@@ -216,7 +277,19 @@ class SpecTest {
 
   @Test
   void toMapOmitsNullAndEmptyFields() {
-    var spec = new Spec("auth", "test", "", SpecStatus.PENDING, null, List.of(), null);
+    var spec =
+        new Spec(
+            "auth",
+            "test",
+            "",
+            SpecStatus.PENDING,
+            null,
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null);
 
     var map = spec.toMap();
 
@@ -239,6 +312,10 @@ class SpecTest {
             SpecStatus.REVIEW,
             "alice",
             List.of("db"),
+            List.of(),
+            null,
+            null,
+            null,
             "feat/auth");
 
     var parsed = Spec.fromMap(spec.toMap());

@@ -31,6 +31,12 @@ import java.util.regex.Pattern;
  * @param model model this spec should run with (nullable)
  * @param reasoningEffort model reasoning effort for this spec (nullable)
  * @param branch git branch for this spec's work (nullable)
+ * @param priority dispatch ordering weight; 0 is the default
+ * @param createdBy FDE handle that created the spec (nullable)
+ * @param createdAt creation instant as recorded by the store (nullable)
+ * @param updatedAt last-edit instant as recorded by the store (nullable)
+ * @param updatedBy FDE handle of the last editor (nullable)
+ * @param roomId the room this spec lives in — its own id for identity rooms (nullable)
  */
 public record Spec(
     String id,
@@ -43,7 +49,13 @@ public record Spec(
     String agent,
     String model,
     String reasoningEffort,
-    String branch) {
+    String branch,
+    int priority,
+    String createdBy,
+    String createdAt,
+    String updatedAt,
+    String updatedBy,
+    String roomId) {
 
   private static final Pattern MODEL_PATTERN = Pattern.compile("[A-Za-z0-9._:/-]+");
   private static final Set<String> REASONING_EFFORTS =
@@ -53,29 +65,7 @@ public record Spec(
     project = Objects.requireNonNull(project, "spec.project is required");
   }
 
-  public Spec(
-      String id,
-      String project,
-      String title,
-      SpecStatus status,
-      String assignee,
-      List<String> dependsOn,
-      String branch) {
-    this(id, project, title, status, assignee, dependsOn, List.of(), null, null, null, branch);
-  }
-
-  public Spec(
-      String id,
-      String project,
-      String title,
-      SpecStatus status,
-      String assignee,
-      List<String> dependsOn,
-      List<String> repos,
-      String branch) {
-    this(id, project, title, status, assignee, dependsOn, repos, null, null, null, branch);
-  }
-
+  /** The creation shape — a spec's definition without attribution or room linkage. */
   public Spec(
       String id,
       String project,
@@ -85,8 +75,71 @@ public record Spec(
       List<String> dependsOn,
       List<String> repos,
       String agent,
+      String model,
+      String reasoningEffort,
       String branch) {
-    this(id, project, title, status, assignee, dependsOn, repos, agent, null, null, branch);
+    this(
+        id,
+        project,
+        title,
+        status,
+        assignee,
+        dependsOn,
+        repos,
+        agent,
+        model,
+        reasoningEffort,
+        branch,
+        0,
+        null,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /** This spec with {@code status} replaced — the single-field copy the status surfaces use. */
+  public Spec withStatus(SpecStatus status) {
+    return new Spec(
+        id,
+        project,
+        title,
+        status,
+        assignee,
+        dependsOn,
+        repos,
+        agent,
+        model,
+        reasoningEffort,
+        branch,
+        priority,
+        createdBy,
+        createdAt,
+        updatedAt,
+        updatedBy,
+        roomId);
+  }
+
+  /** This spec with {@code repos} replaced — the dispatch-resolution copy. */
+  public Spec withRepos(List<String> repos) {
+    return new Spec(
+        id,
+        project,
+        title,
+        status,
+        assignee,
+        dependsOn,
+        repos,
+        agent,
+        model,
+        reasoningEffort,
+        branch,
+        priority,
+        createdBy,
+        createdAt,
+        updatedAt,
+        updatedBy,
+        roomId);
   }
 
   @SuppressWarnings("unchecked")
@@ -107,6 +160,7 @@ public record Spec(
     var model = validatedModel((String) map.get("model"));
     var reasoningEffort = validatedReasoningEffort((String) map.get("reasoning_effort"));
     var branch = (String) map.get("branch");
+    var priority = map.get("priority");
     return new Spec(
         id,
         project,
@@ -118,9 +172,20 @@ public record Spec(
         agent,
         model,
         reasoningEffort,
-        branch);
+        branch,
+        priority instanceof Number n ? n.intValue() : 0,
+        (String) map.get("created_by"),
+        (String) map.get("created_at"),
+        (String) map.get("updated_at"),
+        (String) map.get("updated_by"),
+        (String) map.get("room_id"));
   }
 
+  /**
+   * The definition-shaped projection — the sail.yaml face of a spec. Deliberately narrower than the
+   * record: priority, attribution, and the room link are store-owned state, not definition, so they
+   * never appear here.
+   */
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("id", id);
