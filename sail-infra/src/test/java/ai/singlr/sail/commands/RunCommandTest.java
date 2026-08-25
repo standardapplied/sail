@@ -156,7 +156,19 @@ class RunCommandTest {
 
   @Test
   void specTaskIncludesSpecDetailsAndDoneInstruction() {
-    var spec = new Spec("auth", "test", "Add auth", SpecStatus.PENDING, null, List.of(), null);
+    var spec =
+        new Spec(
+            "auth",
+            "test",
+            "Add auth",
+            SpecStatus.PENDING,
+            null,
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null);
 
     var task = RunCommand.specTask("acme", spec, "Implement the login flow.");
 
@@ -182,7 +194,19 @@ class RunCommandTest {
 
   @Test
   void specTaskFallsBackToTitleWhenBodyIsBlank() {
-    var spec = new Spec("auth", "test", "Add auth", SpecStatus.PENDING, null, List.of(), null);
+    var spec =
+        new Spec(
+            "auth",
+            "test",
+            "Add auth",
+            SpecStatus.PENDING,
+            null,
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null);
 
     var task = RunCommand.specTask("acme", spec, "   ");
 

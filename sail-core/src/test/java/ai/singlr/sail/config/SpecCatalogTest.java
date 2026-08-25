@@ -14,16 +14,58 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SpecCatalogTest {
 
   @Test
+  void statusCountsCoverEveryStatusExceptTheDeliberatelyHiddenOnes() {
+    var counts = SpecCatalog.statusCounts(List.of());
+
+    for (var status : SpecStatus.values()) {
+      if (SpecCatalog.AGENT_HIDDEN.contains(status)) {
+        assertFalse(
+            counts.containsKey(status.wire()),
+            status.wire() + " is deliberately absent from agent task counts");
+      } else {
+        assertEquals(0, counts.get(status.wire()), status.wire());
+      }
+    }
+    assertEquals(
+        Set.of(SpecStatus.DRAFT, SpecStatus.ARCHIVED),
+        SpecCatalog.AGENT_HIDDEN,
+        "widening the hidden set is a product decision — update this pin deliberately");
+  }
+
+  @Test
   void nextReadyReturnsFirstPending() {
     var specs =
         List.of(
-            new Spec("done-spec", "test", "Done", SpecStatus.DONE, null, List.of(), null),
-            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec(
+                "done-spec",
+                "test",
+                "Done",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "ready",
+                "test",
+                "Ready",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -35,8 +77,30 @@ class SpecCatalogTest {
   void nextReadyRespectsDependencies() {
     var specs =
         List.of(
-            new Spec("first", "test", "First", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null));
+            new Spec(
+                "first",
+                "test",
+                "First",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "second",
+                "test",
+                "Second",
+                SpecStatus.PENDING,
+                null,
+                List.of("first"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -47,9 +111,42 @@ class SpecCatalogTest {
   void nextReadySkipsBlockedDependency() {
     var specs =
         List.of(
-            new Spec("first", "test", "First", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null),
-            new Spec("third", "test", "Third", SpecStatus.PENDING, null, List.of(), null));
+            new Spec(
+                "first",
+                "test",
+                "First",
+                SpecStatus.IN_PROGRESS,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "second",
+                "test",
+                "Second",
+                SpecStatus.PENDING,
+                null,
+                List.of("first"),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "third",
+                "test",
+                "Third",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -60,8 +157,30 @@ class SpecCatalogTest {
   void nextReadyReturnsDependentWhenDepDone() {
     var specs =
         List.of(
-            new Spec("first", "test", "First", SpecStatus.DONE, null, List.of(), null),
-            new Spec("second", "test", "Second", SpecStatus.PENDING, null, List.of("first"), null));
+            new Spec(
+                "first",
+                "test",
+                "First",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "second",
+                "test",
+                "Second",
+                SpecStatus.PENDING,
+                null,
+                List.of("first"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -72,8 +191,30 @@ class SpecCatalogTest {
   void nextReadyReturnsNullWhenAllDone() {
     var specs =
         List.of(
-            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null));
+            new Spec(
+                "a",
+                "test",
+                "A",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "b",
+                "test",
+                "B",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReady(specs));
   }
@@ -82,9 +223,42 @@ class SpecCatalogTest {
   void nextReadyAssignedToPicksOnlyThisFdesSpecStrictly() {
     var specs =
         List.of(
-            new Spec("unassigned", "test", "U", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("other", "test", "Other", SpecStatus.PENDING, "mady", List.of(), null),
-            new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
+            new Spec(
+                "unassigned",
+                "test",
+                "U",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "other",
+                "test",
+                "Other",
+                SpecStatus.PENDING,
+                "mady",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "mine",
+                "test",
+                "Mine",
+                SpecStatus.PENDING,
+                "uday",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertEquals("mine", SpecCatalog.nextReadyAssignedTo(specs, "uday").id());
   }
@@ -93,8 +267,30 @@ class SpecCatalogTest {
   void nextReadyAssignedToSkipsUnassignedAndOtherFdeSpecs() {
     var specs =
         List.of(
-            new Spec("unassigned", "test", "U", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("other", "test", "Other", SpecStatus.PENDING, "mady", List.of(), null));
+            new Spec(
+                "unassigned",
+                "test",
+                "U",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "other",
+                "test",
+                "Other",
+                SpecStatus.PENDING,
+                "mady",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReadyAssignedTo(specs, "uday"));
   }
@@ -102,7 +298,19 @@ class SpecCatalogTest {
   @Test
   void nextReadyAssignedToReturnsNullWhenNoFdeIsBound() {
     var specs =
-        List.of(new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of(), null));
+        List.of(
+            new Spec(
+                "mine",
+                "test",
+                "Mine",
+                SpecStatus.PENDING,
+                "uday",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReadyAssignedTo(specs, null));
   }
@@ -111,8 +319,30 @@ class SpecCatalogTest {
   void nextReadyAssignedToRespectsDependencies() {
     var specs =
         List.of(
-            new Spec("dep", "test", "Dep", SpecStatus.PENDING, "uday", List.of(), null),
-            new Spec("mine", "test", "Mine", SpecStatus.PENDING, "uday", List.of("dep"), null));
+            new Spec(
+                "dep",
+                "test",
+                "Dep",
+                SpecStatus.PENDING,
+                "uday",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "mine",
+                "test",
+                "Mine",
+                SpecStatus.PENDING,
+                "uday",
+                List.of("dep"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertEquals("dep", SpecCatalog.nextReadyAssignedTo(specs, "uday").id());
   }
@@ -126,8 +356,30 @@ class SpecCatalogTest {
   void nextReadySkipsInProgress() {
     var specs =
         List.of(
-            new Spec("wip", "test", "WIP", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec(
+                "wip",
+                "test",
+                "WIP",
+                SpecStatus.IN_PROGRESS,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "ready",
+                "test",
+                "Ready",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -138,8 +390,30 @@ class SpecCatalogTest {
   void nextReadySkipsReviewStatus() {
     var specs =
         List.of(
-            new Spec("reviewing", "test", "Reviewing", SpecStatus.REVIEW, null, List.of(), null),
-            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of(), null));
+            new Spec(
+                "reviewing",
+                "test",
+                "Reviewing",
+                SpecStatus.REVIEW,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "ready",
+                "test",
+                "Ready",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -150,8 +424,30 @@ class SpecCatalogTest {
   void nextReadyFiltersbyAssignee() {
     var specs =
         List.of(
-            new Spec("alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null),
-            new Spec("bob-task", "test", "Bob's", SpecStatus.PENDING, "bob", List.of(), null));
+            new Spec(
+                "alice-task",
+                "test",
+                "Alice's",
+                SpecStatus.PENDING,
+                "alice",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "bob-task",
+                "test",
+                "Bob's",
+                SpecStatus.PENDING,
+                "bob",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs, "bob");
 
@@ -161,7 +457,19 @@ class SpecCatalogTest {
   @Test
   void nextReadyIncludesUnassignedForAnyAssignee() {
     var specs =
-        List.of(new Spec("unassigned", "test", "Open", SpecStatus.PENDING, null, List.of(), null));
+        List.of(
+            new Spec(
+                "unassigned",
+                "test",
+                "Open",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs, "alice");
 
@@ -173,7 +481,17 @@ class SpecCatalogTest {
     var specs =
         List.of(
             new Spec(
-                "alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
+                "alice-task",
+                "test",
+                "Alice's",
+                SpecStatus.PENDING,
+                "alice",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs, null);
 
@@ -185,7 +503,17 @@ class SpecCatalogTest {
     var specs =
         List.of(
             new Spec(
-                "alice-task", "test", "Alice's", SpecStatus.PENDING, "alice", List.of(), null));
+                "alice-task",
+                "test",
+                "Alice's",
+                SpecStatus.PENDING,
+                "alice",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReady(specs, "bob"));
   }
@@ -194,9 +522,42 @@ class SpecCatalogTest {
   void nextReadyMultipleDependenciesAllMet() {
     var specs =
         List.of(
-            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null),
-            new Spec("c", "test", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
+            new Spec(
+                "a",
+                "test",
+                "A",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "b",
+                "test",
+                "B",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "c",
+                "test",
+                "C",
+                SpecStatus.PENDING,
+                null,
+                List.of("a", "b"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var next = SpecCatalog.nextReady(specs);
 
@@ -207,9 +568,42 @@ class SpecCatalogTest {
   void nextReadyMultipleDependenciesPartiallyMet() {
     var specs =
         List.of(
-            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "test", "B", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("c", "test", "C", SpecStatus.PENDING, null, List.of("a", "b"), null));
+            new Spec(
+                "a",
+                "test",
+                "A",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "b",
+                "test",
+                "B",
+                SpecStatus.IN_PROGRESS,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "c",
+                "test",
+                "C",
+                SpecStatus.PENDING,
+                null,
+                List.of("a", "b"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReady(specs));
   }
@@ -218,13 +612,90 @@ class SpecCatalogTest {
   void statusCountsAllStatuses() {
     var specs =
         List.of(
-            new Spec("a", "test", "A", SpecStatus.DONE, null, List.of(), null),
-            new Spec("b", "test", "B", SpecStatus.DONE, null, List.of(), null),
-            new Spec("c", "test", "C", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("d", "test", "D", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("e", "test", "E", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("f", "test", "F", SpecStatus.REVIEW, null, List.of(), null),
-            new Spec("g", "test", "G", SpecStatus.AWAITING_MERGE, null, List.of(), null));
+            new Spec(
+                "a",
+                "test",
+                "A",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "b",
+                "test",
+                "B",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "c",
+                "test",
+                "C",
+                SpecStatus.IN_PROGRESS,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "d",
+                "test",
+                "D",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "e",
+                "test",
+                "E",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "f",
+                "test",
+                "F",
+                SpecStatus.REVIEW,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "g",
+                "test",
+                "G",
+                SpecStatus.AWAITING_MERGE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var counts = SpecCatalog.statusCounts(specs);
 
@@ -250,8 +721,30 @@ class SpecCatalogTest {
   void awaitingMergeDependencyKeepsDependentBlocked() {
     var specs =
         List.of(
-            new Spec("base", "test", "Base", SpecStatus.AWAITING_MERGE, null, List.of(), null),
-            new Spec("child", "test", "Child", SpecStatus.PENDING, null, List.of("base"), null));
+            new Spec(
+                "base",
+                "test",
+                "Base",
+                SpecStatus.AWAITING_MERGE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "child",
+                "test",
+                "Child",
+                SpecStatus.PENDING,
+                null,
+                List.of("base"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertNull(SpecCatalog.nextReady(specs));
     assertTrue(SpecCatalog.isBlocked(specs, specs.get(1)));
@@ -260,7 +753,20 @@ class SpecCatalogTest {
 
   @Test
   void awaitingMergeIsCliSettable() {
-    var specs = List.of(new Spec("auth", "test", "Auth", SpecStatus.REVIEW, null, List.of(), null));
+    var specs =
+        List.of(
+            new Spec(
+                "auth",
+                "test",
+                "Auth",
+                SpecStatus.REVIEW,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var updated = SpecCatalog.updateStatus(specs, "auth", SpecStatus.AWAITING_MERGE);
 
@@ -303,7 +809,18 @@ class SpecCatalogTest {
   void nextReadyCombinesAssigneeAndDependencyFiltering() {
     var specs =
         List.of(
-            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
+            new Spec(
+                "setup",
+                "test",
+                "Setup",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
             new Spec(
                 "alice-dep",
                 "test",
@@ -311,8 +828,23 @@ class SpecCatalogTest {
                 SpecStatus.PENDING,
                 "alice",
                 List.of("setup"),
+                List.of(),
+                null,
+                null,
+                null,
                 null),
-            new Spec("bob-nodep", "test", "Bob nodep", SpecStatus.PENDING, "bob", List.of(), null));
+            new Spec(
+                "bob-nodep",
+                "test",
+                "Bob nodep",
+                SpecStatus.PENDING,
+                "bob",
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertEquals("alice-dep", SpecCatalog.nextReady(specs, "alice").id());
     assertEquals("bob-nodep", SpecCatalog.nextReady(specs, "bob").id());
@@ -321,7 +853,19 @@ class SpecCatalogTest {
   @Test
   void findByIdReturnsMatchingSpec() {
     var specs =
-        List.of(new Spec("oauth-flow", "test", "OAuth", SpecStatus.PENDING, null, List.of(), null));
+        List.of(
+            new Spec(
+                "oauth-flow",
+                "test",
+                "OAuth",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var spec = SpecCatalog.findById(specs, "oauth-flow");
 
@@ -333,8 +877,30 @@ class SpecCatalogTest {
   void updateStatusReplacesOnlyMatchingSpec() {
     var specs =
         List.of(
-            new Spec("auth", "test", "Auth", SpecStatus.PENDING, null, List.of(), null),
-            new Spec("search", "test", "Search", SpecStatus.PENDING, null, List.of(), null));
+            new Spec(
+                "auth",
+                "test",
+                "Auth",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "search",
+                "test",
+                "Search",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var updated = SpecCatalog.updateStatus(specs, "search", SpecStatus.REVIEW);
 
@@ -345,7 +911,19 @@ class SpecCatalogTest {
   @Test
   void updateStatusRejectsNonSettableStatus() {
     var specs =
-        List.of(new Spec("auth", "test", "Auth", SpecStatus.PENDING, null, List.of(), null));
+        List.of(
+            new Spec(
+                "auth",
+                "test",
+                "Auth",
+                SpecStatus.PENDING,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var error =
         assertThrows(
@@ -359,8 +937,30 @@ class SpecCatalogTest {
   void isReadyReturnsTrueForPendingSpecWithSatisfiedDependencies() {
     var specs =
         List.of(
-            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
-            new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
+            new Spec(
+                "setup",
+                "test",
+                "Setup",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "oauth",
+                "test",
+                "OAuth",
+                SpecStatus.PENDING,
+                null,
+                List.of("setup"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertTrue(SpecCatalog.isReady(specs, specs.get(1)));
     assertFalse(SpecCatalog.isBlocked(specs, specs.get(1)));
@@ -370,8 +970,30 @@ class SpecCatalogTest {
   void isBlockedReturnsTrueForPendingSpecWithUnmetDependencies() {
     var specs =
         List.of(
-            new Spec("setup", "test", "Setup", SpecStatus.IN_PROGRESS, null, List.of(), null),
-            new Spec("oauth", "test", "OAuth", SpecStatus.PENDING, null, List.of("setup"), null));
+            new Spec(
+                "setup",
+                "test",
+                "Setup",
+                SpecStatus.IN_PROGRESS,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "oauth",
+                "test",
+                "OAuth",
+                SpecStatus.PENDING,
+                null,
+                List.of("setup"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     assertTrue(SpecCatalog.isBlocked(specs, specs.get(1)));
     assertEquals(List.of("setup"), SpecCatalog.unmetDependencies(specs, specs.get(1)));
@@ -381,11 +1003,54 @@ class SpecCatalogTest {
   void summarizeReportsReadyAndBlockedCounts() {
     var specs =
         List.of(
-            new Spec("setup", "test", "Setup", SpecStatus.DONE, null, List.of(), null),
-            new Spec("ready", "test", "Ready", SpecStatus.PENDING, null, List.of("setup"), null),
             new Spec(
-                "blocked", "test", "Blocked", SpecStatus.PENDING, null, List.of("missing"), null),
-            new Spec("review", "test", "Review", SpecStatus.REVIEW, null, List.of(), null));
+                "setup",
+                "test",
+                "Setup",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "ready",
+                "test",
+                "Ready",
+                SpecStatus.PENDING,
+                null,
+                List.of("setup"),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "blocked",
+                "test",
+                "Blocked",
+                SpecStatus.PENDING,
+                null,
+                List.of("missing"),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "review",
+                "test",
+                "Review",
+                SpecStatus.REVIEW,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
 
     var summary = SpecCatalog.summarize(specs);
 

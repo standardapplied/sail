@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -133,6 +134,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     }
 
     /** Projects this stored row onto the storage-agnostic {@link Spec} value type. */
+    /** The row as the canonical aggregate — every persisted field, nothing dropped. */
     public Spec toSpec() {
       return new Spec(
           id,
@@ -145,7 +147,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           agent,
           model,
           reasoningEffort,
-          branch);
+          branch,
+          priority,
+          createdBy,
+          createdAt,
+          updatedAt,
+          updatedBy,
+          roomIdOrIdentity());
     }
   }
 
@@ -794,32 +802,25 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
                 "SELECT status, COUNT(*) FROM specs WHERE project = ? GROUP BY status",
                 row -> new Object[] {row.text(0), row.integer(1)},
                 projectFilter);
-    var draft = 0;
-    var pending = 0;
-    var inProgress = 0;
-    var review = 0;
-    var awaitingMerge = 0;
-    var done = 0;
-    var cancelled = 0;
-    var archived = 0;
+    var byStatus = new EnumMap<SpecStatus, Integer>(SpecStatus.class);
+    for (var status : SpecStatus.values()) {
+      byStatus.put(status, 0);
+    }
     for (var row : counts) {
-      var count = (int) (long) row[1];
-      switch ((String) row[0]) {
-        case "draft" -> draft = count;
-        case "pending" -> pending = count;
-        case "in_progress" -> inProgress = count;
-        case "review" -> review = count;
-        case "awaiting_merge" -> awaitingMerge = count;
-        case "done" -> done = count;
-        case "cancelled" -> cancelled = count;
-        case "archived" -> archived = count;
-        default -> {}
-      }
+      byStatus.put(SpecStatus.fromWire((String) row[0]), (int) (long) row[1]);
     }
     var ready = readySpecs(projectFilter);
     var nextReadyId = ready.isEmpty() ? null : ready.getFirst().id();
     return new BoardSummary(
-        draft, pending, inProgress, review, awaitingMerge, done, cancelled, archived, nextReadyId);
+        byStatus.get(SpecStatus.DRAFT),
+        byStatus.get(SpecStatus.PENDING),
+        byStatus.get(SpecStatus.IN_PROGRESS),
+        byStatus.get(SpecStatus.REVIEW),
+        byStatus.get(SpecStatus.AWAITING_MERGE),
+        byStatus.get(SpecStatus.DONE),
+        byStatus.get(SpecStatus.CANCELLED),
+        byStatus.get(SpecStatus.ARCHIVED),
+        nextReadyId);
   }
 
   private SpecRow mapSpec(Sqlite.Row row) {

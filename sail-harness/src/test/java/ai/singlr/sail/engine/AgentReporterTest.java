@@ -57,8 +57,30 @@ class AgentReporterTest {
     var lastCommit = String.valueOf(Instant.now().minusSeconds(300).getEpochSecond());
     var specs =
         List.of(
-            new Spec("auth", "test", "Build auth module", SpecStatus.DONE, null, List.of(), null),
-            new Spec("tests", "test", "Write tests", SpecStatus.DONE, null, List.of(), null));
+            new Spec(
+                "auth",
+                "test",
+                "Build auth module",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "tests",
+                "test",
+                "Write tests",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
     var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
@@ -244,9 +266,30 @@ class AgentReporterTest {
     var startedAt = Instant.now().minusSeconds(3600).toString();
     var specs =
         List.of(
-            new Spec("auth", "test", "Build auth", SpecStatus.DONE, null, List.of(), null),
             new Spec(
-                "docs", "test", "Update docs", SpecStatus.PENDING, null, List.of("auth"), null));
+                "auth",
+                "test",
+                "Build auth",
+                SpecStatus.DONE,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null),
+            new Spec(
+                "docs",
+                "test",
+                "Update docs",
+                SpecStatus.PENDING,
+                null,
+                List.of("auth"),
+                List.of(),
+                null,
+                null,
+                null,
+                null));
     var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
     var shell =
         new ScriptedShellExecutor()
@@ -326,7 +369,17 @@ class AgentReporterTest {
             "sail/snap",
             List.of(
                 new ai.singlr.sail.config.Spec(
-                    "auth", "acme", "Implement JWT", SpecStatus.DONE, null, List.of(), null)),
+                    "auth",
+                    "acme",
+                    "Implement JWT",
+                    SpecStatus.DONE,
+                    null,
+                    List.of(),
+                    List.of(),
+                    null,
+                    null,
+                    null,
+                    null)),
             18,
             47,
             false,
