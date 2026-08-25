@@ -907,40 +907,20 @@ class ApiRouterTest {
   }
 
   @Test
-  void specMessagesPostAndGetReturnJsonAndClampLimit() throws Exception {
-    var ops = new MessageActorProbe();
+  void retiredSpecConversationDoorsAnswer404() throws Exception {
+    var ops = new FakeOperations();
     try (var server = serverWithOwnedToken(ops, true)) {
-      var posted =
-          post(
-              server,
-              "/v1/specs/auth-flow/messages",
-              "token",
-              "{\"body\":\"progress\",\"reply_to\":\"01900000-0000-7000-8000-000000000001\"}");
-      assertEquals(201, posted.statusCode());
-      assertTrue(posted.body().contains("\"body\": \"progress\""));
-      assertEquals("ada", ops.actor.handle());
-      assertEquals(Role.ADMIN, ops.actor.role());
-      assertEquals(Actor.Lane.API, ops.actor.lane());
-      assertEquals("ada", ops.author);
-      assertFalse(ops.question);
-
-      var asked =
-          post(
-              server,
-              "/v1/specs/auth-flow/messages",
-              "token",
-              "{\"body\":\"which flow?\",\"question\":true}");
-      assertEquals(201, asked.statusCode());
-      assertTrue(ops.question, "the JSON flag reaches the request");
-
-      var listed = get(server, "/v1/specs/auth-flow/messages?limit=999", "token");
-      assertEquals(200, listed.statusCode());
-      assertTrue(listed.body().contains("\"messages\""));
-      assertEquals(200, get(server, "/v1/specs/auth-flow/messages?limit=0", "token").statusCode());
-      assertEquals(200, get(server, "/v1/specs/auth-flow/messages", "token").statusCode());
+      assertEquals(404, get(server, "/v1/specs/auth-flow/messages", "token").statusCode());
       assertEquals(
-          400, get(server, "/v1/specs/auth-flow/messages?limit=bad", "token").statusCode());
-      assertEquals(405, put(server, "/v1/specs/auth-flow/messages", "token", "{}").statusCode());
+          404,
+          post(server, "/v1/specs/auth-flow/messages", "token", "{\"body\":\"x\"}").statusCode());
+      assertEquals(
+          404,
+          post(server, "/v1/specs/auth-flow/engage", "token", "{\"agent\":\"c\"}").statusCode());
+      assertEquals(404, post(server, "/v1/specs/auth-flow/disengage", "token", "{}").statusCode());
+      assertEquals(
+          404,
+          post(server, "/v1/specs/auth-flow/invite", "token", "{\"agent\":\"c\"}").statusCode());
     }
   }
 
@@ -950,23 +930,10 @@ class ApiRouterTest {
     var body = "\"".repeat(34_000);
     var json = "{\"body\":\"" + "\\\"".repeat(34_000) + "\"}";
     try (var server = serverWithOwnedToken(ops, true)) {
-      var response = post(server, "/v1/specs/auth-flow/messages", "token", json);
+      var response = post(server, "/v1/rooms/auth-flow/messages", "token", json);
 
       assertEquals(201, response.statusCode());
       assertEquals(body, ops.body);
-    }
-  }
-
-  @Test
-  void specMessagesRejectUnownedCredentialsBeforePosting() throws Exception {
-    var ops = new MessageActorProbe();
-    try (var server = serverWith(ops, true)) {
-      var response =
-          post(server, "/v1/specs/auth-flow/messages", "token", "{\"body\":\"progress\"}");
-
-      assertEquals(403, response.statusCode());
-      assertTrue(response.body().contains("FDE-bound credential"));
-      assertNull(ops.actor);
     }
   }
 
@@ -1039,28 +1006,6 @@ class ApiRouterTest {
       var response = get(server, "/v1/agents", null);
 
       assertEquals(401, response.statusCode());
-    }
-  }
-
-  @Test
-  void engagePostRoutesTheBodyToTheOperation() throws Exception {
-    var ops = new FakeOperations();
-    try (var server = serverWith(ops, true)) {
-      var response =
-          post(
-              server,
-              "/v1/specs/auth-flow/engage",
-              "token",
-              "{\"agent\": \"claude-code\", \"model\": \"opus-x\", \"snapshot\": true}");
-
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"agent\": \"claude-code\""));
-      assertTrue(response.body().contains("\"mode\": \"full\""));
-      assertTrue(response.body().contains("\"snapshot\": \"engage-1\""));
-      assertEquals("auth-flow", ops.lastEngage.specId());
-      assertEquals("claude-code", ops.lastEngage.request().agent());
-      assertEquals("opus-x", ops.lastEngage.request().model());
-      assertTrue(ops.lastEngage.request().snapshot());
     }
   }
 
@@ -1174,27 +1119,13 @@ class ApiRouterTest {
   }
 
   @Test
-  void engageRequiresPostAndDisengageRoutesTheSpec() throws Exception {
-    var ops = new FakeOperations();
-    try (var server = serverWith(ops, true)) {
-      assertEquals(405, get(server, "/v1/specs/auth-flow/engage", "token").statusCode());
-
-      var response = post(server, "/v1/specs/auth-flow/disengage", "token", "{}");
-
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"disengaged\": true"));
-      assertEquals("auth-flow", ops.lastDisengage);
-    }
-  }
-
-  @Test
   void invitePostRoutesTheBodyToTheOperation() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
       var response =
           post(
               server,
-              "/v1/specs/auth-flow/invite",
+              "/v1/rooms/auth-flow/invite",
               "token",
               "{\"agent\": \"codex\", \"model\": \"gpt-6\", \"full\": true}");
 
@@ -1215,7 +1146,7 @@ class ApiRouterTest {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
       var response =
-          post(server, "/v1/specs/auth-flow/invite", "token", "{\"agent\": \"claude-code\"}");
+          post(server, "/v1/rooms/auth-flow/invite", "token", "{\"agent\": \"claude-code\"}");
 
       assertEquals(200, response.statusCode());
       assertTrue(response.body().contains("\"mode\": \"read_only\""));
@@ -1226,7 +1157,7 @@ class ApiRouterTest {
   @Test
   void inviteRejectsNonPost() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/specs/auth-flow/invite", "token");
+      var response = get(server, "/v1/rooms/auth-flow/invite", "token");
       assertEquals(405, response.statusCode());
     }
   }
@@ -1481,13 +1412,13 @@ class ApiRouterTest {
     private boolean question;
 
     @Override
-    public Result<SpecMessageResponse> postSpecMessage(
+    public Result<SpecMessageResponse> postRoomMessage(
         String specId, SpecMessageRequest request, Actor actor, String author) {
       this.actor = actor;
       this.author = author;
       this.body = request.body();
       this.question = request.question();
-      return super.postSpecMessage(specId, request, actor, author);
+      return super.postRoomMessage(specId, request, actor, author);
     }
   }
 
@@ -1618,24 +1549,11 @@ class ApiRouterTest {
                           new AgentModeView("full", true, null))))));
     }
 
-    Engage lastEngage;
-    String lastDisengage;
     String lastMembersRoom;
     Engage lastAddMember;
     String lastRemoveMember;
 
     record Engage(String specId, EngageRequest request, String localHandle) {}
-
-    @Override
-    public Result<EngageResponse> engageToSpec(
-        String specId, EngageRequest request, Actor actor, String localHandle) {
-      lastEngage = new Engage(specId, request, localHandle);
-      return Result.success(
-          new EngageResponse(
-              request.agent(),
-              request.mode() == null ? "full" : request.mode(),
-              request.snapshot() ? "engage-1" : ""));
-    }
 
     @Override
     public Result<RoomMembersResponse> roomMembers(String roomId) {
@@ -1764,13 +1682,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
-      lastDisengage = specId;
-      return Result.success(new DisengageResponse("claude-code"));
-    }
-
-    @Override
-    public Result<InviteResponse> inviteToSpec(
+    public Result<InviteResponse> inviteToRoom(
         String specId, InviteRequest request, Actor actor, String localHandle) {
       lastInvite = new Invite(specId, request, localHandle);
       return Result.success(
@@ -2084,18 +1996,6 @@ class ApiRouterTest {
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
         String specId, SpecContentRequest request, Actor actor) {
       return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
-    }
-
-    @Override
-    public Result<SpecMessageResponse> postSpecMessage(
-        String specId, SpecMessageRequest request, Actor actor, String author) {
-      return new TestOperations().postSpecMessage(specId, request, actor, author);
-    }
-
-    @Override
-    public Result<SpecMessagesResponse> specMessages(
-        String specId, String before, String after, int limit) {
-      return new TestOperations().specMessages(specId, before, after, limit);
     }
 
     @Override

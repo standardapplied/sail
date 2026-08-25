@@ -25,7 +25,7 @@ import picocli.CommandLine.Spec;
  * until dismissed. Full access is the default — conversations produce artifacts. {@code --snapshot}
  * opts into a rollback point first (off by default: a dir-backend snapshot is a slow full copy);
  * {@code --read-only} is the explicit narrow choice, offered only where the harness enforces it. A
- * thin client of {@code POST /v1/specs/{id}/engage}; the server's refusals render verbatim.
+ * thin client of {@code POST /v1/rooms/{id}/members}; the server's refusals render verbatim.
  */
 @Command(
     name = "engage",
@@ -84,7 +84,7 @@ public final class ApiSpecEngageCommand implements Runnable {
       body.put("model", model);
     }
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var result = client.post("/v1/specs/" + specId + "/engage", Map.copyOf(body));
+      var result = client.post("/v1/rooms/" + specId + "/members", Map.copyOf(body));
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));

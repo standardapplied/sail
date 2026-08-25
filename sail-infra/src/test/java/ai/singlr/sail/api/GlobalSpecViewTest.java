@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 class GlobalSpecViewTest {
 
-  private static SpecStore.SpecRow row(String engagement) {
+  private static SpecStore.SpecRow row() {
     return new SpecStore.SpecRow(
         "auth",
         "acme",
@@ -35,18 +37,21 @@ class GlobalSpecViewTest {
         "t1",
         "uday",
         List.of(),
-        List.of(),
-        null,
-        engagement,
-        null);
+        List.of());
+  }
+
+  private static RoomStore.RoomRow room(String wake, String roster) {
+    return new RoomStore.RoomRow(
+        "auth", "acme", "OAuth", "uday", wake, roster, "uday", "t0", "t1", "uday");
   }
 
   @Test
-  void anEngagedRowCarriesTheEngagementIntoTheViewAndItsMap() {
-    var engagement = Engagement.of("claude-code", "full", "opus-x", "t0");
+  void theRoomRowDecoratesWakeAndEngagementIntoTheViewAndItsMap() {
+    var member = Engagement.of("claude-code", "full", "opus-x", "t0");
 
-    var view = GlobalSpecView.from(row(engagement.toJson()));
+    var view = GlobalSpecView.from(row(), room("mention", Roster.solo(member).toJson()));
 
+    assertEquals("mention", view.wake());
     assertEquals("claude-code", view.engagement().get("agent"));
     assertEquals("full", view.engagement().get("mode"));
     assertEquals("opus-x", view.engagement().get("model"));
@@ -57,18 +62,20 @@ class GlobalSpecViewTest {
   }
 
   @Test
-  void aModelLessEngagementOmitsTheModelKey() {
-    var engagement = Engagement.of("codex", "full", null, "t0");
+  void aModelLessMemberOmitsTheModelKey() {
+    var member = Engagement.of("codex", "full", null, "t0");
 
-    var view = GlobalSpecView.from(row(engagement.toJson()));
+    var view = GlobalSpecView.from(row(), room(null, Roster.solo(member).toJson()));
 
     assertFalse(view.engagement().containsKey("model"));
   }
 
   @Test
-  void anUnengagedOrCorruptRowRendersNoEngagement() {
-    assertNull(GlobalSpecView.from(row(null)).engagement());
-    assertNull(GlobalSpecView.from(row("garbage {{{")).engagement());
-    assertFalse(GlobalSpecView.from(row(null)).toMap().containsKey("engagement"));
+  void aMissingRoomOrEmptyOrCorruptRosterRendersNoEngagement() {
+    assertNull(GlobalSpecView.from(row()).engagement());
+    assertNull(GlobalSpecView.from(row()).wake());
+    assertNull(GlobalSpecView.from(row(), room("on", null)).engagement());
+    assertNull(GlobalSpecView.from(row(), room("on", "garbage {{{")).engagement());
+    assertFalse(GlobalSpecView.from(row()).toMap().containsKey("engagement"));
   }
 }

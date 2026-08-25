@@ -306,7 +306,7 @@ class SchemaManagerTest {
 
   @Test
   void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
-    var staged = SchemaManager.CURRENT_VERSION - 10;
+    var staged = SchemaManager.CURRENT_VERSION - 15;
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
@@ -350,7 +350,7 @@ class SchemaManagerTest {
 
   @Test
   void specsGainRoomIdBackfilledToTheirOwnIdOnUpgrade() {
-    var staged = SchemaManager.CURRENT_VERSION - 2;
+    var staged = SchemaManager.CURRENT_VERSION - 7;
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
@@ -686,7 +686,7 @@ class SchemaManagerTest {
   }
 
   @Test
-  void aV0_27_0ShapedDatabaseGainsTheEngagementColumn() {
+  void aV0_27_0ShapedDatabaseConvergesAndShedsTheLegacyColumns() {
     stageAtBaseline();
     var tail = migrationIndex("ALTER TABLE specs ADD COLUMN engagement");
     db.execute("PRAGMA foreign_keys = OFF");
@@ -706,9 +706,13 @@ class SchemaManagerTest {
 
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
     assertTrue(
-        db.queryOne("SELECT engagement FROM specs WHERE id = 'pre'", r -> r.isNull(0))
-            .orElseThrow(),
-        "a pre-upgrade spec reads as not engaged");
+        db.query(
+                "SELECT name FROM pragma_table_info('specs') WHERE name IN ('wake', 'engagement')",
+                r -> r.text(0))
+            .isEmpty(),
+        "the conversation-side columns retire with the rebuild");
+    assertEquals(
+        "T", db.queryOne("SELECT title FROM specs WHERE id = 'pre'", r -> r.text(0)).orElseThrow());
     assertEquals(
         "keep",
         db.queryOne("SELECT agent FROM runs WHERE id = 'r-pre'", r -> r.text(0)).orElseThrow(),
@@ -722,24 +726,68 @@ class SchemaManagerTest {
             db.execute(
                 "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
                     + " ('r-bad', 'p', 'claude-code', 'running', 't0', 'shout')"));
-    db.execute("UPDATE specs SET engagement = '{\"agent\":\"claude-code\"}' WHERE id = 'pre'");
-    assertEquals(
-        "{\"agent\":\"claude-code\"}",
-        db.queryOne("SELECT engagement FROM specs WHERE id = 'pre'", r -> r.text(0)).orElseThrow());
   }
 
   @Test
-  void theWakeColumnAdmitsItsThreeModesAndRejectsGarbage() {
-    new SchemaManager(db).migrate();
+  void theSpecsRebuildShedsConversationColumnsAndKeepsRowsChildrenAndConstraints() {
+    var staged = SchemaManager.CURRENT_VERSION - 5;
+    stageAtBaseline();
+    db.execute("PRAGMA foreign_keys = OFF");
+    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
+      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
+      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
+    }
+    db.execute("PRAGMA foreign_keys = ON");
     db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at, wake)"
-            + " VALUES ('auth', 'T', 'pending', 't0', 't0', 'mention')");
+        "INSERT INTO specs (id, title, status, created_at, updated_at, project, wake, engagement,"
+            + " room_id) VALUES ('auth', 'OAuth', 'pending', 't0', 't1', 'acme', 'on',"
+            + " '{\"agent\":\"claude-code\"}', 'auth')");
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES"
+            + " ('base', 'Base', 'done', 't0', 't0')");
+    db.execute("INSERT INTO spec_dependencies (spec_id, depends_on) VALUES ('auth', 'base')");
+    db.execute("INSERT INTO spec_repos (spec_id, repo) VALUES ('auth', 'api')");
+    db.execute(
+        "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES ('auth', 'B', 'P', 't0')");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+    assertTrue(
+        db.query(
+                "SELECT name FROM pragma_table_info('specs') WHERE name IN ('wake', 'engagement')",
+                r -> r.text(0))
+            .isEmpty());
     assertEquals(
-        "mention",
-        db.queryOne("SELECT wake FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
+        "OAuth",
+        db.queryOne("SELECT title FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
+    assertEquals(
+        "auth",
+        db.queryOne("SELECT room_id FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
+    assertEquals(
+        "base",
+        db.queryOne(
+                "SELECT depends_on FROM spec_dependencies WHERE spec_id = 'auth'", r -> r.text(0))
+            .orElseThrow());
+    assertEquals(
+        "B",
+        db.queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
+            .orElseThrow());
+    assertTrue(
+        db.query("SELECT * FROM pragma_foreign_key_check", r -> r.text(0)).isEmpty(),
+        "the rebuild leaves no dangling child references");
+    assertTrue(
+        db.query(
+                    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_specs_project'",
+                    r -> r.text(0))
+                .size()
+            == 1);
     assertThrows(
         SqliteException.class,
-        () -> db.execute("UPDATE specs SET wake = 'loud' WHERE id = 'auth'"));
+        () ->
+            db.execute(
+                "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES"
+                    + " ('bad', 'T', 'shouting', 't0', 't0')"));
   }
 
   @Test

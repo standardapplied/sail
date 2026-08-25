@@ -8,8 +8,6 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -102,33 +100,22 @@ class SpecStoreTest {
   }
 
   @Test
+  void aLegacySnapshotCarryingRetiredKeysAppliesCleanly() {
+    store.create(spec("auth", "OAuth", "pending"));
+    var snapshot = store.comparableSnapshot("auth");
+    var legacy = new java.util.LinkedHashMap<String, Object>(snapshot);
+    legacy.put("wake", "on");
+    legacy.put("engagement", "{\"agent\":\"claude-code\",\"engaged_at\":\"t0\"}");
+
+    store.applyRevision("auth", legacy, "2-legacy");
+
+    var applied = store.findById("auth").orElseThrow();
+    assertEquals("OAuth", applied.title(), "retired keys are ignored, never fatal");
+  }
+
+  @Test
   void findByIdReturnsEmptyForMissing() {
     assertTrue(store.findById("nonexistent").isEmpty());
-  }
-
-  @Test
-  void wakeModePersistsThroughCreateUpdateAndList() {
-    store.create(spec("auth", "OAuth", "pending").withWake("mention"));
-
-    assertEquals("mention", store.findById("auth").orElseThrow().wake());
-    assertEquals("mention", store.list(SpecStore.SpecFilter.all()).getFirst().wake());
-
-    store.update(store.findById("auth").orElseThrow().withWake("off"));
-    assertEquals("off", store.findById("auth").orElseThrow().wake());
-
-    store.update(store.findById("auth").orElseThrow().withWake(null));
-    assertTrue(store.findById("auth").orElseThrow().wake() == null);
-  }
-
-  @Test
-  void wakeModeRidesTheSnapshotAndSurvivesApplyRevision() {
-    store.create(spec("auth", "OAuth", "pending").withWake("on"));
-
-    var snapshot = store.comparableSnapshot("auth");
-    assertEquals("on", snapshot.get("wake"));
-
-    store.applyRevision("auth", snapshot, "2-abc");
-    assertEquals("on", store.findById("auth").orElseThrow().wake());
   }
 
   @Test
@@ -645,51 +632,5 @@ class SpecStoreTest {
         "auth",
         store.findById("auth").orElseThrow().roomIdOrIdentity(),
         "a pre-decouple snapshot falls back to the identity room");
-  }
-
-  @Test
-  void updateEngagementTouchesOnlyTheMirrorColumnAndJournals() {
-    store.create(spec("auth", "OAuth", "draft"));
-    store.updateStatus("auth", SpecStatus.IN_PROGRESS);
-    var before = store.findById("auth").orElseThrow();
-    var rev = store.revOf("auth");
-
-    store.updateEngagement("auth", "{\"agent\":\"claude-code\",\"engaged_at\":\"t0\"}");
-
-    var after = store.findById("auth").orElseThrow();
-    assertEquals(SpecStatus.IN_PROGRESS, after.status(), "a mirror write never touches status");
-    assertEquals(before.assignee(), after.assignee());
-    assertEquals(before.title(), after.title());
-    assertNotNull(after.engagement());
-    assertNotEquals(rev, store.revOf("auth"), "the mirror write journals a revision");
-
-    store.updateEngagement("auth", null);
-    assertNull(store.findById("auth").orElseThrow().engagement());
-  }
-
-  @Test
-  void engagementRoundTripsThroughCreateUpdateSnapshotAndList() {
-    var engagement = "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}";
-    store.create(spec("auth", "OAuth", "draft").withEngagement(engagement));
-    store.create(spec("plain", "Other", "draft"));
-
-    assertEquals(engagement, store.findById("auth").orElseThrow().engagement());
-    assertEquals(
-        List.of("auth"),
-        store.listEngaged().stream().map(SpecStore.SpecRow::id).toList(),
-        "only engaged rooms join the sweep");
-
-    var journaled =
-        db.queryOne(
-                "SELECT snapshot FROM change_log WHERE entity_id = 'auth'"
-                    + " ORDER BY seq DESC LIMIT 1",
-                r -> r.text(0))
-            .orElseThrow();
-    assertTrue(journaled.contains("engagement"), "the engagement syncs as one atomic field");
-
-    store.update(store.findById("auth").orElseThrow().withEngagement(null));
-    assertTrue(store.listEngaged().isEmpty(), "disengaging clears the room");
-    assertEquals(
-        null, store.findById("auth").orElseThrow().engagement(), "the column reads back null");
   }
 }

@@ -56,14 +56,15 @@ public interface LocalLaneOperations {
 
   Result<GlobalBoardResponse> globalBoard(String project);
 
-  Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, Actor actor, String author);
+  Result<SpecMessageResponse> postRoomMessage(
+      String roomId, SpecMessageRequest request, Actor actor, String author);
 
   /**
-   * A page of a spec room: {@code before} pages backward from the newest (the default), {@code
-   * after} reads forward past a known message id. The two are exclusive.
+   * A page of a room's conversation: {@code before} pages backward from the newest (the default),
+   * {@code after} reads forward past a known message id. The two are exclusive. The id resolves
+   * spec-first, so a spec id reads its room.
    */
-  Result<SpecMessagesResponse> specMessages(String specId, String before, String after, int limit);
+  Result<SpecMessagesResponse> roomMessages(String roomId, String before, String after, int limit);
 
   /**
    * The run's undelivered room messages: everything on the run's spec absent from the run's

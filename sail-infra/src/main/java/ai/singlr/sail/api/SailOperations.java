@@ -450,7 +450,7 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<InviteResponse> inviteToSpec(
+  public Result<InviteResponse> inviteToRoom(
       String specId, InviteRequest request, Actor actor, String localHandle) {
     freshenForRead();
     var result = safe(() -> inviteValue(specId, request, actor, localHandle));
@@ -461,7 +461,7 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<EngageResponse> engageToSpec(
+  public Result<EngageResponse> addRoomMember(
       String specId, EngageRequest request, Actor actor, String localHandle) {
     freshenForRead();
     var result =
@@ -559,12 +559,17 @@ public final class SailOperations implements Operations {
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
     var spec = specStore == null ? null : specStore.findById(roomId).orElse(null);
     if (spec != null) {
+      var room =
+          roomStore == null ? null : roomStore.findById(spec.roomIdOrIdentity()).orElse(null);
+      if (room != null) {
+        return room;
+      }
       return new RoomStore.RoomRow(
           spec.id(),
           spec.project(),
           spec.title(),
           spec.assignee(),
-          spec.wake(),
+          null,
           null,
           spec.createdBy(),
           spec.createdAt(),
@@ -732,19 +737,8 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<EngageResponse> addRoomMember(
-      String roomId, EngageRequest request, Actor actor, String localHandle) {
-    return engageToSpec(roomId, request, actor, localHandle);
-  }
-
-  @Override
   public Result<DisengageResponse> removeRoomMember(
-      String roomId, Actor actor, String localHandle) {
-    return disengageSpec(roomId, actor, localHandle);
-  }
-
-  @Override
-  public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
+      String specId, Actor actor, String localHandle) {
     freshenForRead();
     var result =
         safe(() -> new DisengageResponse(dispatchOps.disengage(specId, actor, localHandle)));
@@ -756,6 +750,16 @@ public final class SailOperations implements Operations {
 
   private InviteResponse inviteValue(
       String specId, InviteRequest request, Actor actor, String localHandle) {
+    if (specStore != null && specStore.findById(specId).isEmpty()) {
+      requireRoomOrSpec(specId);
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "Room '"
+              + specId
+              + "' has no attached spec, and an invite is a one-shot turn on a"
+              + " spec's checkout.",
+          "Seat a standing member instead (POST /v1/rooms/{id}/members), or attach a spec first.");
+    }
     var launch =
         dispatchOps.startInvite(
             specId,
@@ -1457,56 +1461,6 @@ public final class SailOperations implements Operations {
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor) {
     return safeWrite(() -> globalSpecOps.setContent(specId, request, actor));
-  }
-
-  @Override
-  public Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, Actor actor, String author) {
-    return safeWrite(
-        () -> {
-          var store = requireMessageStore();
-          var spec =
-              specStore
-                  .findById(specId)
-                  .orElseThrow(
-                      () ->
-                          new ApiException(
-                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-          SpecPolicy.post(actor, spec.id(), spec.assignee(), spec.createdBy()).enforce();
-          return appendMessage(spec.project(), spec.roomIdOrIdentity(), request, author);
-        });
-  }
-
-  @Override
-  public Result<SpecMessagesResponse> specMessages(
-      String specId, String before, String after, int limit) {
-    return safeRead(
-        () -> {
-          if (before != null && after != null) {
-            throw new ApiException(
-                ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
-          }
-          var spec =
-              specStore
-                  .findById(specId)
-                  .orElseThrow(
-                      () ->
-                          new ApiException(
-                              ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
-          var roomId = spec.roomIdOrIdentity();
-          List<SpecMessageView> messages;
-          try {
-            var store = requireMessageStore();
-            var rows =
-                after != null
-                    ? store.listAfter(roomId, after, limit)
-                    : store.list(roomId, before, limit);
-            messages = rows.stream().map(SpecMessageView::from).toList();
-          } catch (IllegalArgumentException invalid) {
-            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
-          }
-          return new SpecMessagesResponse(specId, messages);
-        });
   }
 
   @Override

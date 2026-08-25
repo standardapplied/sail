@@ -1618,7 +1618,7 @@ class SailOperationsTest {
             .useMessages(new MessageStore(db));
 
     var result =
-        operations.postSpecMessage(
+        operations.postRoomMessage(
             "auth",
             new SpecMessageRequest("Ready", null, false),
             new Actor("sail", Role.ADMIN, Actor.Lane.API),

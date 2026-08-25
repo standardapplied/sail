@@ -35,6 +35,10 @@ class LocalApiRouterTest {
     return Map.of("authorization", "Bearer " + TestOperations.BOX_CREDENTIAL);
   }
 
+  private static Map<String, String> roomAuth() {
+    return Map.of("authorization", "Bearer " + TestOperations.ROOM_RUN_CREDENTIAL);
+  }
+
   private static LocalApiRequest get(String path, Map<String, String> query) {
     return new LocalApiRequest("GET", path, query, auth(), new byte[0]);
   }
@@ -335,6 +339,29 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void aSpeclessRoomSessionPostsOnlyToItsOwnRoom() {
+    var own =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/specs/lounge/messages",
+                Map.of(),
+                roomAuth(),
+                "body=hi".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(201, own.status(), "a room-keyed run owns its own conversation");
+
+    var foreign =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/specs/auth/messages",
+                Map.of(),
+                roomAuth(),
+                "body=hi".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(403, foreign.status(), "another room is never this session's to post into");
+  }
+
+  @Test
   void aRunReadingItsOwnRoomAcknowledgesExactlyTheMessagesShown() {
     var response = router.handle(get("/v1/specs/auth/messages", Map.of()));
 
@@ -627,16 +654,16 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<SpecMessageResponse> postSpecMessage(
+    public Result<SpecMessageResponse> postRoomMessage(
         String specId, SpecMessageRequest request, Actor actor, String author) {
       lastMessage = request;
       lastMessageAuthor = author;
       lastActor = actor;
-      return super.postSpecMessage(specId, request, actor, author);
+      return super.postRoomMessage(specId, request, actor, author);
     }
 
     @Override
-    public Result<SpecMessagesResponse> specMessages(
+    public Result<SpecMessagesResponse> roomMessages(
         String specId, String before, String after, int limit) {
       lastBefore = before;
       lastAfter = after;
@@ -647,7 +674,7 @@ class LocalApiRouterTest {
       if (emptyMessages) {
         return Result.success(new SpecMessagesResponse(specId, List.of()));
       }
-      return super.specMessages(specId, before, after, limit);
+      return super.roomMessages(specId, before, after, limit);
     }
 
     @Override

@@ -102,7 +102,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String sessionId,
       String sessionSource,
       String transcriptPath,
-      String lastActivityAt) {
+      String lastActivityAt,
+      String roomId) {
+
+    /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
+    public String conversationId() {
+      return specId != null ? specId : roomId;
+    }
 
     /** A row without activity — the shape every run has until its first progress stamp. */
     public RunRow(
@@ -153,6 +159,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
+          null,
           null);
     }
 
@@ -309,7 +316,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
-          + " principal, owner, session_id, session_source, transcript_path, last_activity_at";
+          + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
+          + " room_id";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -1305,8 +1313,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         """
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
-            principal, owner, session_id, session_source, transcript_path, last_activity_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            principal, owner, session_id, session_source, transcript_path, last_activity_at,
+            room_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1317,7 +1326,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             principal = excluded.principal, owner = excluded.owner,
             session_id = excluded.session_id, session_source = excluded.session_source,
             transcript_path = excluded.transcript_path,
-            last_activity_at = excluded.last_activity_at""",
+            last_activity_at = excluded.last_activity_at, room_id = excluded.room_id""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1341,7 +1350,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.sessionId(),
         row.sessionSource(),
         row.transcriptPath(),
-        row.lastActivityAt());
+        row.lastActivityAt(),
+        row.roomId());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1370,6 +1380,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("session_source", run.sessionSource());
     map.put("transcript_path", run.transcriptPath());
     map.put("last_activity_at", run.lastActivityAt());
+    map.put("room_id", run.roomId());
     return map;
   }
 
@@ -1418,7 +1429,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "session_id"),
         Snapshots.text(snapshot, "session_source"),
         Snapshots.text(snapshot, "transcript_path"),
-        Snapshots.text(snapshot, "last_activity_at"));
+        Snapshots.text(snapshot, "last_activity_at"),
+        Snapshots.text(snapshot, "room_id"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -1499,6 +1511,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.text(20),
         row.text(21),
         row.text(22),
-        row.text(23));
+        row.text(23),
+        row.text(24));
   }
 }

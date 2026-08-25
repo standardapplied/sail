@@ -131,7 +131,8 @@ class RoomWakeLaunchTest {
             (project, config) -> "",
             launcher,
             DispatchOperations.Listener.NONE)
-        .useMessages(messageStore);
+        .useMessages(messageStore)
+        .useRooms(new RoomStore(db));
   }
 
   @Test
@@ -588,10 +589,14 @@ class RoomWakeLaunchTest {
 
   private void engage(String specId, String agent, String mode) {
     var spec = specStore.findById(specId).orElseThrow();
-    specStore.update(
-        spec.withEngagement(
-            ai.singlr.sail.config.Engagement.of(agent, mode, null, "2026-08-18T00:00:00Z")
-                .toJson()));
+    var rooms = new RoomStore(db);
+    rooms.ensureFor(specId, spec.project(), spec.title(), spec.assignee(), null, HANDLE);
+    rooms.updateRoster(
+        specId,
+        ai.singlr.sail.config.Roster.solo(
+                ai.singlr.sail.config.Engagement.of(agent, mode, null, "2026-08-18T00:00:00Z"))
+            .toJson(),
+        HANDLE);
   }
 
   @Test

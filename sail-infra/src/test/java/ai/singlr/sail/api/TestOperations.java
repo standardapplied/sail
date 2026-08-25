@@ -17,6 +17,7 @@ class TestOperations implements Operations {
   static final String PRINCIPAL = "claude/abc123";
   static final String OWNER = "uday";
   static final String BOX_CREDENTIAL = "sailbox_test";
+  static final String ROOM_RUN_CREDENTIAL = "sailroom_test";
   static final String BOX_HANDLE = "uday";
 
   @Override
@@ -29,6 +30,35 @@ class TestOperations implements Operations {
 
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {
+    if (ROOM_RUN_CREDENTIAL.equals(credential)) {
+      return Optional.of(
+          new RunStore.RunRow(
+              "run-2",
+              "acme",
+              null,
+              "node-a",
+              "room",
+              "claude-code",
+              null,
+              "chat",
+              null,
+              null,
+              "running",
+              null,
+              null,
+              null,
+              "t0",
+              null,
+              List.of(),
+              null,
+              PRINCIPAL,
+              OWNER,
+              null,
+              null,
+              null,
+              null,
+              "lounge"));
+    }
     if (!RUN_CREDENTIAL.equals(credential)) {
       return Optional.empty();
     }
@@ -78,24 +108,6 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<InviteResponse> inviteToSpec(
-      String specId, InviteRequest request, Actor actor, String localHandle) {
-    return Result.success(new InviteResponse("run-1", "claude/invite-run-1", "read_only", ""));
-  }
-
-  @Override
-  public Result<EngageResponse> engageToSpec(
-      String specId, EngageRequest request, Actor actor, String localHandle) {
-    return Result.success(
-        new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode(), ""));
-  }
-
-  @Override
-  public Result<DisengageResponse> disengageSpec(String specId, Actor actor, String localHandle) {
-    return Result.success(new DisengageResponse(null));
-  }
-
-  @Override
   public Result<RoomMembersResponse> roomMembers(String roomId) {
     return Result.success(new RoomMembersResponse(java.util.List.of()));
   }
@@ -123,13 +135,45 @@ class TestOperations implements Operations {
   @Override
   public Result<SpecMessagesResponse> roomMessages(
       String roomId, String before, String after, int limit) {
-    return Result.success(new SpecMessagesResponse(roomId, java.util.List.of()));
+    return Result.success(
+        new SpecMessagesResponse(
+            roomId,
+            List.of(
+                SpecMessageView.from(
+                    new MessageStore.MessageRow(
+                        "01900000-0000-7000-8000-000000000001",
+                        roomId,
+                        PRINCIPAL,
+                        "hello",
+                        null,
+                        "2026-07-28T00:00:00Z",
+                        "1-a",
+                        null,
+                        false)))));
   }
 
   @Override
   public Result<SpecMessageResponse> postRoomMessage(
       String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
-    return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
+    return Result.success(
+        new SpecMessageResponse(
+            SpecMessageView.from(
+                new MessageStore.MessageRow(
+                    "01900000-0000-7000-8000-000000000001",
+                    roomId,
+                    authorHandle,
+                    request.body(),
+                    request.replyTo(),
+                    "2026-07-28T00:00:00Z",
+                    "1-a",
+                    null,
+                    request.question()))));
+  }
+
+  @Override
+  public Result<InviteResponse> inviteToRoom(
+      String roomId, InviteRequest request, Actor actor, String localHandle) {
+    return Result.success(new InviteResponse("run-1", "claude/invite-run-1", "read_only", ""));
   }
 
   @Override
@@ -430,41 +474,6 @@ class TestOperations implements Operations {
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
       String specId, SpecContentRequest request, Actor actor) {
     return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
-  }
-
-  @Override
-  public Result<SpecMessageResponse> postSpecMessage(
-      String specId, SpecMessageRequest request, Actor actor, String author) {
-    return Result.success(
-        new SpecMessageResponse(
-            SpecMessageView.from(
-                new MessageStore.MessageRow(
-                    "01900000-0000-7000-8000-000000000001",
-                    specId,
-                    author,
-                    request.body(),
-                    request.replyTo(),
-                    "2026-07-28T00:00:00Z",
-                    "1-a",
-                    null,
-                    request.question()))));
-  }
-
-  @Override
-  public Result<SpecMessagesResponse> specMessages(
-      String specId, String before, String after, int limit) {
-    return Result.success(
-        new SpecMessagesResponse(
-            specId,
-            List.of(
-                new SpecMessageView(
-                    "01900000-0000-7000-8000-000000000001",
-                    specId,
-                    PRINCIPAL,
-                    "hello",
-                    null,
-                    "2026-07-28T00:00:00Z",
-                    false))));
   }
 
   @Override

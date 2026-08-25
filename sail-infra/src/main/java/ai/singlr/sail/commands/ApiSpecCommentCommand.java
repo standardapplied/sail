@@ -59,7 +59,7 @@ public final class ApiSpecCommentCommand implements Runnable {
     }
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      Map<String, Object> result = client.post("/v1/specs/" + specId + "/messages", request);
+      Map<String, Object> result = client.post("/v1/rooms/" + specId + "/messages", request);
       System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
     }
   }

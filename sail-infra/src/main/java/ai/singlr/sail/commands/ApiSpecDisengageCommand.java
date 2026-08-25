@@ -9,7 +9,6 @@ import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.util.LinkedHashMap;
-import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -20,7 +19,7 @@ import picocli.CommandLine.Spec;
 
 /**
  * Dismisses a spec room's engaged agent. Idempotent — dismissing an empty room reports that nobody
- * was there rather than erroring. A thin client of {@code POST /v1/specs/{id}/disengage}.
+ * was there rather than erroring. A thin client of {@code DELETE /v1/rooms/{id}/members}.
  */
 @Command(
     name = "disengage",
@@ -49,7 +48,7 @@ public final class ApiSpecDisengageCommand implements Runnable {
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var result = client.post("/v1/specs/" + specId + "/disengage", Map.of());
+      var result = client.delete("/v1/rooms/" + specId + "/members");
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
