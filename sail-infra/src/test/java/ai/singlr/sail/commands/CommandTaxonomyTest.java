@@ -36,6 +36,7 @@ class CommandTaxonomyTest {
             "login",
             "enroll",
             "spec",
+            "session",
             "agent",
             "events",
             "migrate",

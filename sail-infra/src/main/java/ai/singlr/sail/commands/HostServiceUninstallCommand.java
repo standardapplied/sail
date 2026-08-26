@@ -35,6 +35,12 @@ public final class HostServiceUninstallCommand implements Runnable {
             shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
 
     installer.uninstall();
+    new ai.singlr.sail.engine.PtyHostUnit(
+            shell,
+            installer.mode(),
+            java.nio.file.Path.of(System.getProperty("user.home")),
+            ai.singlr.sail.engine.SailPaths.binaryPath())
+        .uninstall();
 
     System.out.println(
         Ansi.AUTO.string("  @|bold,green ✓|@ Uninstalled " + installer.serviceFilePath()));
