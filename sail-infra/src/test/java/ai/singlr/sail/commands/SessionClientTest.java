@@ -22,10 +22,16 @@ class SessionClientTest {
 
   @Test
   void verbsRoundTripAndErrorsSurfaceAsExceptions() throws Exception {
-    try (var host = new PtySessionHost(dir.resolve("h.sock"), dir.resolve("s"), 64 * 1024)) {
+    try (var host =
+        new PtySessionHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            64 * 1024,
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
-        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", 80, 24);
+        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24);
         var listed = client.list();
         assertEquals(1, listed.size());
         assertEquals("s1", listed.getFirst().name());
@@ -33,7 +39,8 @@ class SessionClientTest {
 
         var dup =
             assertThrows(
-                IOException.class, () -> client.create("s1", List.of("sh"), "/tmp", 80, 24));
+                IOException.class,
+                () -> client.create("s1", List.of("sh"), "/tmp", "acme", 80, 24));
         assertTrue(dup.getMessage().contains("already running"));
 
         client.kill("s1");

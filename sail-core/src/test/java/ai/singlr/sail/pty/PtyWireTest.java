@@ -30,9 +30,12 @@ class PtyWireTest {
   void everyMessageShapeSurvivesTheWire() throws Exception {
     var create =
         (PtyMessage.Create)
-            roundTrip(new PtyMessage.Create("lounge", List.of("bash", "-l"), "/home/dev", 132, 43));
+            roundTrip(
+                new PtyMessage.Create(
+                    "lounge", List.of("bash", "-l"), "/home/dev", "chorus", 132, 43));
     assertEquals("lounge", create.session());
     assertEquals(List.of("bash", "-l"), create.command());
+    assertEquals("chorus", create.project());
     assertEquals(132, create.cols());
 
     var input =
@@ -56,6 +59,7 @@ class PtyWireTest {
     assertEquals(2, sessions.sessions().size());
     assertEquals("uday", sessions.sessions().getFirst().writerFde());
 
+    assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));
     assertInstanceOf(PtyMessage.ReplayEnd.class, roundTrip(new PtyMessage.ReplayEnd()));
     assertEquals(

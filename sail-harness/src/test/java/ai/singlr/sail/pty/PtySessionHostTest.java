@@ -7,6 +7,7 @@ package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -24,17 +25,58 @@ class PtySessionHostTest {
   @TempDir Path dir;
 
   private PtySessionHost host;
+  private final java.util.concurrent.ConcurrentLinkedQueue<String> events =
+      new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+  private static final PtyIdentity.Resolver RESOLVER =
+      token ->
+          switch (token) {
+            case "", "tok-uday" -> new PtyIdentity("uday", false);
+            case "tok-mady" -> new PtyIdentity("mady", false);
+            case "tok-root" -> new PtyIdentity("root", true);
+            default -> throw new IOException("Session token is not valid or has expired.");
+          };
 
   private PtySessionHost startHost() throws IOException {
-    host = new PtySessionHost(dir.resolve("host.sock"), dir.resolve("sessions"), 64 * 1024);
+    host =
+        new PtySessionHost(
+            dir.resolve("host.sock"),
+            dir.resolve("sessions"),
+            64 * 1024,
+            RESOLVER,
+            new PtyEvents() {
+              @Override
+              public void sessionStarted(String session, String project, String fde) {
+                events.add("started:" + session + ":" + fde);
+              }
+
+              @Override
+              public void sessionAttached(String session, String project, String fde) {
+                events.add("attached:" + session + ":" + fde);
+              }
+
+              @Override
+              public void sessionEnded(String session, String project, String reason) {
+                events.add("ended:" + session);
+              }
+            });
     host.start();
     return host;
   }
 
   private SocketChannel connect() throws IOException {
+    return connect("tok-uday");
+  }
+
+  private SocketChannel connect(String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
     channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
     PtyWire.handshake(channel, channel);
+    PtyWire.write(channel, new PtyMessage.Hello(token));
+    var reply = PtyWire.read(channel);
+    if (reply instanceof PtyMessage.Err(var message)) {
+      throw new IOException(message);
+    }
     return channel;
   }
 
@@ -55,13 +97,81 @@ class PtySessionHostTest {
   }
 
   @Test
+  void identityComesFirstAndAdmissionIsOwnerOrAdmin() throws Exception {
+    try (var ignored = startHost()) {
+      var rude = SocketChannel.open(StandardProtocolFamily.UNIX);
+      rude.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+      PtyWire.handshake(rude, rude);
+      PtyWire.write(rude, new PtyMessage.ListSessions());
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(rude), "hello must come first");
+      rude.close();
+
+      assertThrows(IOException.class, () -> connect("tok-forged"), "unknown tokens are refused");
+
+      try (var owner = connect("tok-uday")) {
+        PtyWire.write(
+            owner,
+            new PtyMessage.Create("mine", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+        assertTrue(events.contains("started:mine:uday"), events.toString());
+      }
+
+      try (var foreign = connect("tok-mady")) {
+        PtyWire.write(foreign, new PtyMessage.Attach("mine", false));
+        assertInstanceOf(
+            PtyMessage.Err.class, PtyWire.read(foreign), "a foreign member cannot observe");
+        PtyWire.write(foreign, new PtyMessage.Kill("mine"));
+        assertInstanceOf(PtyMessage.Err.class, PtyWire.read(foreign), "nor kill");
+      }
+
+      try (var admin = connect("tok-root")) {
+        PtyWire.write(admin, new PtyMessage.Attach("mine", false));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(admin), "an admin observes anywhere");
+        PtyWire.write(admin, new PtyMessage.TakeWrite());
+        var deadline = System.nanoTime() + 5_000_000_000L;
+        while (!events.contains("attached:mine:root") && System.nanoTime() < deadline) {
+          Thread.onSpinWait();
+        }
+        assertTrue(events.contains("attached:mine:root"), events.toString());
+
+        try (var owner = connect("tok-uday")) {
+          PtyWire.write(owner, new PtyMessage.ListSessions());
+          var listed = (PtyMessage.Sessions) PtyWire.read(owner);
+          assertEquals(
+              "root", listed.sessions().getFirst().writerFde(), "the token names its holder");
+        }
+      }
+
+      try (var owner = connect("tok-uday")) {
+        PtyWire.write(owner, new PtyMessage.ListSessions());
+        var listed = (PtyMessage.Sessions) PtyWire.read(owner);
+        var freed = System.nanoTime() + 5_000_000_000L;
+        while (!listed.sessions().getFirst().writerFde().isEmpty() && System.nanoTime() < freed) {
+          Thread.onSpinWait();
+          PtyWire.write(owner, new PtyMessage.ListSessions());
+          listed = (PtyMessage.Sessions) PtyWire.read(owner);
+        }
+        assertEquals(
+            "", listed.sessions().getFirst().writerFde(), "a departed holder releases the token");
+        PtyWire.write(owner, new PtyMessage.Kill("mine"));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner), "the owner always may");
+      }
+    }
+  }
+
+  @Test
   void createAttachConverseDetachReattachRepays() throws Exception {
     try (var ignored = startHost()) {
       try (var channel = connect()) {
         PtyWire.write(
             channel,
             new PtyMessage.Create(
-                "s1", List.of("sh", "-c", "echo hi; read a; echo bye:$a; read b"), "/tmp", 80, 24));
+                "s1",
+                List.of("sh", "-c", "echo hi; read a; echo bye:$a; read b"),
+                "/tmp",
+                "acme",
+                80,
+                24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         PtyWire.write(channel, new PtyMessage.Attach("s1", true));
@@ -89,9 +199,9 @@ class PtySessionHostTest {
         PtyWire.write(
             channel,
             new PtyMessage.Create(
-                "dup", List.of("sh", "-c", "echo old-life; read a"), "/tmp", 80, 24));
+                "dup", List.of("sh", "-c", "echo old-life; read a"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        PtyWire.write(channel, new PtyMessage.Create("dup", List.of("sh"), "/tmp", 80, 24));
+        PtyWire.write(channel, new PtyMessage.Create("dup", List.of("sh"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
 
         PtyWire.write(channel, new PtyMessage.Kill("dup"));
@@ -99,7 +209,7 @@ class PtySessionHostTest {
         PtyWire.write(
             channel,
             new PtyMessage.Create(
-                "dup", List.of("sh", "-c", "echo new-life; read a"), "/tmp", 80, 24));
+                "dup", List.of("sh", "-c", "echo new-life; read a"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         PtyWire.write(channel, new PtyMessage.Attach("dup", false));
@@ -124,7 +234,8 @@ class PtySessionHostTest {
     try (var ignored = startHost()) {
       try (var channel = connect()) {
         PtyWire.write(
-            channel, new PtyMessage.Create("a", List.of("sh", "-c", "read x"), "/tmp", 80, 24));
+            channel,
+            new PtyMessage.Create("a", List.of("sh", "-c", "read x"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         PtyWire.write(channel, new PtyMessage.ListSessions());
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
@@ -142,11 +253,11 @@ class PtySessionHostTest {
       try (var channel = connect()) {
         PtyWire.write(
             channel,
-            new PtyMessage.Create("lonely", List.of("sh", "-c", "read x"), "/tmp", 80, 24));
+            new PtyMessage.Create("lonely", List.of("sh", "-c", "read x"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         PtyWire.write(
             channel,
-            new PtyMessage.Create("corpse", List.of("sh", "-c", "exit 0"), "/tmp", 80, 24));
+            new PtyMessage.Create("corpse", List.of("sh", "-c", "exit 0"), "/tmp", "acme", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         var deadline = System.nanoTime() + 10_000_000_000L;

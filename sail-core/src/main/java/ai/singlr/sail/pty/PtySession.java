@@ -38,6 +38,9 @@ public final class PtySession implements AutoCloseable {
   private record Subscriber(long id, Client client, SubscriberQueue queue) {}
 
   private final String name;
+  private final String ownerFde;
+  private final String project;
+  private final PtyEvents events;
   private final Pty pty;
   private final Process child;
   private final RingJournal journal;
@@ -51,13 +54,25 @@ public final class PtySession implements AutoCloseable {
   private final CountDownLatch gatherDone = new CountDownLatch(1);
   private final long createdAt = System.nanoTime();
   private volatile long writerId = -1;
+  private volatile String writerFde = "";
   private volatile String endedReason;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
 
   private PtySession(
-      String name, Pty pty, Process child, RingJournal journal, int queueCapacity, int replayMax) {
+      String name,
+      String ownerFde,
+      String project,
+      PtyEvents events,
+      Pty pty,
+      Process child,
+      RingJournal journal,
+      int queueCapacity,
+      int replayMax) {
     this.name = name;
+    this.ownerFde = ownerFde;
+    this.project = project;
+    this.events = events;
     this.pty = pty;
     this.child = child;
     this.journal = journal;
@@ -67,6 +82,9 @@ public final class PtySession implements AutoCloseable {
 
   public static PtySession start(
       String name,
+      String ownerFde,
+      String project,
+      PtyEvents events,
       List<String> command,
       Map<String, String> env,
       Path cwd,
@@ -75,11 +93,27 @@ public final class PtySession implements AutoCloseable {
       int cols,
       int rows)
       throws IOException {
-    return start(name, command, env, cwd, journalPath, journalCapacity, cols, rows, 4096, 262_144);
+    return start(
+        name,
+        ownerFde,
+        project,
+        events,
+        command,
+        env,
+        cwd,
+        journalPath,
+        journalCapacity,
+        cols,
+        rows,
+        4096,
+        262_144);
   }
 
   static PtySession start(
       String name,
+      String ownerFde,
+      String project,
+      PtyEvents events,
       List<String> command,
       Map<String, String> env,
       Path cwd,
@@ -100,8 +134,11 @@ public final class PtySession implements AutoCloseable {
       journal.close();
       throw e;
     }
-    var session = new PtySession(name, pty, child, journal, queueCapacity, replayMax);
+    var session =
+        new PtySession(
+            name, ownerFde, project, events, pty, child, journal, queueCapacity, replayMax);
     Thread.ofPlatform().name("pty-gather-" + name).start(session::gather);
+    events.sessionStarted(name, project, ownerFde);
     return session;
   }
 
@@ -136,12 +173,13 @@ public final class PtySession implements AutoCloseable {
       pty.close();
       var ended = new PtyMessage.SessionEnded(endedReason);
       subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
+      events.sessionEnded(name, project, endedReason);
       gatherDone.countDown();
     }
   }
 
   /** Attaches a client: replay first, live stream after, write token if free and requested. */
-  public long attach(Client client, boolean wantsWrite) throws IOException {
+  public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
     if (endedReason != null) {
       throw new IOException("Session '" + name + "' has ended: " + endedReason + ".");
     }
@@ -160,8 +198,10 @@ public final class PtySession implements AutoCloseable {
     synchronized (this) {
       if (wantsWrite && writerId < 0) {
         writerId = subscriber.id;
+        writerFde = fde;
       }
     }
+    events.sessionAttached(name, project, fde);
     Thread.ofVirtual()
         .name("pty-send-" + name + "-" + subscriber.id())
         .start(() -> send(subscriber));
@@ -200,6 +240,7 @@ public final class PtySession implements AutoCloseable {
       throw new IllegalArgumentException("No attached subscriber " + subscriberId + ".");
     }
     writerId = subscriberId;
+    writerFde = fde;
     var changed = new PtyMessage.WriterChanged(fde);
     subscribers.values().forEach(subscriber -> subscriber.queue().force(changed));
   }
@@ -223,6 +264,7 @@ public final class PtySession implements AutoCloseable {
     }
     if (writerId == subscriberId) {
       writerId = -1;
+      writerFde = "";
     }
   }
 
@@ -245,6 +287,18 @@ public final class PtySession implements AutoCloseable {
 
   public int attachedCount() {
     return subscribers.size();
+  }
+
+  public String ownerFde() {
+    return ownerFde;
+  }
+
+  public String project() {
+    return project;
+  }
+
+  public String writerFde() {
+    return writerFde;
   }
 
   public long writerId() {

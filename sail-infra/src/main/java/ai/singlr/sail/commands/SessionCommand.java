@@ -65,6 +65,7 @@ public final class SessionCommand {
             name,
             commandFor(project, command),
             System.getProperty("user.home", "/home/dev"),
+            project == null ? "" : project,
             size[1],
             size[0]);
       }

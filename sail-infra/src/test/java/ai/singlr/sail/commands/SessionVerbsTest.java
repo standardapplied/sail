@@ -24,7 +24,12 @@ class SessionVerbsTest {
 
   @Test
   void newLsKillRoundTripThroughTheRealHost() throws Exception {
-    try (var host = PtyHostCommand.startHost(dir.resolve("h.sock"), dir.resolve("s"))) {
+    try (var host =
+        PtyHostCommand.startHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
 
       assertEquals(0, run("new", "--socket", socket, "t1", "--", "sh", "-c", "read a"));
@@ -41,7 +46,12 @@ class SessionVerbsTest {
 
   @Test
   void attachToAMissingSessionFailsBeforeTouchingTheTerminal() throws Exception {
-    try (var host = PtyHostCommand.startHost(dir.resolve("h.sock"), dir.resolve("s"))) {
+    try (var host =
+        PtyHostCommand.startHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyEvents.NONE)) {
       var exit = run("attach", "ghost", "--socket", dir.resolve("h.sock").toString());
       assertNotEquals(0, exit, "a missing session is a loud failure, not a hung raw terminal");
       assertTrue(host.sessionCount() == 0);
