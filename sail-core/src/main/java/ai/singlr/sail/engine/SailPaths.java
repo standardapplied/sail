@@ -212,6 +212,16 @@ public final class SailPaths {
     return dataDir().resolve("run").resolve("api.sock");
   }
 
+  /** The pty session host's unix socket — in-container, owned by the dev user. */
+  public static Path ptySocketPath() {
+    return sailDir().resolve("pty.sock");
+  }
+
+  /** Where session ring journals live: {@code ~/.sail/sessions/<name>.ring}. */
+  public static Path sessionsDir() {
+    return sailDir().resolve("sessions");
+  }
+
   /** Returns true when the current process runs as root — the single privilege check. */
   public static boolean isRoot() {
     return "root".equals(ProcessHandle.current().info().user().orElse(""));

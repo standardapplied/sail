@@ -8,7 +8,6 @@ package ai.singlr.sail.engine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -164,24 +163,15 @@ public final class TerminalFilePicker {
   }
 
   private static Optional<String> sttyState() {
-    var result = stty("-g");
-    return result.isBlank() ? Optional.empty() : Optional.of(result.strip());
+    return Stty.saved();
   }
 
   private static String stty(String args) {
-    try {
-      var process =
-          new ProcessBuilder("sh", "-c", "stty " + args + " </dev/tty")
-              .redirectErrorStream(false)
-              .start();
-      var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      process.waitFor();
-      return output;
-    } catch (IOException e) {
-      return "";
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return "";
+    if (args.equals("size")) {
+      var size = Stty.size(new int[] {FALLBACK_ROWS, FALLBACK_COLS});
+      return size[0] + " " + size[1];
     }
+    Stty.set(args);
+    return "";
   }
 }
