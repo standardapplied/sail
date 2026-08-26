@@ -28,6 +28,7 @@ public final class TermBoundary {
   private State state = State.GROUND;
   private int utf8Pending;
   private boolean atLineStart = true;
+  private boolean stringIsOsc;
 
   /** Advances over {@code buf[0..len)}. */
   public void feed(byte[] buf, int len) {
@@ -51,21 +52,28 @@ public final class TermBoundary {
           }
           atLineStart = b == '\n';
         }
-        case ESC ->
-            state =
-                switch (b) {
-                  case '[' -> State.CSI;
-                  case ']', 'P', 'X', '^', '_' -> State.STRING;
-                  case 0x1B -> State.ESC;
-                  default -> State.GROUND;
-                };
+        case ESC -> {
+          switch (b) {
+            case '[' -> state = State.CSI;
+            case ']' -> {
+              stringIsOsc = true;
+              state = State.STRING;
+            }
+            case 'P', 'X', '^', '_' -> {
+              stringIsOsc = false;
+              state = State.STRING;
+            }
+            case 0x1B -> state = State.ESC;
+            default -> state = State.GROUND;
+          }
+        }
         case CSI -> {
           if (b >= 0x40 && b <= 0x7E) {
             state = State.GROUND;
           }
         }
         case STRING -> {
-          if (b == 0x07) {
+          if (b == 0x07 && stringIsOsc) {
             state = State.GROUND;
           } else if (b == 0x1B) {
             state = State.STRING_ESC;

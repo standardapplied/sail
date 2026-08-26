@@ -6,7 +6,9 @@
 package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -182,9 +184,9 @@ class PtySessionTest {
       var firstId = session.attach(first, true, "uday");
       var secondId = session.attach(second, false, "uday");
 
-      assertThrows(
-          IOException.class,
-          () -> session.input(secondId, 1, "nope\n".getBytes(StandardCharsets.UTF_8)));
+      assertFalse(
+          session.input(secondId, 1, "nope\n".getBytes(StandardCharsets.UTF_8)),
+          "a non-writer's input is refused, not fatal");
 
       session.takeWrite(secondId, "mady");
       var deadline = System.nanoTime() + 5_000_000_000L;
@@ -193,9 +195,9 @@ class PtySessionTest {
       }
       assertTrue(first.saw(PtyMessage.WriterChanged.class), "the old writer hears the takeover");
 
-      assertThrows(
-          IOException.class,
-          () -> session.input(firstId, 2, "stale\n".getBytes(StandardCharsets.UTF_8)));
+      assertFalse(
+          session.input(firstId, 2, "stale\n".getBytes(StandardCharsets.UTF_8)),
+          "the demoted writer can no longer write");
       session.input(secondId, 3, "fresh\n".getBytes(StandardCharsets.UTF_8));
       second.awaitOutput("done:fresh");
     }
@@ -256,5 +258,39 @@ class PtySessionTest {
 
       assertTrue(session.live(), "the child never blocked on the stalled observer");
     }
+  }
+
+  @Test
+  void aFailingEndEventStillReleasesTheSessionInsteadOfWedgingClose() throws Exception {
+    var brittle =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(String session, String project, String fde) {}
+
+          @Override
+          public void sessionAttached(String session, String project, String fde) {}
+
+          @Override
+          public void sessionEnded(String session, String project, String reason) {
+            throw new RuntimeException("the event sink is down");
+          }
+        };
+    var session =
+        PtySession.start(
+            "brittle",
+            "uday",
+            "acme",
+            brittle,
+            List.of("sh", "-c", "exit 0"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("brittle.ring"),
+            64 * 1024,
+            80,
+            24);
+    assertTimeoutPreemptively(
+        java.time.Duration.ofSeconds(10),
+        session::close,
+        "close must not hang when the end-of-session event throws");
   }
 }

@@ -111,4 +111,33 @@ class PtyWireTest {
     pipe.sink().close();
     assertThrows(java.io.EOFException.class, () -> PtyWire.read(pipe.source()));
   }
+
+  @Test
+  void aLyingInnerLengthIsRefusedNotAllocated() throws Exception {
+    assertThrows(
+        IOException.class,
+        () ->
+            readFramed(ByteBuffer.allocate(13).put((byte) 3).putLong(7).putInt(Integer.MAX_VALUE)),
+        "a tiny Input frame claiming 2 GiB of bytes must fail loud, never allocate");
+
+    assertThrows(
+        IOException.class,
+        () -> readFramed(ByteBuffer.allocate(5).put((byte) 29).putInt(Integer.MAX_VALUE)),
+        "a tiny Sessions frame claiming 2 billion entries must fail loud, never pre-size a list");
+
+    assertThrows(
+        IOException.class,
+        () -> readFramed(ByteBuffer.allocate(13).put((byte) 3).putLong(7).putInt(-1)),
+        "a negative inner length must fail loud, never throw NegativeArraySizeException");
+  }
+
+  private static void readFramed(ByteBuffer payload) throws IOException {
+    payload.flip();
+    var frame = ByteBuffer.allocate(4 + payload.remaining());
+    frame.putInt(payload.remaining()).put(payload).flip();
+    var pipe = Pipe.open();
+    pipe.sink().write(frame);
+    pipe.sink().close();
+    PtyWire.read(pipe.source());
+  }
 }

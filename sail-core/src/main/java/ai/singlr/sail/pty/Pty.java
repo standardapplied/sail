@@ -138,17 +138,22 @@ public final class Pty implements AutoCloseable {
         throw new IOException("posix_openpt failed; no pseudo-terminals available.");
       }
       if ((int) LIBC.grantpt().invokeExact(fd) != 0 || (int) LIBC.unlockpt().invokeExact(fd) != 0) {
-        LIBC.close().invokeExact(fd);
+        var unused = (int) LIBC.close().invokeExact(fd);
         throw new IOException("grantpt/unlockpt failed for the new pseudo-terminal.");
       }
       var name = (MemorySegment) LIBC.ptsname().invokeExact(fd);
       if (name.equals(MemorySegment.NULL)) {
-        LIBC.close().invokeExact(fd);
+        var unused = (int) LIBC.close().invokeExact(fd);
         throw new IOException("ptsname returned no slave path for fd " + fd + ".");
       }
       var slave = name.reinterpret(256).getString(0);
       var pty = new Pty(fd, slave);
-      pty.resize(cols, rows);
+      try {
+        pty.resize(cols, rows);
+      } catch (IOException e) {
+        pty.close();
+        throw e;
+      }
       return pty;
     } catch (IOException e) {
       throw e;

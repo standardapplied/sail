@@ -20,7 +20,6 @@ final class SubscriberQueue {
   private final int capacity;
   private final Deque<PtyMessage> queue = new ArrayDeque<>();
   private boolean paused;
-  private boolean closed;
 
   SubscriberQueue(int capacity) {
     this.capacity = capacity;
@@ -28,7 +27,7 @@ final class SubscriberQueue {
 
   /** Offers a live message; a full queue trips the pause, a paused queue drops silently. */
   synchronized void enqueue(PtyMessage message) {
-    if (closed || paused) {
+    if (paused) {
       return;
     }
     if (queue.size() >= capacity) {
@@ -43,9 +42,6 @@ final class SubscriberQueue {
 
   /** Enqueues regardless of pause — endings and poison must always arrive. */
   synchronized void force(PtyMessage message) {
-    if (closed) {
-      return;
-    }
     queue.add(message);
     notifyAll();
   }
@@ -71,11 +67,5 @@ final class SubscriberQueue {
       wait();
     }
     return queue.poll();
-  }
-
-  synchronized void close() {
-    closed = true;
-    queue.clear();
-    notifyAll();
   }
 }

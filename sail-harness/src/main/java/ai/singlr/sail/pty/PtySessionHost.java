@@ -149,13 +149,13 @@ public final class PtySessionHost implements AutoCloseable {
           case PtyMessage.Input m -> {
             if (attached == null) {
               reply(channel, new PtyMessage.Err("Attach before writing."));
-            } else {
-              attached.input(subscriberId, m.seq(), m.bytes());
+            } else if (!attached.input(subscriberId, m.seq(), m.bytes())) {
+              reply(channel, new PtyMessage.Err("You do not hold the write token."));
             }
           }
           case PtyMessage.Resize m -> {
             if (attached != null) {
-              attached.resize(subscriberId, m.cols(), m.rows());
+              var unused = attached.resize(subscriberId, m.cols(), m.rows());
             }
           }
           case PtyMessage.TakeWrite m -> {
@@ -173,7 +173,7 @@ public final class PtySessionHost implements AutoCloseable {
             }
             reply(channel, new PtyMessage.Ok());
           }
-          case PtyMessage.ListSessions m -> reply(channel, listSessions());
+          case PtyMessage.ListSessions m -> reply(channel, listSessions(who));
           case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
@@ -191,6 +191,10 @@ public final class PtySessionHost implements AutoCloseable {
 
   private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
     var existing = sessions.get(m.session());
+    if (existing != null && !admitted(who, existing)) {
+      return new PtyMessage.Err(
+          "Session '" + m.session() + "' belongs to " + existing.ownerFde() + ".");
+    }
     if (existing != null && existing.live()) {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
@@ -221,9 +225,10 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private PtyMessage listSessions() {
+  private PtyMessage listSessions(PtyIdentity who) {
     var infos = new ArrayList<PtyMessage.SessionInfo>();
     sessions.values().stream()
+        .filter(session -> admitted(who, session))
         .sorted(java.util.Comparator.comparing(PtySession::name))
         .forEach(
             session ->
