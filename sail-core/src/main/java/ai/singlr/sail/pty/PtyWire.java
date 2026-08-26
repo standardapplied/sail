@@ -39,6 +39,10 @@ public final class PtyWire {
 
   public static void write(WritableByteChannel out, PtyMessage message) throws IOException {
     var payload = encode(message);
+    if (payload.length > MAX_FRAME) {
+      throw new IOException(
+          "Refusing to send a pty frame of " + payload.length + " bytes; the cap is 1 MiB.");
+    }
     var frame = ByteBuffer.allocate(4 + payload.length);
     frame.putInt(payload.length).put(payload).flip();
     writeFully(out, frame);
@@ -144,7 +148,7 @@ public final class PtyWire {
       case 27 -> new PtyMessage.SessionEnded(string(in));
       case 28 -> decodeInfo(in);
       case 29 -> {
-        var count = in.getInt();
+        var count = bounded(in);
         var sessions = new ArrayList<PtyMessage.SessionInfo>(count);
         for (var i = 0; i < count; i++) {
           sessions.add(decodeInfo(in));
@@ -157,29 +161,47 @@ public final class PtyWire {
     };
   }
 
-  private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) {
+  private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
     return new PtyMessage.SessionInfo(string(in), in.get() == 1, in.getInt(), string(in));
   }
 
-  private static String string(ByteBuffer in) {
+  private static String string(ByteBuffer in) throws IOException {
     var bytes = bytes(in);
     return bytes.length == 0 ? "" : new String(bytes, StandardCharsets.UTF_8);
   }
 
-  private static byte[] bytes(ByteBuffer in) {
-    var length = in.getInt();
-    var bytes = new byte[length];
+  private static byte[] bytes(ByteBuffer in) throws IOException {
+    var bytes = new byte[bounded(in)];
     in.get(bytes);
     return bytes;
   }
 
-  private static List<String> stringList(ByteBuffer in) {
-    var count = in.getInt();
+  private static List<String> stringList(ByteBuffer in) throws IOException {
+    var count = bounded(in);
     var values = new ArrayList<String>(count);
     for (var i = 0; i < count; i++) {
       values.add(string(in));
     }
     return List.copyOf(values);
+  }
+
+  /**
+   * A length or element count read from within a frame, validated before it sizes any allocation: a
+   * corrupt inner field can never exceed what the (already-capped) frame still holds, so a tiny
+   * frame can never drive a giant array. Fails loud rather than throwing an unchecked {@code
+   * NegativeArraySizeException} or {@code OutOfMemoryError} past the {@code read} contract.
+   */
+  private static int bounded(ByteBuffer in) throws IOException {
+    var value = in.getInt();
+    if (value < 0 || value > in.remaining()) {
+      throw new IOException(
+          "Corrupt pty frame: a field claims "
+              + value
+              + " bytes but only "
+              + in.remaining()
+              + " remain.");
+    }
+    return value;
   }
 
   private static void readFully(ReadableByteChannel in, ByteBuffer buf) throws IOException {

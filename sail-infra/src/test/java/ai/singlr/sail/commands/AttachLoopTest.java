@@ -79,4 +79,57 @@ class AttachLoopTest {
       }
     }
   }
+
+  @Test
+  void aTerminalResizeReachesTheRemotePty() throws Exception {
+    try (var host =
+        new PtySessionHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            64 * 1024,
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyEvents.NONE)) {
+      host.start();
+      try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
+        client.create(
+            "s1",
+            List.of("sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; read a"),
+            "/tmp",
+            "acme",
+            80,
+            24);
+        var channel = client.attach("s1", true);
+
+        var ready = new java.util.concurrent.CountDownLatch(1);
+        var stdout =
+            new ByteArrayOutputStream() {
+              @Override
+              public synchronized void write(byte[] b, int off, int len) {
+                super.write(b, off, len);
+                if (toString(StandardCharsets.UTF_8).contains("ready")) {
+                  ready.countDown();
+                }
+              }
+            };
+        var fired = new java.util.concurrent.atomic.AtomicBoolean();
+        AttachLoop.Resizes resizes =
+            () -> {
+              if (!fired.compareAndSet(false, true)) {
+                return null;
+              }
+              ready.await();
+              return new int[] {100, 40};
+            };
+
+        var stdin = new PipedInputStream(new PipedOutputStream());
+        var reason = AttachLoop.run(channel, stdin, stdout, resizes);
+
+        assertEquals("exited(0)", reason);
+        assertTrue(
+            stdout.toString(StandardCharsets.UTF_8).contains("40 100"),
+            "the child's SIGWINCH trap saw the forwarded 100x40 geometry: "
+                + stdout.toString(StandardCharsets.UTF_8));
+      }
+    }
+  }
 }

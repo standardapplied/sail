@@ -121,7 +121,7 @@ public final class SessionCommand {
         Stty.set("raw -echo");
         String reason;
         try {
-          reason = AttachLoop.run(channel, System.in, System.out);
+          reason = AttachLoop.run(channel, System.in, System.out, terminalResizes());
         } finally {
           Stty.set(saved);
         }
@@ -131,6 +131,30 @@ public final class SessionCommand {
       }
       return 0;
     }
+  }
+
+  /**
+   * The controlling terminal's live geometry as {@code {cols, rows}} resize events: the current
+   * size up front (so the remote pty matches this terminal, not the size it was created at), then
+   * one on every {@code SIGWINCH}. Degrades to no resizes when signals are unavailable (native
+   * image edge, no controlling tty) — the pty simply keeps its last known size.
+   */
+  static AttachLoop.Resizes terminalResizes() {
+    var fallback = new int[] {24, 80};
+    var changes = new java.util.concurrent.LinkedBlockingQueue<int[]>();
+    try {
+      sun.misc.Signal.handle(
+          new sun.misc.Signal("WINCH"),
+          signal -> {
+            var size = Stty.size(fallback);
+            changes.offer(new int[] {size[1], size[0]});
+          });
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      return AttachLoop.Resizes.NONE;
+    }
+    var initial = Stty.size(fallback);
+    changes.offer(new int[] {initial[1], initial[0]});
+    return changes::take;
   }
 
   @Command(name = "kill", description = "End a session and its process.")

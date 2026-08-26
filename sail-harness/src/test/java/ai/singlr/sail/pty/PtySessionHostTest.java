@@ -159,6 +159,114 @@ class PtySessionHostTest {
     }
   }
 
+  private static PtyMessage readControl(SocketChannel channel) throws IOException {
+    while (true) {
+      var m = PtyWire.read(channel);
+      if (m instanceof PtyMessage.Ok
+          || m instanceof PtyMessage.Err
+          || m instanceof PtyMessage.Sessions
+          || m instanceof PtyMessage.SessionEnded) {
+        return m;
+      }
+    }
+  }
+
+  private static PtyMessage.Sessions awaitCorpse(SocketChannel channel, String name)
+      throws IOException {
+    var deadline = System.nanoTime() + 10_000_000_000L;
+    while (System.nanoTime() < deadline) {
+      PtyWire.write(channel, new PtyMessage.ListSessions());
+      var listed = (PtyMessage.Sessions) readControl(channel);
+      if (listed.sessions().stream().anyMatch(s -> s.name().equals(name) && !s.live())) {
+        return listed;
+      }
+    }
+    throw new AssertionError("session '" + name + "' never became a corpse");
+  }
+
+  @Test
+  void aNonWritersInputIsRefusedWithoutKillingTheConnection() throws Exception {
+    try (var ignored = startHost()) {
+      try (var owner = connect("tok-uday")) {
+        PtyWire.write(
+            owner,
+            new PtyMessage.Create(
+                "shared", List.of("sh", "-c", "read a; read b"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(owner));
+      }
+      try (var observer = connect("tok-uday")) {
+        PtyWire.write(observer, new PtyMessage.Attach("shared", false));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(observer));
+
+        PtyWire.write(observer, new PtyMessage.Input(1, "nope\n".getBytes(StandardCharsets.UTF_8)));
+        assertInstanceOf(
+            PtyMessage.Err.class, readControl(observer), "a non-writer's input is refused");
+
+        PtyWire.write(observer, new PtyMessage.ListSessions());
+        assertInstanceOf(
+            PtyMessage.Sessions.class,
+            readControl(observer),
+            "the connection survives the refusal and still answers");
+      }
+    }
+  }
+
+  @Test
+  void listSessionsShowsOnlyYourOwnUnlessAdmin() throws Exception {
+    try (var ignored = startHost()) {
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create("udays", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+      }
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(
+            mady,
+            new PtyMessage.Create("madys", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+
+        PtyWire.write(mady, new PtyMessage.ListSessions());
+        var listed = (PtyMessage.Sessions) readControl(mady);
+        assertEquals(
+            List.of("madys"),
+            listed.sessions().stream().map(PtyMessage.SessionInfo::name).toList(),
+            "a member sees only their own sessions, never another owner's");
+      }
+      try (var admin = connect("tok-root")) {
+        PtyWire.write(admin, new PtyMessage.ListSessions());
+        var listed = (PtyMessage.Sessions) readControl(admin);
+        assertEquals(2, listed.sessions().size(), "an admin sees every owner's sessions");
+      }
+    }
+  }
+
+  @Test
+  void aForeignMemberCannotEvictAnothersCorpseByReusingItsName() throws Exception {
+    try (var ignored = startHost()) {
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create("keep", List.of("sh", "-c", "exit 0"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+        awaitCorpse(uday, "keep");
+      }
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.Create("keep", List.of("sh"), "/tmp", "acme", 80, 24));
+        assertInstanceOf(
+            PtyMessage.Err.class,
+            readControl(mady),
+            "a foreign member cannot reuse an owner's name, even a corpse");
+      }
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(uday, new PtyMessage.ListSessions());
+        var listed = (PtyMessage.Sessions) readControl(uday);
+        assertEquals(1, listed.sessions().size(), "the owner's corpse is left intact");
+        assertEquals("keep", listed.sessions().getFirst().name());
+      }
+    }
+  }
+
   @Test
   void createAttachConverseDetachReattachRepays() throws Exception {
     try (var ignored = startHost()) {

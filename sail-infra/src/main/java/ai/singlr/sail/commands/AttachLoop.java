@@ -24,11 +24,31 @@ public final class AttachLoop {
 
   public static final int DETACH_KEY = 0x1D;
 
+  /**
+   * A source of terminal-size changes to forward to the remote pty. {@link #next()} blocks until
+   * the next size, returning {@code {cols, rows}}, or {@code null} once there are no more — so the
+   * loop's resize thread ends cleanly. {@link #NONE} never resizes, for callers with no live
+   * terminal.
+   */
+  @FunctionalInterface
+  public interface Resizes {
+    int[] next() throws InterruptedException;
+
+    Resizes NONE = () -> null;
+  }
+
   private AttachLoop() {}
 
   public static String run(ByteChannel channel, InputStream stdin, OutputStream stdout)
       throws IOException {
+    return run(channel, stdin, stdout, Resizes.NONE);
+  }
+
+  public static String run(
+      ByteChannel channel, InputStream stdin, OutputStream stdout, Resizes resizes)
+      throws IOException {
     var seq = new AtomicLong();
+    var writeLock = new Object();
     var pump =
         Thread.ofVirtual()
             .start(
@@ -42,15 +62,34 @@ public final class AttachLoop {
                       }
                       for (var i = 0; i < n; i++) {
                         if ((buf[i] & 0xFF) == DETACH_KEY) {
-                          PtyWire.write(channel, new PtyMessage.Detach());
+                          synchronized (writeLock) {
+                            PtyWire.write(channel, new PtyMessage.Detach());
+                          }
                           return;
                         }
                       }
                       var chunk = new byte[n];
                       System.arraycopy(buf, 0, chunk, 0, n);
-                      PtyWire.write(channel, new PtyMessage.Input(seq.incrementAndGet(), chunk));
+                      synchronized (writeLock) {
+                        PtyWire.write(channel, new PtyMessage.Input(seq.incrementAndGet(), chunk));
+                      }
                     }
                   } catch (IOException ignored) {
+                    var unused = ignored;
+                  }
+                });
+    var resizer =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    int[] size;
+                    while ((size = resizes.next()) != null) {
+                      synchronized (writeLock) {
+                        PtyWire.write(channel, new PtyMessage.Resize(size[0], size[1]));
+                      }
+                    }
+                  } catch (InterruptedException | IOException ignored) {
                     var unused = ignored;
                   }
                 });
@@ -81,6 +120,7 @@ public final class AttachLoop {
       return "connection closed";
     } finally {
       pump.interrupt();
+      resizer.interrupt();
     }
   }
 }

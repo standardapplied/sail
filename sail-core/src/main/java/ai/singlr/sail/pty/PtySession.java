@@ -144,6 +144,7 @@ public final class PtySession implements AutoCloseable {
 
   private void gather() {
     var buf = new byte[65536];
+    String failure = null;
     try {
       while (true) {
         var n = pty.read(buf);
@@ -163,18 +164,26 @@ public final class PtySession implements AutoCloseable {
         }
       }
     } catch (IOException e) {
-      endedReason = "pty failed: " + e.getMessage();
+      failure = "pty failed: " + e.getMessage();
     } finally {
-      var exit = child.onExit().join().exitValue();
-      if (endedReason == null) {
-        endedReason = "exited(" + exit + ")";
+      try {
+        var reason =
+            failure != null ? failure : "exited(" + child.onExit().join().exitValue() + ")";
+        pty.close();
+        synchronized (fanout) {
+          endedAtNanos = System.nanoTime();
+          endedReason = reason;
+          var ended = new PtyMessage.SessionEnded(reason);
+          subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
+        }
+        try {
+          events.sessionEnded(name, project, reason);
+        } catch (RuntimeException ignored) {
+          var unused = ignored;
+        }
+      } finally {
+        gatherDone.countDown();
       }
-      endedAtNanos = System.nanoTime();
-      pty.close();
-      var ended = new PtyMessage.SessionEnded(endedReason);
-      subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
-      events.sessionEnded(name, project, endedReason);
-      gatherDone.countDown();
     }
   }
 
@@ -194,6 +203,9 @@ public final class PtySession implements AutoCloseable {
       }
       subscriber.queue().force(new PtyMessage.ReplayEnd());
       subscribers.put(subscriber.id, subscriber);
+      if (endedReason != null) {
+        subscriber.queue().force(new PtyMessage.SessionEnded(endedReason));
+      }
     }
     synchronized (this) {
       if (wantsWrite && writerId < 0) {
@@ -225,13 +237,19 @@ public final class PtySession implements AutoCloseable {
     }
   }
 
-  /** Writes input; only the write-token holder may, and the sequence rides future output. */
-  public void input(long subscriberId, long seq, byte[] bytes) throws IOException {
+  /**
+   * Writes input on behalf of {@code subscriberId}; only the write-token holder may. Returns {@code
+   * false} — never throws — when the caller does not hold the token, so a non-writer's stray input
+   * is a refusable outcome, not a fatal error that tears down its connection. An {@link
+   * IOException} means the pty write itself failed. The sequence rides future output.
+   */
+  public boolean input(long subscriberId, long seq, byte[] bytes) throws IOException {
     if (subscriberId != writerId) {
-      throw new IOException("Subscriber " + subscriberId + " does not hold the write token.");
+      return false;
     }
     lastInputSeq.set(seq);
     pty.write(bytes);
+    return true;
   }
 
   /** Transfers the write token to {@code subscriberId}; everyone hears about it. */
@@ -245,16 +263,21 @@ public final class PtySession implements AutoCloseable {
     subscribers.values().forEach(subscriber -> subscriber.queue().force(changed));
   }
 
-  /** Resizes; only the write-token holder may, and observers hear the new geometry. */
-  public void resize(long subscriberId, int cols, int rows) throws IOException {
+  /**
+   * Resizes on behalf of {@code subscriberId}; only the write-token holder may, and observers hear
+   * the new geometry. Returns {@code false} — never throws — for a non-writer, so an observer's own
+   * window change is a silent no-op rather than a fatal error: the writer's window wins.
+   */
+  public boolean resize(long subscriberId, int cols, int rows) throws IOException {
     if (subscriberId != writerId) {
-      throw new IOException("Only the writer resizes; the writer's window wins.");
+      return false;
     }
     pty.resize(cols, rows);
     var resized = new PtyMessage.Resized(cols, rows);
     subscribers.values().stream()
         .filter(subscriber -> subscriber.id() != subscriberId)
         .forEach(subscriber -> subscriber.queue().force(resized));
+    return true;
   }
 
   public synchronized void detach(long subscriberId) {
