@@ -24,9 +24,7 @@ public final class PtyHostCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var host =
-        new PtySessionHost(SailPaths.ptySocketPath(), SailPaths.sessionsDir(), JOURNAL_CAPACITY);
-    host.start();
+    var host = startHost(SailPaths.ptySocketPath(), SailPaths.sessionsDir());
     var done = new CountDownLatch(1);
     Runtime.getRuntime()
         .addShutdownHook(
@@ -35,6 +33,15 @@ public final class PtyHostCommand implements Callable<Integer> {
                   host.close();
                   done.countDown();
                 }));
+    done.await();
+    return 0;
+  }
+
+  /** Starts the host and its sweep timer — the process shell around it is {@link #call()}. */
+  static PtySessionHost startHost(java.nio.file.Path socket, java.nio.file.Path sessions)
+      throws java.io.IOException {
+    var host = new PtySessionHost(socket, sessions, JOURNAL_CAPACITY);
+    host.start();
     Thread.ofVirtual()
         .start(
             () -> {
@@ -47,7 +54,6 @@ public final class PtyHostCommand implements Callable<Integer> {
                 Thread.currentThread().interrupt();
               }
             });
-    done.await();
-    return 0;
+    return host;
   }
 }

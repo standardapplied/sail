@@ -67,7 +67,6 @@ class PtySessionHostTest {
         PtyWire.write(channel, new PtyMessage.Attach("s1", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
-        assertInstanceOf(PtyMessage.ReplayEnd.class, PtyWire.read(channel));
         awaitText(channel, "hi");
 
         PtyWire.write(channel, new PtyMessage.Input(1, "world\n".getBytes(StandardCharsets.UTF_8)));

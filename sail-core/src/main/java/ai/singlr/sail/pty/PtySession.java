@@ -17,8 +17,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * One live conversation: a {@link Pty} and its child, a gather thread that drains the pty
  * unconditionally into the {@link RingJournal} (the child is never backpressured — the ghostty
  * discipline), and any number of subscribers, each served by its own sender thread over a bounded
- * queue. A subscriber that cannot keep up is paused — its backlog dropped, marked by {@code
- * Paused}/{@code Continued} frames — while the writer and everyone else stay live.
+ * queue. Attach (journal snapshot + subscription) and the gather fanout (append + delivery)
+ * serialize on one lock so no byte falls between a subscriber's replay and its live stream; the
+ * blocking pty read stays outside the lock. A subscriber that cannot keep up is paused — its
+ * backlog dropped, marked by {@code Paused}/{@code Continued} frames — while the writer and
+ * everyone else stay live.
  *
  * <p>Exactly one subscriber holds the write token; input from anyone else is refused. Attach
  * replays the journal tail bracketed by {@code ReplayBegin}/{@code ReplayEnd}, then streams. When
@@ -42,6 +45,7 @@ public final class PtySession implements AutoCloseable {
   private final int queueCapacity;
   private final int replayMax;
   private final Map<Long, Subscriber> subscribers = new ConcurrentHashMap<>();
+  private final Object fanout = new Object();
   private final AtomicLong subscriberIds = new AtomicLong();
   private final AtomicLong lastInputSeq = new AtomicLong(-1);
   private final CountDownLatch gatherDone = new CountDownLatch(1);
@@ -109,15 +113,17 @@ public final class PtySession implements AutoCloseable {
         if (n < 0) {
           break;
         }
-        journal.append(buf, n);
-        boundary.feed(buf, n);
-        if (boundary.atSafeLineStart()) {
-          journal.markSafe(Math.max(0, journal.totalWritten() - replayMax));
+        synchronized (fanout) {
+          journal.append(buf, n);
+          boundary.feed(buf, n);
+          if (boundary.atSafeLineStart()) {
+            journal.markSafe(Math.max(0, journal.totalWritten() - replayMax));
+          }
+          var chunk = new byte[n];
+          System.arraycopy(buf, 0, chunk, 0, n);
+          var output = new PtyMessage.Output(lastInputSeq.get(), chunk);
+          subscribers.values().forEach(subscriber -> subscriber.queue().enqueue(output));
         }
-        var chunk = new byte[n];
-        System.arraycopy(buf, 0, chunk, 0, n);
-        var output = new PtyMessage.Output(lastInputSeq.get(), chunk);
-        subscribers.values().forEach(subscriber -> subscriber.queue().enqueue(output));
       }
     } catch (IOException e) {
       endedReason = "pty failed: " + e.getMessage();
@@ -142,13 +148,15 @@ public final class PtySession implements AutoCloseable {
     everAttached = true;
     var subscriber =
         new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
-    var tail = journal.tail(replayMax);
-    subscriber.queue().force(new PtyMessage.ReplayBegin(tail.safe()));
-    if (tail.bytes().length > 0) {
-      subscriber.queue().force(new PtyMessage.Output(lastInputSeq.get(), tail.bytes()));
+    synchronized (fanout) {
+      var tail = journal.tail(replayMax);
+      subscriber.queue().force(new PtyMessage.ReplayBegin(tail.safe()));
+      if (tail.bytes().length > 0) {
+        subscriber.queue().force(new PtyMessage.Output(lastInputSeq.get(), tail.bytes()));
+      }
+      subscriber.queue().force(new PtyMessage.ReplayEnd());
+      subscribers.put(subscriber.id, subscriber);
     }
-    subscriber.queue().force(new PtyMessage.ReplayEnd());
-    subscribers.put(subscriber.id, subscriber);
     synchronized (this) {
       if (wantsWrite && writerId < 0) {
         writerId = subscriber.id;
