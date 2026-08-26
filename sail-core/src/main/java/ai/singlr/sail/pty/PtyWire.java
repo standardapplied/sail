@@ -60,8 +60,9 @@ public final class PtyWire {
   private static byte[] encode(PtyMessage message) {
     var out = new Writer();
     switch (message) {
+      case PtyMessage.Hello m -> out.type(9).string(m.token());
       case PtyMessage.Create m -> {
-        out.type(1).string(m.session()).stringList(m.command()).string(m.cwd());
+        out.type(1).string(m.session()).stringList(m.command()).string(m.cwd()).string(m.project());
         out.buffer.putInt(m.cols()).putInt(m.rows());
       }
       case PtyMessage.Attach m -> {
@@ -122,8 +123,10 @@ public final class PtyWire {
   private static PtyMessage decode(ByteBuffer in) throws IOException {
     var type = in.get();
     return switch (type) {
+      case 9 -> new PtyMessage.Hello(string(in));
       case 1 ->
-          new PtyMessage.Create(string(in), stringList(in), string(in), in.getInt(), in.getInt());
+          new PtyMessage.Create(
+              string(in), stringList(in), string(in), string(in), in.getInt(), in.getInt());
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());

@@ -35,14 +35,23 @@ public final class PtySessionHost implements AutoCloseable {
   private final Path socketPath;
   private final Path sessionsDir;
   private final long journalCapacity;
+  private final PtyIdentity.Resolver identity;
+  private final PtyEvents events;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private volatile ServerSocketChannel server;
   private volatile boolean closed;
 
-  public PtySessionHost(Path socketPath, Path sessionsDir, long journalCapacity) {
+  public PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyEvents events) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
+    this.identity = identity;
+    this.events = events;
   }
 
   public void start() throws IOException {
@@ -72,10 +81,23 @@ public final class PtySessionHost implements AutoCloseable {
     var subscriberId = -1L;
     try (channel) {
       PtyWire.handshake(channel, channel);
+      PtyIdentity who;
+      if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
+        try {
+          who = identity.resolve(token);
+        } catch (IOException refused) {
+          reply(channel, new PtyMessage.Err(refused.getMessage()));
+          return;
+        }
+        reply(channel, new PtyMessage.Ok());
+      } else {
+        reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
+        return;
+      }
       while (true) {
         var message = PtyWire.read(channel);
         switch (message) {
-          case PtyMessage.Create m -> reply(channel, create(m));
+          case PtyMessage.Create m -> reply(channel, create(m, who));
           case PtyMessage.Attach m -> {
             if (attached != null) {
               reply(channel, new PtyMessage.Err("This connection is already attached."));
@@ -87,8 +109,15 @@ public final class PtySessionHost implements AutoCloseable {
                   channel, new PtyMessage.Err("No live session '" + m.session() + "' to attach."));
               break;
             }
+            if (!admitted(who, session)) {
+              reply(
+                  channel,
+                  new PtyMessage.Err(
+                      "Session '" + m.session() + "' belongs to " + session.ownerFde() + "."));
+              break;
+            }
             reply(channel, new PtyMessage.Ok());
-            subscriberId = session.attach(msg -> reply(channel, msg), m.write());
+            subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
             attached = session;
           }
           case PtyMessage.Input m -> {
@@ -107,7 +136,7 @@ public final class PtySessionHost implements AutoCloseable {
             if (attached == null) {
               reply(channel, new PtyMessage.Err("Attach before taking the write token."));
             } else {
-              attached.takeWrite(subscriberId, "");
+              attached.takeWrite(subscriberId, who.fde());
             }
           }
           case PtyMessage.Detach m -> {
@@ -119,7 +148,7 @@ public final class PtySessionHost implements AutoCloseable {
             reply(channel, new PtyMessage.Ok());
           }
           case PtyMessage.ListSessions m -> reply(channel, listSessions());
-          case PtyMessage.Kill m -> reply(channel, kill(m.session()));
+          case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
       }
@@ -130,7 +159,11 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private PtyMessage create(PtyMessage.Create m) {
+  private static boolean admitted(PtyIdentity who, PtySession session) {
+    return who.admin() || who.fde().equals(session.ownerFde());
+  }
+
+  private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
     var existing = sessions.get(m.session());
     if (existing != null && existing.live()) {
       return new PtyMessage.Err(
@@ -145,6 +178,9 @@ public final class PtySessionHost implements AutoCloseable {
       var session =
           PtySession.start(
               m.session(),
+              who.fde(),
+              m.project(),
+              events,
               m.command(),
               Map.of("TERM", "xterm-256color"),
               Path.of(m.cwd()),
@@ -167,14 +203,20 @@ public final class PtySessionHost implements AutoCloseable {
             session ->
                 infos.add(
                     new PtyMessage.SessionInfo(
-                        session.name(), session.live(), session.attachedCount(), "")));
+                        session.name(),
+                        session.live(),
+                        session.attachedCount(),
+                        session.writerFde())));
     return new PtyMessage.Sessions(infos);
   }
 
-  private PtyMessage kill(String name) {
+  private PtyMessage kill(String name, PtyIdentity who) {
     var session = sessions.get(name);
     if (session == null) {
       return new PtyMessage.Err("No session '" + name + "'.");
+    }
+    if (!admitted(who, session)) {
+      return new PtyMessage.Err("Session '" + name + "' belongs to " + session.ownerFde() + ".");
     }
     remove(name, session);
     return new PtyMessage.Ok();

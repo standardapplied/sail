@@ -24,6 +24,11 @@ public final class SessionClient implements AutoCloseable {
   }
 
   public static SessionClient connect(Path socket) throws IOException {
+    return connect(socket, java.util.Objects.toString(System.getenv("SAIL_TOKEN"), ""));
+  }
+
+  /** Connects, handshakes, and identifies with {@code token} — blank means the box's owner. */
+  public static SessionClient connect(Path socket, String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
     try {
       channel.connect(UnixDomainSocketAddress.of(socket));
@@ -33,12 +38,16 @@ public final class SessionClient implements AutoCloseable {
       throw new IOException(
           "No session host at " + socket + ". Is the sail-pty-host service running?", e);
     }
-    return new SessionClient(channel);
+    var client = new SessionClient(channel);
+    PtyWire.write(channel, new PtyMessage.Hello(token));
+    client.expectOk("hello");
+    return client;
   }
 
-  public void create(String name, List<String> command, String cwd, int cols, int rows)
+  public void create(
+      String name, List<String> command, String cwd, String project, int cols, int rows)
       throws IOException {
-    PtyWire.write(channel, new PtyMessage.Create(name, command, cwd, cols, rows));
+    PtyWire.write(channel, new PtyMessage.Create(name, command, cwd, project, cols, rows));
     expectOk("create");
   }
 

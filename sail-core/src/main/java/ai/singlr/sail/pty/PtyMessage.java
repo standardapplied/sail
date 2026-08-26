@@ -15,7 +15,10 @@ import java.util.List;
  */
 public sealed interface PtyMessage {
 
-  record Create(String session, List<String> command, String cwd, int cols, int rows)
+  record Hello(String token) implements PtyMessage {}
+
+  record Create(
+      String session, List<String> command, String cwd, String project, int cols, int rows)
       implements PtyMessage {}
 
   record Attach(String session, boolean write) implements PtyMessage {}

@@ -72,6 +72,9 @@ class PtySessionTest {
   private PtySession session(String script) throws IOException {
     return PtySession.start(
         "t",
+        "uday",
+        "acme",
+        PtyEvents.NONE,
         List.of("sh", "-c", script),
         Map.of("TERM", "dumb"),
         Path.of("/tmp"),
@@ -82,10 +85,65 @@ class PtySessionTest {
   }
 
   @Test
+  void ownershipEventsAndWriterPrincipalAreObservable() throws Exception {
+    var events = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+    var recorder =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(String session, String project, String fde) {
+            events.add("started:" + session + ":" + project + ":" + fde);
+          }
+
+          @Override
+          public void sessionAttached(String session, String project, String fde) {
+            events.add("attached:" + session + ":" + fde);
+          }
+
+          @Override
+          public void sessionEnded(String session, String project, String reason) {
+            events.add("ended:" + session + ":" + reason);
+          }
+        };
+    var session =
+        PtySession.start(
+            "owned",
+            "mady",
+            "acme",
+            recorder,
+            List.of("sh", "-c", "read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("owned.ring"),
+            64 * 1024,
+            80,
+            24);
+    try {
+      assertEquals("mady", session.ownerFde());
+      assertEquals("acme", session.project());
+      assertTrue(events.contains("started:owned:acme:mady"), events.toString());
+
+      var writer = new Collector();
+      session.attach(writer, true, "mady");
+      assertEquals("mady", session.writerFde(), "the token records its principal");
+      assertTrue(events.contains("attached:owned:mady"), events.toString());
+    } finally {
+      session.close();
+    }
+    var deadline = System.nanoTime() + 5_000_000_000L;
+    while (events.stream().noneMatch(e -> e.startsWith("ended:owned:"))
+        && System.nanoTime() < deadline) {
+      Thread.onSpinWait();
+    }
+    assertTrue(
+        events.stream().anyMatch(e -> e.startsWith("ended:owned:")),
+        "the ending is a recorded fact: " + events);
+  }
+
+  @Test
   void theWriterConversesAndOutputCarriesItsInputSequence() throws Exception {
     try (var session = session("read a; echo got:$a; read b")) {
       var writer = new Collector();
-      var id = session.attach(writer, true);
+      var id = session.attach(writer, true, "uday");
 
       session.input(id, 7, "hello\n".getBytes(StandardCharsets.UTF_8));
       writer.awaitOutput("got:hello");
@@ -102,11 +160,11 @@ class PtySessionTest {
   void aLateObserverGetsTheReplayBracketThenLiveOutput() throws Exception {
     try (var session = session("echo early-line; read b; echo late-line; read c")) {
       var writer = new Collector();
-      var writerId = session.attach(writer, true);
+      var writerId = session.attach(writer, true, "uday");
       writer.awaitOutput("early-line");
 
       var observer = new Collector();
-      session.attach(observer, false);
+      session.attach(observer, false, "uday");
       observer.awaitOutput("early-line");
       assertTrue(observer.saw(PtyMessage.ReplayBegin.class), "replay is bracketed");
       assertTrue(observer.saw(PtyMessage.ReplayEnd.class));
@@ -121,8 +179,8 @@ class PtySessionTest {
     try (var session = session("read a; echo done:$a")) {
       var first = new Collector();
       var second = new Collector();
-      var firstId = session.attach(first, true);
-      var secondId = session.attach(second, false);
+      var firstId = session.attach(first, true, "uday");
+      var secondId = session.attach(second, false, "uday");
 
       assertThrows(
           IOException.class,
@@ -148,12 +206,12 @@ class PtySessionTest {
     var session = session("echo bye; exit 3");
     try {
       var client = new Collector();
-      session.attach(client, true);
+      session.attach(client, true, "uday");
       assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the ending reaches subscribers");
       assertEquals("exited(3)", session.endedReason());
 
       var late = new Collector();
-      assertThrows(IOException.class, () -> session.attach(late, false));
+      assertThrows(IOException.class, () -> session.attach(late, false, "uday"));
     } finally {
       session.close();
     }
@@ -164,6 +222,9 @@ class PtySessionTest {
     try (var session =
         PtySession.start(
             "slow",
+            "uday",
+            "acme",
+            PtyEvents.NONE,
             List.of(
                 "sh",
                 "-c",
@@ -178,10 +239,10 @@ class PtySessionTest {
             2,
             65536)) {
       var writer = new Collector();
-      var writerId = session.attach(writer, true);
+      var writerId = session.attach(writer, true, "uday");
       var stalled = new Collector();
       stalled.sleepMillis = 1000;
-      session.attach(stalled, false);
+      session.attach(stalled, false, "uday");
 
       session.input(writerId, 1, "go\n".getBytes(StandardCharsets.UTF_8));
       var deadline = System.nanoTime() + 10_000_000_000L;
