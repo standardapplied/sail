@@ -12,8 +12,10 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -56,10 +58,34 @@ public final class PtySessionHost implements AutoCloseable {
 
   public void start() throws IOException {
     Files.createDirectories(sessionsDir);
+    var socketDir = socketPath.getParent();
+    if (socketDir != null) {
+      Files.createDirectories(socketDir);
+      ownerOnly(socketDir);
+    }
     Files.deleteIfExists(socketPath);
     server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     server.bind(UnixDomainSocketAddress.of(socketPath));
+    ownerOnly(socketPath);
     Thread.ofVirtual().name("pty-host-accept").start(this::acceptLoop);
+  }
+
+  /**
+   * Restricts {@code path} to owner-only. The socket is the identity boundary's only door — a
+   * blank-token connection resolves to the box owner — so no group or other principal may reach it.
+   * A best-effort no-op on a filesystem without POSIX permissions (never the provisioned box).
+   */
+  private static void ownerOnly(java.nio.file.Path path) {
+    try {
+      Files.setPosixFilePermissions(
+          path,
+          EnumSet.of(
+              PosixFilePermission.OWNER_READ,
+              PosixFilePermission.OWNER_WRITE,
+              PosixFilePermission.OWNER_EXECUTE));
+    } catch (UnsupportedOperationException | IOException ignored) {
+      var unused = ignored;
+    }
   }
 
   private void acceptLoop() {

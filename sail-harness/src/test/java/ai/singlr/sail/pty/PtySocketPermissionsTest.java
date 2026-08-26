@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.pty;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class PtySocketPermissionsTest {
+
+  @TempDir Path dir;
+
+  /**
+   * The pty socket is the identity boundary's only door: a blank-token connection resolves to the
+   * box owner, so any local process that can open the socket would act as the owner. The socket and
+   * the directory holding it must therefore be owner-only — no group or other access.
+   */
+  @Test
+  void theSocketAndItsDirectoryAreOwnerOnly() throws IOException {
+    var sockDir = dir.resolve("run");
+    var socket = sockDir.resolve("pty.sock");
+    try (var host =
+        new PtySessionHost(
+            socket,
+            dir.resolve("sessions"),
+            64 * 1024,
+            token -> new PtyIdentity("uday", true),
+            PtyEvents.NONE)) {
+      host.start();
+
+      assertGroupAndOtherDenied(Files.getPosixFilePermissions(socket), "socket");
+      assertGroupAndOtherDenied(Files.getPosixFilePermissions(sockDir), "socket directory");
+    }
+  }
+
+  private static void assertGroupAndOtherDenied(Set<PosixFilePermission> perms, String what) {
+    for (var perm : PosixFilePermission.values()) {
+      if (perm.name().startsWith("GROUP") || perm.name().startsWith("OTHERS")) {
+        assertFalse(perms.contains(perm), what + " must not grant " + perm);
+      }
+    }
+    assertTrue(perms.contains(PosixFilePermission.OWNER_READ), what + " stays owner-readable");
+  }
+}

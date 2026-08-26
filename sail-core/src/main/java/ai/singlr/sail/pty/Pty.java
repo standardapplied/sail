@@ -32,6 +32,8 @@ import java.util.Map;
  * <p>Reads block the calling thread (the session host dedicates a platform gather thread per
  * session — the ghostty drain discipline); a read against a dead child reports end of stream
  * ({@code EIO} on Linux) as {@code -1}, never an exception, so the reaper owns the child's ending.
+ * Read and write each allocate their own per-call confined arena, so the two halves — which run on
+ * different threads (gather vs. the writer's connection) — share no native buffer and cannot race.
  */
 public final class Pty implements AutoCloseable {
 
@@ -40,6 +42,7 @@ public final class Pty implements AutoCloseable {
   private static final long TIOCSWINSZ = 0x5414;
   private static final int EINTR = 4;
   private static final int EIO = 5;
+  private static final int EBADF = 9;
 
   private static final StructLayout WINSIZE =
       java.lang.foreign.MemoryLayout.structLayout(
@@ -116,19 +119,15 @@ public final class Pty implements AutoCloseable {
         errnoHandle);
   }
 
+  private static final int MAX_CHUNK = 64 * 1024;
+
   private final int masterFd;
   private final String slavePath;
-  private final Arena arena;
-  private final MemorySegment ioBuffer;
-  private final MemorySegment errnoState;
   private volatile boolean closed;
 
   private Pty(int masterFd, String slavePath) {
     this.masterFd = masterFd;
     this.slavePath = slavePath;
-    this.arena = Arena.ofShared();
-    this.ioBuffer = arena.allocate(64 * 1024);
-    this.errnoState = arena.allocate(LIBC.capturedState());
   }
 
   /** Allocates a master/slave pair and stamps the initial window size on it. */
@@ -189,19 +188,20 @@ public final class Pty implements AutoCloseable {
       }
       long n;
       int err;
-      try {
-        n =
-            (long)
-                LIBC.read()
-                    .invokeExact(
-                        errnoState, masterFd, ioBuffer, (long) Math.min(buf.length, 64 * 1024));
-        err = (int) LIBC.errno().get(errnoState, 0L);
-      } catch (Throwable t) {
-        throw new IOException("pty read failed", t);
-      }
-      if (n > 0) {
-        MemorySegment.ofArray(buf).copyFrom(ioBuffer.asSlice(0, n));
-        return (int) n;
+      try (var arena = Arena.ofConfined()) {
+        var cap = Math.min(buf.length, MAX_CHUNK);
+        var slot = arena.allocate(cap);
+        var errno = arena.allocate(LIBC.capturedState());
+        try {
+          n = (long) LIBC.read().invokeExact(errno, masterFd, slot, (long) cap);
+        } catch (Throwable t) {
+          throw new IOException("pty read failed", t);
+        }
+        err = (int) LIBC.errno().get(errno, 0L);
+        if (n > 0) {
+          MemorySegment.ofArray(buf).copyFrom(slot.asSlice(0, n));
+          return (int) n;
+        }
       }
       if (n == 0) {
         return -1;
@@ -209,7 +209,7 @@ public final class Pty implements AutoCloseable {
       if (err == EINTR) {
         continue;
       }
-      if (err == EIO || closed) {
+      if (err == EIO || err == EBADF || closed) {
         return -1;
       }
       throw new IOException("pty read failed with errno " + err + ".");
@@ -221,15 +221,19 @@ public final class Pty implements AutoCloseable {
     requireOpen();
     var offset = 0;
     while (offset < data.length) {
-      var chunk = Math.min(data.length - offset, 64 * 1024);
-      ioBuffer.asSlice(0, chunk).copyFrom(MemorySegment.ofArray(data).asSlice(offset, chunk));
+      var chunk = Math.min(data.length - offset, MAX_CHUNK);
       long n;
       int err;
-      try {
-        n = (long) LIBC.write().invokeExact(errnoState, masterFd, ioBuffer, (long) chunk);
-        err = (int) LIBC.errno().get(errnoState, 0L);
-      } catch (Throwable t) {
-        throw new IOException("pty write failed", t);
+      try (var arena = Arena.ofConfined()) {
+        var slot = arena.allocate(chunk);
+        var errno = arena.allocate(LIBC.capturedState());
+        slot.copyFrom(MemorySegment.ofArray(data).asSlice(offset, chunk));
+        try {
+          n = (long) LIBC.write().invokeExact(errno, masterFd, slot, (long) chunk);
+        } catch (Throwable t) {
+          throw new IOException("pty write failed", t);
+        }
+        err = (int) LIBC.errno().get(errno, 0L);
       }
       if (n < 0) {
         if (err == EINTR) {
@@ -269,6 +273,12 @@ public final class Pty implements AutoCloseable {
     }
   }
 
+  /**
+   * Closes the master fd. Safe under concurrency: read and write hold no shared native state (each
+   * allocates a per-call confined arena), so a close racing an in-flight op cannot corrupt memory
+   * or throw an arena-in-use error — the fd close simply lands, and a blocked read observes it as
+   * end of stream (a closed fd reports {@code EBADF}).
+   */
   @Override
   public void close() {
     if (closed) {
@@ -280,6 +290,5 @@ public final class Pty implements AutoCloseable {
     } catch (Throwable t) {
       throw new IllegalStateException("pty close failed", t);
     }
-    arena.close();
   }
 }
