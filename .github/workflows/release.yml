@@ -41,7 +41,9 @@ jobs:
         run: mvn package -Pnative -DskipTests
 
       - name: Smoke test
-        run: ./sail-infra/target/sail -V
+        run: |
+          ./sail-infra/target/sail -V
+          ./sail-infra/target/sail _pty-selftest
 
       - name: Rename binary
         run: mv sail-infra/target/sail sail-infra/target/${{ matrix.binary-name }}

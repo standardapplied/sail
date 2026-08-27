@@ -19,6 +19,7 @@ import ai.singlr.sail.commands.LoginCommand;
 import ai.singlr.sail.commands.MigrateCommand;
 import ai.singlr.sail.commands.ProjectCommand;
 import ai.singlr.sail.commands.PtyHostCommand;
+import ai.singlr.sail.commands.PtySelfTestCommand;
 import ai.singlr.sail.commands.ServerCommand;
 import ai.singlr.sail.commands.SessionCommand;
 import ai.singlr.sail.commands.SpecCommand;
@@ -52,6 +53,7 @@ import picocli.CommandLine.Help.Ansi;
       GatewayCommand.class,
       SessionCommand.class,
       PtyHostCommand.class,
+      PtySelfTestCommand.class,
       SyncCommand.class,
       SyncServerCommand.class,
       ConflictsCommand.class,
