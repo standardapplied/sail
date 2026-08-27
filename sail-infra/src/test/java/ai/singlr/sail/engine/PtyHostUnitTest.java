@@ -47,7 +47,11 @@ class PtyHostUnitTest {
     assertTrue(Files.isSymbolicLink(home.resolve(".config/systemd/user/sail-pty-host.service")));
     assertTrue(
         shell.invocations().stream()
-            .anyMatch(c -> c.contains("systemctl --user enable --now sail-pty-host.service")));
+            .anyMatch(c -> c.contains("systemctl --user enable sail-pty-host.service")));
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")),
+        "restart, so an upgrade's new binary takes effect");
 
     unit.uninstall();
     assertFalse(Files.exists(home.resolve(".sail/services/sail-pty-host.service")));

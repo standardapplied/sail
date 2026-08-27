@@ -107,9 +107,10 @@ public final class MigrateCommand implements Runnable {
    * Installs {@code sail-pty-host.service} on a provisioned box. The unit is newer than most
    * existing boxes were provisioned, and {@code sail upgrade} spawns the new binary's {@code
    * migrate} — so this is the one place that can bring the host up on an upgrade without a manual
-   * step. Gated on the API service being present (a real host, not a stray {@code sail migrate} in
-   * some directory), idempotent ({@code enable --now} never restarts a running host, so live
-   * sessions survive), and fail-soft (a systemd hiccup warns rather than aborting the migration).
+   * step. It also restarts the host so the new binary takes effect (an upgrade rewrites the binary
+   * but the old process keeps running until restarted). Gated on the API service being present (a
+   * real host, not a stray {@code sail migrate} in some directory) and fail-soft (a systemd hiccup
+   * warns rather than aborting the migration).
    */
   private static void ensurePtyHostService(boolean jsonOutput) {
     var shell = new ShellExecutor(false);

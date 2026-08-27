@@ -92,8 +92,8 @@ class MigrateCommandTest {
         "a provisioned host gets the pty-host unit");
     assertTrue(
         shell.invocations().stream()
-            .anyMatch(c -> c.contains("systemctl --user enable --now sail-pty-host.service")),
-        "and it is enabled and started");
+            .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")),
+        "and it is enabled and (re)started so the upgraded binary takes effect");
   }
 
   @Test
