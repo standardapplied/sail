@@ -13,7 +13,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+@EnabledOnOs(OS.LINUX)
 class PtyTest {
 
   private static String readUntil(Pty pty, String marker) throws Exception {
