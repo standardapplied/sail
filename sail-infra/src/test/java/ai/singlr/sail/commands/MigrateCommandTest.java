@@ -7,13 +7,18 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.function.UnaryOperator;
@@ -68,6 +73,27 @@ class MigrateCommandTest {
                 row -> row.integer(0),
                 LegacyDataMigration.NAME)
             .orElseThrow());
+  }
+
+  @Test
+  void ensurePtyHostServiceInstallsOnlyOnAProvisionedHost(@TempDir Path home) {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var binary = Path.of("/usr/local/bin/sail");
+
+    MigrateCommand.ensurePtyHostService(
+        false, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
+    assertTrue(shell.invocations().isEmpty(), "no systemctl where the box has no api service");
+    assertFalse(Files.exists(home.resolve(".sail/services/sail-pty-host.service")));
+
+    MigrateCommand.ensurePtyHostService(
+        true, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
+    assertTrue(
+        Files.exists(home.resolve(".sail/services/sail-pty-host.service")),
+        "a provisioned host gets the pty-host unit");
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("systemctl --user enable --now sail-pty-host.service")),
+        "and it is enabled and started");
   }
 
   @Test

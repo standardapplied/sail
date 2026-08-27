@@ -13,10 +13,13 @@ import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ProjectImporter;
+import ai.singlr.sail.engine.PtyHostUnit;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DataMigrator;
@@ -25,6 +28,7 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -33,6 +37,7 @@ import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import picocli.CommandLine.Command;
@@ -93,7 +98,55 @@ public final class MigrateCommand implements Runnable {
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       relocateContainerSockets(jsonOutput);
+      ensurePtyHostService(jsonOutput);
       return runs;
+    }
+  }
+
+  /**
+   * Installs {@code sail-pty-host.service} on a provisioned box. The unit is newer than most
+   * existing boxes were provisioned, and {@code sail upgrade} spawns the new binary's {@code
+   * migrate} — so this is the one place that can bring the host up on an upgrade without a manual
+   * step. Gated on the API service being present (a real host, not a stray {@code sail migrate} in
+   * some directory), idempotent ({@code enable --now} never restarts a running host, so live
+   * sessions survive), and fail-soft (a systemd hiccup warns rather than aborting the migration).
+   */
+  private static void ensurePtyHostService(boolean jsonOutput) {
+    var shell = new ShellExecutor(false);
+    var api =
+        HostServiceInstallers.create(
+            shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+    ensurePtyHostService(
+        api.isInstalled(),
+        shell,
+        api.mode(),
+        Path.of(System.getProperty("user.home")),
+        SailPaths.binaryPath(),
+        jsonOutput);
+  }
+
+  static void ensurePtyHostService(
+      boolean apiInstalled,
+      ShellExec shell,
+      SystemdServiceInstaller.Mode mode,
+      Path userHome,
+      Path binary,
+      boolean jsonOutput) {
+    if (!apiInstalled) {
+      return;
+    }
+    try {
+      new PtyHostUnit(shell, mode, userHome, binary).install();
+      if (!jsonOutput) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ pty session host service ensured"));
+      }
+    } catch (IOException | TimeoutException e) {
+      if (!jsonOutput) {
+        System.out.println(
+            Ansi.AUTO.string("  @|yellow ⚠|@ pty session host not installed: " + e.getMessage()));
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
     }
   }
 
