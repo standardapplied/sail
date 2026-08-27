@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -31,6 +32,9 @@ public final class ContainerExec {
   /** The dev user's XDG_RUNTIME_DIR inside Incus containers. */
   public static final String DEV_XDG_RUNTIME_DIR = "/run/user/1000";
 
+  /** Where a container session opens by default — the engineer's checkout. */
+  public static final String DEV_WORKSPACE = "/home/dev/workspace";
+
   private ContainerExec() {}
 
   /**
@@ -42,23 +46,43 @@ public final class ContainerExec {
    * @return an unmodifiable command list ready for {@link ShellExec#exec}
    */
   public static List<String> asDevUser(String containerName, List<String> args) {
+    return devUser(containerName, false, null, args);
+  }
+
+  /**
+   * Builds an interactive {@code incus exec -t} command as the dev user, opening in the workspace.
+   * Unlike {@link #asDevUser}, this requests a container-side pseudo-terminal ({@code -t}) so the
+   * child sees a real tty — required for a login shell driven by the pty session host, which
+   * allocates the node-side pty and forwards its stdio into the container.
+   *
+   * @param containerName the Incus container name
+   * @param args the command and arguments to run inside the container
+   * @return an unmodifiable command list ready for {@link ShellExec#exec}
+   */
+  public static List<String> asDevUserTty(String containerName, List<String> args) {
+    return devUser(containerName, true, DEV_WORKSPACE, args);
+  }
+
+  private static List<String> devUser(
+      String containerName, boolean tty, String cwd, List<String> args) {
     NameValidator.requireValidProjectName(containerName);
-    var prefix =
+    var prefix = new ArrayList<String>(List.of("incus", "exec", containerName));
+    if (tty) {
+      prefix.add("-t");
+    }
+    prefix.addAll(List.of("--user", DEV_UID, "--group", DEV_GID));
+    if (cwd != null) {
+      prefix.addAll(List.of("--cwd", cwd));
+    }
+    prefix.addAll(
         List.of(
-            "incus",
-            "exec",
-            containerName,
-            "--user",
-            DEV_UID,
-            "--group",
-            DEV_GID,
             "--env",
             "HOME=" + DEV_HOME,
             "--env",
             "XDG_RUNTIME_DIR=" + DEV_XDG_RUNTIME_DIR,
             "--env",
             "DBUS_SESSION_BUS_ADDRESS=unix:path=" + DEV_XDG_RUNTIME_DIR + "/bus",
-            "--");
+            "--"));
     return Stream.concat(prefix.stream(), args.stream()).toList();
   }
 

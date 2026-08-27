@@ -114,7 +114,7 @@ class PtySessionHostTest {
       try (var owner = connect("tok-uday")) {
         PtyWire.write(
             owner,
-            new PtyMessage.Create("mine", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+            new PtyMessage.Create("mine", List.of("sh", "-c", "read a"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
         assertTrue(events.contains("started:mine:uday"), events.toString());
       }
@@ -194,7 +194,7 @@ class PtySessionHostTest {
         PtyWire.write(
             owner,
             new PtyMessage.Create(
-                "shared", List.of("sh", "-c", "read a; read b"), "/tmp", "acme", 80, 24));
+                "shared", List.of("sh", "-c", "read a; read b"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, readControl(owner));
       }
       try (var observer = connect("tok-uday")) {
@@ -220,13 +220,13 @@ class PtySessionHostTest {
       try (var uday = connect("tok-uday")) {
         PtyWire.write(
             uday,
-            new PtyMessage.Create("udays", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+            new PtyMessage.Create("udays", List.of("sh", "-c", "read a"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
       }
       try (var mady = connect("tok-mady")) {
         PtyWire.write(
             mady,
-            new PtyMessage.Create("madys", List.of("sh", "-c", "read a"), "/tmp", "acme", 80, 24));
+            new PtyMessage.Create("madys", List.of("sh", "-c", "read a"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
 
         PtyWire.write(mady, new PtyMessage.ListSessions());
@@ -249,13 +249,12 @@ class PtySessionHostTest {
     try (var ignored = startHost()) {
       try (var uday = connect("tok-uday")) {
         PtyWire.write(
-            uday,
-            new PtyMessage.Create("keep", List.of("sh", "-c", "exit 0"), "/tmp", "acme", 80, 24));
+            uday, new PtyMessage.Create("keep", List.of("sh", "-c", "exit 0"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
         awaitCorpse(uday, "keep");
       }
       try (var mady = connect("tok-mady")) {
-        PtyWire.write(mady, new PtyMessage.Create("keep", List.of("sh"), "/tmp", "acme", 80, 24));
+        PtyWire.write(mady, new PtyMessage.Create("keep", List.of("sh"), "/tmp", "", 80, 24));
         assertInstanceOf(
             PtyMessage.Err.class,
             readControl(mady),
@@ -280,7 +279,7 @@ class PtySessionHostTest {
                 "s1",
                 List.of("sh", "-c", "echo hi; read a; echo bye:$a; read b"),
                 "/tmp",
-                "acme",
+                "",
                 80,
                 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
@@ -310,9 +309,9 @@ class PtySessionHostTest {
         PtyWire.write(
             channel,
             new PtyMessage.Create(
-                "dup", List.of("sh", "-c", "echo old-life; read a"), "/tmp", "acme", 80, 24));
+                "dup", List.of("sh", "-c", "echo old-life; read a"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        PtyWire.write(channel, new PtyMessage.Create("dup", List.of("sh"), "/tmp", "acme", 80, 24));
+        PtyWire.write(channel, new PtyMessage.Create("dup", List.of("sh"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
 
         PtyWire.write(channel, new PtyMessage.Kill("dup"));
@@ -320,7 +319,7 @@ class PtySessionHostTest {
         PtyWire.write(
             channel,
             new PtyMessage.Create(
-                "dup", List.of("sh", "-c", "echo new-life; read a"), "/tmp", "acme", 80, 24));
+                "dup", List.of("sh", "-c", "echo new-life; read a"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         PtyWire.write(channel, new PtyMessage.Attach("dup", false));
@@ -345,8 +344,7 @@ class PtySessionHostTest {
     try (var ignored = startHost()) {
       try (var channel = connect()) {
         PtyWire.write(
-            channel,
-            new PtyMessage.Create("a", List.of("sh", "-c", "read x"), "/tmp", "acme", 80, 24));
+            channel, new PtyMessage.Create("a", List.of("sh", "-c", "read x"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         PtyWire.write(channel, new PtyMessage.ListSessions());
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
@@ -364,11 +362,11 @@ class PtySessionHostTest {
       try (var channel = connect()) {
         PtyWire.write(
             channel,
-            new PtyMessage.Create("lonely", List.of("sh", "-c", "read x"), "/tmp", "acme", 80, 24));
+            new PtyMessage.Create("lonely", List.of("sh", "-c", "read x"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         PtyWire.write(
             channel,
-            new PtyMessage.Create("corpse", List.of("sh", "-c", "exit 0"), "/tmp", "acme", 80, 24));
+            new PtyMessage.Create("corpse", List.of("sh", "-c", "exit 0"), "/tmp", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         var deadline = System.nanoTime() + 10_000_000_000L;
