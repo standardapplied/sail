@@ -3,43 +3,112 @@
     "downcalls": [
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "void*", "jint", "void*"]
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "jint",
+          "void*"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "void*", "jint", "void*", "void*"]
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "jint",
+          "void*",
+          "void*"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*"]
+        "parameterTypes": [
+          "void*"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "jint"]
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "jint", "void*", "jint", "void*"]
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "void*",
+          "jint",
+          "void*"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "jint", "jlong"]
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jlong"
+        ]
       },
       {
         "returnType": "jint",
-        "parameterTypes": ["void*", "jint", "jdouble"]
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jdouble"
+        ]
       },
       {
         "returnType": "jlong",
-        "parameterTypes": ["void*", "jint"]
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
       },
       {
         "returnType": "void*",
-        "parameterTypes": ["void*", "jint"]
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
       },
       {
         "returnType": "void*",
-        "parameterTypes": ["void*"]
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "jint"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "jint"
+        ]
+      },
+      {
+        "returnType": "jlong",
+        "parameterTypes": [
+          "jint",
+          "void*",
+          "jlong"
+        ],
+        "options": {
+          "captureCallState": true
+        }
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "jint",
+          "jlong",
+          "void*"
+        ]
       }
     ]
   }
