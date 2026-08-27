@@ -38,7 +38,7 @@ class AttachLoopTest {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create(
-            "s1", List.of("sh", "-c", "read a; echo pty-says:$a; exit 0"), "/tmp", "acme", 80, 24);
+            "s1", List.of("sh", "-c", "read a; echo pty-says:$a; exit 0"), "/tmp", "", 80, 24);
         var channel = client.attach("s1", true);
 
         var stdinFeed = new PipedOutputStream();
@@ -66,7 +66,7 @@ class AttachLoopTest {
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
-        client.create("s1", List.of("sh", "-c", "read a; echo after:$a"), "/tmp", "acme", 80, 24);
+        client.create("s1", List.of("sh", "-c", "read a; echo after:$a"), "/tmp", "", 80, 24);
         var channel = client.attach("s1", true);
 
         var stdinFeed = new PipedOutputStream();
@@ -98,7 +98,7 @@ class AttachLoopTest {
             "s1",
             List.of("sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; read a"),
             "/tmp",
-            "acme",
+            "",
             80,
             24);
         var channel = client.attach("s1", true);

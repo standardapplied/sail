@@ -16,6 +16,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -189,6 +190,19 @@ public final class PtySessionHost implements AutoCloseable {
     return who.admin() || who.fde().equals(session.ownerFde());
   }
 
+  /**
+   * Resolves the child process a session spawns. An empty request defaults to a login shell; a
+   * non-blank {@code project} wraps the command in the dev-user {@code incus exec -t} lane so the
+   * session runs inside that project's container with a real tty. The container name is validated
+   * here, at the host — clients send only a name, never raw {@code incus} arguments.
+   */
+  static List<String> childCommand(List<String> requested, String project) {
+    var chosen = requested.isEmpty() ? List.of("bash", "-l") : requested;
+    return project == null || project.isBlank()
+        ? chosen
+        : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, chosen);
+  }
+
   private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {
@@ -211,7 +225,7 @@ public final class PtySessionHost implements AutoCloseable {
               who.fde(),
               m.project(),
               events,
-              m.command(),
+              childCommand(m.command(), m.project()),
               Map.of("TERM", "xterm-256color"),
               Path.of(m.cwd()),
               ring,

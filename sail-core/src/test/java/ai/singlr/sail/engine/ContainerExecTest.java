@@ -55,6 +55,46 @@ class ContainerExecTest {
   }
 
   @Test
+  void asDevUserTtyRequestsAContainerPtyAndOpensInTheWorkspace() {
+    var cmd = ContainerExec.asDevUserTty("acme", List.of("bash", "-l"));
+
+    assertEquals("incus", cmd.get(0));
+    assertEquals("exec", cmd.get(1));
+    assertEquals("acme", cmd.get(2));
+    assertEquals("-t", cmd.get(3));
+    assertEquals("--user", cmd.get(4));
+    assertEquals("1000", cmd.get(5));
+    assertEquals("--group", cmd.get(6));
+    assertEquals("1000", cmd.get(7));
+    assertEquals("--cwd", cmd.get(8));
+    assertEquals("/home/dev/workspace", cmd.get(9));
+    assertEquals("--env", cmd.get(10));
+    assertEquals("HOME=/home/dev", cmd.get(11));
+    assertEquals("--env", cmd.get(12));
+    assertEquals("XDG_RUNTIME_DIR=/run/user/1000", cmd.get(13));
+    assertEquals("--env", cmd.get(14));
+    assertEquals("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", cmd.get(15));
+    assertEquals("--", cmd.get(16));
+    assertEquals("bash", cmd.get(17));
+    assertEquals("-l", cmd.get(18));
+    assertEquals(19, cmd.size());
+  }
+
+  @Test
+  void asDevUserTtyRejectsInvalidContainerName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ContainerExec.asDevUserTty("proj;rm-rf", List.of("bash")));
+  }
+
+  @Test
+  void asDevUserTtyReturnsUnmodifiableList() {
+    var cmd = ContainerExec.asDevUserTty("proj", List.of("bash"));
+
+    assertThrows(UnsupportedOperationException.class, () -> cmd.add("extra"));
+  }
+
+  @Test
   void asDevUserRejectsInvalidContainerName() {
     assertThrows(
         IllegalArgumentException.class,

@@ -33,14 +33,6 @@ public final class SessionCommand {
     return socket != null ? socket : SailPaths.ptySocketPath();
   }
 
-  /** The child to spawn: a shell inside the project container, or the raw command as given. */
-  static List<String> commandFor(String project, List<String> command) {
-    var chosen = command.isEmpty() ? List.of("bash", "-l") : command;
-    return project != null
-        ? ai.singlr.sail.engine.ContainerExec.asDevUser(project, chosen)
-        : chosen;
-  }
-
   @Command(
       name = "new",
       description = "Create a session (default: a shell in --project's container).")
@@ -63,7 +55,7 @@ public final class SessionCommand {
       try (var client = SessionClient.connect(socketOrDefault(socket))) {
         client.create(
             name,
-            commandFor(project, command),
+            command,
             System.getProperty("user.home", "/home/dev"),
             project == null ? "" : project,
             size[1],
