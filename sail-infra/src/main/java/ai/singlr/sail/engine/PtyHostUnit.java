@@ -72,7 +72,14 @@ public final class PtyHostUnit {
         .formatted(userClause, sailBinary, wantedBy);
   }
 
-  /** Writes the unit (and USER-mode symlink), reloads systemd, enables and starts the service. */
+  /**
+   * Writes the unit (and USER-mode symlink), reloads systemd, enables the service, and {@code
+   * restart}s it. Restart, not {@code enable --now}: an upgrade rewrites the binary on disk but the
+   * running host keeps executing the old process, so it must be restarted to pick up the new code —
+   * {@code restart} also starts a stopped service, so it is correct on a first install too. (Live
+   * sessions do not survive a host restart regardless — there is no rehydration — so this loses
+   * nothing an upgrade wasn't already going to lose.)
+   */
   public void install() throws IOException, InterruptedException, TimeoutException {
     Files.createDirectories(serviceFilePath.getParent());
     Files.writeString(serviceFilePath, renderUnit());
@@ -82,8 +89,8 @@ public final class PtyHostUnit {
       Files.createSymbolicLink(systemdLinkPath, serviceFilePath);
     }
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
-    requireSuccess(
-        shell.exec(systemctl("enable", "--now", UNIT_NAME)), "Failed to enable+start " + UNIT_NAME);
+    requireSuccess(shell.exec(systemctl("enable", UNIT_NAME)), "Failed to enable " + UNIT_NAME);
+    requireSuccess(shell.exec(systemctl("restart", UNIT_NAME)), "Failed to (re)start " + UNIT_NAME);
   }
 
   /** Stops, disables, and removes the unit; missing pieces are not an error. */
