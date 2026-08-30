@@ -47,6 +47,32 @@ class SubscriberQueueTest {
   }
 
   @Test
+  void replaceWithSwapsTheBacklogButTerminalMessagesSurvive() throws Exception {
+    var queue = new SubscriberQueue(8);
+    queue.enqueue(out(1));
+    queue.enqueue(out(2));
+    queue.force(new PtyMessage.SessionEnded("gone"));
+    queue.replaceWith(
+        java.util.List.of(new PtyMessage.ReplayBegin(true), out(9), new PtyMessage.ReplayEnd()));
+
+    assertInstanceOf(PtyMessage.ReplayBegin.class, queue.next(), "the resync leads");
+    assertEquals(9, ((PtyMessage.Output) queue.next()).lastInputSeq());
+    assertInstanceOf(PtyMessage.ReplayEnd.class, queue.next());
+    assertInstanceOf(PtyMessage.SessionEnded.class, queue.next(), "the ending survives the swap");
+  }
+
+  @Test
+  void replaceWithKeepsTheDetachPoisonAlive() throws Exception {
+    var queue = new SubscriberQueue(8);
+    queue.enqueue(out(1));
+    queue.force(new PtyMessage.Ok());
+    queue.replaceWith(java.util.List.of(new PtyMessage.ReplayBegin(true)));
+
+    assertInstanceOf(PtyMessage.ReplayBegin.class, queue.next());
+    assertInstanceOf(PtyMessage.Ok.class, queue.next(), "detach still terminates the send loop");
+  }
+
+  @Test
   void forcedMessagesArriveEvenWhilePaused() throws Exception {
     var queue = new SubscriberQueue(1);
     queue.enqueue(out(1));

@@ -187,6 +187,29 @@ public final class PtySession implements AutoCloseable {
     }
   }
 
+  /**
+   * Re-baselines a subscriber whose pause dropped part of the stream: under the fanout lock, the
+   * journal tail replaces whatever accumulated in its queue (those bytes are inside the snapshot),
+   * so the client hears {@code Continued}, a bracketed replay, then live traffic — exactly-once
+   * against the journal, never a screen with its middle missing.
+   */
+  private void resync(Subscriber subscriber) {
+    synchronized (fanout) {
+      try {
+        var tail = journal.tail(replayMax);
+        var messages = new java.util.ArrayList<PtyMessage>(3);
+        messages.add(new PtyMessage.ReplayBegin(tail.safe()));
+        if (tail.bytes().length > 0) {
+          messages.add(new PtyMessage.Output(lastInputSeq.get(), tail.bytes()));
+        }
+        messages.add(new PtyMessage.ReplayEnd());
+        subscriber.queue().replaceWith(List.copyOf(messages));
+      } catch (IOException e) {
+        subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
+      }
+    }
+  }
+
   /** Attaches a client: replay first, live stream after, write token if free and requested. */
   public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
     if (endedReason != null) {
@@ -230,6 +253,9 @@ public final class PtySession implements AutoCloseable {
         subscriber.client().deliver(message);
         if (message instanceof PtyMessage.SessionEnded) {
           return;
+        }
+        if (message instanceof PtyMessage.Continued) {
+          resync(subscriber);
         }
       }
     } catch (InterruptedException e) {

@@ -46,6 +46,23 @@ final class SubscriberQueue {
     notifyAll();
   }
 
+  /**
+   * Replaces the pending backlog with {@code messages} — the resync-after-pause path, where the
+   * backlog's bytes are already covered by the journal snapshot being installed. Terminal messages
+   * ({@code Ok}, {@code SessionEnded}) survive the swap, re-queued after the replacement: a detach
+   * or an ending must never be lost to a resync racing it.
+   */
+  synchronized void replaceWith(java.util.List<PtyMessage> messages) {
+    var terminal =
+        queue.stream()
+            .filter(m -> m instanceof PtyMessage.Ok || m instanceof PtyMessage.SessionEnded)
+            .toList();
+    queue.clear();
+    queue.addAll(messages);
+    queue.addAll(terminal);
+    notifyAll();
+  }
+
   /** Empties the queue and delivers only {@code message} next — the detach path. */
   synchronized void clearAnd(PtyMessage message) {
     queue.clear();

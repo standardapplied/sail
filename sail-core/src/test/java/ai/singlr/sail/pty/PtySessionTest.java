@@ -33,9 +33,18 @@ class PtySessionTest {
     final ConcurrentLinkedQueue<PtyMessage> messages = new ConcurrentLinkedQueue<>();
     final CountDownLatch ended = new CountDownLatch(1);
     volatile long sleepMillis;
+    volatile CountDownLatch gate;
 
     @Override
     public void deliver(PtyMessage message) {
+      var g = gate;
+      if (g != null) {
+        try {
+          g.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
       if (sleepMillis > 0) {
         try {
           Thread.sleep(sleepMillis);
@@ -295,5 +304,64 @@ class PtySessionTest {
         java.time.Duration.ofSeconds(10),
         session::close,
         "close must not hang when the end-of-session event throws");
+  }
+
+  @Test
+  void aPausedSubscriberIsResyncedFromTheJournalNotLeftCorrupt() throws Exception {
+    var session =
+        PtySession.start(
+            "resync",
+            "uday",
+            "acme",
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "read _; i=0; while [ $i -lt 300 ]; do printf '%01000d' $i; i=$((i+1)); done;"
+                    + " printf BURST-END; read _; printf PHASE2; read _"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("resync.ring"),
+            1024 * 1024,
+            80,
+            24,
+            1,
+            64 * 1024);
+    try {
+      var client = new Collector();
+      var gate = new CountDownLatch(1);
+      client.gate = gate;
+      var id = session.attach(client, true, "uday");
+
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      var deadline = System.nanoTime() + 10_000_000_000L;
+      while (session.journaledBytes() < 300_000) {
+        if (System.nanoTime() > deadline) {
+          throw new AssertionError("burst never landed; journaled=" + session.journaledBytes());
+        }
+        Thread.onSpinWait();
+      }
+
+      client.gate = null;
+      gate.countDown();
+
+      client.awaitOutput("BURST-END");
+      assertTrue(client.saw(PtyMessage.Paused.class), "the overflow paused the subscriber");
+      assertTrue(client.saw(PtyMessage.Continued.class), "the drain resumed it");
+      var kinds = client.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
+      var continuedAt = kinds.indexOf("Continued");
+      assertTrue(
+          kinds.subList(continuedAt, kinds.size()).contains("ReplayBegin"),
+          "the resync is bracketed as a replay after Continued, got: " + kinds);
+
+      session.input(id, 2, "\n".getBytes(StandardCharsets.UTF_8));
+      client.awaitOutput("PHASE2");
+      var text = client.outputText();
+      assertEquals(text.indexOf("PHASE2"), text.lastIndexOf("PHASE2"), "no duplicated bytes");
+      assertEquals(
+          text.indexOf("BURST-END"), text.lastIndexOf("BURST-END"), "no duplicated resync");
+    } finally {
+      session.close();
+    }
   }
 }
