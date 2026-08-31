@@ -60,7 +60,7 @@ class SailOperationsSyncTest {
   void aSpecMutationTriggersExactlyOneReconcile() throws Exception {
     var operations = operations(scheduler(), store -> {});
 
-    var result = operations.createGlobalSpec(create("auth"));
+    var result = operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -89,11 +89,13 @@ class SailOperationsSyncTest {
                 }),
             store -> {});
 
-    var result = operations.createGlobalSpec(create("auth"));
+    var result = operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
-    assertInstanceOf(Result.Success.class, operations.createGlobalSpec(create("billing")));
+    assertInstanceOf(
+        Result.Success.class,
+        operations.createGlobalSpec(create("billing"), Actor.cliOperator("uday")));
     assertEquals(2, rounds.get());
   }
 
@@ -120,7 +122,9 @@ class SailOperationsSyncTest {
         .run(
             () -> {
               operations.globalSpecs(new SpecStore.SpecFilter(null, null, null, null, null));
-              assertInstanceOf(Result.Success.class, operations.createGlobalSpec(create("auth")));
+              assertInstanceOf(
+                  Result.Success.class,
+                  operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
             });
 
     assertEquals(0, rounds.get());

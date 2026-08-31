@@ -333,10 +333,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * Composes writes across stores sharing this database into one atomic transaction — nested store
    * transactions join the outermost scope (see {@link Sqlite#transaction}), the same seam {@code
    * StoreReplica.atomically} rides. Lets a caller pair a room write with its spec mirror so a crash
-   * can never persist one half.
+   * can never persist one half. Takes the write lock up front ({@link Sqlite#immediateTransaction})
+   * because every composed scope is a check-then-write: under WAL a deferred begin would let
+   * another process commit between the check and the write.
    */
   public <T> T atomically(java.util.function.Supplier<T> work) {
-    return db.transaction(work);
+    return db.immediateTransaction(work);
   }
 
   public void updateStatus(String id, SpecStatus status) {

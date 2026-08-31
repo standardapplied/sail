@@ -496,19 +496,19 @@ public final class SailOperations implements Operations {
             throw new ApiException(
                 ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
           }
-          requireRoomOrSpec(roomId);
+          var room = requireRoomOrSpec(roomId);
           List<SpecMessageView> messages;
           try {
             var store = requireMessageStore();
             var rows =
                 after != null
-                    ? store.listAfter(roomId, after, limit)
-                    : store.list(roomId, before, limit);
+                    ? store.listAfter(room.id(), after, limit)
+                    : store.list(room.id(), before, limit);
             messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
           }
-          return new SpecMessagesResponse(roomId, messages);
+          return new SpecMessagesResponse(room.id(), messages);
         });
   }
 
@@ -519,7 +519,7 @@ public final class SailOperations implements Operations {
         () -> {
           var room = requireRoomOrSpec(roomId);
           SpecPolicy.post(principal, room.id(), room.assignee(), room.createdBy()).enforce();
-          return appendMessage(room.project(), roomId, request, authorHandle);
+          return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
 
@@ -608,28 +608,46 @@ public final class SailOperations implements Operations {
                     ErrorCode.READ_ONLY_CREDENTIAL,
                     "Your credential is read-only and cannot create rooms.");
               }
-              if (store.findById(request.id()).isPresent()) {
-                throw new ApiException(
-                    ErrorCode.CONFLICT, "Room '" + request.id() + "' already exists.");
-              }
-              store.create(
-                  new RoomStore.RoomRow(
-                      request.id(),
-                      request.project(),
-                      request.title(),
-                      request.createdBy(),
-                      request.wake(),
-                      null,
-                      request.createdBy(),
-                      null,
-                      null,
-                      request.createdBy()));
-              return detailOf(store.findById(request.id()).orElseThrow());
+              return store.atomically(
+                  () -> {
+                    requireUnclaimedRoomId(store, request.id());
+                    store.create(
+                        new RoomStore.RoomRow(
+                            request.id(),
+                            request.project(),
+                            request.title(),
+                            request.createdBy(),
+                            request.wake(),
+                            null,
+                            request.createdBy(),
+                            null,
+                            null,
+                            request.createdBy()));
+                    return detailOf(store.findById(request.id()).orElseThrow());
+                  });
             });
     if (result instanceof Result.Success<RoomDetailResponse>) {
       triggerSyncAfterWrite();
     }
     return result;
+  }
+
+  /**
+   * A room id must be free on both sides of the conversation namespace: {@link #requireRoomOrSpec}
+   * resolves spec-first, so a room minted under an existing spec's id would be unaddressable —
+   * every message to it would land in that spec's home room. Mirrors the reservation a spec birth
+   * makes.
+   */
+  private void requireUnclaimedRoomId(RoomStore store, String id) {
+    if (specStore != null && specStore.findById(id).isPresent()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + id + "' already owns that conversation id.",
+          "Pick a room id that is not a spec id.");
+    }
+    if (store.findById(id).isPresent()) {
+      throw new ApiException(ErrorCode.CONFLICT, "Room '" + id + "' already exists.");
+    }
   }
 
   @Override
@@ -670,24 +688,27 @@ public final class SailOperations implements Operations {
         safe(
             () -> {
               var store = requireRoomStore();
-              var row =
-                  store
-                      .findById(roomId)
-                      .orElseThrow(
-                          () ->
-                              new ApiException(
-                                  ErrorCode.ROOM_NOT_FOUND,
-                                  "Room '" + roomId + "' was not found."));
-              SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
-              var attached = specIdsOf(roomId);
-              if (!attached.isEmpty()) {
-                throw new ApiException(
-                    ErrorCode.CONFLICT,
-                    "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
-                    "Delete or re-home its specs first: " + String.join(", ", attached));
-              }
-              store.delete(roomId);
-              return new RoomDeletedResponse(roomId);
+              return store.atomically(
+                  () -> {
+                    var row =
+                        store
+                            .findById(roomId)
+                            .orElseThrow(
+                                () ->
+                                    new ApiException(
+                                        ErrorCode.ROOM_NOT_FOUND,
+                                        "Room '" + roomId + "' was not found."));
+                    SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
+                    var attached = specIdsOf(roomId);
+                    if (!attached.isEmpty()) {
+                      throw new ApiException(
+                          ErrorCode.CONFLICT,
+                          "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
+                          "Delete or re-home its specs first: " + String.join(", ", attached));
+                    }
+                    store.delete(roomId);
+                    return new RoomDeletedResponse(roomId);
+                  });
             });
     if (result instanceof Result.Success<RoomDeletedResponse>) {
       triggerSyncAfterWrite();
@@ -1431,8 +1452,9 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
-    return safeWrite(() -> globalSpecOps.create(request));
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+      SpecCreateRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.create(request, actor));
   }
 
   @Override
@@ -1536,6 +1558,46 @@ public final class SailOperations implements Operations {
           var transcript = Strings.isBlank(transcriptPath) ? null : transcriptPath.strip();
           runStore.recordSession(runId, session, sessionSource, transcript);
           return new RunSessionResponse(runId, session, sessionSource);
+        });
+  }
+
+  @Override
+  public Result<RoomConversationResponse> recordRoomConversation(
+      String roomId,
+      String agent,
+      String sessionId,
+      String source,
+      String transcriptPath,
+      Actor actor) {
+    return safe(
+        () -> {
+          if (Strings.isBlank(sessionId)) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
+          }
+          var room = requireRoomOrSpec(roomId);
+          SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
+          var cli = Strings.isBlank(agent) ? null : agent.strip();
+          var data = new LinkedHashMap<String, Object>();
+          data.put("room_id", room.id());
+          data.put("session_id", sessionId.strip());
+          if (cli != null) {
+            data.put("agent", cli);
+          }
+          if (Strings.isNotBlank(source)) {
+            data.put("session_source", source.strip());
+          }
+          if (Strings.isNotBlank(transcriptPath)) {
+            data.put("transcript_path", transcriptPath.strip());
+          }
+          publishOnBus(
+              Event.of(
+                  room.project(),
+                  room.id(),
+                  Event.WellKnownTypes.AGENT_CONVERSATION_STARTED,
+                  actor.handle(),
+                  HostInfo.hostname(),
+                  data));
+          return new RoomConversationResponse(room.id(), sessionId.strip(), cli);
         });
   }
 

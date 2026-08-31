@@ -11,6 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class SpecCliHelperTest {
@@ -72,6 +82,99 @@ class SpecCliHelperTest {
     assertTrue(
         content.contains("[--reply-to <message-id>] [--question]"),
         "the usage text teaches the flag");
+  }
+
+  @Test
+  void createDefaultsTheHomeRoomToTheSessionsRoomUnlessTold() throws Exception {
+    var content = SpecCliHelper.scriptContent();
+    assertTrue(content.contains("--room)             FIELDS+=(--data-urlencode \"room_id=$2\")"));
+    assertTrue(content.contains("[--room R]"), "the usage text teaches the flag");
+
+    var home = Files.createTempDirectory("spec-shim");
+    try {
+      var socket = home.resolve("api.sock");
+      var script = home.resolve("spec");
+      writeExecutable(
+          script,
+          content.replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
+      Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
+      var bin = home.resolve("bin");
+      Files.createDirectories(bin);
+      writeExecutable(
+          bin.resolve("curl"),
+          """
+          #!/bin/sh
+          printf '%s\\n' "$*" >> "$HOME/curl.log"
+          exit 0
+          """);
+      try (var bound = bind(socket)) {
+        runShim(
+            home,
+            bin,
+            Map.of("SAIL_ROOM_ID", "design-talk"),
+            "create",
+            "--id",
+            "a",
+            "--title",
+            "A");
+        runShim(
+            home,
+            bin,
+            Map.of("SAIL_ROOM_ID", "design-talk"),
+            "create",
+            "--id",
+            "b",
+            "--title",
+            "B",
+            "--room",
+            "epic");
+        runShim(home, bin, Map.of(), "create", "--id", "c", "--title", "C");
+      }
+      var calls = Files.readAllLines(home.resolve("curl.log"));
+      assertEquals(3, calls.size(), calls.toString());
+      assertTrue(
+          calls.get(0).contains("room_id=design-talk"),
+          "the session's room is the default: " + calls.get(0));
+      assertTrue(calls.get(1).contains("room_id=epic"), "an explicit --room wins: " + calls.get(1));
+      assertFalse(calls.get(1).contains("design-talk"), calls.get(1));
+      assertFalse(
+          calls.get(2).contains("room_id"), "outside any session nothing changes: " + calls.get(2));
+      assertTrue(
+          calls.get(0).contains("Bearer sailbox_test"), "the ambient credential authenticates");
+    } finally {
+      try (var walk = Files.walk(home)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
+
+  private static void runShim(Path home, Path bin, Map<String, String> extra, String... args)
+      throws Exception {
+    var argv =
+        new java.util.ArrayList<>(List.of("/usr/bin/env", "bash", home.resolve("spec").toString()));
+    argv.addAll(List.of(args));
+    var pb = new ProcessBuilder(argv);
+    var env = pb.environment();
+    env.keySet().removeIf(key -> key.startsWith("SAIL_"));
+    env.put("HOME", home.toString());
+    env.put("PATH", bin + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
+    env.putAll(extra);
+    pb.redirectErrorStream(true);
+    var process = pb.start();
+    var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the shim must finish");
+    assertEquals(0, process.exitValue(), output);
+  }
+
+  private static java.io.Closeable bind(Path socket) throws IOException {
+    var channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    channel.bind(UnixDomainSocketAddress.of(socket));
+    return channel;
+  }
+
+  private static void writeExecutable(Path path, String content) throws IOException {
+    Files.writeString(path, content);
+    Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwxr-xr-x"));
   }
 
   @Test

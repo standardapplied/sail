@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -78,6 +79,27 @@ class ContainerExecTest {
     assertEquals("bash", cmd.get(17));
     assertEquals("-l", cmd.get(18));
     assertEquals(19, cmd.size());
+  }
+
+  @Test
+  void asDevUserTtyExportsExtraEnvAsExplicitIncusEnvFlags() {
+    var cmd =
+        ContainerExec.asDevUserTty(
+            "acme",
+            new java.util.LinkedHashMap<>(
+                java.util.Map.of("SAIL_ROOM_ID", "design", "TERM", "xterm-256color")),
+            List.of("claude"));
+
+    var tail = cmd.subList(16, cmd.size());
+    assertTrue(tail.contains("SAIL_ROOM_ID=design"), tail.toString());
+    assertTrue(tail.contains("TERM=xterm-256color"), tail.toString());
+    assertEquals("--env", cmd.get(cmd.indexOf("SAIL_ROOM_ID=design") - 1));
+    assertEquals("--", cmd.get(cmd.size() - 2), "extra env precedes the argv separator");
+    assertEquals("claude", cmd.getLast());
+    assertEquals(
+        ContainerExec.asDevUserTty("acme", List.of("claude")),
+        ContainerExec.asDevUserTty("acme", java.util.Map.of(), List.of("claude")),
+        "no extra env means the plain tty lane");
   }
 
   @Test

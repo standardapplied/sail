@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.Stty;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -43,11 +44,24 @@ public final class SessionCommand {
     @Parameters(index = "0", description = "Session name.")
     private String name;
 
-    @Parameters(index = "1..*", description = "Command to run (default: bash -l).")
-    private List<String> command = List.of();
-
     @Option(names = "--project", description = "Run the session inside this project's container.")
     private String project;
+
+    @Option(
+        names = "--room",
+        paramLabel = "<room-id>",
+        description =
+            "Pin the session to a room: it is listed and announced there, and every spec created"
+                + " inside it is born there (exported as SAIL_ROOM_ID).")
+    private String room;
+
+    @Option(
+        names = "--command",
+        arity = "1..*",
+        paramLabel = "<argv>",
+        description =
+            "Command to run, every following argument included (default: bash -l). Give it last.")
+    private List<String> command = List.of();
 
     @Override
     public Integer call() throws Exception {
@@ -57,7 +71,8 @@ public final class SessionCommand {
             name,
             command,
             System.getProperty("user.home", "/home/dev"),
-            project == null ? "" : project,
+            Objects.toString(project, ""),
+            Objects.toString(room, ""),
             size[1],
             size[0]);
       }
@@ -82,8 +97,12 @@ public final class SessionCommand {
         }
         for (var session : sessions) {
           System.out.printf(
-              "%-24s %-8s %d attached%n",
-              session.name(), session.live() ? "live" : "ended", session.attached());
+              "%-24s %-8s %d attached  %-24s %s%n",
+              session.name(),
+              session.live() ? "live" : "ended",
+              session.attached(),
+              session.room().isBlank() ? "-" : "room=" + session.room(),
+              String.join(" ", session.command()));
         }
       }
       return 0;

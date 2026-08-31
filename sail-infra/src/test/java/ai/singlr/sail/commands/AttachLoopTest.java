@@ -34,11 +34,12 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create(
-            "s1", List.of("sh", "-c", "read a; echo pty-says:$a; exit 0"), "/tmp", "", 80, 24);
+            "s1", List.of("sh", "-c", "read a; echo pty-says:$a; exit 0"), "/tmp", "", "", 80, 24);
         var channel = client.attach("s1", true);
 
         var stdinFeed = new PipedOutputStream();
@@ -63,10 +64,11 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
-        client.create("s1", List.of("sh", "-c", "read a; echo after:$a"), "/tmp", "", 80, 24);
+        client.create("s1", List.of("sh", "-c", "read a; echo after:$a"), "/tmp", "", "", 80, 24);
         var channel = client.attach("s1", true);
 
         var stdinFeed = new PipedOutputStream();
@@ -91,6 +93,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -98,6 +101,7 @@ class AttachLoopTest {
             "s1",
             List.of("sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; read a"),
             "/tmp",
+            "",
             "",
             80,
             24);

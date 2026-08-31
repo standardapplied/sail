@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
@@ -41,6 +42,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity("uday", true),
+            PtyRooms.NONE,
             PtyEvents.NONE);
     host.start();
     return host;
@@ -69,6 +71,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             List.of("sh", "-c", "read a; echo pty-says:$a@$(hostname); exit 0"),
             "/tmp",
             container,
+            "",
             80,
             24);
         var channel = client.attach("c1", true);
@@ -107,6 +110,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             List.of("sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; read a"),
             "/tmp",
             container,
+            "",
             80,
             24);
         var channel = client.attach("c1", true);

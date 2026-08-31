@@ -46,7 +46,7 @@ public final class ContainerExec {
    * @return an unmodifiable command list ready for {@link ShellExec#exec}
    */
   public static List<String> asDevUser(String containerName, List<String> args) {
-    return devUser(containerName, false, null, args);
+    return devUser(containerName, false, null, Map.of(), args);
   }
 
   /**
@@ -60,11 +60,21 @@ public final class ContainerExec {
    * @return an unmodifiable command list ready for {@link ShellExec#exec}
    */
   public static List<String> asDevUserTty(String containerName, List<String> args) {
-    return devUser(containerName, true, DEV_WORKSPACE, args);
+    return asDevUserTty(containerName, Map.of(), args);
+  }
+
+  /**
+   * As {@link #asDevUserTty(String, List)}, additionally exporting {@code env} into the container
+   * process — {@code incus exec} forwards nothing from the caller's environment on its own, so
+   * anything the child must inherit crosses as an explicit {@code --env}.
+   */
+  public static List<String> asDevUserTty(
+      String containerName, Map<String, String> env, List<String> args) {
+    return devUser(containerName, true, DEV_WORKSPACE, env, args);
   }
 
   private static List<String> devUser(
-      String containerName, boolean tty, String cwd, List<String> args) {
+      String containerName, boolean tty, String cwd, Map<String, String> env, List<String> args) {
     NameValidator.requireValidProjectName(containerName);
     var prefix = new ArrayList<String>(List.of("incus", "exec", containerName));
     if (tty) {
@@ -81,8 +91,9 @@ public final class ContainerExec {
             "--env",
             "XDG_RUNTIME_DIR=" + DEV_XDG_RUNTIME_DIR,
             "--env",
-            "DBUS_SESSION_BUS_ADDRESS=unix:path=" + DEV_XDG_RUNTIME_DIR + "/bus",
-            "--"));
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=" + DEV_XDG_RUNTIME_DIR + "/bus"));
+    env.forEach((key, value) -> prefix.addAll(List.of("--env", key + "=" + value)));
+    prefix.add("--");
     return Stream.concat(prefix.stream(), args.stream()).toList();
   }
 

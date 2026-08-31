@@ -169,7 +169,7 @@ class CodexHookConfigTest {
     assertEquals(
         SailEventHelper.SCRIPT_PATH + " agent_session_started", startHooks.get(0).get("command"));
     assertEquals(
-        SailSessionReport.SCRIPT_PATH,
+        SailSessionReport.SCRIPT_PATH + " codex",
         startHooks.get(1).get("command"),
         "codex's matcher-less group fires on every start source, so one group serves both hooks");
     assertEquals(SailSessionReport.HOOK_TIMEOUT_SECONDS, startHooks.get(1).get("timeout"));

@@ -408,7 +408,8 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+      SpecCreateRequest request, Actor actor) {
     return Result.success(
         new GlobalSpecCreatedResponse(
             new GlobalSpecView(
@@ -503,6 +504,17 @@ class TestOperations implements Operations {
   public Result<RunSessionResponse> recordRunSession(
       String runId, String sessionId, String source, String transcriptPath) {
     return Result.success(new RunSessionResponse(runId, sessionId, source));
+  }
+
+  @Override
+  public Result<RoomConversationResponse> recordRoomConversation(
+      String roomId,
+      String agent,
+      String sessionId,
+      String source,
+      String transcriptPath,
+      Actor actor) {
+    return Result.success(new RoomConversationResponse(roomId, sessionId, agent));
   }
 
   @Override

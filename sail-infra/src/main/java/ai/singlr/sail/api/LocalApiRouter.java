@@ -246,7 +246,8 @@ final class LocalApiRouter implements LocalApiHandler {
           yield problem(403, "A room session reads and converses; it cannot create specs.");
         }
         yield ApiResponse.fromCreated(
-            operations.createGlobalSpec(createFrom(request.form(), caller.author())));
+            operations.createGlobalSpec(
+                createFrom(request.form(), caller.author()), caller.actor()));
       }
       default -> problem(405, "specs accepts GET or POST");
     };
@@ -353,26 +354,45 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * The session-identity lane: the SessionStart hook knows only its run credential, so the
-   * credential names the run and the report names the conversation. {@code POST} records the
-   * payload's {@code session_id}, {@code source}, and {@code transcript_path} on the run row, last
-   * write wins — a resume, clear, or compact restart re-reports the new conversation. A revoked
-   * credential never resolves to a caller, so a finished run cannot rewrite its session.
+   * The session-identity lane — one door, two credentials. A run caller: the SessionStart hook
+   * knows only its run credential, so the credential names the run and the report names the
+   * conversation; {@code POST} records the payload's {@code session_id}, {@code source}, and {@code
+   * transcript_path} on the run row, last write wins — a resume, clear, or compact restart
+   * re-reports the new conversation, and a revoked credential never resolves to a caller, so a
+   * finished run cannot rewrite its session. A box caller has no run row: it may report only a
+   * room-bound interactive conversation ({@code room_id}, the {@code SAIL_ROOM_ID} its terminal
+   * session exported), which becomes a record-class {@code agent_conversation_started} event in the
+   * room — the seam that later lets one conversation be reopened through either door.
    */
   private ApiResponse runSession(LocalApiRequest request, Caller caller) {
-    if (!(caller instanceof Caller.Run(var run))) {
+    if (caller instanceof Caller.Box && Strings.isBlank(request.form().get("room_id"))) {
       return problem(
           403,
           "Session reports name a run's conversation and require a run credential; the box"
-              + " credential has no run to report for.");
+              + " credential reports only a room-bound conversation (room_id).");
     }
     if (!"POST".equals(request.method())) {
       return problem(405, "run session accepts POST");
     }
     var form = request.form();
-    return ApiResponse.from(
-        operations.recordRunSession(
-            run.id(), form.get("session_id"), form.get("source"), form.get("transcript_path")));
+    return switch (caller) {
+      case Caller.Run(var run) ->
+          ApiResponse.from(
+              operations.recordRunSession(
+                  run.id(),
+                  form.get("session_id"),
+                  form.get("source"),
+                  form.get("transcript_path")));
+      case Caller.Box box ->
+          ApiResponse.from(
+              operations.recordRoomConversation(
+                  form.get("room_id"),
+                  form.get("agent"),
+                  form.get("session_id"),
+                  form.get("source"),
+                  form.get("transcript_path"),
+                  box.actor()));
+    };
   }
 
   private static List<String> deliveredIds(String value) {
@@ -432,7 +452,7 @@ final class LocalApiRouter implements LocalApiHandler {
             form.get("body"),
             form.get("plan"),
             null,
-            null)
+            form.get("room_id"))
         .withCreatedBy(principal);
   }
 

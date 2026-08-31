@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import java.nio.file.Files;
@@ -80,6 +81,14 @@ public final class ApiSpecCreateCommand implements Runnable {
   @Option(names = "--repos", description = "Comma-separated repo names.")
   private String repos;
 
+  @Option(
+      names = "--room",
+      paramLabel = "<room-id>",
+      description =
+          "Home room the spec is born in (must exist, same project). Defaults to SAIL_ROOM_ID when"
+              + " set — a terminal session pinned to a room — else the spec gets its own room.")
+  private String room;
+
   @Mixin private SyncOptions syncOptions;
 
   @Mixin private ConnectionOptions connection;
@@ -120,6 +129,8 @@ public final class ApiSpecCreateCommand implements Runnable {
     if (branch != null) body.put("branch", branch);
     if (dependsOn != null) body.put("depends_on", List.of(dependsOn.split(",")));
     if (repos != null) body.put("repos", List.of(repos.split(",")));
+    var homeRoom = Strings.isBlank(room) ? System.getenv("SAIL_ROOM_ID") : room;
+    if (Strings.isNotBlank(homeRoom)) body.put("room_id", homeRoom);
     if (bodyFile != null) body.put("body", Files.readString(bodyFile));
     if (planFile != null) body.put("plan", Files.readString(planFile));
 
@@ -183,6 +194,7 @@ public final class ApiSpecCreateCommand implements Runnable {
             || branch != null
             || dependsOn != null
             || repos != null
+            || room != null
             || !"draft".equals(status);
     if (derived) {
       throw new IllegalArgumentException(

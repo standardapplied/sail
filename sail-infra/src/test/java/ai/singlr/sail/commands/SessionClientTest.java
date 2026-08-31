@@ -31,18 +31,22 @@ class SessionClientTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            (room, project, who) -> {},
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
-        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", 80, 24);
+        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "lounge", 80, 24);
         var listed = client.list();
         assertEquals(1, listed.size());
         assertEquals("s1", listed.getFirst().name());
         assertTrue(listed.getFirst().live());
+        assertEquals("lounge", listed.getFirst().room(), "the room rides create to list");
+        assertEquals(List.of("sh", "-c", "read a"), listed.getFirst().command());
 
         var dup =
             assertThrows(
-                IOException.class, () -> client.create("s1", List.of("sh"), "/tmp", "", 80, 24));
+                IOException.class,
+                () -> client.create("s1", List.of("sh"), "/tmp", "", "", 80, 24));
         assertTrue(dup.getMessage().contains("already running"));
 
         client.kill("s1");

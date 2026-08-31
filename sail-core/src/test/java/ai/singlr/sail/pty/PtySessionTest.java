@@ -83,11 +83,13 @@ class PtySessionTest {
     }
   }
 
+  private static PtySession.Origin origin(String name, String owner, String project) {
+    return new PtySession.Origin(name, owner, project, "", List.of("sh"));
+  }
+
   private PtySession session(String script) throws IOException {
     return PtySession.start(
-        "t",
-        "uday",
-        "acme",
+        origin("t", "uday", "acme"),
         PtyEvents.NONE,
         List.of("sh", "-c", script),
         Map.of("TERM", "dumb"),
@@ -104,25 +106,33 @@ class PtySessionTest {
     var recorder =
         new PtyEvents() {
           @Override
-          public void sessionStarted(String session, String project, String fde) {
-            events.add("started:" + session + ":" + project + ":" + fde);
+          public void sessionStarted(PtySession.Origin origin) {
+            events.add(
+                "started:"
+                    + origin.name()
+                    + ":"
+                    + origin.project()
+                    + ":"
+                    + origin.ownerFde()
+                    + ":"
+                    + origin.room()
+                    + ":"
+                    + String.join(" ", origin.command()));
           }
 
           @Override
-          public void sessionAttached(String session, String project, String fde) {
-            events.add("attached:" + session + ":" + fde);
+          public void sessionAttached(PtySession.Origin origin, String fde) {
+            events.add("attached:" + origin.name() + ":" + fde + ":" + origin.room());
           }
 
           @Override
-          public void sessionEnded(String session, String project, String reason) {
-            events.add("ended:" + session + ":" + reason);
+          public void sessionEnded(PtySession.Origin origin, String reason) {
+            events.add("ended:" + origin.name() + ":" + reason + ":" + origin.room());
           }
         };
     var session =
         PtySession.start(
-            "owned",
-            "mady",
-            "acme",
+            new PtySession.Origin("owned", "mady", "acme", "lounge", List.of("claude")),
             recorder,
             List.of("sh", "-c", "read a"),
             Map.of("TERM", "dumb"),
@@ -134,12 +144,16 @@ class PtySessionTest {
     try {
       assertEquals("mady", session.ownerFde());
       assertEquals("acme", session.project());
-      assertTrue(events.contains("started:owned:acme:mady"), events.toString());
+      assertEquals("lounge", session.origin().room());
+      assertTrue(session.origin().roomBound());
+      assertTrue(
+          events.contains("started:owned:acme:mady:lounge:claude"),
+          "the start fact names the room and the command: " + events);
 
       var writer = new Collector();
       session.attach(writer, true, "mady");
       assertEquals("mady", session.writerFde(), "the token records its principal");
-      assertTrue(events.contains("attached:owned:mady"), events.toString());
+      assertTrue(events.contains("attached:owned:mady:lounge"), events.toString());
     } finally {
       session.close();
     }
@@ -149,8 +163,8 @@ class PtySessionTest {
       Thread.onSpinWait();
     }
     assertTrue(
-        events.stream().anyMatch(e -> e.startsWith("ended:owned:")),
-        "the ending is a recorded fact: " + events);
+        events.stream().anyMatch(e -> e.startsWith("ended:owned:") && e.endsWith(":lounge")),
+        "the ending is a recorded fact that still names the room: " + events);
   }
 
   @Test
@@ -235,9 +249,7 @@ class PtySessionTest {
   void aFloodNeverBlocksTheChildEvenWithAStalledObserver() throws Exception {
     try (var session =
         PtySession.start(
-            "slow",
-            "uday",
-            "acme",
+            origin("slow", "uday", "acme"),
             PtyEvents.NONE,
             List.of(
                 "sh",
@@ -277,21 +289,19 @@ class PtySessionTest {
     var brittle =
         new PtyEvents() {
           @Override
-          public void sessionStarted(String session, String project, String fde) {}
+          public void sessionStarted(PtySession.Origin origin) {}
 
           @Override
-          public void sessionAttached(String session, String project, String fde) {}
+          public void sessionAttached(PtySession.Origin origin, String fde) {}
 
           @Override
-          public void sessionEnded(String session, String project, String reason) {
+          public void sessionEnded(PtySession.Origin origin, String reason) {
             throw new RuntimeException("the event sink is down");
           }
         };
     var session =
         PtySession.start(
-            "brittle",
-            "uday",
-            "acme",
+            origin("brittle", "uday", "acme"),
             brittle,
             List.of("sh", "-c", "exit 0"),
             Map.of("TERM", "dumb"),
@@ -310,9 +320,7 @@ class PtySessionTest {
   void aPausedSubscriberIsResyncedFromTheJournalNotLeftCorrupt() throws Exception {
     var session =
         PtySession.start(
-            "resync",
-            "uday",
-            "acme",
+            origin("resync", "uday", "acme"),
             PtyEvents.NONE,
             List.of(
                 "sh",

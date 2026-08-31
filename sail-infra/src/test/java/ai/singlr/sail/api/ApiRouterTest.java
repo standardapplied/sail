@@ -1930,7 +1930,8 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+        SpecCreateRequest request, Actor actor) {
       return Result.success(
           new GlobalSpecCreatedResponse(
               new GlobalSpecView(
@@ -2012,6 +2013,18 @@ class ApiRouterTest {
     public Result<RunSessionResponse> recordRunSession(
         String runId, String sessionId, String source, String transcriptPath) {
       return new TestOperations().recordRunSession(runId, sessionId, source, transcriptPath);
+    }
+
+    @Override
+    public Result<RoomConversationResponse> recordRoomConversation(
+        String roomId,
+        String agent,
+        String sessionId,
+        String source,
+        String transcriptPath,
+        Actor actor) {
+      return new TestOperations()
+          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, actor);
     }
 
     @Override

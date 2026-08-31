@@ -15,10 +15,26 @@ import java.util.List;
  */
 public sealed interface PtyMessage {
 
+  int PAGE_LIMIT = 16;
+  int MAX_COMMAND_BYTES = 32 * 1024;
+
   record Hello(String token) implements PtyMessage {}
 
+  /**
+   * Starts a session. {@code room} is the room this session is pinned to — blank for none. The host
+   * admits it through its {@link PtyRooms} gate (the room exists in the session's project and the
+   * caller holds its post right) before it rides into the child as {@code SAIL_ROOM_ID}, onto the
+   * session's events, and back out on listings. {@code command} is capped at {@link
+   * #MAX_COMMAND_BYTES} as encoded on the wire.
+   */
   record Create(
-      String session, List<String> command, String cwd, String project, int cols, int rows)
+      String session,
+      List<String> command,
+      String cwd,
+      String project,
+      String room,
+      int cols,
+      int rows)
       implements PtyMessage {}
 
   record Attach(String session, boolean write) implements PtyMessage {}
@@ -31,7 +47,13 @@ public sealed interface PtyMessage {
 
   record Detach() implements PtyMessage {}
 
-  record ListSessions() implements PtyMessage {}
+  /**
+   * Asks for one page of the caller's sessions, in name order, strictly after {@code after} (blank
+   * for the first page) and at most {@code limit} long. The host clamps {@code limit} to {@link
+   * #PAGE_LIMIT} and bounds a session's command at creation to {@link #MAX_COMMAND_BYTES} of wire
+   * bytes, so a full page always fits one frame however many sessions exist.
+   */
+  record ListSessions(String after, int limit) implements PtyMessage {}
 
   record Kill(String session) implements PtyMessage {}
 
@@ -51,10 +73,17 @@ public sealed interface PtyMessage {
 
   record SessionEnded(String reason) implements PtyMessage {}
 
-  record SessionInfo(String name, boolean live, int attached, String writerFde)
+  /**
+   * One listed session. {@code command} is the child as requested (the default login shell when
+   * none was), so a client can tell an agent session from a plain shell; {@code room} is blank when
+   * the session is not room-bound.
+   */
+  record SessionInfo(
+      String name, boolean live, int attached, String writerFde, String room, List<String> command)
       implements PtyMessage {}
 
-  record Sessions(List<SessionInfo> sessions) implements PtyMessage {}
+  /** One page of sessions; {@code next} is blank on the last page, else the cursor to continue. */
+  record Sessions(List<SessionInfo> sessions, String next) implements PtyMessage {}
 
   record Ok() implements PtyMessage {}
 

@@ -21,7 +21,9 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -131,6 +133,42 @@ class RoomsSurfaceTest {
   }
 
   @Test
+  void aRoomIdAlreadyOwnedByASpecIsRefusedSoTheNewRoomIsNeverShadowed() {
+    create("adas-room", "Ada's room");
+    specStore.create(
+        new SpecStore.SpecRow(
+            "auth",
+            "acme",
+            "Auth",
+            ai.singlr.sail.config.SpecStatus.DRAFT,
+            HANDLE,
+            null,
+            null,
+            null,
+            null,
+            0,
+            HANDLE,
+            "",
+            "",
+            HANDLE,
+            List.of(),
+            List.of(),
+            "adas-room"));
+
+    var shadowed =
+        ops.createRoom(
+            RoomCreateRequest.fromMap(Map.of("id", "auth", "project", "acme", "title", "Namesake"))
+                .withCreatedBy(HANDLE),
+            admin());
+
+    assertTrue(shadowed instanceof Result.Failure<RoomDetailResponse>, shadowed.toString());
+    var failure = (Result.Failure<RoomDetailResponse>) shadowed;
+    assertEquals(ErrorCode.CONFLICT, failure.errorCode());
+    assertTrue(failure.errorMessage().contains("Spec 'auth'"), failure.errorMessage());
+    assertTrue(roomStore.findById("auth").isEmpty(), "no unaddressable room is left behind");
+  }
+
+  @Test
   void deleteTombstonesAChatRoomButRefusesARoomHoldingSpecs() {
     create("empty-room", "Empty");
     var deleted = ops.deleteRoom("empty-room", admin());
@@ -144,7 +182,8 @@ class RoomsSurfaceTest {
             SpecCreateRequest.fromMap(
                     Map.of(
                         "id", "work", "title", "Work", "project", "acme", "room_id", "busy-room"))
-                .withCreatedBy(HANDLE));
+                .withCreatedBy(HANDLE),
+            admin());
     assertTrue(spec instanceof Result.Success<GlobalSpecCreatedResponse>, spec.toString());
 
     var refused = ops.deleteRoom("busy-room", admin());
@@ -353,5 +392,50 @@ class RoomsSurfaceTest {
     assertTrue(
         posted instanceof Result.Success<SpecMessageResponse>,
         "a pre-decouple spec without a room row still answers on the room door");
+  }
+
+  @Test
+  void deletionNeverOrphansASpecOntoATombstonedRoom() throws Exception {
+    for (var i = 0; i < 150; i++) {
+      var roomId = "race-room-" + i;
+      var specId = "race-spec-" + i;
+      create(roomId, "Race");
+      var barrier = new CyclicBarrier(2);
+      var deleter =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    align(barrier);
+                    ops.deleteRoom(roomId, admin());
+                  });
+      var binder =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    align(barrier);
+                    ops.createGlobalSpec(
+                        SpecCreateRequest.fromMap(
+                                Map.of(
+                                    "id", specId, "title", "Race", "project", "acme", "room_id",
+                                    roomId))
+                            .withCreatedBy(HANDLE),
+                        admin());
+                  });
+      deleter.join();
+      binder.join();
+      if (specStore.findById(specId).isPresent()) {
+        assertTrue(
+            roomStore.findById(roomId).isPresent(),
+            "iteration " + i + ": spec '" + specId + "' bound to a room tombstoned underneath it");
+      }
+    }
+  }
+
+  private static void align(CyclicBarrier barrier) {
+    try {
+      barrier.await();
+    } catch (Exception interrupted) {
+      throw new IllegalStateException(interrupted);
+    }
   }
 }

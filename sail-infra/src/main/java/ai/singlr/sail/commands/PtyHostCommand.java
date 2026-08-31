@@ -29,6 +29,7 @@ public final class PtyHostCommand implements Callable<Integer> {
             SailPaths.ptySocketPath(),
             SailPaths.sessionsDir(),
             new PtyHostIdentity(),
+            new PtyHostRooms(),
             new PtyHostEvents());
     var done = new CountDownLatch(1);
     Runtime.getRuntime()
@@ -47,9 +48,10 @@ public final class PtyHostCommand implements Callable<Integer> {
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
       ai.singlr.sail.pty.PtyIdentity.Resolver identity,
+      ai.singlr.sail.pty.PtyRooms rooms,
       ai.singlr.sail.pty.PtyEvents events)
       throws java.io.IOException {
-    var host = new PtySessionHost(socket, sessions, JOURNAL_CAPACITY, identity, events);
+    var host = new PtySessionHost(socket, sessions, JOURNAL_CAPACITY, identity, rooms, events);
     host.start();
     Thread.ofVirtual()
         .start(
