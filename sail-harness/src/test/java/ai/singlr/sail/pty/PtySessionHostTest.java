@@ -105,7 +105,7 @@ class PtySessionHostTest {
       var rude = SocketChannel.open(StandardProtocolFamily.UNIX);
       rude.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
       PtyWire.handshake(rude, rude);
-      PtyWire.write(rude, new PtyMessage.ListSessions());
+      PtyWire.write(rude, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
       assertInstanceOf(PtyMessage.Err.class, PtyWire.read(rude), "hello must come first");
       rude.close();
 
@@ -138,7 +138,7 @@ class PtySessionHostTest {
         assertTrue(events.contains("attached:mine:root"), events.toString());
 
         try (var owner = connect("tok-uday")) {
-          PtyWire.write(owner, new PtyMessage.ListSessions());
+          PtyWire.write(owner, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
           var listed = (PtyMessage.Sessions) PtyWire.read(owner);
           assertEquals(
               "root", listed.sessions().getFirst().writerFde(), "the token names its holder");
@@ -146,12 +146,12 @@ class PtySessionHostTest {
       }
 
       try (var owner = connect("tok-uday")) {
-        PtyWire.write(owner, new PtyMessage.ListSessions());
+        PtyWire.write(owner, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) PtyWire.read(owner);
         var freed = System.nanoTime() + 5_000_000_000L;
         while (!listed.sessions().getFirst().writerFde().isEmpty() && System.nanoTime() < freed) {
           Thread.onSpinWait();
-          PtyWire.write(owner, new PtyMessage.ListSessions());
+          PtyWire.write(owner, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
           listed = (PtyMessage.Sessions) PtyWire.read(owner);
         }
         assertEquals(
@@ -178,7 +178,7 @@ class PtySessionHostTest {
       throws IOException {
     var deadline = System.nanoTime() + 10_000_000_000L;
     while (System.nanoTime() < deadline) {
-      PtyWire.write(channel, new PtyMessage.ListSessions());
+      PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
       var listed = (PtyMessage.Sessions) readControl(channel);
       if (listed.sessions().stream().anyMatch(s -> s.name().equals(name) && !s.live())) {
         return listed;
@@ -203,7 +203,7 @@ class PtySessionHostTest {
                 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
-        PtyWire.write(channel, new PtyMessage.ListSessions());
+        PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
         assertEquals("design-talk", listed.sessions().getFirst().room());
         assertEquals(
@@ -242,7 +242,7 @@ class PtySessionHostTest {
       try (var channel = connect()) {
         PtyWire.write(channel, new PtyMessage.Create("shell", List.of(), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        PtyWire.write(channel, new PtyMessage.ListSessions());
+        PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
         var shell =
             listed.sessions().stream().filter(info -> info.name().equals("shell")).findFirst();
@@ -250,6 +250,64 @@ class PtySessionHostTest {
         assertEquals("", shell.orElseThrow().room());
       }
     }
+  }
+
+  @Test
+  void listingsPageInNameOrderSoNoCountOfSessionsOutgrowsAFrame() throws Exception {
+    try (var ignored = startHost()) {
+      try (var channel = connect()) {
+        for (var name : List.of("charlie", "alpha", "bravo")) {
+          PtyWire.write(
+              channel,
+              new PtyMessage.Create(name, List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+        }
+
+        PtyWire.write(channel, new PtyMessage.ListSessions("", 2));
+        var first = (PtyMessage.Sessions) PtyWire.read(channel);
+        assertEquals(List.of("alpha", "bravo"), names(first));
+        assertEquals("bravo", first.next(), "a full page hands back the cursor to continue from");
+
+        PtyWire.write(channel, new PtyMessage.ListSessions(first.next(), 2));
+        var second = (PtyMessage.Sessions) PtyWire.read(channel);
+        assertEquals(List.of("charlie"), names(second));
+        assertEquals("", second.next(), "the last page carries no cursor");
+
+        PtyWire.write(channel, new PtyMessage.ListSessions("", 0));
+        assertEquals(
+            1,
+            ((PtyMessage.Sessions) PtyWire.read(channel)).sessions().size(),
+            "a limit below one is clamped up, never an empty page that loops forever");
+        PtyWire.write(channel, new PtyMessage.ListSessions("", Integer.MAX_VALUE));
+        var clamped = (PtyMessage.Sessions) PtyWire.read(channel);
+        assertEquals(List.of("alpha", "bravo", "charlie"), names(clamped));
+        assertEquals("", clamped.next());
+      }
+    }
+  }
+
+  @Test
+  void anOversizedCommandIsRefusedBeforeAnythingIsSpawned() throws Exception {
+    try (var host = startHost()) {
+      try (var channel = connect()) {
+        var padding = "x".repeat(PtyMessage.MAX_COMMAND_BYTES);
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create(
+                "huge", List.of("sh", "-c", "read a", padding), "/tmp", "", "", 80, 24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+        assertTrue(refused.message().contains("cap is"), refused.message());
+        PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertTrue(
+            ((PtyMessage.Sessions) PtyWire.read(channel)).sessions().isEmpty(),
+            "nothing was spawned");
+        assertTrue(events.isEmpty(), "and no session fact was recorded");
+      }
+    }
+  }
+
+  private static List<String> names(PtyMessage.Sessions page) {
+    return page.sessions().stream().map(PtyMessage.SessionInfo::name).toList();
   }
 
   @Test
@@ -285,7 +343,7 @@ class PtySessionHostTest {
         assertInstanceOf(
             PtyMessage.Err.class, readControl(observer), "a non-writer's input is refused");
 
-        PtyWire.write(observer, new PtyMessage.ListSessions());
+        PtyWire.write(observer, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         assertInstanceOf(
             PtyMessage.Sessions.class,
             readControl(observer),
@@ -309,7 +367,7 @@ class PtySessionHostTest {
             new PtyMessage.Create("madys", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
 
-        PtyWire.write(mady, new PtyMessage.ListSessions());
+        PtyWire.write(mady, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(mady);
         assertEquals(
             List.of("madys"),
@@ -317,7 +375,7 @@ class PtySessionHostTest {
             "a member sees only their own sessions, never another owner's");
       }
       try (var admin = connect("tok-root")) {
-        PtyWire.write(admin, new PtyMessage.ListSessions());
+        PtyWire.write(admin, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(admin);
         assertEquals(2, listed.sessions().size(), "an admin sees every owner's sessions");
       }
@@ -342,7 +400,7 @@ class PtySessionHostTest {
             "a foreign member cannot reuse an owner's name, even a corpse");
       }
       try (var uday = connect("tok-uday")) {
-        PtyWire.write(uday, new PtyMessage.ListSessions());
+        PtyWire.write(uday, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(uday);
         assertEquals(1, listed.sessions().size(), "the owner's corpse is left intact");
         assertEquals("keep", listed.sessions().getFirst().name());
@@ -429,7 +487,7 @@ class PtySessionHostTest {
             channel,
             new PtyMessage.Create("a", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        PtyWire.write(channel, new PtyMessage.ListSessions());
+        PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
         assertEquals(1, listed.sessions().size());
         assertEquals("a", listed.sessions().getFirst().name());
@@ -453,13 +511,13 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
 
         var deadline = System.nanoTime() + 10_000_000_000L;
-        PtyWire.write(channel, new PtyMessage.ListSessions());
+        PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) PtyWire.read(channel);
         while (listed.sessions().stream().anyMatch(s -> s.name().equals("corpse") && s.live())) {
           if (System.nanoTime() > deadline) {
             throw new AssertionError("corpse never exited");
           }
-          PtyWire.write(channel, new PtyMessage.ListSessions());
+          PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
           listed = (PtyMessage.Sessions) PtyWire.read(channel);
         }
 

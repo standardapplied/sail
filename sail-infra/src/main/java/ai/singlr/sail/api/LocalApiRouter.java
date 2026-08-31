@@ -246,7 +246,8 @@ final class LocalApiRouter implements LocalApiHandler {
           yield problem(403, "A room session reads and converses; it cannot create specs.");
         }
         yield ApiResponse.fromCreated(
-            operations.createGlobalSpec(createFrom(request.form(), caller.author())));
+            operations.createGlobalSpec(
+                createFrom(request.form(), caller.author()), caller.actor()));
       }
       default -> problem(405, "specs accepts GET or POST");
     };
@@ -390,7 +391,7 @@ final class LocalApiRouter implements LocalApiHandler {
                   form.get("session_id"),
                   form.get("source"),
                   form.get("transcript_path"),
-                  box.author()));
+                  box.actor()));
     };
   }
 

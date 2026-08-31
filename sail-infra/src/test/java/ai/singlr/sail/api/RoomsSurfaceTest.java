@@ -144,7 +144,8 @@ class RoomsSurfaceTest {
             SpecCreateRequest.fromMap(
                     Map.of(
                         "id", "work", "title", "Work", "project", "acme", "room_id", "busy-room"))
-                .withCreatedBy(HANDLE));
+                .withCreatedBy(HANDLE),
+            admin());
     assertTrue(spec instanceof Result.Success<GlobalSpecCreatedResponse>, spec.toString());
 
     var refused = ops.deleteRoom("busy-room", admin());

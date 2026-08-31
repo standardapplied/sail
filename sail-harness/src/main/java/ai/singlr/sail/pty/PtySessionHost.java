@@ -10,11 +10,11 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -174,7 +174,7 @@ public final class PtySessionHost implements AutoCloseable {
             }
             reply(channel, new PtyMessage.Ok());
           }
-          case PtyMessage.ListSessions m -> reply(channel, listSessions(who));
+          case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
           case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
@@ -232,6 +232,18 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
     }
+    var commandBytes =
+        m.command().stream().mapToInt(arg -> arg.getBytes(StandardCharsets.UTF_8).length).sum();
+    if (commandBytes > PtyMessage.MAX_COMMAND_BYTES) {
+      return new PtyMessage.Err(
+          "Refusing a "
+              + commandBytes
+              + "-byte command for session '"
+              + m.session()
+              + "'; the cap is "
+              + PtyMessage.MAX_COMMAND_BYTES
+              + " bytes. Put it in a script and run that.");
+    }
     var room = java.util.Objects.toString(m.room(), "");
     if (!room.isBlank()) {
       try {
@@ -269,22 +281,34 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private PtyMessage listSessions(PtyIdentity who) {
-    var infos = new ArrayList<PtyMessage.SessionInfo>();
-    sessions.values().stream()
-        .filter(session -> admitted(who, session))
-        .sorted(java.util.Comparator.comparing(PtySession::name))
-        .forEach(
-            session ->
-                infos.add(
-                    new PtyMessage.SessionInfo(
-                        session.name(),
-                        session.live(),
-                        session.attachedCount(),
-                        session.writerFde(),
-                        session.origin().room(),
-                        session.origin().command())));
-    return new PtyMessage.Sessions(infos);
+  /**
+   * One name-ordered page of the caller's sessions. A page is bounded by {@link
+   * PtyMessage#PAGE_LIMIT} entries of at most {@link PtyMessage#MAX_COMMAND_BYTES} of command each
+   * (names are file names, so a filesystem bounds them), which keeps every page well under the
+   * wire's frame cap no matter how many sessions the host holds.
+   */
+  private PtyMessage listSessions(PtyIdentity who, PtyMessage.ListSessions request) {
+    var after = java.util.Objects.toString(request.after(), "");
+    var limit = Math.clamp(request.limit(), 1, PtyMessage.PAGE_LIMIT);
+    var mine =
+        sessions.values().stream()
+            .filter(session -> admitted(who, session))
+            .filter(session -> session.name().compareTo(after) > 0)
+            .sorted(java.util.Comparator.comparing(PtySession::name))
+            .toList();
+    var page = mine.stream().limit(limit).map(PtySessionHost::infoOf).toList();
+    var next = mine.size() > limit ? page.getLast().name() : "";
+    return new PtyMessage.Sessions(page, next);
+  }
+
+  private static PtyMessage.SessionInfo infoOf(PtySession session) {
+    return new PtyMessage.SessionInfo(
+        session.name(),
+        session.live(),
+        session.attachedCount(),
+        session.writerFde(),
+        session.origin().room(),
+        session.origin().command());
   }
 
   private PtyMessage kill(String name, PtyIdentity who) {

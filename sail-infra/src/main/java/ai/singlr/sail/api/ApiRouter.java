@@ -420,7 +420,8 @@ public final class ApiRouter implements HttpHandler {
             ApiResponse.fromCreated(
                 operations.createGlobalSpec(
                     SpecCreateRequest.fromMap(JsonBody.readMap(exchange))
-                        .withCreatedBy(actor(exchange))));
+                        .withCreatedBy(actor(exchange)),
+                    actorOf(exchange)));
         default -> throw methodNotAllowed();
       };
     }

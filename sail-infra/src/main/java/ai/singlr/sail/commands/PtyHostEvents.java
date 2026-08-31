@@ -20,9 +20,10 @@ import java.util.Map;
 /**
  * The production {@link PtyEvents}: each session fact becomes one record-class event row — {@code
  * pty_session_started|attached|ended} — observational only, never driving run or spec state. A
- * room-bound session's rows carry {@code room_id}, so a room timeline can show who opened a
- * terminal there and with what. Failures are swallowed by design: a session must never die because
- * an event row could not be written.
+ * room-bound session's rows are scoped to the room (the indexed {@code spec_id} column, which a
+ * room's history query filters on) and carry {@code room_id} in their data, so a room timeline
+ * shows who opened a terminal there and with what. Failures are swallowed by design: a session must
+ * never die because an event row could not be written.
  */
 final class PtyHostEvents implements PtyEvents {
 
@@ -40,19 +41,19 @@ final class PtyHostEvents implements PtyEvents {
   public void sessionStarted(PtySession.Origin origin) {
     var data = dataFor(origin);
     data.put("command", origin.command());
-    insert("pty_session_started", origin.project(), origin.ownerFde(), data);
+    insert("pty_session_started", origin, origin.ownerFde(), data);
   }
 
   @Override
   public void sessionAttached(PtySession.Origin origin, String fde) {
-    insert("pty_session_attached", origin.project(), fde, dataFor(origin));
+    insert("pty_session_attached", origin, fde, dataFor(origin));
   }
 
   @Override
   public void sessionEnded(PtySession.Origin origin, String reason) {
     var data = dataFor(origin);
     data.put("reason", reason);
-    insert("pty_session_ended", origin.project(), "sail", data);
+    insert("pty_session_ended", origin, "sail", data);
   }
 
   private static Map<String, Object> dataFor(PtySession.Origin origin) {
@@ -64,7 +65,8 @@ final class PtyHostEvents implements PtyEvents {
     return data;
   }
 
-  private void insert(String type, String project, String agent, Map<String, Object> data) {
+  private void insert(
+      String type, PtySession.Origin origin, String agent, Map<String, Object> data) {
     try (var db = Sqlite.open(dbPath)) {
       new EventStore(db)
           .insert(
@@ -72,8 +74,8 @@ final class PtyHostEvents implements PtyEvents {
                   0,
                   DateTimeUtils.now().toString(),
                   type,
-                  project,
-                  null,
+                  origin.project(),
+                  origin.roomBound() ? origin.room() : null,
                   agent,
                   HostInfo.hostname(),
                   YamlUtil.dumpJson(data)));

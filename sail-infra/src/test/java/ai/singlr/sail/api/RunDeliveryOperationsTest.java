@@ -33,6 +33,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class RunDeliveryOperationsTest {
 
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
+
   @TempDir Path tempDir;
   private Sqlite db;
   private EventBus bus;
@@ -315,7 +317,7 @@ class RunDeliveryOperationsTest {
     var recorded =
         operations
             .recordRoomConversation(
-                "room", " claude-code ", " abc-123 ", "startup", "/t/abc.jsonl", "uday")
+                "room", " claude-code ", " abc-123 ", "startup", "/t/abc.jsonl", ADA)
             .orThrow();
 
     assertEquals("room", recorded.roomId());
@@ -329,7 +331,7 @@ class RunDeliveryOperationsTest {
     assertEquals(Event.RetentionClass.RECORD, Event.WellKnownTypes.retentionClass(event.type()));
     assertEquals("acme", event.project(), "the room's project scopes the event");
     assertEquals("room", event.spec(), "scoped by the room id, like a room message");
-    assertEquals("uday", event.agent(), "authored by the FDE behind the box credential");
+    assertEquals("ada", event.agent(), "authored by the FDE behind the box credential");
     assertEquals("abc-123", event.data().get("session_id"));
     assertEquals("claude-code", event.data().get("agent"));
     assertEquals("startup", event.data().get("session_source"));
@@ -340,22 +342,50 @@ class RunDeliveryOperationsTest {
 
   @Test
   void recordRoomConversationOmitsBlankOptionalsAndRefusesBadInput() {
-    var bare = operations.recordRoomConversation("room", " ", "abc", null, "", "uday").orThrow();
+    var bare = operations.recordRoomConversation("room", " ", "abc", null, "", ADA).orThrow();
     assertNull(bare.agent());
     assertFalse(bare.toMap().containsKey("agent"));
 
     assertEquals(
         ErrorCode.BAD_REQUEST,
         operations
-            .recordRoomConversation("room", "claude-code", " ", null, null, "uday")
+            .recordRoomConversation("room", "claude-code", " ", null, null, ADA)
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND,
         operations
-            .recordRoomConversation("nowhere", "claude-code", "abc", null, null, "uday")
+            .recordRoomConversation("nowhere", "claude-code", "abc", null, null, ADA)
             .asFailure()
             .errorCode());
+  }
+
+  @Test
+  void recordRoomConversationTakesTheRoomsPostGateSoABoxCannotForgeIntoForeignRooms() {
+    var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
+    assertEquals(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        operations
+            .recordRoomConversation("room", "claude-code", "abc", null, null, mallory)
+            .asFailure()
+            .errorCode(),
+        "a member who does not own the room cannot author a conversation into it");
+    var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.CLI);
+    assertEquals(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        operations
+            .recordRoomConversation("room", "claude-code", "abc", null, null, viewer)
+            .asFailure()
+            .errorCode(),
+        "a read-only credential writes nothing, even into its own room");
+    var admin = new Actor("ops", Role.ADMIN, Actor.Lane.CLI);
+    assertEquals(
+        "room",
+        operations
+            .recordRoomConversation("room", "claude-code", "abc", null, null, admin)
+            .orThrow()
+            .roomId(),
+        "an admin passes the same gate a room message takes");
   }
 
   @Test

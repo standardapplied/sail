@@ -12,6 +12,7 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /** A thin, testable client of the pty session host's socket — one call per command verb. */
@@ -57,12 +58,25 @@ public final class SessionClient implements AutoCloseable {
     expectOk("create");
   }
 
+  /** Every session the host admits this identity to, gathered page by page in name order. */
   public List<PtyMessage.SessionInfo> list() throws IOException {
-    PtyWire.write(channel, new PtyMessage.ListSessions());
-    if (PtyWire.read(channel) instanceof PtyMessage.Sessions(var sessions)) {
-      return sessions;
+    var all = new ArrayList<PtyMessage.SessionInfo>();
+    var after = "";
+    while (true) {
+      PtyWire.write(channel, new PtyMessage.ListSessions(after, PtyMessage.PAGE_LIMIT));
+      if (!(PtyWire.read(channel) instanceof PtyMessage.Sessions(var page, var next))) {
+        throw new IOException("The host did not answer the session listing.");
+      }
+      all.addAll(page);
+      if (next.isEmpty()) {
+        return List.copyOf(all);
+      }
+      if (next.compareTo(after) <= 0) {
+        throw new IOException(
+            "The host's session listing cursor went backwards; refusing to loop.");
+      }
+      after = next;
     }
-    throw new IOException("The host did not answer the session listing.");
   }
 
   public void kill(String name) throws IOException {

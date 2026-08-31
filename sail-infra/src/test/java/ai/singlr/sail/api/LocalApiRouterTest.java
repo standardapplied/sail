@@ -506,8 +506,9 @@ class LocalApiRouterTest {
     assertEquals("/home/dev/.claude/p/abc.jsonl", ops.lastTranscriptPath);
     assertEquals(
         TestOperations.BOX_HANDLE,
-        ops.lastConversationFde,
+        ops.lastActor.handle(),
         "the conversation is authored by the box FDE the credential stands for");
+    assertEquals(Role.MEMBER, ops.lastActor.role(), "the actor's role travels for the room gate");
     assertNull(ops.lastSessionRunId, "no run row is touched by a box-lane report");
 
     var wrongMethod =
@@ -542,6 +543,10 @@ class LocalApiRouterTest {
                 "id=room&title=Room".getBytes(StandardCharsets.UTF_8)));
     assertEquals(201, created.status());
     assertEquals(TestOperations.BOX_HANDLE, ops.lastCreate.createdBy());
+    assertEquals(
+        TestOperations.BOX_HANDLE,
+        ops.lastActor.handle(),
+        "the create travels with the actor so a room binding is authorized");
 
     var posted =
         router.handle(
@@ -650,7 +655,6 @@ class LocalApiRouterTest {
     private String lastTranscriptPath;
     private String lastConversationRoom;
     private String lastConversationAgent;
-    private String lastConversationFde;
     private boolean emptyMessages;
     private boolean failMessages;
 
@@ -661,9 +665,11 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+        SpecCreateRequest request, Actor actor) {
       lastCreate = request;
-      return super.createGlobalSpec(request);
+      lastActor = actor;
+      return super.createGlobalSpec(request, actor);
     }
 
     @Override
@@ -766,14 +772,14 @@ class LocalApiRouterTest {
         String sessionId,
         String source,
         String transcriptPath,
-        String fde) {
+        Actor actor) {
       lastConversationRoom = roomId;
       lastConversationAgent = agent;
       lastSessionId = sessionId;
       lastSessionSource = source;
       lastTranscriptPath = transcriptPath;
-      lastConversationFde = fde;
-      return super.recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, fde);
+      lastActor = actor;
+      return super.recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, actor);
     }
   }
 }

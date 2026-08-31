@@ -98,8 +98,9 @@ final class GlobalSpecOperations {
     return runStore.listForSpec(specId).stream().findFirst().map(RunSummary::from).orElse(null);
   }
 
-  GlobalSpecCreatedResponse create(SpecCreateRequest request) {
+  GlobalSpecCreatedResponse create(SpecCreateRequest request, Actor actor) {
     requireStore();
+    Objects.requireNonNull(actor, "spec creation needs the authenticated actor");
     if (request.id() == null || request.id().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
     }
@@ -114,11 +115,12 @@ final class GlobalSpecOperations {
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
     var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
-    var roomId = Strings.isBlank(request.roomId()) ? request.id() : request.roomId();
+    var explicitHome = Strings.isNotBlank(request.roomId());
+    var roomId = explicitHome ? request.roomId() : request.id();
     NameValidator.requireValidSpecId(roomId);
-    var bornInARoom = !roomId.equals(request.id());
-    if (bornInARoom) {
-      requireHomeRoom(roomId, request.project());
+    var home = explicitHome ? requireHomeRoom(roomId) : existingRoom(roomId);
+    if (home != null) {
+      admitIntoRoom(home, request.project(), actor);
     }
     var row =
         new SpecStore.SpecRow(
@@ -146,7 +148,7 @@ final class GlobalSpecOperations {
           Objects.requireNonNullElse(request.plan(), ""));
     }
     var created = specStore.findById(request.id()).orElseThrow();
-    if (!bornInARoom) {
+    if (home == null) {
       mintIdentityRoom(created);
     }
     publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
@@ -155,10 +157,10 @@ final class GlobalSpecOperations {
 
   /**
    * The room a spec is explicitly born into — a brainstorm's {@code SAIL_ROOM_ID}, an epic's room —
-   * must already exist and belong to the spec's project. A spec with a home room mints no identity
-   * room: the room it was born in is its conversation.
+   * must already exist. A spec with a home room mints no identity room: the room it was born in is
+   * its conversation.
    */
-  private void requireHomeRoom(String roomId, String project) {
+  private RoomStore.RoomRow requireHomeRoom(String roomId) {
     var store = rooms.get();
     if (store == null) {
       throw new ApiException(
@@ -166,24 +168,40 @@ final class GlobalSpecOperations {
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
           "Start the server with 'sail server start' or omit the room.");
     }
-    var room =
-        store
-            .findById(roomId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    return store
+        .findById(roomId)
+        .orElseThrow(
+            () ->
+                new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+  }
+
+  /** The room already sitting on a new spec's identity id, if any — a binding, not a mint. */
+  private RoomStore.RoomRow existingRoom(String roomId) {
+    var store = rooms.get();
+    return store == null ? null : store.findById(roomId).orElse(null);
+  }
+
+  /**
+   * Binding a spec to an existing room hands the spec's owner every membership write that room
+   * takes — engage rewrites its roster — so it needs the room's own post right: the room's assignee
+   * (or creator when unassigned) or an admin, in the room's project. Whether the room was named
+   * explicitly or merely shares the new spec's id makes no difference: either way the spec lands in
+   * somebody's room.
+   */
+  private static void admitIntoRoom(RoomStore.RoomRow room, String project, Actor actor) {
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "Room '"
-              + roomId
+              + room.id()
               + "' belongs to project '"
               + room.project()
               + "', not '"
               + project
-              + "'; a spec is born in a room of its own project.");
+              + "'.",
+          "A spec is born only into a room of its own project.");
     }
+    SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {

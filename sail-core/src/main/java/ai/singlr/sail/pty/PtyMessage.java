@@ -15,6 +15,9 @@ import java.util.List;
  */
 public sealed interface PtyMessage {
 
+  int PAGE_LIMIT = 16;
+  int MAX_COMMAND_BYTES = 32 * 1024;
+
   record Hello(String token) implements PtyMessage {}
 
   /**
@@ -42,7 +45,13 @@ public sealed interface PtyMessage {
 
   record Detach() implements PtyMessage {}
 
-  record ListSessions() implements PtyMessage {}
+  /**
+   * Asks for one page of the caller's sessions, in name order, strictly after {@code after} (blank
+   * for the first page) and at most {@code limit} long. The host clamps {@code limit} to {@link
+   * #PAGE_LIMIT} and bounds a session's command at creation to {@link #MAX_COMMAND_BYTES}, so a
+   * full page always fits one frame however many sessions exist.
+   */
+  record ListSessions(String after, int limit) implements PtyMessage {}
 
   record Kill(String session) implements PtyMessage {}
 
@@ -71,7 +80,8 @@ public sealed interface PtyMessage {
       String name, boolean live, int attached, String writerFde, String room, List<String> command)
       implements PtyMessage {}
 
-  record Sessions(List<SessionInfo> sessions) implements PtyMessage {}
+  /** One page of sessions; {@code next} is blank on the last page, else the cursor to continue. */
+  record Sessions(List<SessionInfo> sessions, String next) implements PtyMessage {}
 
   record Ok() implements PtyMessage {}
 

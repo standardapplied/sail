@@ -67,6 +67,9 @@ class PtyHostEventsTest {
     assertTrue(
         recent.stream().noneMatch(e -> e.data().contains("room_id")),
         "an unbound session's rows name no room");
+    assertTrue(
+        recent.stream().allMatch(e -> e.specId() == null),
+        "an unbound session's rows are scoped to no room");
   }
 
   @Test
@@ -85,6 +88,10 @@ class PtyHostEventsTest {
     for (var row : recent) {
       var data = YamlUtil.parseMap(row.data());
       assertEquals("design-talk", data.get("room_id"), row.type() + " names its room");
+      assertEquals(
+          "design-talk",
+          row.specId(),
+          row.type() + " is scoped to its room, so the room's history query finds it");
       assertEquals("brainstorm", data.get("session"));
     }
     var started =

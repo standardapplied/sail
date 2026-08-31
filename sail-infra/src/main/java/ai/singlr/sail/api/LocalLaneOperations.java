@@ -42,7 +42,12 @@ public interface LocalLaneOperations {
 
   Result<GlobalSpecDetailResponse> globalSpec(String specId);
 
-  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
+  /**
+   * Creates a spec as {@code actor}. A spec born into an existing room — named explicitly or
+   * sitting on the spec's own id — binds under that room's post right, so a member cannot land work
+   * in somebody else's room.
+   */
+  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request, Actor actor);
 
   Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
       String specId, SpecUpdateRequest request, Actor actor);
@@ -97,10 +102,12 @@ public interface LocalLaneOperations {
   /**
    * Records the hook-reported identity of an interactive, room-bound agent conversation — one
    * started in a terminal session that exported {@code SAIL_ROOM_ID}, which has no run row. The
-   * room must exist; the fact lands as a record-class {@code agent_conversation_started} event in
-   * that room, authored by {@code fde}, carrying the CLI ({@code agent}), the conversation's
-   * session id, and the optional start source and transcript path. Nothing consumes it yet: it is
-   * the seam a later resume-through-either-door builds on.
+   * room must exist and {@code actor} must hold its post right — the same gate a room message
+   * passes, so a box credential cannot forge conversations into rooms it does not own. The fact
+   * lands as a record-class {@code agent_conversation_started} event in that room, authored by the
+   * actor's handle, carrying the CLI ({@code agent}), the conversation's session id, and the
+   * optional start source and transcript path. Nothing consumes it yet: it is the seam a later
+   * resume-through-either-door builds on.
    */
   Result<RoomConversationResponse> recordRoomConversation(
       String roomId,
@@ -108,5 +115,5 @@ public interface LocalLaneOperations {
       String sessionId,
       String source,
       String transcriptPath,
-      String fde);
+      Actor actor);
 }

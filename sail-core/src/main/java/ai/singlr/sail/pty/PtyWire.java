@@ -89,7 +89,10 @@ public final class PtyWire {
       }
       case PtyMessage.TakeWrite m -> out.type(5);
       case PtyMessage.Detach m -> out.type(6);
-      case PtyMessage.ListSessions m -> out.type(7);
+      case PtyMessage.ListSessions m -> {
+        out.type(7).string(m.after());
+        out.buffer.putInt(m.limit());
+      }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Output m -> {
         out.type(20);
@@ -116,6 +119,7 @@ public final class PtyWire {
         for (var info : m.sessions()) {
           encodeInfo(out, info);
         }
+        out.string(m.next());
       }
       case PtyMessage.Ok m -> out.type(30);
       case PtyMessage.Err m -> out.type(31).string(m.message());
@@ -147,7 +151,7 @@ public final class PtyWire {
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
       case 5 -> new PtyMessage.TakeWrite();
       case 6 -> new PtyMessage.Detach();
-      case 7 -> new PtyMessage.ListSessions();
+      case 7 -> new PtyMessage.ListSessions(string(in), in.getInt());
       case 8 -> new PtyMessage.Kill(string(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
       case 21 -> new PtyMessage.ReplayBegin(in.get() == 1);
@@ -164,7 +168,7 @@ public final class PtyWire {
         for (var i = 0; i < count; i++) {
           sessions.add(decodeInfo(in));
         }
-        yield new PtyMessage.Sessions(List.copyOf(sessions));
+        yield new PtyMessage.Sessions(List.copyOf(sessions), string(in));
       }
       case 30 -> new PtyMessage.Ok();
       case 31 -> new PtyMessage.Err(string(in));

@@ -408,7 +408,8 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+      SpecCreateRequest request, Actor actor) {
     return Result.success(
         new GlobalSpecCreatedResponse(
             new GlobalSpecView(
@@ -512,7 +513,7 @@ class TestOperations implements Operations {
       String sessionId,
       String source,
       String transcriptPath,
-      String fde) {
+      Actor actor) {
     return Result.success(new RoomConversationResponse(roomId, sessionId, agent));
   }
 

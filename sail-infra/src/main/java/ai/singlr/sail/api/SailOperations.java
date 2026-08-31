@@ -1431,8 +1431,9 @@ public final class SailOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
-    return safeWrite(() -> globalSpecOps.create(request));
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
+      SpecCreateRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.create(request, actor));
   }
 
   @Override
@@ -1546,13 +1547,14 @@ public final class SailOperations implements Operations {
       String sessionId,
       String source,
       String transcriptPath,
-      String fde) {
+      Actor actor) {
     return safe(
         () -> {
           if (Strings.isBlank(sessionId)) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
+          SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());
@@ -1571,7 +1573,7 @@ public final class SailOperations implements Operations {
                   room.project(),
                   room.id(),
                   Event.WellKnownTypes.AGENT_CONVERSATION_STARTED,
-                  fde,
+                  actor.handle(),
                   HostInfo.hostname(),
                   data));
           return new RoomConversationResponse(room.id(), sessionId.strip(), cli);

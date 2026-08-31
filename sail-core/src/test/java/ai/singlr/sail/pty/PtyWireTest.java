@@ -63,14 +63,21 @@ class PtyWireTest {
                     List.of(
                         new PtyMessage.SessionInfo(
                             "a", true, 2, "uday", "design", List.of("claude", "--resume")),
-                        new PtyMessage.SessionInfo("b", false, 0, "", "", List.of("bash", "-l")))));
+                        new PtyMessage.SessionInfo("b", false, 0, "", "", List.of("bash", "-l"))),
+                    "b"));
     assertEquals(2, sessions.sessions().size());
+    assertEquals("b", sessions.next(), "the page cursor rides the listing");
     assertEquals("uday", sessions.sessions().getFirst().writerFde());
     assertEquals("design", sessions.sessions().getFirst().room());
     assertEquals(List.of("claude", "--resume"), sessions.sessions().getFirst().command());
     assertEquals("", sessions.sessions().getLast().room());
     assertEquals(List.of("bash", "-l"), sessions.sessions().getLast().command());
 
+    var listing = (PtyMessage.ListSessions) roundTrip(new PtyMessage.ListSessions("after-me", 7));
+    assertEquals("after-me", listing.after());
+    assertEquals(7, listing.limit());
+    assertEquals(
+        "", ((PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(List.of(), ""))).next());
     assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));
     assertInstanceOf(PtyMessage.ReplayEnd.class, roundTrip(new PtyMessage.ReplayEnd()));
