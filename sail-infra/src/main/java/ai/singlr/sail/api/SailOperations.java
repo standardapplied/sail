@@ -496,19 +496,19 @@ public final class SailOperations implements Operations {
             throw new ApiException(
                 ErrorCode.BAD_REQUEST, "before and after are exclusive; pass at most one.");
           }
-          requireRoomOrSpec(roomId);
+          var room = requireRoomOrSpec(roomId);
           List<SpecMessageView> messages;
           try {
             var store = requireMessageStore();
             var rows =
                 after != null
-                    ? store.listAfter(roomId, after, limit)
-                    : store.list(roomId, before, limit);
+                    ? store.listAfter(room.id(), after, limit)
+                    : store.list(room.id(), before, limit);
             messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
             throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
           }
-          return new SpecMessagesResponse(roomId, messages);
+          return new SpecMessagesResponse(room.id(), messages);
         });
   }
 
@@ -519,7 +519,7 @@ public final class SailOperations implements Operations {
         () -> {
           var room = requireRoomOrSpec(roomId);
           SpecPolicy.post(principal, room.id(), room.assignee(), room.createdBy()).enforce();
-          return appendMessage(room.project(), roomId, request, authorHandle);
+          return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
 
@@ -688,24 +688,27 @@ public final class SailOperations implements Operations {
         safe(
             () -> {
               var store = requireRoomStore();
-              var row =
-                  store
-                      .findById(roomId)
-                      .orElseThrow(
-                          () ->
-                              new ApiException(
-                                  ErrorCode.ROOM_NOT_FOUND,
-                                  "Room '" + roomId + "' was not found."));
-              SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
-              var attached = specIdsOf(roomId);
-              if (!attached.isEmpty()) {
-                throw new ApiException(
-                    ErrorCode.CONFLICT,
-                    "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
-                    "Delete or re-home its specs first: " + String.join(", ", attached));
-              }
-              store.delete(roomId);
-              return new RoomDeletedResponse(roomId);
+              return store.atomically(
+                  () -> {
+                    var row =
+                        store
+                            .findById(roomId)
+                            .orElseThrow(
+                                () ->
+                                    new ApiException(
+                                        ErrorCode.ROOM_NOT_FOUND,
+                                        "Room '" + roomId + "' was not found."));
+                    SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
+                    var attached = specIdsOf(roomId);
+                    if (!attached.isEmpty()) {
+                      throw new ApiException(
+                          ErrorCode.CONFLICT,
+                          "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
+                          "Delete or re-home its specs first: " + String.join(", ", attached));
+                    }
+                    store.delete(roomId);
+                    return new RoomDeletedResponse(roomId);
+                  });
             });
     if (result instanceof Result.Success<RoomDeletedResponse>) {
       triggerSyncAfterWrite();

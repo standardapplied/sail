@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -277,5 +278,74 @@ class SpecMessageOperationsTest {
 
   private static Actor member(String handle) {
     return new Actor(handle, Role.MEMBER, Actor.Lane.API);
+  }
+
+  @Test
+  void specAddressedConversationLandsInTheSpecsHomeRoom() throws Exception {
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "study", "acme", "Study", "ada", null, null, "ada", null, null, "ada"));
+    db.execute(
+        """
+        INSERT INTO specs
+            (id, title, project, assignee, created_by, created_at, updated_at, room_id)
+        VALUES ('born', 'Born elsewhere', 'acme', 'ada', 'ada', 'now', 'now', 'study')""");
+    var withRooms =
+        new SailOperations(
+                new ShellExecutor(false),
+                "sail.yaml",
+                bus,
+                null,
+                new SpecStore(db),
+                new ReviewStore(db))
+            .useMessages(new MessageStore(db))
+            .useRooms(rooms);
+
+    var event = new AtomicReference<Event>();
+    var delivered = new CountDownLatch(1);
+    bus.subscribe(
+        BusTesting.latching(
+            new EventSubscriber() {
+              @Override
+              public String name() {
+                return "home-capture";
+              }
+
+              @Override
+              public Predicate<Event> filter() {
+                return ignored -> true;
+              }
+
+              @Override
+              public void onEvent(Event posted) {
+                event.set(posted);
+              }
+            },
+            delivered));
+
+    var posted =
+        withRooms
+            .postRoomMessage(
+                "born",
+                new SpecMessageRequest("home sweet home", null, false),
+                member("ada"),
+                "ada")
+            .orThrow();
+
+    BusTesting.awaitDelivery(delivered);
+    assertEquals(
+        "study",
+        event.get().spec(),
+        "the event scopes to the home room, not a phantom identity room");
+
+    var home = withRooms.roomMessages("study", null, null, 50).orThrow();
+    assertEquals(1, home.messages().size(), "the home room holds the spec-addressed message");
+    assertEquals(posted.message().id(), home.messages().getFirst().id());
+
+    var viaSpec = withRooms.roomMessages("born", null, null, 50).orThrow();
+    assertEquals("study", viaSpec.specId(), "reads resolve to the one conversation key");
+    assertEquals(1, viaSpec.messages().size());
+    assertEquals(posted.message().id(), viaSpec.messages().getFirst().id());
   }
 }

@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -391,5 +392,50 @@ class RoomsSurfaceTest {
     assertTrue(
         posted instanceof Result.Success<SpecMessageResponse>,
         "a pre-decouple spec without a room row still answers on the room door");
+  }
+
+  @Test
+  void deletionNeverOrphansASpecOntoATombstonedRoom() throws Exception {
+    for (var i = 0; i < 150; i++) {
+      var roomId = "race-room-" + i;
+      var specId = "race-spec-" + i;
+      create(roomId, "Race");
+      var barrier = new CyclicBarrier(2);
+      var deleter =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    align(barrier);
+                    ops.deleteRoom(roomId, admin());
+                  });
+      var binder =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    align(barrier);
+                    ops.createGlobalSpec(
+                        SpecCreateRequest.fromMap(
+                                Map.of(
+                                    "id", specId, "title", "Race", "project", "acme", "room_id",
+                                    roomId))
+                            .withCreatedBy(HANDLE),
+                        admin());
+                  });
+      deleter.join();
+      binder.join();
+      if (specStore.findById(specId).isPresent()) {
+        assertTrue(
+            roomStore.findById(roomId).isPresent(),
+            "iteration " + i + ": spec '" + specId + "' bound to a room tombstoned underneath it");
+      }
+    }
+  }
+
+  private static void align(CyclicBarrier barrier) {
+    try {
+      barrier.await();
+    } catch (Exception interrupted) {
+      throw new IllegalStateException(interrupted);
+    }
   }
 }
