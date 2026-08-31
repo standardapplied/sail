@@ -18,6 +18,7 @@ import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -136,7 +137,7 @@ public final class RunReservation {
    */
   private void yieldDisplacedSessions(
       String runId, String project, String specId, String role, List<String> repos) {
-    var target = repos == null ? List.<String>of() : repos;
+    var target = Objects.requireNonNullElse(repos, List.<String>of());
     var displaced =
         runStore.listForProject(project).stream()
             .filter(run -> !run.id().equals(runId))
