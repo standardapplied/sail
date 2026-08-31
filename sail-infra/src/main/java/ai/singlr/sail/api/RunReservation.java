@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -35,24 +34,26 @@ import java.util.stream.Collectors;
  * conversation ({@link SessionYield#resumeSession}) whose run the new claim would have conflicted
  * with — by exactly the {@link DispatchGate} rules, the conversation holding its run's repos like a
  * working lane — is ended through the {@link SessionYield} seam, so no interactive agent ever sits
- * on a repo a dispatch is about to work.
+ * on a repo a dispatch is about to work. The claim and the yield run under the seam's per-project
+ * lock, the same lock an attach holds from reading the run rows to creating its session, so an
+ * attach can never slip a resume session in between the scan and the launch.
  */
 public final class RunReservation {
 
   private final RunStore runStore;
   private final ShellExec shell;
   private final DispatchOperations.Listener listener;
-  private final Supplier<SessionYield> sessionYield;
+  private final SessionYield sessionYield;
 
   public RunReservation(
       RunStore runStore,
       ShellExec shell,
       DispatchOperations.Listener listener,
-      Supplier<SessionYield> sessionYield) {
+      SessionYield sessionYield) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
-    this.sessionYield = sessionYield;
+    this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
   }
 
   /**
@@ -96,6 +97,35 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
+    String credential;
+    try (var hold = sessionYield.lock(project)) {
+      credential =
+          claim(
+              runId, project, specId, roomId, node, owner, role, repos, agentType, branch, task,
+              unit, config);
+      yieldDisplacedSessions(runId, project, specId, role, repos);
+    } catch (IOException e) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
+    }
+    pruneRuns(project);
+    return credential;
+  }
+
+  private String claim(
+      String runId,
+      String project,
+      String specId,
+      String roomId,
+      String node,
+      String owner,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      SailYaml config) {
     RunStore.Reservation reservation;
     try {
       reservation =
@@ -123,8 +153,6 @@ public final class RunReservation {
     if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
       throw leaseRefusal(held);
     }
-    yieldDisplacedSessions(runId, project, specId, role, repos);
-    pruneRuns(project);
     return ((RunStore.Reservation.Reserved) reservation).credential();
   }
 
@@ -150,7 +178,7 @@ public final class RunReservation {
     var reason =
         "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
     try {
-      sessionYield.get().end(displaced, reason);
+      sessionYield.end(displaced, reason);
     } catch (IOException e) {
       System.err.println(
           "  [api] Warning: could not yield terminal sessions "

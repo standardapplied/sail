@@ -138,7 +138,8 @@ class DispatchLaunchCancelRaceTest {
               cancelled.set(run.id());
               return 0;
             },
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
 
     var conflict =
         assertThrows(

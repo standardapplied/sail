@@ -78,9 +78,9 @@ class AgentResumeSessionIT extends AbstractIncusIT {
       var runStore = new RunStore(db);
       var runId = completedRun(runStore, "sess-abc");
       var run = runStore.findById(runId).orElseThrow();
+      var hostYield = new PtyHostYield(socket, dir.resolve("locks"));
       var reservation =
-          new RunReservation(
-              runStore, shell, DispatchOperations.Listener.NONE, () -> new PtyHostYield(socket));
+          new RunReservation(runStore, shell, DispatchOperations.Listener.NONE, hostYield);
 
       try (var host =
           new PtySessionHost(

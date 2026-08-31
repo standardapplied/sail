@@ -182,7 +182,7 @@ public final class DispatchOperations {
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
-  private SessionYield sessionYield = SessionYield.NONE;
+  private final SessionYield sessionYield;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
   private final Snapshotter snapshotter;
@@ -194,7 +194,9 @@ public final class DispatchOperations {
    * that forgets the run store, the roster, or the watcher) is visible in the diff instead of
    * hidden behind a convenience overload — the #142 lesson. {@code reviewStore}, {@code runStore}
    * and {@code fdeStore} accept {@code null} only for boxes that genuinely keep no such aggregate;
-   * passing {@code null} is an explicit decision, not a default.
+   * passing {@code null} is an explicit decision, not a default. {@code sessionYield} is never
+   * null: every production lane passes the pty host seam, so no launch path can silently skip
+   * yielding a resumed conversation; a lane with no host passes {@link SessionYield#NONE}.
    */
   public DispatchOperations(
       ShellExec shell,
@@ -207,7 +209,8 @@ public final class DispatchOperations {
       WatcherSpawner watcherSpawner,
       Snapshotter snapshotter,
       AgentLauncher launcher,
-      Listener listener) {
+      Listener listener,
+      SessionYield sessionYield) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.file = Objects.requireNonNull(file, "file");
     this.projects = new ProjectLoader(shell, file);
@@ -220,12 +223,13 @@ public final class DispatchOperations {
     this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.listener = Objects.requireNonNull(listener, "listener");
+    this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.membership =
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
-    this.runReservation = new RunReservation(runStore, shell, listener, () -> sessionYield);
+    this.runReservation = new RunReservation(runStore, shell, listener, sessionYield);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
         new RoomWakeLauncher(
@@ -272,14 +276,6 @@ public final class DispatchOperations {
   /** Wires the room store — the authoritative home of membership state; returns {@code this}. */
   public DispatchOperations useRooms(RoomStore rooms) {
     this.roomStore = Objects.requireNonNull(rooms, "rooms");
-    return this;
-  }
-
-  /**
-   * Wires the pty host seam a reservation ends displaced sessions through; returns {@code this}.
-   */
-  public DispatchOperations useSessionYield(SessionYield yield) {
-    this.sessionYield = Objects.requireNonNull(yield, "yield");
     return this;
   }
 

@@ -10,6 +10,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -137,7 +138,8 @@ public final class DispatchCommand implements Runnable {
               new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
               snapshotter(shell),
               DispatchOperations.terminalLauncher(),
-              renderer(sync));
+              renderer(sync),
+              new PtyHostYield());
       render(dispatch(operations, request, handle));
     }
   }
@@ -155,7 +157,8 @@ public final class DispatchCommand implements Runnable {
       WatcherSpawner watcherSpawner,
       DispatchOperations.Snapshotter snapshotter,
       DispatchOperations.AgentLauncher launcher,
-      DispatchOperations.Listener listener) {
+      DispatchOperations.Listener listener,
+      SessionYield sessionYield) {
     return new DispatchOperations(
             shell,
             file,
@@ -167,7 +170,8 @@ public final class DispatchCommand implements Runnable {
             watcherSpawner,
             snapshotter,
             launcher,
-            listener)
+            listener,
+            sessionYield)
         .useMessages(new MessageStore(db));
   }
 

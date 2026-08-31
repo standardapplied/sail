@@ -123,7 +123,7 @@ public final class AgentAttachCommand implements Runnable {
     var latest = latest();
     var run = latest.run();
     if (run != null && LIVE_STATUSES.contains(run.status())) {
-      throw new IllegalStateException(refusal(run));
+      throw new IllegalStateException(refusal(run, name));
     }
     var agentType = run != null ? AgentCli.fromYamlName(run.agent()) : resolveAgentType();
     var sessionId = validatedSessionId(run);
@@ -150,8 +150,11 @@ public final class AgentAttachCommand implements Runnable {
     announceResume(run, agentType, sessionId, plan);
     requireRunning();
     var size = Stty.size(new int[] {24, 80});
-    try (var client = SessionClient.connect(SessionCommand.socketOrDefault(socket))) {
-      var opened = openOrJoin(client, plan, size[1], size[0]);
+    var hostSocket = SessionCommand.socketOrDefault(socket);
+    try (var client = SessionClient.connect(hostSocket)) {
+      var opened =
+          openLocked(
+              new PtyHostYield(hostSocket), this::latest, run, client, plan, size[1], size[0]);
       System.out.println(
           Ansi.AUTO.string(
               opened
@@ -160,6 +163,42 @@ public final class AgentAttachCommand implements Runnable {
                       + plan.session()
                       + " (Ctrl-] detaches).|@"));
       SessionCommand.attachTerminal(client, plan.session(), true);
+    }
+  }
+
+  /**
+   * Opens or joins under the project's claim lock — the lock a dispatch holds from its run-row
+   * insert through the yield of displaced sessions — re-reading the latest run first. The plan was
+   * built from an unlocked read, so a dispatch that reserved in between shows up here as a live
+   * latest run and refuses; a dispatch that reserves after this returns finds the session live and
+   * yields it. Either way no resumed agent ever works repos a claim holds. Returns whether this
+   * call opened the session.
+   */
+  static boolean openLocked(
+      SessionYield hostYield,
+      Supplier<Latest> latest,
+      RunStore.RunRow planned,
+      SessionClient client,
+      ResumePlan plan,
+      int cols,
+      int rows)
+      throws IOException {
+    try (var hold = hostYield.lock(plan.project())) {
+      requireStillLatestAndIdle(planned, latest.get().run(), plan.project());
+      return openOrJoin(client, plan, cols, rows);
+    }
+  }
+
+  static void requireStillLatestAndIdle(
+      RunStore.RunRow planned, RunStore.RunRow current, String project) {
+    if (current != null && LIVE_STATUSES.contains(current.status())) {
+      throw new IllegalStateException(refusal(current, project));
+    }
+    if (current == null || !current.id().equals(planned.id())) {
+      throw new IllegalStateException(
+          "The latest run of '"
+              + project
+              + "' changed while opening the session; run sail agent attach again.");
     }
   }
 
@@ -280,7 +319,7 @@ public final class AgentAttachCommand implements Runnable {
     return SAFE_SESSION_ID.matcher(sessionId).matches();
   }
 
-  private String refusal(RunStore.RunRow run) {
+  private static String refusal(RunStore.RunRow run, String project) {
     var room =
         run.specId() == null
             ? "its spec room"
@@ -291,7 +330,7 @@ public final class AgentAttachCommand implements Runnable {
         + " and worktree. Reply in "
         + room
         + " to steer it (delivered mid-run), or stop it first with: sail agent stop "
-        + name
+        + project
         + ".";
   }
 

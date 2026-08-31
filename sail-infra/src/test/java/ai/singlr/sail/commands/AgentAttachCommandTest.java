@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +23,9 @@ import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -153,6 +158,133 @@ class AgentAttachCommandTest {
             "a refusal with nothing live behind it is the error it was");
       }
     }
+  }
+
+  @Test
+  void aCompletedLatestRunIsStillResumableAndAnythingElseRefuses() {
+    var completed = row("r1", "completed");
+    assertDoesNotThrow(
+        () -> AgentAttachCommand.requireStillLatestAndIdle(completed, completed, "acme"));
+
+    var live =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentAttachCommand.requireStillLatestAndIdle(
+                    completed, row("r2", "running"), "acme"));
+    assertTrue(live.getMessage().startsWith("Run r2 is live"), live.getMessage());
+
+    var newer =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentAttachCommand.requireStillLatestAndIdle(
+                    completed, row("r2", "completed"), "acme"));
+    assertTrue(newer.getMessage().contains("changed while opening"), newer.getMessage());
+    assertThrows(
+        IllegalStateException.class,
+        () -> AgentAttachCommand.requireStillLatestAndIdle(completed, null, "acme"));
+  }
+
+  /**
+   * The reviewer's interleaving: attach reads a completed run, a dispatch claims the project and
+   * scans for sessions to yield (finding none), and only then does the attach reach the host. With
+   * the claim lock shared by both, the attach waits behind the dispatch, rereads, sees the live
+   * claim, and refuses — no resumed agent opens over repos the dispatch owns. (The other order — a
+   * session opened under the lock is found and yielded by the claim that follows — runs against a
+   * real container in {@code AgentResumeSessionIT}.)
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void anAttachWaitingOnADispatchRereadsTheClaimAndRefuses(@TempDir Path dir) throws Exception {
+    var socket = dir.resolve("h.sock");
+    var hostYield = new PtyHostYield(socket, dir.resolve("locks"));
+    try (var db = Sqlite.open(dir.resolve("t.db"));
+        var host =
+            PtyHostCommand.startHost(
+                socket,
+                dir.resolve("s"),
+                token -> new PtyIdentity("uday", true),
+                PtyRooms.NONE,
+                PtyEvents.NONE)) {
+      new SchemaManager(db).migrate();
+      var runs = new RunStore(db);
+      var planned = completedRun(runs, "r1");
+      Supplier<AgentAttachCommand.Latest> latest =
+          () ->
+              new AgentAttachCommand.Latest(
+                  runs.latestForProjectOnNode("acme", "it").orElse(null), "");
+      var plan =
+          new AgentAttachCommand.ResumePlan("resume-r1", List.of("sh", "-c", "read a"), "acme", "");
+
+      var dispatchClaiming = hostYield.lock("acme");
+      var refused = new AtomicReference<Throwable>();
+      var done = new CountDownLatch(1);
+      try (var client = SessionClient.connect(socket, "")) {
+        var attach =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      try {
+                        AgentAttachCommand.openLocked(
+                            hostYield, latest, planned, client, plan, 80, 24);
+                      } catch (Throwable t) {
+                        refused.set(t);
+                      } finally {
+                        done.countDown();
+                      }
+                    });
+        SessionDispatchLockTest.awaitParked(attach);
+        reserveRunning(runs, "r2");
+        assertEquals(0, host.sessionCount(), "the dispatch's yield scan finds nothing live");
+        dispatchClaiming.close();
+        done.await();
+      }
+      assertInstanceOf(IllegalStateException.class, refused.get());
+      assertTrue(
+          refused.get().getMessage().startsWith("Run r2 is live"), refused.get().getMessage());
+      assertEquals(0, host.sessionCount(), "the stale attach never opened over the claimed repos");
+    }
+  }
+
+  private static RunStore.RunRow completedRun(RunStore runs, String id) {
+    reserveRunning(runs, id);
+    runs.transition(id, "running", "completed", 0);
+    return runs.findById(id).orElseThrow();
+  }
+
+  private static void reserveRunning(RunStore runs, String id) {
+    runs.reserveDispatch(
+        id, "acme", "spec-" + id, "it", "it", "build", List.of(), "codex", null, "t", "l", "u");
+  }
+
+  private static RunStore.RunRow row(String id, String status) {
+    return new RunStore.RunRow(
+        id,
+        "acme",
+        "spec-" + id,
+        "it",
+        "build",
+        "codex",
+        null,
+        "t",
+        null,
+        null,
+        status,
+        null,
+        "l",
+        "u",
+        "t0",
+        null,
+        List.of(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   @Test

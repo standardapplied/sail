@@ -122,7 +122,8 @@ class InviteLaunchTest {
               order.add("launch");
               return 0;
             },
-            DispatchOperations.Listener.NONE)
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE)
         .useMessages(messageStore);
   }
 

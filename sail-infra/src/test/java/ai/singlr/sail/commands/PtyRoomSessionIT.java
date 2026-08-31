@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
@@ -89,7 +90,8 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   new RunStore(db),
                   null,
                   SyncScheduler.disabled(),
-                  fdeStore)
+                  fdeStore,
+                  SessionYield.NONE)
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(rooms);

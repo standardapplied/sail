@@ -64,8 +64,7 @@ class RoomsSurfaceTest {
                 new ReviewStore(db),
                 new RunStore(db))
             .useMessages(new MessageStore(db))
-            .useRooms(roomStore)
-            .useSessionYield(SessionYield.NONE);
+            .useRooms(roomStore);
   }
 
   @AfterEach

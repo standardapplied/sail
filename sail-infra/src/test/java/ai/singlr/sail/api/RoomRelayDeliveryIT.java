@@ -76,7 +76,8 @@ class RoomRelayDeliveryIT {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null)
+                null,
+                SessionYield.NONE)
             .useMessages(messages);
     runId = DateTimeUtils.newId().toString();
     var reservation =

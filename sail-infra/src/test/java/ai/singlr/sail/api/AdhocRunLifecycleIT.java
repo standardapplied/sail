@@ -123,7 +123,8 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
               (project, config) -> "",
               DispatchOperations.shellLauncher(shell),
-              DispatchOperations.Listener.NONE);
+              DispatchOperations.Listener.NONE,
+              SessionYield.NONE);
 
       var session =
           dispatchOps.startAdhoc(

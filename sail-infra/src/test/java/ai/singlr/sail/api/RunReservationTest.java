@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,8 +107,27 @@ class RunReservationTest {
     };
   }
 
+  interface Ender {
+    void end(List<String> sessions, String reason) throws IOException;
+  }
+
+  /** A seam with no lock to hold — a box with no host — that ends through {@code ender}. */
+  private static SessionYield ending(Ender ender) {
+    return new SessionYield() {
+      @Override
+      public Hold lock(String project) {
+        return NO_HOLD;
+      }
+
+      @Override
+      public void end(List<String> sessions, String reason) throws IOException {
+        ender.end(sessions, reason);
+      }
+    };
+  }
+
   private RunReservation reservation(ShellExec shell, RunStore store) {
-    return new RunReservation(store, shell, DispatchOperations.Listener.NONE, () -> sessionYield);
+    return new RunReservation(store, shell, DispatchOperations.Listener.NONE, sessionYield);
   }
 
   private String reserve(RunReservation r) {
@@ -190,10 +210,11 @@ class RunReservationTest {
     var ended = new ArrayList<String>();
     var reasons = new ArrayList<String>();
     sessionYield =
-        (sessions, reason) -> {
-          ended.addAll(sessions);
-          reasons.add(reason);
-        };
+        ending(
+            (sessions, reason) -> {
+              ended.addAll(sessions);
+              reasons.add(reason);
+            });
 
     reserveBuild("spec", "build", List.of("app"));
 
@@ -207,7 +228,8 @@ class RunReservationTest {
   @Test
   void aReadOnlyRoomWakeDisplacesNoConversation() {
     completedRun("old-spec", List.of("app"));
-    sessionYield = (sessions, reason) -> fail("a read-only wake reserves nothing and ends nothing");
+    sessionYield =
+        ending((sessions, reason) -> fail("a read-only wake reserves nothing and ends nothing"));
 
     assertNotNull(reserveBuild("old-spec", DispatchGate.ROOM_ROLE, List.of()));
   }
@@ -216,14 +238,67 @@ class RunReservationTest {
   void aWholeContainerClaimDisplacesEveryConversationAndAHostFailureNeverFailsTheClaim() {
     completedRun("old-spec", List.of("app"));
     sessionYield =
-        (sessions, reason) -> {
-          throw new IOException("Session 'resume-x' belongs to mady.");
-        };
+        ending(
+            (sessions, reason) -> {
+              throw new IOException("Session 'resume-x' belongs to mady.");
+            });
 
     var credential = reserve(reservation(quietShell(), runStore));
 
     assertNotNull(credential, "a host that refuses is a warning, never a failed launch");
     assertEquals("running", runStore.findById(RUN_ID).orElseThrow().status());
+  }
+
+  @Test
+  void theClaimAndTheYieldRunUnderTheProjectLockWhichEveryExitReleases() {
+    completedRun("old-spec", List.of("app"));
+    var held = new AtomicBoolean();
+    var locked = new ArrayList<String>();
+    var claimedWhileHeld = new AtomicBoolean();
+    sessionYield =
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) {
+            locked.add(project);
+            held.set(true);
+            return () -> held.set(false);
+          }
+
+          @Override
+          public void end(List<String> sessions, String reason) {
+            claimedWhileHeld.set(
+                held.get() && "running".equals(runStore.findById(RUN_ID).orElseThrow().status()));
+          }
+        };
+
+    reserveBuild("spec", "build", List.of("app"));
+    assertEquals(List.of("acme"), locked);
+    assertTrue(claimedWhileHeld.get(), "the row lands and the yield runs under one hold");
+    assertFalse(held.get(), "released once the yield is done");
+
+    assertThrows(ApiException.class, () -> reserveBuild("spec2", "build", List.of("app")));
+    assertFalse(held.get(), "a refused claim releases the lock too");
+  }
+
+  @Test
+  void anUnlockableProjectRefusesTheClaimBeforeAnyRowIsWritten() {
+    sessionYield =
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) throws IOException {
+            throw new IOException("locks directory is not writable");
+          }
+
+          @Override
+          public void end(List<String> sessions, String reason) {
+            fail("nothing is claimed, so nothing yields");
+          }
+        };
+
+    var ex = assertThrows(ApiException.class, () -> reserve(reservation(quietShell(), runStore)));
+
+    assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
+    assertTrue(runStore.findById(RUN_ID).isEmpty(), "no run row without the lock");
   }
 
   @Test
@@ -285,7 +360,7 @@ class RunReservationTest {
     assertDoesNotThrow(
         () ->
             new RunReservation(
-                    null, quietShell(), DispatchOperations.Listener.NONE, () -> SessionYield.NONE)
+                    null, quietShell(), DispatchOperations.Listener.NONE, SessionYield.NONE)
                 .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
   }
 

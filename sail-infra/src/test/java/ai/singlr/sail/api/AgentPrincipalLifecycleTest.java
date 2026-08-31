@@ -125,7 +125,8 @@ class AgentPrincipalLifecycleTest {
                       .orElse(""));
               return 0;
             },
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
 
     var outcome =
         dispatchOps.dispatch(
@@ -278,7 +279,8 @@ class AgentPrincipalLifecycleTest {
                       .orElse(""));
               return 0;
             },
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
 
     var outcome =
         dispatchOps.dispatch(

@@ -16,6 +16,7 @@ import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -120,7 +121,8 @@ class DispatchCommandWiringTest {
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
         (project, config) -> "",
         command -> 0,
-        DispatchOperations.Listener.NONE);
+        DispatchOperations.Listener.NONE,
+        SessionYield.NONE);
   }
 
   private static StubShell shell() {
@@ -173,7 +175,8 @@ class DispatchCommandWiringTest {
             new RunStore(db),
             new ProjectStore(db),
             SyncScheduler.disabled(),
-            new FdeStore(db));
+            new FdeStore(db),
+            SessionYield.NONE);
     var served = server.runs("acme", null);
     assertTrue(
         served.isSuccess(), "/v1/runs answers from the rows a CLI-lane dispatch just recorded");

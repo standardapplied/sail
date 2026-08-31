@@ -211,7 +211,8 @@ class BuildDispatchCoverageTest {
         new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
         (project, config) -> "",
         command -> 0,
-        DispatchOperations.Listener.NONE);
+        DispatchOperations.Listener.NONE,
+        SessionYield.NONE);
   }
 
   private static DispatchOperations.Outcome dispatch(DispatchOperations ops) {

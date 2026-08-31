@@ -17,18 +17,31 @@ import java.util.List;
  * over the socket as the box's ambient owner — a blank token, the same identity a local {@code sail
  * session} verb carries — lists what is live, and yields the named sessions one by one. No socket
  * means no host and therefore no sessions: nothing to end, not an error. A refused yield (a session
- * another FDE owns on this box) surfaces as the exception the reservation warns about.
+ * another FDE owns on this box) surfaces as the exception the reservation warns about. The claim
+ * lock lives beside the control-plane database, the one place every sail process on the box already
+ * reaches.
  */
 final class PtyHostYield implements SessionYield {
 
   private final Path socket;
+  private final Path lockDir;
 
   PtyHostYield() {
     this(SailPaths.ptySocketPath());
   }
 
   PtyHostYield(Path socket) {
+    this(socket, SailPaths.dataDir().resolve("locks"));
+  }
+
+  PtyHostYield(Path socket, Path lockDir) {
     this.socket = socket;
+    this.lockDir = lockDir;
+  }
+
+  @Override
+  public Hold lock(String project) throws IOException {
+    return SessionDispatchLock.acquire(lockDir, project);
   }
 
   @Override
