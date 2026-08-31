@@ -15,6 +15,7 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,10 @@ class PtySessionHostTest {
 
   private SocketChannel connect() throws IOException {
     return connect("tok-uday");
+  }
+
+  private String dispatchCredential() throws IOException {
+    return Files.readString(PtySessionHost.dispatchCredentialOf(dir.resolve("host.sock")));
   }
 
   private SocketChannel connect(String token) throws IOException {
@@ -187,17 +192,29 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(owner));
         awaitText(owner, "up");
 
-        try (var foreign = connect("tok-mady")) {
-          PtyWire.write(foreign, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
-          assertInstanceOf(
-              PtyMessage.Err.class, PtyWire.read(foreign), "yield is admitted exactly like kill");
+        for (var fde : List.of("tok-mady", "tok-uday", "tok-root")) {
+          try (var user = connect(fde)) {
+            PtyWire.write(user, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+            var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(user));
+            assertTrue(
+                refused.message().contains("dispatch authority"),
+                fde + " — no FDE yields, not the owner, not an admin: " + refused.message());
+          }
         }
-        try (var box = connect()) {
-          PtyWire.write(box, new PtyMessage.Yield("ghost", "yielded to dispatch 2"));
+        try (var dispatch = connect(dispatchCredential())) {
+          PtyWire.write(
+              dispatch, new PtyMessage.Create("x", List.of("sh"), "/tmp", "", "", 80, 24));
           assertInstanceOf(
-              PtyMessage.Ok.class, PtyWire.read(box), "nothing live to yield is nothing to do");
-          PtyWire.write(box, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
-          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(box));
+              PtyMessage.Err.class,
+              PtyWire.read(dispatch),
+              "the dispatch authority yields and does nothing else");
+          PtyWire.write(dispatch, new PtyMessage.Yield("ghost", "yielded to dispatch 2"));
+          assertInstanceOf(
+              PtyMessage.Ok.class,
+              PtyWire.read(dispatch),
+              "nothing live to yield is nothing to do");
+          PtyWire.write(dispatch, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
         }
 
         awaitText(owner, "[sail: session ended \u2014 yielded to dispatch 2]");

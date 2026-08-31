@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
@@ -16,6 +17,7 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
@@ -106,9 +108,13 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  /** The latest run and, when its room exists on this box, that room. */
-  record Latest(RunStore.RunRow run, String room) {
-    static final Latest NONE = new Latest(null, "");
+  /**
+   * The latest run, its room when that room exists on this box, and every run live on this box in
+   * the project — all lanes, since a full invite or a full room turn holds repos exactly as a build
+   * does yet never counts as the project's latest session.
+   */
+  record Latest(RunStore.RunRow run, String room, List<DispatchGate.RunningRun> running) {
+    static final Latest NONE = new Latest(null, "", List.of());
   }
 
   @Override
@@ -132,6 +138,7 @@ public final class AgentAttachCommand implements Runnable {
       attachFresh(run, agentType, buildIncusExecWithTty(name, command));
       return;
     }
+    requireNoLiveConflict(run, latest.running(), name);
     var plan = new ResumePlan(SessionYield.resumeSession(run.id()), command, name, latest.room());
     if (json) {
       System.out.println(YamlUtil.dumpJson(plan(run, agentType, sessionId, plan)));
@@ -168,11 +175,12 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * Opens or joins under the project's claim lock — the lock a dispatch holds from its run-row
-   * insert through the yield of displaced sessions — re-reading the latest run first. The plan was
-   * built from an unlocked read, so a dispatch that reserved in between shows up here as a live
-   * latest run and refuses; a dispatch that reserves after this returns finds the session live and
-   * yields it. Either way no resumed agent ever works repos a claim holds. Returns whether this
-   * call opened the session.
+   * insert through the yield of displaced sessions — re-reading the run rows first. The plan was
+   * built from an unlocked read, so a claim that landed in between shows up here as a live run and
+   * refuses: as the project's latest session when it is a build, or through the dispatch gate when
+   * it is a lane the latest-session query leaves out, a full invite above all. A dispatch that
+   * reserves after this returns finds the session live and yields it. Either way no resumed agent
+   * ever works repos a claim holds. Returns whether this call opened the session.
    */
   static boolean openLocked(
       SessionYield hostYield,
@@ -184,13 +192,13 @@ public final class AgentAttachCommand implements Runnable {
       int rows)
       throws IOException {
     try (var hold = hostYield.lock(plan.project())) {
-      requireStillLatestAndIdle(planned, latest.get().run(), plan.project());
+      requireStillLatestAndIdle(planned, latest.get(), plan.project());
       return openOrJoin(client, plan, cols, rows);
     }
   }
 
-  static void requireStillLatestAndIdle(
-      RunStore.RunRow planned, RunStore.RunRow current, String project) {
+  static void requireStillLatestAndIdle(RunStore.RunRow planned, Latest latest, String project) {
+    var current = latest.run();
     if (current != null && LIVE_STATUSES.contains(current.status())) {
       throw new IllegalStateException(refusal(current, project));
     }
@@ -200,6 +208,38 @@ public final class AgentAttachCommand implements Runnable {
               + project
               + "' changed while opening the session; run sail agent attach again.");
     }
+    requireNoLiveConflict(planned, latest.running(), project);
+  }
+
+  /**
+   * The dispatch gate read from the conversation's side: resuming {@code run} puts a working agent
+   * on its repos, so any live run the gate would refuse a build of that spec over those repos — a
+   * build, a full invite, a full room turn — refuses the resume. This is the exact mirror of the
+   * rule a reservation uses to yield a live resume session, so the two sides can never disagree.
+   */
+  static void requireNoLiveConflict(
+      RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
+    DispatchGate.decide(run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
+        .ifPresent(
+            conflict -> {
+              throw new IllegalStateException(conflictRefusal(run, conflict, project));
+            });
+  }
+
+  private static String conflictRefusal(
+      RunStore.RunRow run, DispatchGate.Conflict conflict, String project) {
+    var live = conflict.run();
+    return "Run "
+        + live.runId()
+        + " ("
+        + live.role()
+        + ") is live in "
+        + (conflict.overlap().isEmpty()
+            ? "container '" + project + "'"
+            : "repo(s) " + conflict.overlap())
+        + " — resuming run "
+        + run.id()
+        + " would put a second agent on what it holds. Wait for it to finish, or stop it first.";
   }
 
   /**
@@ -266,9 +306,13 @@ public final class AgentAttachCommand implements Runnable {
         name,
         () -> {
           try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-            var run =
-                new RunStore(db).latestForProjectOnNode(name, NodeIdentity.handle()).orElse(null);
-            return run == null ? Latest.NONE : new Latest(run, knownRoom(new RoomStore(db), run));
+            var runs = new RunStore(db);
+            var node = NodeIdentity.handle();
+            var run = runs.latestForProjectOnNode(name, node).orElse(null);
+            return run == null
+                ? Latest.NONE
+                : new Latest(
+                    run, knownRoom(new RoomStore(db), run), runs.runningOnNode(name, node));
           }
         });
   }

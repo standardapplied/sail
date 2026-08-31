@@ -10,11 +10,16 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.EnumSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,11 +33,19 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Reaping is driven by {@link #sweep(long)} with an injected clock — the production timer thread
  * merely calls it; tests call it directly with synthetic time.
+ *
+ * <p>Yielding is the one verb no FDE holds. A dispatch that reserves repos must end whichever
+ * resumed conversation sits on them regardless of who opened it, so the host mints a random
+ * dispatch credential at start, keeps it owner-only beside the socket ({@link
+ * #dispatchCredentialOf}), and admits a {@code Hello} carrying it as {@link PtyIdentity#DISPATCH} —
+ * a principal that can yield and do nothing else. Owners and admins keep create, attach, and kill;
+ * a user-issued kill never masquerades as a yield.
  */
 public final class PtySessionHost implements AutoCloseable {
 
   static final Duration NEVER_ATTACHED_GRACE = Duration.ofSeconds(60);
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
+  static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
 
   private final Path socketPath;
   private final Path sessionsDir;
@@ -42,6 +55,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyEvents events;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private volatile ServerSocketChannel server;
+  private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
 
   public PtySessionHost(
@@ -67,10 +81,43 @@ public final class PtySessionHost implements AutoCloseable {
       ownerOnly(socketDir);
     }
     Files.deleteIfExists(socketPath);
+    mintDispatchCredential();
     server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     server.bind(UnixDomainSocketAddress.of(socketPath));
     ownerOnly(socketPath);
     Thread.ofVirtual().name("pty-host-accept").start(this::acceptLoop);
+  }
+
+  /**
+   * The dispatch credential of the host serving {@code socket}: an owner-only file beside it, so
+   * exactly the processes that may open the socket may read it — the box's own API and CLI lanes.
+   */
+  public static Path dispatchCredentialOf(Path socket) {
+    return socket.resolveSibling(DISPATCH_CREDENTIAL_FILE);
+  }
+
+  private void mintDispatchCredential() throws IOException {
+    var bytes = new byte[32];
+    new SecureRandom().nextBytes(bytes);
+    var credential = HexFormat.of().formatHex(bytes);
+    var path = dispatchCredentialOf(socketPath);
+    Files.deleteIfExists(path);
+    try {
+      Files.createFile(
+          path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+    } catch (UnsupportedOperationException notPosix) {
+      Files.createFile(path);
+    }
+    Files.writeString(path, credential);
+    dispatchCredential = credential.getBytes(StandardCharsets.UTF_8);
+  }
+
+  private PtyIdentity identify(String token) throws IOException {
+    var presented = token.getBytes(StandardCharsets.UTF_8);
+    if (presented.length > 0 && MessageDigest.isEqual(presented, dispatchCredential)) {
+      return PtyIdentity.DISPATCH;
+    }
+    return identity.resolve(token);
   }
 
   /**
@@ -113,7 +160,7 @@ public final class PtySessionHost implements AutoCloseable {
       PtyIdentity who;
       if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
         try {
-          who = identity.resolve(token);
+          who = identify(token);
         } catch (IOException refused) {
           reply(channel, new PtyMessage.Err(refused.getMessage()));
           return;
@@ -125,6 +172,10 @@ public final class PtySessionHost implements AutoCloseable {
       }
       while (true) {
         var message = PtyWire.read(channel);
+        if (who.dispatchAuthority() && !(message instanceof PtyMessage.Yield)) {
+          reply(channel, new PtyMessage.Err("The dispatch authority may only yield sessions."));
+          continue;
+        }
         switch (message) {
           case PtyMessage.Create m -> reply(channel, create(m, who));
           case PtyMessage.Attach m -> {
@@ -178,7 +229,12 @@ public final class PtySessionHost implements AutoCloseable {
           }
           case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
           case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
-          case PtyMessage.Yield m -> reply(channel, yieldSession(m.session(), m.reason(), who));
+          case PtyMessage.Yield m ->
+              reply(
+                  channel,
+                  who.dispatchAuthority()
+                      ? yieldSession(m.session(), m.reason())
+                      : new PtyMessage.Err("Yield requires host dispatch authority."));
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
       }
@@ -329,15 +385,13 @@ public final class PtySessionHost implements AutoCloseable {
   /**
    * Ends a live session that a reservation displaced — the reason lands in the stream and on the
    * ended event. Idempotent: a session that is not live has nothing to end, so the answer is {@code
-   * Ok}; the one refusal is admission, which is exactly a kill's.
+   * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
+   * whichever FDE opened it.
    */
-  private PtyMessage yieldSession(String name, String reason, PtyIdentity who) {
+  private PtyMessage yieldSession(String name, String reason) {
     var session = sessions.get(name);
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
-    }
-    if (!admitted(who, session)) {
-      return new PtyMessage.Err("Session '" + name + "' belongs to " + session.ownerFde() + ".");
     }
     sessions.remove(name, session);
     session.end(reason);
@@ -393,6 +447,7 @@ public final class PtySessionHost implements AutoCloseable {
         server.close();
       }
       Files.deleteIfExists(socketPath);
+      Files.deleteIfExists(dispatchCredentialOf(socketPath));
     } catch (IOException e) {
       throw new IllegalStateException("pty host close failed", e);
     }
