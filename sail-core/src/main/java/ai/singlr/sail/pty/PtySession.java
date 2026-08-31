@@ -388,7 +388,12 @@ public final class PtySession implements AutoCloseable {
     close();
   }
 
-  /** Ends the child (if alive), waits for the gather thread, and releases the journal. */
+  /**
+   * Ends the child (if alive), waits for the gather thread, and releases the journal. By the time
+   * the gather thread is done it has forced {@code SessionEnded} into every subscriber's queue, so
+   * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
+   * ending, and a detach's queue-clearing poison would race that delivery and lose it.
+   */
   @Override
   public void close() {
     child.destroy();
@@ -400,7 +405,11 @@ public final class PtySession implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
-    subscribers.keySet().forEach(this::detach);
+    synchronized (this) {
+      subscribers.clear();
+      writerId = -1;
+      writerFde = "";
+    }
     try {
       journal.close();
     } catch (IOException e) {
