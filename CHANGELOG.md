@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `sail agent attach` resumes a completed run's conversation inside a host-owned session
+  (`resume-<run id>`, pinned to the run's room) instead of a raw `incus exec` tty: `Ctrl-]`
+  detaches and the conversation lives on, attaching again joins the live session instead of
+  forking a second agent, the run's room lists it like any room session, and a `spec create` from
+  the resumed conversation is born in the run's room. Host-owned conversations respect the
+  reservation gate: when a dispatch reserves the repos a resumed conversation works in — by exactly
+  the dispatch gate's rules, so a read-only room wake displaces nothing — the reservation ends the
+  session, attached or detached, with the reason in its stream and on its `pty_session_ended` room
+  event, and the dispatch proceeds. New host-inbound pty wire verb `Yield(session, reason)`.
+
 - `agent_session_started` now carries `run_role`, so clients can light presence the moment a run
   launches instead of waiting for its first tool call — the seconds between "message sent" and
   "agent working" shrink to the wake debounce plus launch.

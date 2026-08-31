@@ -182,6 +182,7 @@ public final class DispatchOperations {
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
+  private SessionYield sessionYield = SessionYield.NONE;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
   private final Snapshotter snapshotter;
@@ -224,7 +225,7 @@ public final class DispatchOperations {
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
-    this.runReservation = new RunReservation(runStore, shell, listener);
+    this.runReservation = new RunReservation(runStore, shell, listener, () -> sessionYield);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
         new RoomWakeLauncher(
@@ -271,6 +272,14 @@ public final class DispatchOperations {
   /** Wires the room store — the authoritative home of membership state; returns {@code this}. */
   public DispatchOperations useRooms(RoomStore rooms) {
     this.roomStore = Objects.requireNonNull(rooms, "rooms");
+    return this;
+  }
+
+  /**
+   * Wires the pty host seam a reservation ends displaced sessions through; returns {@code this}.
+   */
+  public DispatchOperations useSessionYield(SessionYield yield) {
+    this.sessionYield = Objects.requireNonNull(yield, "yield");
     return this;
   }
 

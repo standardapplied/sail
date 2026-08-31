@@ -173,6 +173,48 @@ class PtySessionHostTest {
     }
   }
 
+  @Test
+  void yieldEndsALiveSessionWithTheReasonInTheStreamAndOnTheEnding() throws Exception {
+    try (var ignored = startHost()) {
+      try (var owner = connect()) {
+        PtyWire.write(
+            owner,
+            new PtyMessage.Create(
+                "resume-1", List.of("sh", "-c", "echo up; read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+        PtyWire.write(owner, new PtyMessage.Attach("resume-1", true));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(owner));
+        awaitText(owner, "up");
+
+        try (var foreign = connect("tok-mady")) {
+          PtyWire.write(foreign, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+          assertInstanceOf(
+              PtyMessage.Err.class, PtyWire.read(foreign), "yield is admitted exactly like kill");
+        }
+        try (var box = connect()) {
+          PtyWire.write(box, new PtyMessage.Yield("ghost", "yielded to dispatch 2"));
+          assertInstanceOf(
+              PtyMessage.Ok.class, PtyWire.read(box), "nothing live to yield is nothing to do");
+          PtyWire.write(box, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(box));
+        }
+
+        awaitText(owner, "[sail: session ended \u2014 yielded to dispatch 2]");
+        PtyMessage message;
+        do {
+          message = PtyWire.read(owner);
+        } while (!(message instanceof PtyMessage.SessionEnded));
+        assertEquals(
+            "yielded to dispatch 2",
+            ((PtyMessage.SessionEnded) message).reason(),
+            "the ending carries the displacing reason, not the child's exit status");
+        assertEquals(0, host.sessionCount(), "a yielded session is gone, like a killed one");
+        assertTrue(events.contains("ended:resume-1"), events.toString());
+      }
+    }
+  }
+
   private static PtyMessage readControl(SocketChannel channel) throws IOException {
     while (true) {
       var m = PtyWire.read(channel);

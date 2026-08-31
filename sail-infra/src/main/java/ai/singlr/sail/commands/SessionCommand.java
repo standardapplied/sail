@@ -123,25 +123,34 @@ public final class SessionCommand {
     @Override
     public Integer call() throws Exception {
       try (var client = SessionClient.connect(socketOrDefault(socket))) {
-        var channel = client.attach(name, !observe);
-        var saved = Stty.saved().orElse(null);
-        if (saved == null) {
-          System.err.println("session attach needs an interactive terminal.");
-          return 1;
-        }
-        Stty.set("raw -echo");
-        String reason;
-        try {
-          reason = AttachLoop.run(channel, System.in, System.out, terminalResizes());
-        } finally {
-          Stty.set(saved);
-        }
-        System.out.println();
-        System.out.println(
-            reason == null ? "Detached; the session lives on." : "Session ended: " + reason);
+        return attachTerminal(client, name, !observe);
       }
-      return 0;
     }
+  }
+
+  /**
+   * Attaches the controlling terminal to {@code name} through {@code client}: raw mode for the
+   * duration, {@code Ctrl-]} detaches, and the ending — detach or session end — is narrated on the
+   * way out. Fails before touching the terminal when there is none to put in raw mode.
+   */
+  static int attachTerminal(SessionClient client, String name, boolean write) throws Exception {
+    var channel = client.attach(name, write);
+    var saved = Stty.saved().orElse(null);
+    if (saved == null) {
+      System.err.println("session attach needs an interactive terminal.");
+      return 1;
+    }
+    Stty.set("raw -echo");
+    String reason;
+    try {
+      reason = AttachLoop.run(channel, System.in, System.out, terminalResizes());
+    } finally {
+      Stty.set(saved);
+    }
+    System.out.println();
+    System.out.println(
+        reason == null ? "Detached; the session lives on." : "Session ended: " + reason);
+    return 0;
   }
 
   /**

@@ -178,6 +178,7 @@ public final class PtySessionHost implements AutoCloseable {
           }
           case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
           case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
+          case PtyMessage.Yield m -> reply(channel, yieldSession(m.session(), m.reason(), who));
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
       }
@@ -322,6 +323,24 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err("Session '" + name + "' belongs to " + session.ownerFde() + ".");
     }
     remove(name, session);
+    return new PtyMessage.Ok();
+  }
+
+  /**
+   * Ends a live session that a reservation displaced — the reason lands in the stream and on the
+   * ended event. Idempotent: a session that is not live has nothing to end, so the answer is {@code
+   * Ok}; the one refusal is admission, which is exactly a kill's.
+   */
+  private PtyMessage yieldSession(String name, String reason, PtyIdentity who) {
+    var session = sessions.get(name);
+    if (session == null || !session.live()) {
+      return new PtyMessage.Ok();
+    }
+    if (!admitted(who, session)) {
+      return new PtyMessage.Err("Session '" + name + "' belongs to " + session.ownerFde() + ".");
+    }
+    sessions.remove(name, session);
+    session.end(reason);
     return new PtyMessage.Ok();
   }
 

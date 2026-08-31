@@ -204,7 +204,8 @@ public final class ServerStartCommand implements Runnable {
             .useMessages(messageStore)
             .useRooms(roomStore)
             .useBoxCredentials(boxCredentialStore)
-            .useEvents(eventStore);
+            .useEvents(eventStore)
+            .useSessionYield(new PtyHostYield());
     var orphaned = reviewStore.failOrphanedRunning();
     var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
     if (orphanedRuns > 0) {

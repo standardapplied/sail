@@ -9,9 +9,9 @@ import java.util.List;
 
 /**
  * The session-host wire vocabulary — one sealed hierarchy for both directions. Client to host:
- * create, attach, input, resize, write-token, detach, list, kill. Host to client: output (carrying
- * the last applied input sequence — the one enabler client-side predictive echo needs), replay
- * bracketing, writer and size changes, flow control, endings, listings, and errors.
+ * create, attach, input, resize, write-token, detach, list, kill, yield. Host to client: output
+ * (carrying the last applied input sequence — the one enabler client-side predictive echo needs),
+ * replay bracketing, writer and size changes, flow control, endings, listings, and errors.
  */
 public sealed interface PtyMessage {
 
@@ -56,6 +56,16 @@ public sealed interface PtyMessage {
   record ListSessions(String after, int limit) implements PtyMessage {}
 
   record Kill(String session) implements PtyMessage {}
+
+  /**
+   * Ends a live session on behalf of something that displaced it — a dispatch reserving the repos
+   * its conversation works in. Admitted like {@link Kill} (owner or admin), but idempotent: a
+   * session that is not live has nothing to end and answers {@code Ok}. Unlike a kill, every
+   * attached client first sees {@code reason} as a terminal line in the stream, and the session
+   * ends with that reason rather than the child's exit status, so the room's ending event names
+   * why.
+   */
+  record Yield(String session, String reason) implements PtyMessage {}
 
   record Output(long lastInputSeq, byte[] bytes) implements PtyMessage {}
 

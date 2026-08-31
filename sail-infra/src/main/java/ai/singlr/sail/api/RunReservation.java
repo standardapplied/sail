@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -14,8 +15,10 @@ import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -26,17 +29,29 @@ import java.util.stream.Collectors;
  * #releaseIfAbsent} is the mirror: on a launch failure it frees the reservation, but only once the
  * agent is proven absent, so a failure that races a live process never pulls the repo out from
  * under it. Kept in one place so the concurrency guarantee has a single definition across lanes.
+ *
+ * <p>Host-owned terminal sessions respect the same gate: once a claim lands, every resumed agent
+ * conversation ({@link SessionYield#resumeSession}) whose run the new claim would have conflicted
+ * with — by exactly the {@link DispatchGate} rules, the conversation holding its run's repos like a
+ * working lane — is ended through the {@link SessionYield} seam, so no interactive agent ever sits
+ * on a repo a dispatch is about to work.
  */
 public final class RunReservation {
 
   private final RunStore runStore;
   private final ShellExec shell;
   private final DispatchOperations.Listener listener;
+  private final Supplier<SessionYield> sessionYield;
 
-  public RunReservation(RunStore runStore, ShellExec shell, DispatchOperations.Listener listener) {
+  public RunReservation(
+      RunStore runStore,
+      ShellExec shell,
+      DispatchOperations.Listener listener,
+      Supplier<SessionYield> sessionYield) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
+    this.sessionYield = sessionYield;
   }
 
   /**
@@ -107,8 +122,49 @@ public final class RunReservation {
     if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
       throw leaseRefusal(held);
     }
+    yieldDisplacedSessions(runId, project, specId, role, repos);
     pruneRuns(project);
     return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  /**
+   * Ends the resumed conversations this claim displaces: a run's resume session is judged as if the
+   * run were still running a working lane over its repos, so a read-only room wake displaces
+   * nothing while a build, full turn, or invite over an overlapping repo (or the same spec) ends
+   * it. Best-effort after the claim, like pruning: the reservation stands either way, and a host
+   * that refuses or cannot be reached is a warning, never a failed launch.
+   */
+  private void yieldDisplacedSessions(
+      String runId, String project, String specId, String role, List<String> repos) {
+    var target = repos == null ? List.<String>of() : repos;
+    var displaced =
+        runStore.listForProject(project).stream()
+            .filter(run -> !run.id().equals(runId))
+            .filter(run -> displaces(specId, role, target, run))
+            .map(run -> SessionYield.resumeSession(run.id()))
+            .toList();
+    if (displaced.isEmpty()) {
+      return;
+    }
+    var reason =
+        "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
+    try {
+      sessionYield.get().end(displaced, reason);
+    } catch (IOException e) {
+      System.err.println(
+          "  [api] Warning: could not yield terminal sessions "
+              + displaced
+              + ": "
+              + e.getMessage());
+    }
+  }
+
+  static boolean displaces(
+      String specId, String role, List<String> repos, RunStore.RunRow resumed) {
+    var conversation =
+        new DispatchGate.RunningRun(
+            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos());
+    return DispatchGate.decide(specId, role, repos, List.of(conversation)).isPresent();
   }
 
   /**

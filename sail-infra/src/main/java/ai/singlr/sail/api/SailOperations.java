@@ -189,6 +189,14 @@ public final class SailOperations implements Operations {
   }
 
   /**
+   * Wires the pty host seam a reservation ends displaced sessions through; returns {@code this}.
+   */
+  public SailOperations useSessionYield(SessionYield sessionYield) {
+    this.dispatchOps.useSessionYield(sessionYield);
+    return this;
+  }
+
+  /**
    * Overrides the executor that runs the deferred half of an invite (snapshot + launch). Production
    * keeps the default virtual-thread executor; a test injects {@code Runnable::run} to make the
    * completion run inline, so its assertions and teardown see a finished launch. Returns {@code

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
@@ -70,6 +71,7 @@ public final class PtySession implements AutoCloseable {
   private volatile long writerId = -1;
   private volatile String writerFde = "";
   private volatile String endedReason;
+  private volatile String yieldedReason;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
 
@@ -163,8 +165,8 @@ public final class PtySession implements AutoCloseable {
       failure = "pty failed: " + e.getMessage();
     } finally {
       try {
-        var reason =
-            failure != null ? failure : "exited(" + child.onExit().join().exitValue() + ")";
+        var exit = "exited(" + child.onExit().join().exitValue() + ")";
+        var reason = failure != null ? failure : Objects.requireNonNullElse(yieldedReason, exit);
         pty.close();
         synchronized (fanout) {
           endedAtNanos = System.nanoTime();
@@ -364,6 +366,26 @@ public final class PtySession implements AutoCloseable {
 
   public long createdAtNanos() {
     return createdAt;
+  }
+
+  /**
+   * Ends the session because something displaced it: every attached client first sees {@code
+   * reason} as a terminal line in the stream, then the session ends and reports that reason — not
+   * the child's exit status — to its subscribers and its ended event. A session that already ended
+   * keeps its own reason.
+   */
+  public void end(String reason) {
+    synchronized (fanout) {
+      if (endedReason == null && yieldedReason == null) {
+        yieldedReason = reason;
+        var notice =
+            ("\r\n[sail: session ended \u2014 " + reason + "]\r\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var output = new PtyMessage.Output(lastInputSeq.get(), notice);
+        subscribers.values().forEach(subscriber -> subscriber.queue().force(output));
+      }
+    }
+    close();
   }
 
   /** Ends the child (if alive), waits for the gather thread, and releases the journal. */
