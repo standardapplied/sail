@@ -6,6 +6,7 @@
 package ai.singlr.sail.pty;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -380,7 +381,7 @@ public final class PtySession implements AutoCloseable {
         yieldedReason = reason;
         var notice =
             ("\r\n[sail: session ended \u2014 " + reason + "]\r\n")
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                .getBytes(StandardCharsets.UTF_8);
         var output = new PtyMessage.Output(lastInputSeq.get(), notice);
         subscribers.values().forEach(subscriber -> subscriber.queue().force(output));
       }

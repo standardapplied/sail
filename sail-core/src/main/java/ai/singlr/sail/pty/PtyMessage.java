@@ -59,11 +59,12 @@ public sealed interface PtyMessage {
 
   /**
    * Ends a live session on behalf of something that displaced it — a dispatch reserving the repos
-   * its conversation works in. Admitted like {@link Kill} (owner or admin), but idempotent: a
-   * session that is not live has nothing to end and answers {@code Ok}. Unlike a kill, every
-   * attached client first sees {@code reason} as a terminal line in the stream, and the session
-   * ends with that reason rather than the child's exit status, so the room's ending event names
-   * why.
+   * its conversation works in. Admitted only for the host's dispatch authority — the credential the
+   * host mints at start, the one principal that may yield and do nothing else — never for an owner
+   * or admin, whose verb is {@link Kill}. Idempotent: a session that is not live has nothing to end
+   * and answers {@code Ok}. Unlike a kill, every attached client first sees {@code reason} as a
+   * terminal line in the stream, and the session ends with that reason rather than the child's exit
+   * status, so the room's ending event names why.
    */
   record Yield(String session, String reason) implements PtyMessage {}
 
