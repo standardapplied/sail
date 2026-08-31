@@ -101,6 +101,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   dir.resolve("s"),
                   64 * 1024,
                   token -> new PtyIdentity("it", true),
+                  new PtyHostRooms(dbPath),
                   new PtyHostEvents(dbPath))) {
         api.start();
         host.start();

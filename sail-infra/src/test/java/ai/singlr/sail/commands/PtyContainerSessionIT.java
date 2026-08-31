@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
@@ -41,6 +42,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity("uday", true),
+            PtyRooms.NONE,
             PtyEvents.NONE);
     host.start();
     return host;

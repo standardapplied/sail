@@ -115,10 +115,9 @@ final class GlobalSpecOperations {
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
     var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
-    var explicitHome = Strings.isNotBlank(request.roomId());
-    var roomId = explicitHome ? request.roomId() : request.id();
-    NameValidator.requireValidSpecId(roomId);
-    var home = explicitHome ? requireHomeRoom(roomId) : existingRoom(roomId);
+    reserveIdentityRoom(request.id());
+    var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
+    var roomId = home != null ? home.id() : request.id();
     if (home != null) {
       admitIntoRoom(home, request.project(), actor);
     }
@@ -161,6 +160,7 @@ final class GlobalSpecOperations {
    * its conversation.
    */
   private RoomStore.RoomRow requireHomeRoom(String roomId) {
+    NameValidator.requireValidSpecId(roomId);
     var store = rooms.get();
     if (store == null) {
       throw new ApiException(
@@ -175,18 +175,26 @@ final class GlobalSpecOperations {
                 new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
   }
 
-  /** The room already sitting on a new spec's identity id, if any — a binding, not a mint. */
-  private RoomStore.RoomRow existingRoom(String roomId) {
+  /**
+   * A spec's id is reserved for the identity room it mints: a room already sitting on that id is
+   * somebody's room, and letting the spec bind to it would leave deletion unable to tell the room
+   * the spec owns from one it merely borrowed. Refusing here is what makes {@code room_id == id} an
+   * exact record of "this spec minted this room" — the one fact {@link #delete} relies on.
+   */
+  private void reserveIdentityRoom(String specId) {
     var store = rooms.get();
-    return store == null ? null : store.findById(roomId).orElse(null);
+    if (store != null && store.findById(specId).isPresent()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
+          "Pick another spec id, or pass --room " + specId + " to be born in that room.");
+    }
   }
 
   /**
    * Binding a spec to an existing room hands the spec's owner every membership write that room
    * takes — engage rewrites its roster — so it needs the room's own post right: the room's assignee
-   * (or creator when unassigned) or an admin, in the room's project. Whether the room was named
-   * explicitly or merely shares the new spec's id makes no difference: either way the spec lands in
-   * somebody's room.
+   * (or creator when unassigned) or an admin, in the room's project.
    */
   private static void admitIntoRoom(RoomStore.RoomRow room, String project, Actor actor) {
     if (!Objects.equals(room.project(), project)) {
@@ -285,9 +293,10 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * Writes an explicit wake edit onto the room row — the one home the wake mode has. The spec
-   * update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still works;
-   * the value lands only on the room.
+   * Writes an explicit wake edit onto the spec's home room — the one home the wake mode has, and
+   * the same room messages, roster, and the spec view read. The spec update door keeps accepting
+   * {@code wake} so the CLI's {@code spec update --wake} still works; the value lands only on the
+   * room.
    */
   private void writeWake(SpecStore.SpecRow updated, SpecUpdateRequest request) {
     var store = rooms.get();
@@ -295,16 +304,17 @@ final class GlobalSpecOperations {
       return;
     }
     var wake = validWake(request.wake());
+    var roomId = updated.roomIdOrIdentity();
     var room =
         store.ensureFor(
-            updated.id(),
+            roomId,
             updated.project(),
             updated.title(),
             updated.assignee(),
             null,
             request.updatedBy());
     if (!Objects.equals(room.wake(), wake)) {
-      store.updateWake(updated.id(), wake, request.updatedBy());
+      store.updateWake(roomId, wake, request.updatedBy());
     }
   }
 
@@ -343,10 +353,11 @@ final class GlobalSpecOperations {
     var existing = findOrThrow(specId);
     SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
     var store = rooms.get();
+    var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
         () -> {
           specStore.delete(specId);
-          if (store != null) {
+          if (store != null && mintedItsRoom) {
             store.delete(specId);
           }
           return null;

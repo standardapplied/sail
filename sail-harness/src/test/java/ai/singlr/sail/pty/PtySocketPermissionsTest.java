@@ -38,6 +38,7 @@ class PtySocketPermissionsTest {
             dir.resolve("sessions"),
             64 * 1024,
             token -> new PtyIdentity("uday", true),
+            PtyRooms.NONE,
             PtyEvents.NONE)) {
       host.start();
 

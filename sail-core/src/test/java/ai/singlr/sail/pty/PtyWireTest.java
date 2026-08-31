@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -20,10 +21,11 @@ import org.junit.jupiter.api.Test;
 class PtyWireTest {
 
   private static PtyMessage roundTrip(PtyMessage message) throws IOException {
-    var pipe = Pipe.open();
-    PtyWire.write(pipe.sink(), message);
-    pipe.sink().close();
-    return PtyWire.read(pipe.source());
+    var bytes = new java.io.ByteArrayOutputStream();
+    PtyWire.write(java.nio.channels.Channels.newChannel(bytes), message);
+    return PtyWire.read(
+        java.nio.channels.Channels.newChannel(
+            new java.io.ByteArrayInputStream(bytes.toByteArray())));
   }
 
   @Test
@@ -85,6 +87,31 @@ class PtyWireTest {
         "gone",
         ((PtyMessage.SessionEnded) roundTrip(new PtyMessage.SessionEnded("gone"))).reason());
     assertEquals("boom", ((PtyMessage.Err) roundTrip(new PtyMessage.Err("boom"))).message());
+  }
+
+  @Test
+  void wireSizeCountsThePrefixesSoAFullPageOfCappedCommandsFitsOneFrame() throws Exception {
+    var confetti = new java.util.ArrayList<>(List.of("/bin/true"));
+    for (var i = 0; i < 20_000; i++) {
+      confetti.add("x");
+    }
+    assertTrue(
+        PtyWire.wireSize(confetti) > PtyMessage.MAX_COMMAND_BYTES,
+        "20,000 one-byte arguments cost 100 KiB on the wire, not 20 KiB");
+
+    var densest = new java.util.ArrayList<String>();
+    while (PtyWire.wireSize(densest) + 5 <= PtyMessage.MAX_COMMAND_BYTES) {
+      densest.add("x");
+    }
+    var name = "n".repeat(255);
+    var page = new java.util.ArrayList<PtyMessage.SessionInfo>();
+    for (var i = 0; i < PtyMessage.PAGE_LIMIT; i++) {
+      page.add(new PtyMessage.SessionInfo(name + i, true, 3, name, name, densest));
+    }
+
+    var listed = (PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(page, name));
+    assertEquals(PtyMessage.PAGE_LIMIT, listed.sessions().size());
+    assertEquals(densest, listed.sessions().getLast().command());
   }
 
   @Test

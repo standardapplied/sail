@@ -40,6 +40,16 @@ class PtySessionHostTest {
             default -> throw new IOException("Session token is not valid or has expired.");
           };
 
+  private static final PtyRooms ROOMS =
+      (room, project, who) -> {
+        if (!room.equals("design-talk")) {
+          throw new IOException("Room '" + room + "' was not found.");
+        }
+        if (!who.admin() && !who.fde().equals("uday")) {
+          throw new IOException("Room 'design-talk' is assigned to 'uday', not you.");
+        }
+      };
+
   private PtySessionHost startHost() throws IOException {
     host =
         new PtySessionHost(
@@ -47,6 +57,7 @@ class PtySessionHostTest {
             dir.resolve("sessions"),
             64 * 1024,
             RESOLVER,
+            ROOMS,
             new PtyEvents() {
               @Override
               public void sessionStarted(PtySession.Origin origin) {
@@ -308,6 +319,57 @@ class PtySessionHostTest {
 
   private static List<String> names(PtyMessage.Sessions page) {
     return page.sessions().stream().map(PtyMessage.SessionInfo::name).toList();
+  }
+
+  @Test
+  void aCommandOfManyTinyArgumentsIsCappedByItsWireSizeNotItsCharacters() throws Exception {
+    try (var host = startHost()) {
+      try (var channel = connect()) {
+        var command = new java.util.ArrayList<>(List.of("/bin/true"));
+        for (var i = 0; i < 20_000; i++) {
+          command.add("x");
+        }
+        assertTrue(
+            command.stream().mapToInt(String::length).sum() < PtyMessage.MAX_COMMAND_BYTES,
+            "by characters alone this command would pass the cap");
+        PtyWire.write(channel, new PtyMessage.Create("confetti", command, "/tmp", "", "", 80, 24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+        assertTrue(refused.message().contains("cap is"), refused.message());
+        assertEquals(0, host.sessionCount(), "a page of such commands would outgrow a frame");
+      }
+    }
+  }
+
+  @Test
+  void aRoomTheGateRefusesNeverReachesTheChildOrTheEvents() throws Exception {
+    try (var host = startHost()) {
+      try (var channel = connect("tok-mady")) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create(
+                "intruder", List.of("sh", "-c", "read a"), "/tmp", "", "design-talk", 80, 24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+        assertTrue(refused.message().contains("not you"), refused.message());
+      }
+      try (var channel = connect()) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create(
+                "ghost", List.of("sh", "-c", "read a"), "/tmp", "", "no-such-room", 80, 24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+        assertTrue(refused.message().contains("not found"), refused.message());
+      }
+      assertEquals(0, host.sessionCount(), "nothing is spawned for a room the gate refuses");
+      assertTrue(events.isEmpty(), "and no fact lands in anybody's room history");
+      try (var channel = connect("tok-root")) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create(
+                "admin", List.of("sh", "-c", "read a"), "/tmp", "", "design-talk", 80, 24));
+        assertInstanceOf(
+            PtyMessage.Ok.class, PtyWire.read(channel), "the gate decides, not the host");
+      }
+    }
   }
 
   @Test

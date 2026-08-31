@@ -10,7 +10,6 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
@@ -39,6 +38,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final Path sessionsDir;
   private final long journalCapacity;
   private final PtyIdentity.Resolver identity;
+  private final PtyRooms rooms;
   private final PtyEvents events;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private volatile ServerSocketChannel server;
@@ -49,11 +49,13 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
+      PtyRooms rooms,
       PtyEvents events) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
+    this.rooms = rooms;
     this.events = events;
   }
 
@@ -232,8 +234,7 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
     }
-    var commandBytes =
-        m.command().stream().mapToInt(arg -> arg.getBytes(StandardCharsets.UTF_8).length).sum();
+    var commandBytes = PtyWire.wireSize(m.command());
     if (commandBytes > PtyMessage.MAX_COMMAND_BYTES) {
       return new PtyMessage.Err(
           "Refusing a "
@@ -248,9 +249,10 @@ public final class PtySessionHost implements AutoCloseable {
     if (!room.isBlank()) {
       try {
         ai.singlr.sail.engine.NameValidator.requireValidSpecId(room);
-      } catch (IllegalArgumentException invalid) {
+        rooms.admit(room, m.project(), who);
+      } catch (IllegalArgumentException | IOException refused) {
         return new PtyMessage.Err(
-            "Refusing room for session '" + m.session() + "': " + invalid.getMessage());
+            "Refusing room for session '" + m.session() + "': " + refused.getMessage());
       }
     }
     if (existing != null) {
@@ -283,9 +285,9 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * One name-ordered page of the caller's sessions. A page is bounded by {@link
-   * PtyMessage#PAGE_LIMIT} entries of at most {@link PtyMessage#MAX_COMMAND_BYTES} of command each
-   * (names are file names, so a filesystem bounds them), which keeps every page well under the
-   * wire's frame cap no matter how many sessions the host holds.
+   * PtyMessage#PAGE_LIMIT} entries of at most {@link PtyMessage#MAX_COMMAND_BYTES} of encoded
+   * command each (names are file names, so a filesystem bounds them), which keeps every page well
+   * under the wire's frame cap no matter how many sessions the host holds.
    */
   private PtyMessage listSessions(PtyIdentity who, PtyMessage.ListSessions request) {
     var after = java.util.Objects.toString(request.after(), "");

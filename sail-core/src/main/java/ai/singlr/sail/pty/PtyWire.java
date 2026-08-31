@@ -48,6 +48,18 @@ public final class PtyWire {
     writeFully(out, frame);
   }
 
+  /**
+   * The bytes {@code strings} occupy on the wire — the count and every length prefix included, not
+   * merely the characters — so a cap measured here bounds the frame that carries them.
+   */
+  public static int wireSize(List<String> strings) {
+    var size = 4;
+    for (var value : strings) {
+      size += 4 + value.getBytes(StandardCharsets.UTF_8).length;
+    }
+    return size;
+  }
+
   public static PtyMessage read(ReadableByteChannel in) throws IOException {
     var lengthBuf = ByteBuffer.allocate(4);
     readFully(in, lengthBuf);

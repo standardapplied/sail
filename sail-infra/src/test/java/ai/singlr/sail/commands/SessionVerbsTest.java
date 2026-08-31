@@ -19,6 +19,13 @@ import picocli.CommandLine;
 @EnabledOnOs(OS.LINUX)
 class SessionVerbsTest {
 
+  private static final ai.singlr.sail.pty.PtyRooms ROOMS =
+      (room, project, who) -> {
+        if (!room.equals("design-talk")) {
+          throw new java.io.IOException("Room '" + room + "' was not found.");
+        }
+      };
+
   @TempDir Path dir;
 
   private int run(String... args) {
@@ -32,6 +39,7 @@ class SessionVerbsTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
 
@@ -54,6 +62,7 @@ class SessionVerbsTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
 
@@ -99,6 +108,7 @@ class SessionVerbsTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var exit = run("attach", "ghost", "--socket", dir.resolve("h.sock").toString());
       assertNotEquals(0, exit, "a missing session is a loud failure, not a hung raw terminal");

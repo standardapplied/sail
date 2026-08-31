@@ -21,9 +21,11 @@ public sealed interface PtyMessage {
   record Hello(String token) implements PtyMessage {}
 
   /**
-   * Starts a session. {@code room} is the room this session is pinned to — blank for none — and is
-   * opaque to the host: it rides into the child as {@code SAIL_ROOM_ID}, onto the session's events,
-   * and back out on listings; the API layer, which owns rooms, is where it is validated.
+   * Starts a session. {@code room} is the room this session is pinned to — blank for none. The host
+   * admits it through its {@link PtyRooms} gate (the room exists in the session's project and the
+   * caller holds its post right) before it rides into the child as {@code SAIL_ROOM_ID}, onto the
+   * session's events, and back out on listings. {@code command} is capped at {@link
+   * #MAX_COMMAND_BYTES} as encoded on the wire.
    */
   record Create(
       String session,
@@ -48,8 +50,8 @@ public sealed interface PtyMessage {
   /**
    * Asks for one page of the caller's sessions, in name order, strictly after {@code after} (blank
    * for the first page) and at most {@code limit} long. The host clamps {@code limit} to {@link
-   * #PAGE_LIMIT} and bounds a session's command at creation to {@link #MAX_COMMAND_BYTES}, so a
-   * full page always fits one frame however many sessions exist.
+   * #PAGE_LIMIT} and bounds a session's command at creation to {@link #MAX_COMMAND_BYTES} of wire
+   * bytes, so a full page always fits one frame however many sessions exist.
    */
   record ListSessions(String after, int limit) implements PtyMessage {}
 

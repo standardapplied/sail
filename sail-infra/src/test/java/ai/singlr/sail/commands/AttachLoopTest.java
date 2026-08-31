@@ -34,6 +34,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -63,6 +64,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -91,6 +93,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {

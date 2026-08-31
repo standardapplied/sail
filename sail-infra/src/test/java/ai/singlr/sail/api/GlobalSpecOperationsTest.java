@@ -871,7 +871,7 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
-  void namingTheSpecsOwnIdAsItsRoomIsAnExplicitBindingThatMustExist() {
+  void aSpecsIdIsReservedForTheRoomItMints() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
 
@@ -885,13 +885,71 @@ class GlobalSpecOperationsTest {
     rooms.create(
         new RoomStore.RoomRow(
             "auth", "manatee", "Auth talk", "uday", "on", null, "uday", null, null, "uday"));
-    withRooms.create(createReq(java.util.Map.of("room_id", "auth")), UDAY);
-
-    assertEquals("auth", specStore.findById("auth").orElseThrow().roomIdOrIdentity());
+    for (var request :
+        List.of(createReq(java.util.Map.of()), createReq(java.util.Map.of("room_id", "auth")))) {
+      var taken = assertThrows(ApiException.class, () -> withRooms.create(request, ADMIN));
+      assertEquals(
+          ErrorCode.CONFLICT,
+          taken.failure().errorCode(),
+          "an existing room on the spec's own id is somebody's room, never a binding target");
+      assertTrue(taken.getMessage().contains("reserved"), taken.getMessage());
+    }
+    assertTrue(specStore.findById("auth").isEmpty());
     assertEquals(
-        "Auth talk",
-        rooms.findById("auth").orElseThrow().title(),
-        "naming an existing room by the spec's own id binds to it, never re-mints it");
+        "Auth talk", rooms.findById("auth").orElseThrow().title(), "the room is untouched");
+  }
+
+  @Test
+  void deletingASpecBornElsewhereLeavesItsHomeRoomAndANamesakeRoomAlone() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "adas-room", "manatee", "Ada's room", "ada", "on", null, "ada", null, null, "ada"));
+    withRooms.create(
+        createReq(java.util.Map.of("room_id", "adas-room", "assignee", "mallory"))
+            .withCreatedBy("mallory"),
+        ADMIN);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "auth", "manatee", "Namesake", "ada", "on", null, "ada", null, null, "ada"));
+
+    withRooms.delete("auth", new Actor("mallory", Role.MEMBER, Actor.Lane.API));
+
+    assertTrue(specStore.findById("auth").isEmpty());
+    assertTrue(rooms.findById("adas-room").isPresent(), "the home room outlives the spec");
+    assertTrue(
+        rooms.findById("auth").isPresent(),
+        "a room that merely shares the spec's id was never the spec's to delete");
+  }
+
+  @Test
+  void aWakeEditOnASpecBornElsewhereLandsOnItsHomeRoom() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "design-room",
+            "manatee",
+            "Design talk",
+            "uday",
+            "on",
+            null,
+            "uday",
+            null,
+            null,
+            "uday"));
+    withRooms.create(createReq(java.util.Map.of("room_id", "design-room")), ADMIN);
+
+    var updated =
+        withRooms.update(
+            "auth",
+            SpecUpdateRequest.fromMap(java.util.Map.of("wake", "mention", "updated_by", "uday")),
+            ADMIN);
+
+    assertEquals("mention", rooms.findById("design-room").orElseThrow().wake());
+    assertEquals("mention", updated.spec().wake(), "the view reads the same room it wrote");
+    assertTrue(rooms.findById("auth").isEmpty(), "no phantom room is minted under the spec id");
   }
 
   @Test
@@ -923,9 +981,9 @@ class GlobalSpecOperationsTest {
                         .withCreatedBy("mallory"),
                     mallory));
     assertEquals(
-        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        ErrorCode.CONFLICT,
         byId.failure().errorCode(),
-        "a spec whose id collides with an existing room binds to it, so it needs the same right");
+        "a spec whose id collides with an existing room is refused outright");
     assertTrue(specStore.findById("adas-room").isEmpty());
 
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.API);
@@ -959,8 +1017,7 @@ class GlobalSpecOperationsTest {
     var foreign =
         assertThrows(
             ApiException.class, () -> withRooms.create(createReq(java.util.Map.of()), ADMIN));
-    assertEquals(ErrorCode.INVALID_REQUEST, foreign.failure().errorCode());
-    assertTrue(foreign.getMessage().contains("beta"), foreign.getMessage());
+    assertEquals(ErrorCode.CONFLICT, foreign.failure().errorCode());
     assertTrue(specStore.findById("auth").isEmpty(), "no spec lands across the project line");
   }
 

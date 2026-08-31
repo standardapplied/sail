@@ -31,6 +31,7 @@ class SessionClientTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            (room, project, who) -> {},
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
