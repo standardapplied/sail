@@ -608,28 +608,46 @@ public final class SailOperations implements Operations {
                     ErrorCode.READ_ONLY_CREDENTIAL,
                     "Your credential is read-only and cannot create rooms.");
               }
-              if (store.findById(request.id()).isPresent()) {
-                throw new ApiException(
-                    ErrorCode.CONFLICT, "Room '" + request.id() + "' already exists.");
-              }
-              store.create(
-                  new RoomStore.RoomRow(
-                      request.id(),
-                      request.project(),
-                      request.title(),
-                      request.createdBy(),
-                      request.wake(),
-                      null,
-                      request.createdBy(),
-                      null,
-                      null,
-                      request.createdBy()));
-              return detailOf(store.findById(request.id()).orElseThrow());
+              return store.atomically(
+                  () -> {
+                    requireUnclaimedRoomId(store, request.id());
+                    store.create(
+                        new RoomStore.RoomRow(
+                            request.id(),
+                            request.project(),
+                            request.title(),
+                            request.createdBy(),
+                            request.wake(),
+                            null,
+                            request.createdBy(),
+                            null,
+                            null,
+                            request.createdBy()));
+                    return detailOf(store.findById(request.id()).orElseThrow());
+                  });
             });
     if (result instanceof Result.Success<RoomDetailResponse>) {
       triggerSyncAfterWrite();
     }
     return result;
+  }
+
+  /**
+   * A room id must be free on both sides of the conversation namespace: {@link #requireRoomOrSpec}
+   * resolves spec-first, so a room minted under an existing spec's id would be unaddressable —
+   * every message to it would land in that spec's home room. Mirrors the reservation a spec birth
+   * makes.
+   */
+  private void requireUnclaimedRoomId(RoomStore store, String id) {
+    if (specStore != null && specStore.findById(id).isPresent()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + id + "' already owns that conversation id.",
+          "Pick a room id that is not a spec id.");
+    }
+    if (store.findById(id).isPresent()) {
+      throw new ApiException(ErrorCode.CONFLICT, "Room '" + id + "' already exists.");
+    }
   }
 
   @Override

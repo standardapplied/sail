@@ -22,8 +22,10 @@ import java.util.Map;
  * pty_session_started|attached|ended} — observational only, never driving run or spec state. A
  * room-bound session's rows are scoped to the room (the indexed {@code spec_id} column, which a
  * room's history query filters on) and carry {@code room_id} in their data, so a room timeline
- * shows who opened a terminal there and with what. Failures are swallowed by design: a session must
- * never die because an event row could not be written.
+ * shows who opened a terminal there and with what. "With what" is the executable alone — {@code
+ * claude} versus {@code bash} — never the full argv: arguments carry tokens, signed URLs, and
+ * inline scripts, and an event row is durable, room-readable history. Failures are swallowed by
+ * design: a session must never die because an event row could not be written.
  */
 final class PtyHostEvents implements PtyEvents {
 
@@ -40,7 +42,7 @@ final class PtyHostEvents implements PtyEvents {
   @Override
   public void sessionStarted(PtySession.Origin origin) {
     var data = dataFor(origin);
-    data.put("command", origin.command());
+    data.put("executable", origin.command().getFirst());
     insert("pty_session_started", origin, origin.ownerFde(), data);
   }
 

@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -897,6 +898,27 @@ class GlobalSpecOperationsTest {
     assertTrue(specStore.findById("auth").isEmpty());
     assertEquals(
         "Auth talk", rooms.findById("auth").orElseThrow().title(), "the room is untouched");
+  }
+
+  @Test
+  void aRoomLandingOnTheSpecsIdMidBirthFailsTheBirthInsteadOfBeingBorrowed() {
+    var rooms = new RoomStore(db);
+    Supplier<RoomStore> raced =
+        () -> {
+          if (specStore.findById("auth").isPresent() && rooms.findById("auth").isEmpty()) {
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "auth", "manatee", "Ada's room", "ada", "on", null, "ada", null, null, "ada"));
+          }
+          return rooms;
+        };
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, raced);
+
+    assertThrows(RuntimeException.class, () -> withRooms.create(createReq(Map.of()), ADMIN));
+
+    assertTrue(
+        specStore.findById("auth").isEmpty(),
+        "the birth rolls back whole: no spec row claims a room it did not mint");
   }
 
   @Test

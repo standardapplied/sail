@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Rooms on SQLite: the durable collaboration surface an FDE and their agents converse in. A room
@@ -174,6 +175,15 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
                               id, project, title, assignee, wake, null, actor, null, null, actor));
                       return findById(id).orElseThrow();
                     }));
+  }
+
+  /**
+   * Composes a check-then-create across the stores sharing this database into one write-locked
+   * transaction (see {@link Sqlite#immediateTransaction}): the spec-id collision check a room
+   * create runs and the insert it guards cannot be split by a spec being born on the same id.
+   */
+  public <T> T atomically(Supplier<T> work) {
+    return db.immediateTransaction(work);
   }
 
   /** Every room with at least one member — the rooms the engagement sweeper walks. */

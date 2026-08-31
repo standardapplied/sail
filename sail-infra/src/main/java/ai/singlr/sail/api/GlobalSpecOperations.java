@@ -115,12 +115,6 @@ final class GlobalSpecOperations {
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
     var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
-    reserveIdentityRoom(request.id());
-    var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
-    var roomId = home != null ? home.id() : request.id();
-    if (home != null) {
-      admitIntoRoom(home, request.project(), actor);
-    }
     var row =
         new SpecStore.SpecRow(
             request.id(),
@@ -139,19 +133,35 @@ final class GlobalSpecOperations {
             request.createdBy(),
             request.dependsOn(),
             request.repos());
-    specStore.create(row.withRoomId(roomId));
+    var created = specStore.atomically(() -> birth(row, request, actor));
+    publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
+    return new GlobalSpecCreatedResponse(viewOf(created));
+  }
+
+  /**
+   * The birth itself, one transaction on the connection every room and spec write shares: the id
+   * reservation, the home-room admission, the row, and the identity mint commit together or not at
+   * all. That is what keeps {@code room_id == id} an exact record of "this spec minted this room" —
+   * a room landing on the id mid-birth cannot slip between the check and the mint.
+   */
+  private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request, Actor actor) {
+    reserveIdentityRoom(request.id());
+    var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
+    if (home != null) {
+      admitIntoRoom(home, request.project(), actor);
+    }
+    specStore.create(row.withRoomId(home != null ? home.id() : request.id()));
     if (request.body() != null || request.plan() != null) {
       specStore.setContent(
           request.id(),
           Objects.requireNonNullElse(request.body(), ""),
           Objects.requireNonNullElse(request.plan(), ""));
     }
-    var created = specStore.findById(request.id()).orElseThrow();
+    var born = specStore.findById(request.id()).orElseThrow();
     if (home == null) {
-      mintIdentityRoom(created);
+      mintIdentityRoom(born);
     }
-    publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
-    return new GlobalSpecCreatedResponse(viewOf(created));
+    return born;
   }
 
   /**
@@ -179,7 +189,9 @@ final class GlobalSpecOperations {
    * A spec's id is reserved for the identity room it mints: a room already sitting on that id is
    * somebody's room, and letting the spec bind to it would leave deletion unable to tell the room
    * the spec owns from one it merely borrowed. Refusing here is what makes {@code room_id == id} an
-   * exact record of "this spec minted this room" — the one fact {@link #delete} relies on.
+   * exact record of "this spec minted this room" — the one fact {@link #delete} relies on. Runs
+   * inside the birth transaction, and {@link #mintIdentityRoom} inserts strictly rather than
+   * ensuring, so a room that lands on the id anyway fails the birth instead of being borrowed.
    */
   private void reserveIdentityRoom(String specId) {
     var store = rooms.get();
@@ -266,11 +278,6 @@ final class GlobalSpecOperations {
    * general mutate policy (assignee or admin, creator or admin when unassigned). Runs before the
    * status-based claim lock so identity is validated first.
    */
-  /**
-   * Mints the spec's identity room — same id, the conversation surface every spec gets — when this
-   * box keeps a room aggregate. Membership writes {@code ensureFor} the room defensively, so a box
-   * without the aggregate here loses nothing; this keeps the room's birth beside the spec's.
-   */
   /** The row as a wire view, wake and roster decorated from its room — the fields' only home. */
   private GlobalSpecView viewOf(SpecStore.SpecRow row) {
     var store = rooms.get();
@@ -278,18 +285,30 @@ final class GlobalSpecOperations {
         row, store == null ? null : store.findById(row.roomIdOrIdentity()).orElse(null));
   }
 
+  /**
+   * Mints the spec's identity room — same id, the conversation surface every spec gets — when this
+   * box keeps a room aggregate. A strict insert, never an ensure: the birth transaction already
+   * reserved the id, so a row there now is a foreign room and the birth must fail loudly rather
+   * than adopt it. Membership writes still {@code ensureFor} defensively, so a box without the
+   * aggregate here loses nothing.
+   */
   private void mintIdentityRoom(SpecStore.SpecRow spec) {
     var store = rooms.get();
     if (store == null) {
       return;
     }
-    store.ensureFor(
-        spec.roomIdOrIdentity(),
-        spec.project(),
-        spec.title(),
-        spec.assignee(),
-        null,
-        spec.createdBy());
+    store.create(
+        new RoomStore.RoomRow(
+            spec.roomIdOrIdentity(),
+            spec.project(),
+            spec.title(),
+            spec.assignee(),
+            null,
+            null,
+            spec.createdBy(),
+            null,
+            null,
+            spec.createdBy()));
   }
 
   /**

@@ -73,11 +73,16 @@ class PtyHostEventsTest {
   }
 
   @Test
-  void aRoomBoundSessionsRowsCarryTheRoomAndTheStartNamesTheCommand() {
+  void aRoomBoundSessionsRowsCarryTheRoomAndTheStartNamesOnlyTheExecutable() {
     var path = migrated();
     var events = new PtyHostEvents(path);
     var origin =
-        new PtySession.Origin("brainstorm", "uday", "acme", "design-talk", List.of("claude"));
+        new PtySession.Origin(
+            "brainstorm",
+            "uday",
+            "acme",
+            "design-talk",
+            List.of("claude", "--api-key", "sk-live-secret"));
 
     events.sessionStarted(origin);
     events.sessionAttached(origin, "mady");
@@ -99,11 +104,14 @@ class PtyHostEventsTest {
             .filter(e -> e.type().equals("pty_session_started"))
             .findFirst()
             .orElseThrow();
-    assertEquals(List.of("claude"), YamlUtil.parseMap(started.data()).get("command"));
+    assertEquals("claude", YamlUtil.parseMap(started.data()).get("executable"));
+    assertFalse(
+        recent.stream().anyMatch(e -> e.data().contains("sk-live-secret")),
+        "arguments never reach durable, room-readable history");
     assertFalse(
         recent.stream()
             .filter(e -> !e.type().equals("pty_session_started"))
-            .anyMatch(e -> e.data().contains("command")),
-        "only the start fact narrates the command");
+            .anyMatch(e -> e.data().contains("executable")),
+        "only the start fact narrates the executable");
   }
 }

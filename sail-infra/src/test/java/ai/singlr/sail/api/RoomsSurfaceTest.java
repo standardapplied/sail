@@ -21,6 +21,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -128,6 +129,42 @@ class RoomsSurfaceTest {
 
     assertTrue(second instanceof Result.Failure<RoomDetailResponse>);
     assertEquals(ErrorCode.CONFLICT, ((Result.Failure<RoomDetailResponse>) second).errorCode());
+  }
+
+  @Test
+  void aRoomIdAlreadyOwnedByASpecIsRefusedSoTheNewRoomIsNeverShadowed() {
+    create("adas-room", "Ada's room");
+    specStore.create(
+        new SpecStore.SpecRow(
+            "auth",
+            "acme",
+            "Auth",
+            ai.singlr.sail.config.SpecStatus.DRAFT,
+            HANDLE,
+            null,
+            null,
+            null,
+            null,
+            0,
+            HANDLE,
+            "",
+            "",
+            HANDLE,
+            List.of(),
+            List.of(),
+            "adas-room"));
+
+    var shadowed =
+        ops.createRoom(
+            RoomCreateRequest.fromMap(Map.of("id", "auth", "project", "acme", "title", "Namesake"))
+                .withCreatedBy(HANDLE),
+            admin());
+
+    assertTrue(shadowed instanceof Result.Failure<RoomDetailResponse>, shadowed.toString());
+    var failure = (Result.Failure<RoomDetailResponse>) shadowed;
+    assertEquals(ErrorCode.CONFLICT, failure.errorCode());
+    assertTrue(failure.errorMessage().contains("Spec 'auth'"), failure.errorMessage());
+    assertTrue(roomStore.findById("auth").isEmpty(), "no unaddressable room is left behind");
   }
 
   @Test
