@@ -116,6 +116,10 @@ final class GlobalSpecOperations {
     var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
     var roomId = Strings.isBlank(request.roomId()) ? request.id() : request.roomId();
     NameValidator.requireValidSpecId(roomId);
+    var bornInARoom = !roomId.equals(request.id());
+    if (bornInARoom) {
+      requireHomeRoom(roomId, request.project());
+    }
     var row =
         new SpecStore.SpecRow(
             request.id(),
@@ -142,9 +146,44 @@ final class GlobalSpecOperations {
           Objects.requireNonNullElse(request.plan(), ""));
     }
     var created = specStore.findById(request.id()).orElseThrow();
-    mintIdentityRoom(created);
+    if (!bornInARoom) {
+      mintIdentityRoom(created);
+    }
     publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
     return new GlobalSpecCreatedResponse(viewOf(created));
+  }
+
+  /**
+   * The room a spec is explicitly born into — a brainstorm's {@code SAIL_ROOM_ID}, an epic's room —
+   * must already exist and belong to the spec's project. A spec with a home room mints no identity
+   * room: the room it was born in is its conversation.
+   */
+  private void requireHomeRoom(String roomId, String project) {
+    var store = rooms.get();
+    if (store == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
+          "Start the server with 'sail server start' or omit the room.");
+    }
+    var room =
+        store
+            .findById(roomId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    if (!Objects.equals(room.project(), project)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "Room '"
+              + roomId
+              + "' belongs to project '"
+              + room.project()
+              + "', not '"
+              + project
+              + "'; a spec is born in a room of its own project.");
+    }
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {

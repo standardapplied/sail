@@ -2015,6 +2015,18 @@ class ApiRouterTest {
     }
 
     @Override
+    public Result<RoomConversationResponse> recordRoomConversation(
+        String roomId,
+        String agent,
+        String sessionId,
+        String source,
+        String transcriptPath,
+        String fde) {
+      return new TestOperations()
+          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, fde);
+    }
+
+    @Override
     public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
       return Result.success(
           new GlobalSpecHistoryResponse(

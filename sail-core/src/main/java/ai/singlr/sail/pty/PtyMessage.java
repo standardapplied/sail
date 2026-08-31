@@ -17,8 +17,19 @@ public sealed interface PtyMessage {
 
   record Hello(String token) implements PtyMessage {}
 
+  /**
+   * Starts a session. {@code room} is the room this session is pinned to — blank for none — and is
+   * opaque to the host: it rides into the child as {@code SAIL_ROOM_ID}, onto the session's events,
+   * and back out on listings; the API layer, which owns rooms, is where it is validated.
+   */
   record Create(
-      String session, List<String> command, String cwd, String project, int cols, int rows)
+      String session,
+      List<String> command,
+      String cwd,
+      String project,
+      String room,
+      int cols,
+      int rows)
       implements PtyMessage {}
 
   record Attach(String session, boolean write) implements PtyMessage {}
@@ -51,7 +62,13 @@ public sealed interface PtyMessage {
 
   record SessionEnded(String reason) implements PtyMessage {}
 
-  record SessionInfo(String name, boolean live, int attached, String writerFde)
+  /**
+   * One listed session. {@code command} is the child as requested (the default login shell when
+   * none was), so a client can tell an agent session from a plain shell; {@code room} is blank when
+   * the session is not room-bound.
+   */
+  record SessionInfo(
+      String name, boolean live, int attached, String writerFde, String room, List<String> command)
       implements PtyMessage {}
 
   record Sessions(List<SessionInfo> sessions) implements PtyMessage {}

@@ -93,4 +93,20 @@ public interface LocalLaneOperations {
    */
   Result<RunSessionResponse> recordRunSession(
       String runId, String sessionId, String source, String transcriptPath);
+
+  /**
+   * Records the hook-reported identity of an interactive, room-bound agent conversation — one
+   * started in a terminal session that exported {@code SAIL_ROOM_ID}, which has no run row. The
+   * room must exist; the fact lands as a record-class {@code agent_conversation_started} event in
+   * that room, authored by {@code fde}, carrying the CLI ({@code agent}), the conversation's
+   * session id, and the optional start source and transcript path. Nothing consumes it yet: it is
+   * the seam a later resume-through-either-door builds on.
+   */
+  Result<RoomConversationResponse> recordRoomConversation(
+      String roomId,
+      String agent,
+      String sessionId,
+      String source,
+      String transcriptPath,
+      String fde);
 }

@@ -153,6 +153,60 @@ class SailSessionReportTest {
   }
 
   @Test
+  void aRoomBoundSessionReportsOverTheBoxLaneNamingItsRoomAndCli() throws Exception {
+    try (var bound = bind()) {
+      Files.writeString(home.resolve("box.credential"), "sailbox_ambient\n");
+      reportArgs = List.of("claude-code");
+      var result =
+          runReport(
+              null,
+              null,
+              fakeCurl(),
+              "{\"session_id\": \"conv-1\", \"source\": \"startup\"}",
+              Map.of("SAIL_ROOM_ID", "design-talk"));
+
+      assertEquals(0, result.exitCode());
+      assertEquals("", result.stdout());
+      var calls = curlLog();
+      assertEquals(1, calls.size(), "an interactive room session reports exactly once");
+      assertTrue(calls.get(0).contains("/v1/run/session"), calls.get(0));
+      assertTrue(calls.get(0).contains("room_id=design-talk"), calls.get(0));
+      assertTrue(calls.get(0).contains("agent=claude-code"), "the hook names its CLI: " + calls);
+      assertTrue(calls.get(0).contains("session_id=conv-1"), calls.get(0));
+      assertTrue(
+          calls.get(0).contains("Bearer sailbox_ambient"),
+          "no run credential: the box's ambient credential beside the socket speaks: " + calls);
+    }
+  }
+
+  @Test
+  void aRunsReportStillPrefersItsRunCredentialAndCarriesNoRoomUnlessBound() throws Exception {
+    try (var bound = bind()) {
+      Files.writeString(home.resolve("box.credential"), "sailbox_ambient\n");
+      reportArgs = List.of("codex");
+      runReport(RUN_ID, CREDENTIAL, fakeCurl(), "{\"session_id\": \"abc\"}");
+
+      var calls = curlLog();
+      assertEquals(1, calls.size());
+      assertTrue(calls.get(0).contains("Bearer " + CREDENTIAL), calls.get(0));
+      assertFalse(calls.get(0).contains("room_id="), "a plain run names no room: " + calls);
+      assertTrue(calls.get(0).contains("agent=codex"), calls.get(0));
+    }
+  }
+
+  @Test
+  void aRoomBoundSessionWithoutAnAmbientCredentialStaysSilent() throws Exception {
+    try (var bound = bind()) {
+      var result =
+          runReport(
+              null, null, fakeCurl(), "{\"session_id\": \"abc\"}", Map.of("SAIL_ROOM_ID", "x"));
+
+      assertEquals(0, result.exitCode());
+      assertTrue(curlLog().isEmpty(), "no credential of either kind: nothing to say");
+    }
+  }
+
+  @Test
   void reportIsInertWithoutARunId() throws Exception {
     try (var bound = bind()) {
       var result = runReport(null, CREDENTIAL, fakeCurl(), "{\"session_id\": \"abc\"}");
@@ -268,15 +322,17 @@ class SailSessionReportTest {
     return runReport(runId, credential, pathPrefix, stdin, Map.of());
   }
 
+  private List<String> reportArgs = List.of();
+
   private ReportResult runReport(
       String runId, String credential, Path pathPrefix, String stdin, Map<String, String> extraEnv)
       throws Exception {
-    var pb = new ProcessBuilder("/bin/sh", report.toString());
+    var argv = new java.util.ArrayList<>(List.of("/bin/sh", report.toString()));
+    argv.addAll(reportArgs);
+    var pb = new ProcessBuilder(argv);
     var env = pb.environment();
     env.put("HOME", home.toString());
-    env.remove("SAIL_RUN_ID");
-    env.remove("SAIL_RUN_CREDENTIAL");
-    env.remove("SAIL_SPEC_ID");
+    env.keySet().removeIf(key -> key.startsWith("SAIL_"));
     if (runId != null) {
       env.put("SAIL_RUN_ID", runId);
     }

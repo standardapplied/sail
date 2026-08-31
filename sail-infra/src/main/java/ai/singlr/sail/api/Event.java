@@ -70,6 +70,14 @@ public record Event(
     public static final String AGENT_SESSION_COMPLETED = "agent_session_completed";
 
     /**
+     * An interactive agent conversation began inside a room-bound terminal session — reported by
+     * the SessionStart hook over the box lane, since such a session has no run row. Scoped to the
+     * room; carries {@code room_id}, {@code session_id}, and {@code agent} in {@code data}. The
+     * seam for reopening one conversation through either door; nothing consumes it yet.
+     */
+    public static final String AGENT_CONVERSATION_STARTED = "agent_conversation_started";
+
+    /**
      * An operator deliberately cancelled a running spec: the terminal intent was recorded (spec
      * {@code cancelled}, run {@code stopped}) before the agent process was halted. Carries {@code
      * data.source=operator} and the run id; the event's {@code agent} field names the acting FDE.

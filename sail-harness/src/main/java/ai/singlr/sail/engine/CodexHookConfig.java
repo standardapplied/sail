@@ -159,7 +159,7 @@ public final class CodexHookConfig {
   private static Map<String, Object> sessionReportCommand() {
     var hook = new LinkedHashMap<String, Object>();
     hook.put("type", "command");
-    hook.put("command", SailSessionReport.SCRIPT_PATH);
+    hook.put("command", SailSessionReport.SCRIPT_PATH + " " + AgentCli.CODEX.yamlName());
     hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }

@@ -7,25 +7,26 @@ package ai.singlr.sail.pty;
 
 /**
  * The record-class facts a session emits — started, attached, ended — with the existing source
- * discipline: observational only, nothing here drives run or spec state.
+ * discipline: observational only, nothing here drives run or spec state. Each fact carries the
+ * session's {@link PtySession.Origin}, so a room-bound session's room travels with it.
  */
 public interface PtyEvents {
 
   PtyEvents NONE =
       new PtyEvents() {
         @Override
-        public void sessionStarted(String session, String project, String fde) {}
+        public void sessionStarted(PtySession.Origin origin) {}
 
         @Override
-        public void sessionAttached(String session, String project, String fde) {}
+        public void sessionAttached(PtySession.Origin origin, String fde) {}
 
         @Override
-        public void sessionEnded(String session, String project, String reason) {}
+        public void sessionEnded(PtySession.Origin origin, String reason) {}
       };
 
-  void sessionStarted(String session, String project, String fde);
+  void sessionStarted(PtySession.Origin origin);
 
-  void sessionAttached(String session, String project, String fde);
+  void sessionAttached(PtySession.Origin origin, String fde);
 
-  void sessionEnded(String session, String project, String reason);
+  void sessionEnded(PtySession.Origin origin, String reason);
 }

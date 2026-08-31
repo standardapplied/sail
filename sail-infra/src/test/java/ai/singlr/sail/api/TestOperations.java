@@ -506,6 +506,17 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<RoomConversationResponse> recordRoomConversation(
+      String roomId,
+      String agent,
+      String sessionId,
+      String source,
+      String transcriptPath,
+      String fde) {
+    return Result.success(new RoomConversationResponse(roomId, sessionId, agent));
+  }
+
+  @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return Result.success(new GlobalSpecHistoryResponse(specId, java.util.List.of()));
   }

@@ -32,11 +32,18 @@ class PtyWireTest {
         (PtyMessage.Create)
             roundTrip(
                 new PtyMessage.Create(
-                    "lounge", List.of("bash", "-l"), "/home/dev", "chorus", 132, 43));
+                    "lounge", List.of("bash", "-l"), "/home/dev", "chorus", "design", 132, 43));
     assertEquals("lounge", create.session());
     assertEquals(List.of("bash", "-l"), create.command());
     assertEquals("chorus", create.project());
+    assertEquals("design", create.room());
     assertEquals(132, create.cols());
+    assertEquals(43, create.rows());
+
+    var unbound =
+        (PtyMessage.Create)
+            roundTrip(new PtyMessage.Create("s", List.of(), "/tmp", "", null, 80, 24));
+    assertEquals("", unbound.room(), "an absent room reads back blank, never null");
 
     var input =
         (PtyMessage.Input)
@@ -54,10 +61,15 @@ class PtyWireTest {
             roundTrip(
                 new PtyMessage.Sessions(
                     List.of(
-                        new PtyMessage.SessionInfo("a", true, 2, "uday"),
-                        new PtyMessage.SessionInfo("b", false, 0, ""))));
+                        new PtyMessage.SessionInfo(
+                            "a", true, 2, "uday", "design", List.of("claude", "--resume")),
+                        new PtyMessage.SessionInfo("b", false, 0, "", "", List.of("bash", "-l")))));
     assertEquals(2, sessions.sessions().size());
     assertEquals("uday", sessions.sessions().getFirst().writerFde());
+    assertEquals("design", sessions.sessions().getFirst().room());
+    assertEquals(List.of("claude", "--resume"), sessions.sessions().getFirst().command());
+    assertEquals("", sessions.sessions().getLast().room());
+    assertEquals(List.of("bash", "-l"), sessions.sessions().getLast().command());
 
     assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));

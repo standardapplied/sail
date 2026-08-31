@@ -1539,6 +1539,45 @@ public final class SailOperations implements Operations {
         });
   }
 
+  @Override
+  public Result<RoomConversationResponse> recordRoomConversation(
+      String roomId,
+      String agent,
+      String sessionId,
+      String source,
+      String transcriptPath,
+      String fde) {
+    return safe(
+        () -> {
+          if (Strings.isBlank(sessionId)) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
+          }
+          var room = requireRoomOrSpec(roomId);
+          var cli = Strings.isBlank(agent) ? null : agent.strip();
+          var data = new LinkedHashMap<String, Object>();
+          data.put("room_id", room.id());
+          data.put("session_id", sessionId.strip());
+          if (cli != null) {
+            data.put("agent", cli);
+          }
+          if (Strings.isNotBlank(source)) {
+            data.put("session_source", source.strip());
+          }
+          if (Strings.isNotBlank(transcriptPath)) {
+            data.put("transcript_path", transcriptPath.strip());
+          }
+          publishOnBus(
+              Event.of(
+                  room.project(),
+                  room.id(),
+                  Event.WellKnownTypes.AGENT_CONVERSATION_STARTED,
+                  fde,
+                  HostInfo.hostname(),
+                  data));
+          return new RoomConversationResponse(room.id(), sessionId.strip(), cli);
+        });
+  }
+
   private RunStore.RunRow requireRun(String runId) {
     if (runStore == null) {
       throw new ApiException(

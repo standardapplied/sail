@@ -69,6 +69,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             List.of("sh", "-c", "read a; echo pty-says:$a@$(hostname); exit 0"),
             "/tmp",
             container,
+            "",
             80,
             24);
         var channel = client.attach("c1", true);
@@ -107,6 +108,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             List.of("sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; read a"),
             "/tmp",
             container,
+            "",
             80,
             24);
         var channel = client.attach("c1", true);

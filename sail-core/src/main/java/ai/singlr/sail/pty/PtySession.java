@@ -37,9 +37,23 @@ public final class PtySession implements AutoCloseable {
 
   private record Subscriber(long id, Client client, SubscriberQueue queue) {}
 
-  private final String name;
-  private final String ownerFde;
-  private final String project;
+  /**
+   * What a session was born as: its name, the FDE who created it, the project whose container it
+   * runs in (blank for the node itself), the room it is pinned to (blank for none), and the child
+   * as requested — the facts every listing and every emitted event carry.
+   */
+  public record Origin(
+      String name, String ownerFde, String project, String room, List<String> command) {
+    public Origin {
+      command = List.copyOf(command);
+    }
+
+    public boolean roomBound() {
+      return room != null && !room.isBlank();
+    }
+  }
+
+  private final Origin origin;
   private final PtyEvents events;
   private final Pty pty;
   private final Process child;
@@ -60,18 +74,14 @@ public final class PtySession implements AutoCloseable {
   private volatile boolean everAttached;
 
   private PtySession(
-      String name,
-      String ownerFde,
-      String project,
+      Origin origin,
       PtyEvents events,
       Pty pty,
       Process child,
       RingJournal journal,
       int queueCapacity,
       int replayMax) {
-    this.name = name;
-    this.ownerFde = ownerFde;
-    this.project = project;
+    this.origin = origin;
     this.events = events;
     this.pty = pty;
     this.child = child;
@@ -80,12 +90,14 @@ public final class PtySession implements AutoCloseable {
     this.replayMax = replayMax;
   }
 
+  /**
+   * Spawns {@code argv} — the process actually executed, which may wrap {@code origin.command()} in
+   * a container exec lane — and starts gathering its output.
+   */
   public static PtySession start(
-      String name,
-      String ownerFde,
-      String project,
+      Origin origin,
       PtyEvents events,
-      List<String> command,
+      List<String> argv,
       Map<String, String> env,
       Path cwd,
       Path journalPath,
@@ -94,27 +106,13 @@ public final class PtySession implements AutoCloseable {
       int rows)
       throws IOException {
     return start(
-        name,
-        ownerFde,
-        project,
-        events,
-        command,
-        env,
-        cwd,
-        journalPath,
-        journalCapacity,
-        cols,
-        rows,
-        4096,
-        262_144);
+        origin, events, argv, env, cwd, journalPath, journalCapacity, cols, rows, 4096, 262_144);
   }
 
   static PtySession start(
-      String name,
-      String ownerFde,
-      String project,
+      Origin origin,
       PtyEvents events,
-      List<String> command,
+      List<String> argv,
       Map<String, String> env,
       Path cwd,
       Path journalPath,
@@ -128,17 +126,15 @@ public final class PtySession implements AutoCloseable {
     var pty = Pty.open(cols, rows);
     Process child;
     try {
-      child = pty.spawn(command, env, cwd);
+      child = pty.spawn(argv, env, cwd);
     } catch (IOException e) {
       pty.close();
       journal.close();
       throw e;
     }
-    var session =
-        new PtySession(
-            name, ownerFde, project, events, pty, child, journal, queueCapacity, replayMax);
-    Thread.ofPlatform().name("pty-gather-" + name).start(session::gather);
-    events.sessionStarted(name, project, ownerFde);
+    var session = new PtySession(origin, events, pty, child, journal, queueCapacity, replayMax);
+    Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
+    events.sessionStarted(origin);
     return session;
   }
 
@@ -177,7 +173,7 @@ public final class PtySession implements AutoCloseable {
           subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
         }
         try {
-          events.sessionEnded(name, project, reason);
+          events.sessionEnded(origin, reason);
         } catch (RuntimeException ignored) {
           var unused = ignored;
         }
@@ -213,7 +209,7 @@ public final class PtySession implements AutoCloseable {
   /** Attaches a client: replay first, live stream after, write token if free and requested. */
   public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
     if (endedReason != null) {
-      throw new IOException("Session '" + name + "' has ended: " + endedReason + ".");
+      throw new IOException("Session '" + name() + "' has ended: " + endedReason + ".");
     }
     everAttached = true;
     var subscriber =
@@ -236,9 +232,9 @@ public final class PtySession implements AutoCloseable {
         writerFde = fde;
       }
     }
-    events.sessionAttached(name, project, fde);
+    events.sessionAttached(origin, fde);
     Thread.ofVirtual()
-        .name("pty-send-" + name + "-" + subscriber.id())
+        .name("pty-send-" + name() + "-" + subscriber.id())
         .start(() -> send(subscriber));
     return subscriber.id();
   }
@@ -322,8 +318,12 @@ public final class PtySession implements AutoCloseable {
     return journal.totalWritten();
   }
 
+  public Origin origin() {
+    return origin;
+  }
+
   public String name() {
-    return name;
+    return origin.name();
   }
 
   public boolean live() {
@@ -339,11 +339,11 @@ public final class PtySession implements AutoCloseable {
   }
 
   public String ownerFde() {
-    return ownerFde;
+    return origin.ownerFde();
   }
 
   public String project() {
-    return project;
+    return origin.project();
   }
 
   public String writerFde() {
@@ -382,7 +382,7 @@ public final class PtySession implements AutoCloseable {
     try {
       journal.close();
     } catch (IOException e) {
-      throw new IllegalStateException("journal close failed for session '" + name + "'", e);
+      throw new IllegalStateException("journal close failed for session '" + name() + "'", e);
     }
   }
 }

@@ -45,9 +45,15 @@ public final class SessionClient implements AutoCloseable {
   }
 
   public void create(
-      String name, List<String> command, String cwd, String project, int cols, int rows)
+      String name,
+      List<String> command,
+      String cwd,
+      String project,
+      String room,
+      int cols,
+      int rows)
       throws IOException {
-    PtyWire.write(channel, new PtyMessage.Create(name, command, cwd, project, cols, rows));
+    PtyWire.write(channel, new PtyMessage.Create(name, command, cwd, project, room, cols, rows));
     expectOk("create");
   }
 

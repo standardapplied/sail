@@ -10,16 +10,19 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtySession;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * The production {@link PtyEvents}: each session fact becomes one record-class event row — {@code
- * pty_session_started|attached|ended} — observational only, never driving run or spec state.
- * Failures are swallowed by design: a session must never die because an event row could not be
- * written.
+ * pty_session_started|attached|ended} — observational only, never driving run or spec state. A
+ * room-bound session's rows carry {@code room_id}, so a room timeline can show who opened a
+ * terminal there and with what. Failures are swallowed by design: a session must never die because
+ * an event row could not be written.
  */
 final class PtyHostEvents implements PtyEvents {
 
@@ -34,18 +37,31 @@ final class PtyHostEvents implements PtyEvents {
   }
 
   @Override
-  public void sessionStarted(String session, String project, String fde) {
-    insert("pty_session_started", project, fde, Map.of("session", session));
+  public void sessionStarted(PtySession.Origin origin) {
+    var data = dataFor(origin);
+    data.put("command", origin.command());
+    insert("pty_session_started", origin.project(), origin.ownerFde(), data);
   }
 
   @Override
-  public void sessionAttached(String session, String project, String fde) {
-    insert("pty_session_attached", project, fde, Map.of("session", session));
+  public void sessionAttached(PtySession.Origin origin, String fde) {
+    insert("pty_session_attached", origin.project(), fde, dataFor(origin));
   }
 
   @Override
-  public void sessionEnded(String session, String project, String reason) {
-    insert("pty_session_ended", project, "sail", Map.of("session", session, "reason", reason));
+  public void sessionEnded(PtySession.Origin origin, String reason) {
+    var data = dataFor(origin);
+    data.put("reason", reason);
+    insert("pty_session_ended", origin.project(), "sail", data);
+  }
+
+  private static Map<String, Object> dataFor(PtySession.Origin origin) {
+    var data = new LinkedHashMap<String, Object>();
+    data.put("session", origin.name());
+    if (origin.roomBound()) {
+      data.put("room_id", origin.room());
+    }
+    return data;
   }
 
   private void insert(String type, String project, String agent, Map<String, Object> data) {

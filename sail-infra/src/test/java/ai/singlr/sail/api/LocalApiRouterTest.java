@@ -213,6 +213,15 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void createSpecPassesTheHomeRoomThroughAndLeavesItNullWhenAbsent() {
+    router.handle(form("POST", "/v1/specs", "id=born&title=Born&room_id=design-talk"));
+    assertEquals("design-talk", ops.lastCreate.roomId(), "a brainstorm's spec names its room");
+
+    router.handle(form("POST", "/v1/specs", "id=solo&title=Solo"));
+    assertNull(ops.lastCreate.roomId(), "no room means the identity-room default downstream");
+  }
+
+  @Test
   void createSpecDefaultsStatusDraftAndStampsThePrincipal() {
     router.handle(form("POST", "/v1/specs", "id=x&title=X&actor=ada"));
     assertEquals("draft", ops.lastCreate.status());
@@ -475,6 +484,53 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void aRoomBoundInteractiveSessionReportsItsConversationOverTheBoxLane() {
+    var reported =
+        router.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/run/session",
+                Map.of(),
+                boxAuth(),
+                ("room_id=design-talk&agent=claude-code&session_id=abc-123&source=startup"
+                        + "&transcript_path=%2Fhome%2Fdev%2F.claude%2Fp%2Fabc.jsonl")
+                    .getBytes(StandardCharsets.UTF_8)));
+    assertEquals(200, reported.status(), reported.body().toString());
+    assertEquals("design-talk", reported.body().get("room_id"));
+    assertEquals("abc-123", reported.body().get("session_id"));
+    assertEquals("claude-code", reported.body().get("agent"));
+    assertEquals("design-talk", ops.lastConversationRoom);
+    assertEquals("claude-code", ops.lastConversationAgent);
+    assertEquals("abc-123", ops.lastSessionId);
+    assertEquals("startup", ops.lastSessionSource);
+    assertEquals("/home/dev/.claude/p/abc.jsonl", ops.lastTranscriptPath);
+    assertEquals(
+        TestOperations.BOX_HANDLE,
+        ops.lastConversationFde,
+        "the conversation is authored by the box FDE the credential stands for");
+    assertNull(ops.lastSessionRunId, "no run row is touched by a box-lane report");
+
+    var wrongMethod =
+        router.handle(
+            new LocalApiRequest(
+                "GET",
+                "/v1/run/session",
+                Map.of("room_id", "design-talk"),
+                boxAuth(),
+                new byte[0]));
+    assertEquals(403, wrongMethod.status(), "a GET carries no form, so no room: refused first");
+  }
+
+  @Test
+  void aRunCallersReportIgnoresAnyRoomItClaims() {
+    var recorded =
+        router.handle(form("POST", "/v1/run/session", "session_id=abc&room_id=someone-elses"));
+    assertEquals(200, recorded.status());
+    assertEquals("run-1", ops.lastSessionRunId, "a run credential always reports onto its run");
+    assertNull(ops.lastConversationRoom, "a run never mints a room conversation");
+  }
+
+  @Test
   void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
     var created =
         router.handle(
@@ -592,6 +648,9 @@ class LocalApiRouterTest {
     private String lastSessionId;
     private String lastSessionSource;
     private String lastTranscriptPath;
+    private String lastConversationRoom;
+    private String lastConversationAgent;
+    private String lastConversationFde;
     private boolean emptyMessages;
     private boolean failMessages;
 
@@ -698,6 +757,23 @@ class LocalApiRouterTest {
       lastSessionSource = source;
       lastTranscriptPath = transcriptPath;
       return super.recordRunSession(runId, sessionId, source, transcriptPath);
+    }
+
+    @Override
+    public Result<RoomConversationResponse> recordRoomConversation(
+        String roomId,
+        String agent,
+        String sessionId,
+        String source,
+        String transcriptPath,
+        String fde) {
+      lastConversationRoom = roomId;
+      lastConversationAgent = agent;
+      lastSessionId = sessionId;
+      lastSessionSource = source;
+      lastTranscriptPath = transcriptPath;
+      lastConversationFde = fde;
+      return super.recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, fde);
     }
   }
 }

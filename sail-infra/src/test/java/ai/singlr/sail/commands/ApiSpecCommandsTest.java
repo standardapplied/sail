@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -19,6 +20,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -58,7 +60,8 @@ class ApiSpecCommandsTest {
     var operations =
         new SailOperations(
                 new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore)
-            .useMessages(new MessageStore(db));
+            .useMessages(new MessageStore(db))
+            .useRooms(new RoomStore(db));
     server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
     server.start();
   }
@@ -174,6 +177,22 @@ class ApiSpecCommandsTest {
 
     var output = run("board");
     assertFalse(output.contains("open findings"));
+  }
+
+  @Test
+  void createWithARoomIsBornThereAndMintsNoIdentityRoom() {
+    run("create", "--id", "epic", "--title", "Epic");
+    var output = run("create", "--id", "child", "--title", "Child", "--room", "epic");
+
+    assertTrue(output.contains("Spec created: child"), output);
+    var rooms = new RoomStore(db);
+    assertEquals("epic", new SpecStore(db).findById("child").orElseThrow().roomIdOrIdentity());
+    assertTrue(
+        rooms.findById("child").isEmpty(), "a spec with a home room gets no room of its own");
+    assertTrue(rooms.findById("epic").isPresent());
+
+    var refused = run("create", "--id", "orphan", "--title", "Orphan", "--room", "nowhere");
+    assertTrue(new SpecStore(db).findById("orphan").isEmpty(), refused);
   }
 
   @Test

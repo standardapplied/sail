@@ -44,7 +44,9 @@ public final class SpecCliHelper {
       # at launch (SAIL_RUN_CREDENTIAL); any other session — an engineer's shell, an
       # IDE-spawned agent — falls back to the box's ambient credential provisioned
       # next to the socket. Authorship is resolved server-side from the credential;
-      # there is no client-chosen actor.
+      # there is no client-chosen actor. A terminal session pinned to a room
+      # exports SAIL_ROOM_ID: a spec created inside it is born in that room
+      # unless --room says otherwise.
       set -euo pipefail
 
       SOCKET="__SAIL_API_SOCKET__"
@@ -81,6 +83,7 @@ public final class SpecCliHelper {
             --priority)         FIELDS+=(--data-urlencode "priority=$2"); shift 2;;
             --depends-on)       FIELDS+=(--data-urlencode "depends_on=$2"); shift 2;;
             --repos)            FIELDS+=(--data-urlencode "repos=$2"); shift 2;;
+            --room)             FIELDS+=(--data-urlencode "room_id=$2"); ROOM_GIVEN=1; shift 2;;
             --wake)             FIELDS+=(--data-urlencode "wake=$2"); shift 2;;
             --body-file)        FIELDS+=(--data-urlencode "body@$2"); shift 2;;
             --plan-file)        FIELDS+=(--data-urlencode "plan@$2"); shift 2;;
@@ -102,6 +105,7 @@ public final class SpecCliHelper {
         spec create --id <id> --title <title> [--body-file F] [--status pending]
                     [--depends-on a,b] [--repos a,b] [--agent A] [--model M]
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
+                    [--room R]  (default: $SAIL_ROOM_ID when this terminal is pinned to a room)
         spec update <id> [--status S] [--title T] [--assignee H] [--wake on|mention|off]
                     [--force] [...]  (alias: edit)
         spec content <id> --body-file F [--plan-file F]   revise the body
@@ -125,7 +129,11 @@ public final class SpecCliHelper {
           [ $# -ge 1 ] || die "show needs a spec id"
           api "$BASE/$1";;
         create)
+          ROOM_GIVEN=""
           collect_fields "$@"
+          if [ -z "$ROOM_GIVEN" ] && [ -n "${SAIL_ROOM_ID:-}" ]; then
+            FIELDS+=(--data-urlencode "room_id=$SAIL_ROOM_ID")
+          fi
           api -X POST --data-urlencode "project=$PROJECT" "${FIELDS[@]}" "$BASE";;
         update|edit)
           [ $# -ge 1 ] || die "update needs a spec id"

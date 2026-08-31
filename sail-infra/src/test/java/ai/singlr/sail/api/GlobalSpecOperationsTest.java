@@ -825,6 +825,56 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void aSpecCannotBeBornInARoomThatDoesNotExistOrBelongsElsewhere() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "other-room", "beta", "Other project", "uday", "on", null, "uday", null, null, "uday"));
+
+    var missing =
+        assertThrows(
+            ApiException.class,
+            () -> withRooms.create(createReq(java.util.Map.of("room_id", "ghost-room"))));
+    assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
+    assertTrue(specStore.findById("auth").isEmpty(), "a refused birth creates no spec");
+    assertTrue(rooms.findById("ghost-room").isEmpty(), "and mints no room under the wrong id");
+
+    var foreign =
+        assertThrows(
+            ApiException.class,
+            () -> withRooms.create(createReq(java.util.Map.of("room_id", "other-room"))));
+    assertEquals(ErrorCode.INVALID_REQUEST, foreign.failure().errorCode());
+    assertTrue(foreign.getMessage().contains("beta"), foreign.getMessage());
+    assertTrue(specStore.findById("auth").isEmpty());
+  }
+
+  @Test
+  void aHomeRoomNeedsARoomAggregateOnThisBox() {
+    var noRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> null);
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> noRooms.create(createReq(java.util.Map.of("room_id", "design-room"))));
+    assertEquals(ErrorCode.INTERNAL, refused.failure().errorCode());
+    assertTrue(refused.getMessage().contains("design-room"), refused.getMessage());
+  }
+
+  @Test
+  void namingTheSpecsOwnIdAsItsRoomIsTheIdentityRoomDefault() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+
+    withRooms.create(createReq(java.util.Map.of("room_id", "auth")));
+
+    assertEquals("auth", specStore.findById("auth").orElseThrow().roomIdOrIdentity());
+    assertEquals(
+        "Auth",
+        rooms.findById("auth").orElseThrow().title(),
+        "the identity room is minted exactly as for a room-less create");
+  }
+
+  @Test
   void anExplicitWakeEditWritesTheRoomRow() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);

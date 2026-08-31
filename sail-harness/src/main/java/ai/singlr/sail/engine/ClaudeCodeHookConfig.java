@@ -197,7 +197,7 @@ public final class ClaudeCodeHookConfig {
   private static Map<String, Object> sessionReportCommand() {
     var hook = new LinkedHashMap<String, Object>();
     hook.put("type", "command");
-    hook.put("command", SailSessionReport.SCRIPT_PATH);
+    hook.put("command", SailSessionReport.SCRIPT_PATH + " " + AgentCli.CLAUDE_CODE.yamlName());
     hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }

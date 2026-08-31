@@ -1359,6 +1359,19 @@ record RunAckResponse(String runId, int acked) implements Mappable {
   }
 }
 
+record RoomConversationResponse(String roomId, String sessionId, String agent) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("room_id", roomId);
+    map.put("session_id", sessionId);
+    if (agent != null) {
+      map.put("agent", agent);
+    }
+    return map;
+  }
+}
+
 record RunSessionResponse(String runId, String sessionId, String sessionSource)
     implements Mappable {
   @Override

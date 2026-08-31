@@ -190,17 +190,36 @@ public final class PtySessionHost implements AutoCloseable {
     return who.admin() || who.fde().equals(session.ownerFde());
   }
 
+  /** The session's command as requested; an empty request means a login shell. */
+  static List<String> requestedOrShell(List<String> requested) {
+    return requested.isEmpty() ? List.of("bash", "-l") : requested;
+  }
+
   /**
-   * Resolves the child process a session spawns. An empty request defaults to a login shell; a
-   * non-blank {@code project} wraps the command in the dev-user {@code incus exec -t} lane so the
-   * session runs inside that project's container with a real tty. The container name is validated
-   * here, at the host — clients send only a name, never raw {@code incus} arguments.
+   * The environment a session's child inherits: a terminal type, plus {@code SAIL_ROOM_ID} when the
+   * session is room-bound — the one fact that lets everything the child creates ({@code spec
+   * create} above all) land in the room the session serves.
    */
-  static List<String> childCommand(List<String> requested, String project) {
-    var chosen = requested.isEmpty() ? List.of("bash", "-l") : requested;
+  static Map<String, String> childEnv(String room) {
+    var env = new java.util.LinkedHashMap<String, String>();
+    env.put("TERM", "xterm-256color");
+    if (room != null && !room.isBlank()) {
+      env.put("SAIL_ROOM_ID", room);
+    }
+    return env;
+  }
+
+  /**
+   * Resolves the process a session spawns. A non-blank project wraps {@code origin.command()} in
+   * the dev-user {@code incus exec -t} lane so the session runs inside that project's container
+   * with a real tty, carrying {@code env} across explicitly. The container name is validated here,
+   * at the host — clients send only a name, never raw {@code incus} arguments.
+   */
+  static List<String> childCommand(PtySession.Origin origin, Map<String, String> env) {
+    var project = origin.project();
     return project == null || project.isBlank()
-        ? chosen
-        : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, chosen);
+        ? origin.command()
+        : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
 
   private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
@@ -213,20 +232,31 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
     }
+    var room = java.util.Objects.toString(m.room(), "");
+    if (!room.isBlank()) {
+      try {
+        ai.singlr.sail.engine.NameValidator.requireValidSpecId(room);
+      } catch (IllegalArgumentException invalid) {
+        return new PtyMessage.Err(
+            "Refusing room for session '" + m.session() + "': " + invalid.getMessage());
+      }
+    }
     if (existing != null) {
       remove(m.session(), existing);
     }
     try {
       var ring = sessionsDir.resolve(m.session() + ".ring");
       Files.deleteIfExists(ring);
+      var origin =
+          new PtySession.Origin(
+              m.session(), who.fde(), m.project(), room, requestedOrShell(m.command()));
+      var env = childEnv(room);
       var session =
           PtySession.start(
-              m.session(),
-              who.fde(),
-              m.project(),
+              origin,
               events,
-              childCommand(m.command(), m.project()),
-              Map.of("TERM", "xterm-256color"),
+              childCommand(origin, env),
+              env,
               Path.of(m.cwd()),
               ring,
               journalCapacity,
@@ -251,7 +281,9 @@ public final class PtySessionHost implements AutoCloseable {
                         session.name(),
                         session.live(),
                         session.attachedCount(),
-                        session.writerFde())));
+                        session.writerFde(),
+                        session.origin().room(),
+                        session.origin().command())));
     return new PtyMessage.Sessions(infos);
   }
 

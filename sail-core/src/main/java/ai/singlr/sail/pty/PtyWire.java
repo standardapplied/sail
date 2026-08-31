@@ -22,7 +22,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY1".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY2".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -33,7 +33,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v1; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v2; refusing the connection.");
     }
   }
 
@@ -66,7 +66,12 @@ public final class PtyWire {
     switch (message) {
       case PtyMessage.Hello m -> out.type(9).string(m.token());
       case PtyMessage.Create m -> {
-        out.type(1).string(m.session()).stringList(m.command()).string(m.cwd()).string(m.project());
+        out.type(1)
+            .string(m.session())
+            .stringList(m.command())
+            .string(m.cwd())
+            .string(m.project())
+            .string(m.room());
         out.buffer.putInt(m.cols()).putInt(m.rows());
       }
       case PtyMessage.Attach m -> {
@@ -121,7 +126,7 @@ public final class PtyWire {
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
     out.string(info.name());
     out.buffer.put((byte) (info.live() ? 1 : 0)).putInt(info.attached());
-    return out.string(info.writerFde());
+    return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
 
   private static PtyMessage decode(ByteBuffer in) throws IOException {
@@ -130,7 +135,13 @@ public final class PtyWire {
       case 9 -> new PtyMessage.Hello(string(in));
       case 1 ->
           new PtyMessage.Create(
-              string(in), stringList(in), string(in), string(in), in.getInt(), in.getInt());
+              string(in),
+              stringList(in),
+              string(in),
+              string(in),
+              string(in),
+              in.getInt(),
+              in.getInt());
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
@@ -162,7 +173,8 @@ public final class PtyWire {
   }
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
-    return new PtyMessage.SessionInfo(string(in), in.get() == 1, in.getInt(), string(in));
+    return new PtyMessage.SessionInfo(
+        string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
   }
 
   private static String string(ByteBuffer in) throws IOException {

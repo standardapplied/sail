@@ -210,7 +210,10 @@ class ClaudeCodeHookConfigTest {
             + " mints a new conversation that must overwrite the row (last write wins)");
     var reportHooks = (List<Map<String, Object>>) reportGroup.get("hooks");
     assertEquals(1, reportHooks.size());
-    assertEquals(SailSessionReport.SCRIPT_PATH, reportHooks.get(0).get("command"));
+    assertEquals(
+        SailSessionReport.SCRIPT_PATH + " claude-code",
+        reportHooks.get(0).get("command"),
+        "the report is told which CLI it speaks for — an interactive session has no SAIL_AGENT");
     assertEquals(SailSessionReport.HOOK_TIMEOUT_SECONDS, reportHooks.get(0).get("timeout"));
   }
 
