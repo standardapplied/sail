@@ -72,7 +72,8 @@ class RunDeliveryOperationsTest {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null)
+                null,
+                SessionYield.NONE)
             .useMessages(messages);
     runId = newRun("room");
     principal = runStore.findById(runId).orElseThrow().principal();

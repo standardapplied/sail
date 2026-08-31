@@ -84,6 +84,12 @@ public final class SessionClient implements AutoCloseable {
     expectOk("kill");
   }
 
+  /** Ends a live session with {@code reason} in its stream and on its ending event. */
+  public void yieldSession(String name, String reason) throws IOException {
+    PtyWire.write(channel, new PtyMessage.Yield(name, reason));
+    expectOk("yield");
+  }
+
   /** Sends the attach request and confirms it; frame traffic then belongs to the caller. */
   public SocketChannel attach(String name, boolean write) throws IOException {
     PtyWire.write(channel, new PtyMessage.Attach(name, write));

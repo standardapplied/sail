@@ -137,16 +137,18 @@ public final class SailOperations implements Operations {
         null,
         projectStore,
         SyncScheduler.disabled(),
-        null);
+        null,
+        SessionYield.NONE);
   }
 
   /**
    * As {@link #SailOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore, ReviewStore,
-   * ProjectStore)} with the node's sync-on-write scheduler, the run aggregate, and the FDE roster;
-   * used by {@code sail server start} so spec mutations propagate to main, stale reads freshen
-   * without a manual {@code sail sync}, dispatches record their runs — without the run store every
-   * {@code /v1/runs} route refuses and API-lane dispatches silently record no run at all — and
-   * dispatch trusts only handles present in the synced roster.
+   * ProjectStore)} with the node's sync-on-write scheduler, the run aggregate, the FDE roster, and
+   * the pty host seam; used by {@code sail server start} so spec mutations propagate to main, stale
+   * reads freshen without a manual {@code sail sync}, dispatches record their runs — without the
+   * run store every {@code /v1/runs} route refuses and API-lane dispatches silently record no run
+   * at all — dispatch trusts only handles present in the synced roster, and a claim ends the
+   * resumed conversations it displaces. Every other constructor serves lanes with no pty host.
    */
   public SailOperations(
       ShellExec shell,
@@ -158,7 +160,8 @@ public final class SailOperations implements Operations {
       RunStore runStore,
       ProjectStore projectStore,
       SyncScheduler syncScheduler,
-      FdeStore fdeStore) {
+      FdeStore fdeStore,
+      SessionYield sessionYield) {
     this(
         shell,
         file,
@@ -171,7 +174,8 @@ public final class SailOperations implements Operations {
         projectStore,
         ConnectEnvironment::detect,
         syncScheduler,
-        fdeStore);
+        fdeStore,
+        sessionYield);
   }
 
   /** Wires the message store into the operations and dispatch lanes; returns {@code this}. */
@@ -268,7 +272,8 @@ public final class SailOperations implements Operations {
         null,
         ConnectEnvironment::detect,
         SyncScheduler.disabled(),
-        null);
+        null,
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -294,7 +299,8 @@ public final class SailOperations implements Operations {
         projectStore,
         connectEnvironment,
         SyncScheduler.disabled(),
-        null);
+        null,
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -321,7 +327,8 @@ public final class SailOperations implements Operations {
         projectStore,
         connectEnvironment,
         syncScheduler,
-        null);
+        null,
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -336,7 +343,8 @@ public final class SailOperations implements Operations {
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler,
-      FdeStore fdeStore) {
+      FdeStore fdeStore,
+      SessionYield sessionYield) {
     this.shell = shell;
     this.file = file;
     this.watcherSpawner = new WatcherSpawner(shell, watcherFallback);
@@ -366,7 +374,8 @@ public final class SailOperations implements Operations {
             this.watcherSpawner,
             DispatchOperations.autoSnapshotter(shell),
             DispatchOperations.shellLauncher(shell),
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            sessionYield);
     this.stopOps =
         specStore != null && runStore != null
             ? new StopOperations(

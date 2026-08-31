@@ -81,6 +81,9 @@ class PtyWireTest {
     assertEquals(
         "", ((PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(List.of(), ""))).next());
     assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
+    assertEquals(
+        new PtyMessage.Yield("resume-1", "yielded to dispatch 2"),
+        roundTrip(new PtyMessage.Yield("resume-1", "yielded to dispatch 2")));
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));
     assertInstanceOf(PtyMessage.ReplayEnd.class, roundTrip(new PtyMessage.ReplayEnd()));
     assertEquals(

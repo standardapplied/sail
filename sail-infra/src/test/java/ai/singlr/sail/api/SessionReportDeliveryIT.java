@@ -76,7 +76,8 @@ class SessionReportDeliveryIT {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null)
+                null,
+                SessionYield.NONE)
             .useMessages(new MessageStore(db));
     runId = DateTimeUtils.newId().toString();
     var reservation =

@@ -101,6 +101,58 @@ class PtySessionTest {
   }
 
   @Test
+  void endDeliversTheNoticeAndTheReasonEvenToASubscriberStillDraining() throws Exception {
+    var endings = new java.util.concurrent.ConcurrentLinkedQueue<String>();
+    var recorder =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(PtySession.Origin origin) {}
+
+          @Override
+          public void sessionAttached(PtySession.Origin origin, String fde) {}
+
+          @Override
+          public void sessionEnded(PtySession.Origin origin, String reason) {
+            endings.add(reason);
+          }
+        };
+    var session =
+        PtySession.start(
+            origin("yielded", "uday", "acme"),
+            recorder,
+            List.of("sh", "-c", "echo up; read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("yielded.ring"),
+            64 * 1024,
+            80,
+            24);
+    var client = new Collector();
+    var gate = new CountDownLatch(1);
+    client.gate = gate;
+    session.attach(client, true, "uday");
+    Thread.sleep(200);
+
+    session.end("yielded to dispatch 2");
+    gate.countDown();
+
+    assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the ending must arrive");
+    assertTrue(
+        client.outputText().contains("[sail: session ended \u2014 yielded to dispatch 2]"),
+        "the notice line reaches a subscriber that was still draining: " + client.messages);
+    assertTrue(
+        client.messages.stream()
+            .anyMatch(
+                m ->
+                    m instanceof PtyMessage.SessionEnded(var reason)
+                        && reason.equals("yielded to dispatch 2")),
+        "the ending carries the displacing reason: " + client.messages);
+    assertFalse(session.live());
+    assertEquals(List.of("yielded to dispatch 2"), List.copyOf(endings));
+    assertEquals("yielded to dispatch 2", session.endedReason());
+  }
+
+  @Test
   void ownershipEventsAndWriterPrincipalAreObservable() throws Exception {
     var events = new java.util.concurrent.ConcurrentLinkedQueue<String>();
     var recorder =

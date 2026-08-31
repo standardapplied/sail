@@ -200,7 +200,8 @@ public final class ServerStartCommand implements Runnable {
                 runStore,
                 projectStore,
                 syncScheduler,
-                new FdeStore(db))
+                new FdeStore(db),
+                new PtyHostYield())
             .useMessages(messageStore)
             .useRooms(roomStore)
             .useBoxCredentials(boxCredentialStore)

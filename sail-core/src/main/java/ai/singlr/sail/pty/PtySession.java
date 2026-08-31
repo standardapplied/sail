@@ -6,9 +6,11 @@
 package ai.singlr.sail.pty;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
@@ -70,6 +72,7 @@ public final class PtySession implements AutoCloseable {
   private volatile long writerId = -1;
   private volatile String writerFde = "";
   private volatile String endedReason;
+  private volatile String yieldedReason;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
 
@@ -163,8 +166,8 @@ public final class PtySession implements AutoCloseable {
       failure = "pty failed: " + e.getMessage();
     } finally {
       try {
-        var reason =
-            failure != null ? failure : "exited(" + child.onExit().join().exitValue() + ")";
+        var exit = "exited(" + child.onExit().join().exitValue() + ")";
+        var reason = failure != null ? failure : Objects.requireNonNullElse(yieldedReason, exit);
         pty.close();
         synchronized (fanout) {
           endedAtNanos = System.nanoTime();
@@ -366,7 +369,32 @@ public final class PtySession implements AutoCloseable {
     return createdAt;
   }
 
-  /** Ends the child (if alive), waits for the gather thread, and releases the journal. */
+  /**
+   * Ends the session because something displaced it: every attached client first sees {@code
+   * reason} as a terminal line in the stream, then the session ends and reports that reason — not
+   * the child's exit status — to its subscribers and its ended event. A session that already ended
+   * keeps its own reason.
+   */
+  public void end(String reason) {
+    synchronized (fanout) {
+      if (endedReason == null && yieldedReason == null) {
+        yieldedReason = reason;
+        var notice =
+            ("\r\n[sail: session ended \u2014 " + reason + "]\r\n")
+                .getBytes(StandardCharsets.UTF_8);
+        var output = new PtyMessage.Output(lastInputSeq.get(), notice);
+        subscribers.values().forEach(subscriber -> subscriber.queue().force(output));
+      }
+    }
+    close();
+  }
+
+  /**
+   * Ends the child (if alive), waits for the gather thread, and releases the journal. By the time
+   * the gather thread is done it has forced {@code SessionEnded} into every subscriber's queue, so
+   * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
+   * ending, and a detach's queue-clearing poison would race that delivery and lose it.
+   */
   @Override
   public void close() {
     child.destroy();
@@ -378,7 +406,11 @@ public final class PtySession implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
-    subscribers.keySet().forEach(this::detach);
+    synchronized (this) {
+      subscribers.clear();
+      writerId = -1;
+      writerFde = "";
+    }
     try {
       journal.close();
     } catch (IOException e) {

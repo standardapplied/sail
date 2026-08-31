@@ -230,7 +230,8 @@ class SailOperationsTest {
             new RunStore(db),
             new ProjectStore(db),
             null,
-            fdeStore);
+            fdeStore,
+            SessionYield.NONE);
 
     var roster = (List<Map<String, Object>>) get(operations.fdes(), "fdes");
 
@@ -1588,7 +1589,8 @@ class SailOperationsTest {
             new RunStore(db),
             new ProjectStore(db),
             SyncScheduler.disabled(),
-            new FdeStore(db));
+            new FdeStore(db),
+            SessionYield.NONE);
 
     var result = operations.runs("acme", null);
 
@@ -1614,7 +1616,8 @@ class SailOperationsTest {
                 new RunStore(db),
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                new FdeStore(db))
+                new FdeStore(db),
+                SessionYield.NONE)
             .useMessages(new MessageStore(db));
 
     var result =
@@ -1647,7 +1650,8 @@ class SailOperationsTest {
                 new RunStore(db),
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                fdeStore)
+                fdeStore,
+                SessionYield.NONE)
             .useBoxCredentials(boxStore);
 
     var credential = boxStore.replace("uday");
@@ -1736,7 +1740,8 @@ class SailOperationsTest {
             new RunStore(db),
             new ProjectStore(db),
             SyncScheduler.disabled(),
-            fdeStore);
+            fdeStore,
+            SessionYield.NONE);
 
     var result =
         dispatch(operations, "acme", new DispatchRequest("auth", "background", false, null, true));

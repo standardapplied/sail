@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
@@ -14,17 +16,21 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.Stty;
+import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -39,12 +45,16 @@ import picocli.CommandLine.Spec;
  *
  * <ul>
  *   <li><b>Completed run with a recorded session:</b> resumes that session exactly ({@code claude
- *       --resume <id>} / {@code codex resume <id>}) in the container under the caller's ambient
- *       identity — never an interactive picker.
- *   <li><b>Completed run without a session:</b> attaches a fresh conversation, loudly.
+ *       --resume <id>} / {@code codex resume <id>}) inside a host-owned session named for the run
+ *       ({@link SessionYield#resumeSession}), pinned to the run's room, and attaches this terminal
+ *       to it. The conversation outlives the terminal: {@code Ctrl-]} detaches, running attach
+ *       again joins the live session rather than forking a second agent, and a dispatch that
+ *       reserves the run's repos ends it with a reason in the stream.
+ *   <li><b>Completed run without a session:</b> attaches a fresh conversation over a raw tty,
+ *       loudly.
  *   <li><b>Live run:</b> refuses — attaching would fork a second concurrent agent over the same
  *       conversation and worktree. The refusal names the real lanes: reply in the spec room to
- *       steer it mid-run, or stop it first; live observe/attach arrives with the PTY session host.
+ *       steer it mid-run, or stop it first.
  * </ul>
  */
 @Command(
@@ -76,7 +86,36 @@ public final class AgentAttachCommand implements Runnable {
   @Option(names = "--json", description = "Print the resolved attach plan as JSON; do not attach.")
   private boolean json;
 
+  @Option(names = "--socket", hidden = true, description = "Host socket override.")
+  private Path socket;
+
   @Spec private CommandSpec commandSpec;
+
+  /** What the resume lane opens: the host session, its child, and the room it is pinned to. */
+  record ResumePlan(String session, List<String> command, String project, String room) {
+
+    /** The {@code sail session} verbs this attach is made of — what {@code --dry-run} prints. */
+    String asSessionCommands() {
+      var open = new ArrayList<>(List.of("sail", "session", "new", session, "--project", project));
+      if (!room.isBlank()) {
+        open.addAll(List.of("--room", room));
+      }
+      open.add("--command");
+      open.addAll(command);
+      return open.stream().map(AgentAttachCommand::shellWord).collect(Collectors.joining(" "))
+          + "\nsail session attach "
+          + session;
+    }
+  }
+
+  /**
+   * The latest run, its room when that room exists on this box, and every run live on this box in
+   * the project — all lanes, since a full invite or a full room turn holds repos exactly as a build
+   * does yet never counts as the project's latest session.
+   */
+  record Latest(RunStore.RunRow run, String room, List<DispatchGate.RunningRun> running) {
+    static final Latest NONE = new Latest(null, "", List.of());
+  }
 
   @Override
   public void run() {
@@ -87,26 +126,161 @@ public final class AgentAttachCommand implements Runnable {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
-    var run = latestRun().orElse(null);
+    var latest = latest();
+    var run = latest.run();
     if (run != null && LIVE_STATUSES.contains(run.status())) {
-      throw new IllegalStateException(refusal(run));
+      throw new IllegalStateException(refusal(run, name));
     }
     var agentType = run != null ? AgentCli.fromYamlName(run.agent()) : resolveAgentType();
     var sessionId = validatedSessionId(run);
-    var command = buildIncusExecWithTty(name, buildResumeCommand(agentType, sessionId));
-
+    var command = buildResumeCommand(agentType, sessionId);
+    if (sessionId == null) {
+      attachFresh(run, agentType, buildIncusExecWithTty(name, command));
+      return;
+    }
+    requireNoLiveConflict(run, latest.running(), name);
+    var plan = new ResumePlan(SessionYield.resumeSession(run.id()), command, name, latest.room());
     if (json) {
-      System.out.println(YamlUtil.dumpJson(plan(run, agentType, sessionId, command)));
+      System.out.println(YamlUtil.dumpJson(plan(run, agentType, sessionId, plan)));
+      return;
+    }
+    if (dryRun) {
+      System.out.println(plan.asSessionCommands());
+      return;
+    }
+    if (Stty.saved().isEmpty()) {
+      throw new IllegalStateException(
+          "sail agent attach needs an interactive terminal to open session '"
+              + plan.session()
+              + "'.");
+    }
+    announceResume(run, agentType, sessionId, plan);
+    requireRunning();
+    var size = Stty.size(new int[] {24, 80});
+    var hostSocket = SessionCommand.socketOrDefault(socket);
+    try (var client = SessionClient.connect(hostSocket)) {
+      var opened =
+          openLocked(
+              new PtyHostYield(hostSocket), this::latest, run, client, plan, size[1], size[0]);
+      System.out.println(
+          Ansi.AUTO.string(
+              opened
+                  ? "  @|faint Opened session " + plan.session() + " (Ctrl-] detaches).|@"
+                  : "  @|faint Joined the live session "
+                      + plan.session()
+                      + " (Ctrl-] detaches).|@"));
+      SessionCommand.attachTerminal(client, plan.session(), true);
+    }
+  }
+
+  /**
+   * Opens or joins under the project's claim lock — the lock a dispatch holds from its run-row
+   * insert through the yield of displaced sessions — re-reading the run rows first. The plan was
+   * built from an unlocked read, so a claim that landed in between shows up here as a live run and
+   * refuses: as the project's latest session when it is a build, or through the dispatch gate when
+   * it is a lane the latest-session query leaves out, a full invite above all. A dispatch that
+   * reserves after this returns finds the session live and yields it. Either way no resumed agent
+   * ever works repos a claim holds. Returns whether this call opened the session.
+   */
+  static boolean openLocked(
+      SessionYield hostYield,
+      Supplier<Latest> latest,
+      RunStore.RunRow planned,
+      SessionClient client,
+      ResumePlan plan,
+      int cols,
+      int rows)
+      throws IOException {
+    try (var hold = hostYield.lock(plan.project())) {
+      requireStillLatestAndIdle(planned, latest.get(), plan.project());
+      return openOrJoin(client, plan, cols, rows);
+    }
+  }
+
+  static void requireStillLatestAndIdle(RunStore.RunRow planned, Latest latest, String project) {
+    var current = latest.run();
+    if (current != null && LIVE_STATUSES.contains(current.status())) {
+      throw new IllegalStateException(refusal(current, project));
+    }
+    if (current == null || !current.id().equals(planned.id())) {
+      throw new IllegalStateException(
+          "The latest run of '"
+              + project
+              + "' changed while opening the session; run sail agent attach again.");
+    }
+    requireNoLiveConflict(planned, latest.running(), project);
+  }
+
+  /**
+   * The dispatch gate read from the conversation's side: resuming {@code run} puts a working agent
+   * on its repos, so any live run the gate would refuse a build of that spec over those repos — a
+   * build, a full invite, a full room turn — refuses the resume. This is the exact mirror of the
+   * rule a reservation uses to yield a live resume session, so the two sides can never disagree.
+   */
+  static void requireNoLiveConflict(
+      RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
+    DispatchGate.decide(run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
+        .ifPresent(
+            conflict -> {
+              throw new IllegalStateException(conflictRefusal(run, conflict, project));
+            });
+  }
+
+  private static String conflictRefusal(
+      RunStore.RunRow run, DispatchGate.Conflict conflict, String project) {
+    var live = conflict.run();
+    return "Run "
+        + live.runId()
+        + " ("
+        + live.role()
+        + ") is live in "
+        + (conflict.overlap().isEmpty()
+            ? "container '" + project + "'"
+            : "repo(s) " + conflict.overlap())
+        + " — resuming run "
+        + run.id()
+        + " would put a second agent on what it holds. Wait for it to finish, or stop it first.";
+  }
+
+  /**
+   * Opens the resume session, or joins it when it is already live: a create the host refuses
+   * because the session runs — a reattach after detach, or the losing side of two simultaneous
+   * attaches — is the join case, never a second agent. Any other refusal is the error it was.
+   * Returns whether this call opened the session.
+   */
+  static boolean openOrJoin(SessionClient client, ResumePlan plan, int cols, int rows)
+      throws IOException {
+    try {
+      client.create(
+          plan.session(),
+          plan.command(),
+          System.getProperty("user.home", "/home/dev"),
+          plan.project(),
+          plan.room(),
+          cols,
+          rows);
+      return true;
+    } catch (IOException refused) {
+      if (client.list().stream()
+          .anyMatch(info -> info.live() && info.name().equals(plan.session()))) {
+        return false;
+      }
+      throw refused;
+    }
+  }
+
+  private void attachFresh(RunStore.RunRow run, AgentCli agentType, List<String> command)
+      throws Exception {
+    if (json) {
+      System.out.println(YamlUtil.dumpJson(plan(run, agentType, null, command)));
       return;
     }
     if (dryRun) {
       System.out.println(String.join(" ", command));
       return;
     }
-
-    announce(run, agentType, sessionId);
-    var state = new ContainerManager(new ShellExecutor(false)).queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    announceFresh(run);
+    requireRunning();
     var process = new ProcessBuilder(command).inheritIO().start();
     var exitCode = process.waitFor();
     if (exitCode != 0) {
@@ -115,31 +289,46 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
+  private void requireRunning() throws Exception {
+    var state = new ContainerManager(new ShellExecutor(false)).queryState(name);
+    ContainerStateGuard.requireRunning(state, name);
+  }
+
   /**
-   * The latest local agent session (build or ad-hoc) of the project, read directly from the
-   * control-plane database like the status and log lanes. Empty only when a successful query finds
-   * no row — attach then falls back to a fresh conversation, loudly. An unreadable database
-   * (locked, corrupt, unmigrated) fails closed instead: treating it as "no run" would bypass the
-   * live-run refusal and fork a second agent over the same worktree.
+   * The latest local agent session (build or ad-hoc) of the project with its room, read directly
+   * from the control-plane database like the status and log lanes. A run whose room is not on this
+   * box resolves to no room — the session then opens unbound, announced — so a legacy conversation
+   * is never unreachable for want of a room row. An unreadable database fails closed through {@link
+   * #orRefuse}.
    */
-  private Optional<RunStore.RunRow> latestRun() {
-    return latestRunOrRefuse(
+  private Latest latest() {
+    return orRefuse(
         name,
         () -> {
           try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-            return new RunStore(db).latestForProjectOnNode(name, NodeIdentity.handle());
+            var runs = new RunStore(db);
+            var node = NodeIdentity.handle();
+            var run = runs.latestForProjectOnNode(name, node).orElse(null);
+            return run == null
+                ? Latest.NONE
+                : new Latest(
+                    run, knownRoom(new RoomStore(db), run), runs.runningOnNode(name, node));
           }
         });
   }
 
+  static String knownRoom(RoomStore rooms, RunStore.RunRow run) {
+    var conversation = run.conversationId();
+    return conversation != null && rooms.findById(conversation).isPresent() ? conversation : "";
+  }
+
   /**
-   * The fail-closed policy, pure: unknown is never absent. Empty means a successful query found no
-   * run — only then may attach fall back to a fresh conversation. A query failure of any kind
-   * refuses the attach, because treating an unreadable database as "no run" would bypass the
-   * live-run refusal and fork a second agent over the same worktree.
+   * The fail-closed policy, pure: unknown is never absent. A successful query may find no run —
+   * only then may attach fall back to a fresh conversation. A query failure of any kind refuses the
+   * attach, because treating an unreadable database as "no run" would bypass the live-run refusal
+   * and fork a second agent over the same worktree.
    */
-  static Optional<RunStore.RunRow> latestRunOrRefuse(
-      String project, Supplier<Optional<RunStore.RunRow>> query) {
+  static <T> T orRefuse(String project, Supplier<T> query) {
     try {
       return query.get();
     } catch (RuntimeException e) {
@@ -174,7 +363,7 @@ public final class AgentAttachCommand implements Runnable {
     return SAFE_SESSION_ID.matcher(sessionId).matches();
   }
 
-  private String refusal(RunStore.RunRow run) {
+  private static String refusal(RunStore.RunRow run, String project) {
     var room =
         run.specId() == null
             ? "its spec room"
@@ -185,22 +374,30 @@ public final class AgentAttachCommand implements Runnable {
         + " and worktree. Reply in "
         + room
         + " to steer it (delivered mid-run), or stop it first with: sail agent stop "
-        + name
-        + ". Live observe/attach arrives with the PTY session host.";
+        + project
+        + ".";
   }
 
-  private void announce(RunStore.RunRow run, AgentCli agentType, String sessionId) {
+  private void announceFresh(RunStore.RunRow run) {
     if (run == null) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ No recorded run for '" + name + "'; attaching a fresh session."));
       return;
     }
-    if (sessionId == null) {
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|yellow ⚠|@ Run " + run.id() + " recorded no session; attaching fresh."));
+  }
+
+  private void announceResume(
+      RunStore.RunRow run, AgentCli agentType, String sessionId, ResumePlan plan) {
+    if (run.conversationId() != null && plan.room().isBlank()) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|yellow ⚠|@ Run " + run.id() + " recorded no session; attaching fresh."));
-      return;
+              "  @|yellow ⚠|@ Room "
+                  + run.conversationId()
+                  + " is not on this box; the session opens without a room."));
     }
     System.out.println(
         Ansi.AUTO.string(
@@ -213,6 +410,16 @@ public final class AgentAttachCommand implements Runnable {
                 + " in "
                 + name
                 + "...|@"));
+  }
+
+  private LinkedHashMap<String, Object> plan(
+      RunStore.RunRow run, AgentCli agentType, String sessionId, ResumePlan resume) {
+    var map = plan(run, agentType, sessionId, resume.command());
+    map.put("session", resume.session());
+    if (!resume.room().isBlank()) {
+      map.put("room", resume.room());
+    }
+    return map;
   }
 
   private LinkedHashMap<String, Object> plan(
@@ -276,5 +483,9 @@ public final class AgentAttachCommand implements Runnable {
     cmd.add("--");
     cmd.addAll(args);
     return List.copyOf(cmd);
+  }
+
+  private static String shellWord(String word) {
+    return word.matches("[A-Za-z0-9._/=:-]+") ? word : "'" + word.replace("'", "'\\''") + "'";
   }
 }

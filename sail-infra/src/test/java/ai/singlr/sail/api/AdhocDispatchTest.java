@@ -114,7 +114,8 @@ class AdhocDispatchTest {
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
         (project, config) -> "",
         launcher,
-        listener);
+        listener,
+        SessionYield.NONE);
   }
 
   private static StubShell liveAgentShell() {
@@ -449,7 +450,8 @@ class AdhocDispatchTest {
               public void launching(boolean background, List<String> command) {
                 launchedCommands.add(command);
               }
-            });
+            },
+            SessionYield.NONE);
 
     var session =
         ops.startAdhoc(
@@ -578,7 +580,8 @@ class AdhocDispatchTest {
               commands.add(command);
               return 0;
             },
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
 
     ops.startAdhoc(
         "acme", new DispatchOperations.AdhocRequest("task", null, "app/api", true, false), HANDLE);

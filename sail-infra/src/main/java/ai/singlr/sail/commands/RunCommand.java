@@ -392,7 +392,8 @@ public final class RunCommand implements Runnable {
         new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
         (project, config) -> "",
         DispatchOperations.terminalLauncher(),
-        listener);
+        listener,
+        new PtyHostYield());
   }
 
   private void render(

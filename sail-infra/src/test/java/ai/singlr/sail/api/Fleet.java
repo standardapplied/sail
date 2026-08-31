@@ -282,7 +282,8 @@ public final class Fleet implements AutoCloseable {
               new WatcherSpawner(shell, (command, log) -> 4242L),
               (project, config) -> "",
               command -> 0,
-              DispatchOperations.Listener.NONE);
+              DispatchOperations.Listener.NONE,
+              SessionYield.NONE);
       stopper =
           new StopOperations(
               shell,
@@ -305,7 +306,8 @@ public final class Fleet implements AutoCloseable {
                   projects,
                   ai.singlr.sail.engine.ConnectEnvironment::detect,
                   SyncScheduler.disabled(),
-                  fdes)
+                  fdes,
+                  SessionYield.NONE)
               .useMessages(messages);
       slack = new CapturingPoster();
       var syncConfig =

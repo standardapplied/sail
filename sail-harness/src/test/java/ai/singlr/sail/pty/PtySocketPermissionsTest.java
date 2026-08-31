@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,7 +45,13 @@ class PtySocketPermissionsTest {
 
       assertGroupAndOtherDenied(Files.getPosixFilePermissions(socket), "socket");
       assertGroupAndOtherDenied(Files.getPosixFilePermissions(sockDir), "socket directory");
+      var credential = PtySessionHost.dispatchCredentialOf(socket);
+      assertGroupAndOtherDenied(Files.getPosixFilePermissions(credential), "dispatch credential");
+      assertEquals(64, Files.readString(credential).length(), "256 bits of hex");
     }
+    assertFalse(
+        Files.exists(PtySessionHost.dispatchCredentialOf(socket)),
+        "a closed host leaves no credential behind");
   }
 
   private static void assertGroupAndOtherDenied(Set<PosixFilePermission> perms, String what) {

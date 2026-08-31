@@ -10,19 +10,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +44,7 @@ class RunReservationTest {
   private Sqlite db;
   private RunStore runStore;
   private static final String RUN_ID = DateTimeUtils.newId().toString();
+  private SessionYield sessionYield = SessionYield.NONE;
 
   private static final SailYaml CONFIG =
       SailYaml.fromMap(
@@ -101,8 +107,27 @@ class RunReservationTest {
     };
   }
 
+  interface Ender {
+    void end(List<String> sessions, String reason) throws IOException;
+  }
+
+  /** A seam with no lock to hold — a box with no host — that ends through {@code ender}. */
+  private static SessionYield ending(Ender ender) {
+    return new SessionYield() {
+      @Override
+      public Hold lock(String project) {
+        return NO_HOLD;
+      }
+
+      @Override
+      public void end(List<String> sessions, String reason) throws IOException {
+        ender.end(sessions, reason);
+      }
+    };
+  }
+
   private RunReservation reservation(ShellExec shell, RunStore store) {
-    return new RunReservation(store, shell, DispatchOperations.Listener.NONE);
+    return new RunReservation(store, shell, DispatchOperations.Listener.NONE, sessionYield);
   }
 
   private String reserve(RunReservation r) {
@@ -153,6 +178,152 @@ class RunReservationTest {
     assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, ex.failure().errorCode());
   }
 
+  private String completedRun(String specId, List<String> repos) {
+    var id = DateTimeUtils.newId().toString();
+    runStore.reserveDispatch(
+        id, "acme", specId, "node", "node", "build", repos, "codex", null, "task", "log", "unit");
+    runStore.transition(id, "running", "completed", 0);
+    return id;
+  }
+
+  private String reserveBuild(String specId, String role, List<String> repos) {
+    return reservation(quietShell(), runStore)
+        .reserve(
+            RUN_ID,
+            "acme",
+            specId,
+            "node",
+            "node",
+            role,
+            repos,
+            "codex",
+            null,
+            "task",
+            AgentUnit.forRun(RUN_ID),
+            CONFIG);
+  }
+
+  @Test
+  void aClaimEndsTheResumeSessionsItDisplacesAndSparesDisjointOnes() {
+    var overlapping = completedRun("old-spec", List.of("app"));
+    completedRun("other-spec", List.of("web"));
+    var ended = new ArrayList<String>();
+    var reasons = new ArrayList<String>();
+    sessionYield =
+        ending(
+            (sessions, reason) -> {
+              ended.addAll(sessions);
+              reasons.add(reason);
+            });
+
+    reserveBuild("spec", "build", List.of("app"));
+
+    assertEquals(
+        List.of(SessionYield.resumeSession(overlapping)),
+        ended,
+        "only the conversation over the reserved repo yields; the disjoint one lives on");
+    assertEquals(List.of("yielded to dispatch " + RUN_ID + " of spec spec"), reasons);
+  }
+
+  @Test
+  void aReadOnlyRoomWakeDisplacesNoConversation() {
+    completedRun("old-spec", List.of("app"));
+    sessionYield =
+        ending((sessions, reason) -> fail("a read-only wake reserves nothing and ends nothing"));
+
+    assertNotNull(reserveBuild("old-spec", DispatchGate.ROOM_ROLE, List.of()));
+  }
+
+  @Test
+  void aWholeContainerClaimDisplacesEveryConversationAndAHostFailureNeverFailsTheClaim() {
+    completedRun("old-spec", List.of("app"));
+    sessionYield =
+        ending(
+            (sessions, reason) -> {
+              throw new IOException("Session 'resume-x' belongs to mady.");
+            });
+
+    var credential = reserve(reservation(quietShell(), runStore));
+
+    assertNotNull(credential, "a host that refuses is a warning, never a failed launch");
+    assertEquals("running", runStore.findById(RUN_ID).orElseThrow().status());
+  }
+
+  @Test
+  void theClaimAndTheYieldRunUnderTheProjectLockWhichEveryExitReleases() {
+    completedRun("old-spec", List.of("app"));
+    var held = new AtomicBoolean();
+    var locked = new ArrayList<String>();
+    var claimedWhileHeld = new AtomicBoolean();
+    sessionYield =
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) {
+            locked.add(project);
+            held.set(true);
+            return () -> held.set(false);
+          }
+
+          @Override
+          public void end(List<String> sessions, String reason) {
+            claimedWhileHeld.set(
+                held.get() && "running".equals(runStore.findById(RUN_ID).orElseThrow().status()));
+          }
+        };
+
+    reserveBuild("spec", "build", List.of("app"));
+    assertEquals(List.of("acme"), locked);
+    assertTrue(claimedWhileHeld.get(), "the row lands and the yield runs under one hold");
+    assertFalse(held.get(), "released once the yield is done");
+
+    assertThrows(ApiException.class, () -> reserveBuild("spec2", "build", List.of("app")));
+    assertFalse(held.get(), "a refused claim releases the lock too");
+  }
+
+  @Test
+  void anUnlockableProjectRefusesTheClaimBeforeAnyRowIsWritten() {
+    sessionYield =
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) throws IOException {
+            throw new IOException("locks directory is not writable");
+          }
+
+          @Override
+          public void end(List<String> sessions, String reason) {
+            fail("nothing is claimed, so nothing yields");
+          }
+        };
+
+    var ex = assertThrows(ApiException.class, () -> reserve(reservation(quietShell(), runStore)));
+
+    assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
+    assertTrue(runStore.findById(RUN_ID).isEmpty(), "no run row without the lock");
+  }
+
+  @Test
+  void theDefaultSeamEndsNothingAndTheClaimStands() {
+    completedRun("old-spec", List.of("app"));
+    assertNotNull(reserve(reservation(quietShell(), runStore)));
+  }
+
+  @Test
+  void aConversationYieldsByTheDispatchGateRulesHoldingItsRunsRepos() {
+    var row = runStore.findById(completedRun("spec", List.of("web"))).orElseThrow();
+    assertTrue(
+        RunReservation.displaces("spec", "build", List.of("app"), row),
+        "the same spec displaces its own conversation even over disjoint repos");
+    assertFalse(
+        RunReservation.displaces("other", "build", List.of("app"), row),
+        "another spec over a disjoint repo leaves it alone");
+    assertTrue(
+        RunReservation.displaces("other", DispatchGate.ROOM_FULL_ROLE, List.of("web"), row),
+        "a full chat turn claims its repos like a build");
+    assertTrue(
+        RunReservation.displaces("other", "build", List.of(), row),
+        "a whole-container claim displaces everything");
+  }
+
   @Test
   void aPruneFailureNeverFailsTheReservation() {
     var credential = reserve(reservation(throwingShell(), runStore));
@@ -188,7 +359,8 @@ class RunReservationTest {
   void releaseWithoutARunStoreIsASilentNoOp() {
     assertDoesNotThrow(
         () ->
-            new RunReservation(null, quietShell(), DispatchOperations.Listener.NONE)
+            new RunReservation(
+                    null, quietShell(), DispatchOperations.Listener.NONE, SessionYield.NONE)
                 .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
   }
 

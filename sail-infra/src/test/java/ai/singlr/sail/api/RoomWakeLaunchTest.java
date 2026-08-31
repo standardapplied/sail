@@ -130,7 +130,8 @@ class RoomWakeLaunchTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             launcher,
-            DispatchOperations.Listener.NONE)
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE)
         .useMessages(messageStore)
         .useRooms(new RoomStore(db));
   }
@@ -159,7 +160,8 @@ class RoomWakeLaunchTest {
               launched.set(command);
               return 0;
             },
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
     seedSpec("auth");
 
     ops.startRoomRun("acme", "auth", HANDLE);

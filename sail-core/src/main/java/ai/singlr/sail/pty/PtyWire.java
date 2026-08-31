@@ -106,6 +106,7 @@ public final class PtyWire {
         out.buffer.putInt(m.limit());
       }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
+      case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
       case PtyMessage.Output m -> {
         out.type(20);
         out.buffer.putLong(m.lastInputSeq());
@@ -165,6 +166,7 @@ public final class PtyWire {
       case 6 -> new PtyMessage.Detach();
       case 7 -> new PtyMessage.ListSessions(string(in), in.getInt());
       case 8 -> new PtyMessage.Kill(string(in));
+      case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
       case 21 -> new PtyMessage.ReplayBegin(in.get() == 1);
       case 22 -> new PtyMessage.ReplayEnd();

@@ -693,18 +693,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           if (lease.isPresent()) {
             return new Reservation.LeaseHeld(lease.get());
           }
-          var running =
-              db.query(
-                  "SELECT id, IFNULL(spec_id, room_id), role, repos FROM runs"
-                      + " WHERE project = ? AND status IN ('running', 'stopping')"
-                      + " AND IFNULL(node, '') = ?",
-                  row ->
-                      new DispatchGate.RunningRun(
-                          row.text(0), row.text(1), row.text(2), repoList(row.text(3))),
-                  project,
-                  ownerKey(node));
           var conflict =
-              DispatchGate.decide(specId != null ? specId : roomId, role, reserved, running);
+              DispatchGate.decide(
+                  specId != null ? specId : roomId, role, reserved, runningOnNode(project, node));
           if (conflict.isPresent()) {
             return new Reservation.Conflicted(conflict.get());
           }
@@ -733,6 +724,24 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
         });
+  }
+
+  /**
+   * Every run of {@code project} live on this box, in the gate's terms — every role, review and
+   * invite lanes included, because each one that reserves repos blocks a claim over them. The
+   * reservation reads it inside its transaction; {@code sail agent attach} reads it under the
+   * project's claim lock to refuse resuming a conversation over repos a live run holds.
+   */
+  public List<DispatchGate.RunningRun> runningOnNode(String project, String localHandle) {
+    return db.query(
+        "SELECT id, IFNULL(spec_id, room_id), role, repos FROM runs"
+            + " WHERE project = ? AND status IN ('running', 'stopping')"
+            + " AND IFNULL(node, '') = ?",
+        row ->
+            new DispatchGate.RunningRun(
+                row.text(0), row.text(1), row.text(2), repoList(row.text(3))),
+        project,
+        ownerKey(localHandle));
   }
 
   private static List<String> repoList(String json) {

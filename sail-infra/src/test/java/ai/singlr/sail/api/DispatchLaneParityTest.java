@@ -136,7 +136,8 @@ class DispatchLaneParityTest {
             new WatcherSpawner(shell(), (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> 0,
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
     var cliOutcome =
         cliOps.dispatch(
             "acme",
@@ -192,7 +193,8 @@ class DispatchLaneParityTest {
               null,
               ConnectEnvironment::detect,
               SyncScheduler.disabled(),
-              new FdeStore(api.db()));
+              new FdeStore(api.db()),
+              SessionYield.NONE);
 
       var result =
           apiOps.dispatch(

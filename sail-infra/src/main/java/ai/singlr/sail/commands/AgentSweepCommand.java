@@ -148,7 +148,8 @@ public final class AgentSweepCommand implements Runnable {
         new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
         (project, config) -> "",
         DispatchOperations.terminalLauncher(),
-        listener);
+        listener,
+        new PtyHostYield());
   }
 
   private void render(DispatchOperations.AdhocSession session, List<String> command) {

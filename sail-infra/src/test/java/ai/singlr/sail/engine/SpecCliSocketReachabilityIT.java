@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
@@ -84,7 +85,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   runStore,
                   null,
                   ai.singlr.sail.api.SyncScheduler.disabled(),
-                  fdeStore)
+                  fdeStore,
+                  SessionYield.NONE)
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {

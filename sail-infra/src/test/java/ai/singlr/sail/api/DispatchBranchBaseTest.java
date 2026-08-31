@@ -148,7 +148,8 @@ class DispatchBranchBaseTest {
             new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> 0,
-            DispatchOperations.Listener.NONE);
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE);
 
     var outcome =
         ops.dispatch(
