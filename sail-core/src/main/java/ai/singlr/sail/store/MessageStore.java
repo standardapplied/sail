@@ -317,12 +317,23 @@ public final class MessageStore implements SyncedStore {
         });
   }
 
+  /** The platform narrator: the review pipeline posts room verdicts under this author. */
+  public static final String SAIL_AUTHOR = "sail";
+
+  /**
+   * Whether {@code peer} may sync a message authored by {@code author} into {@code roomId}. A peer
+   * owns its own handle, the agent principals of runs its box executed (current or historical), and
+   * the platform narrator {@link #SAIL_AUTHOR} — but the narrator only for conversations the peer's
+   * box ran something in: the review pipeline narrates where it executed, and runs sync before
+   * messages, so the run row is the evidence. Posting authority over the room is required on top.
+   */
   private boolean mayPostAs(String peer, String author, String roomId) {
     if (peer == null) {
       return false;
     }
     var ownsAuthor =
         peer.equals(author)
+            || (SAIL_AUTHOR.equals(author) && ranInConversation(peer, roomId))
             || db.queryOne(
                     "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?)"
                         + " AND (r.principal = ? OR EXISTS (SELECT 1 FROM run_principals rp"
@@ -339,6 +350,16 @@ public final class MessageStore implements SyncedStore {
     }
     return postAuthority(peer, "FROM rooms s", "s.id = ?", roomId)
         || postAuthority(peer, "FROM specs s", "s.room_id = ?", roomId);
+  }
+
+  private boolean ranInConversation(String peer, String roomId) {
+    return db.queryOne(
+            "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?) LIMIT 1",
+            row -> true,
+            peer,
+            roomId,
+            roomId)
+        .orElse(false);
   }
 
   /**

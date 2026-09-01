@@ -170,6 +170,54 @@ class MessageSyncTest {
   }
 
   @Test
+  void thePipelineNarratorSyncsFromTheBoxThatRanTheReview() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    runs.createReview(
+        "019fee00-0000-7000-8000-0000000000bb",
+        "acme",
+        "room",
+        "node",
+        "node",
+        "codex",
+        "b",
+        "t",
+        "/log",
+        "unit");
+
+    var accepted =
+        SyncPeer.with(
+            "node",
+            () ->
+                main.messages.commitRevision(
+                    "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
+
+    assertTrue(
+        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        "the review pipeline narrates verdicts as 'sail' on the box that ran the review;"
+            + " refusing those rows wedges that box's sync forever");
+  }
+
+  @Test
+  void theNarratorAuthorCannotBeForgedIntoARoomThePeerNeverRanIn() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SyncPeer.with(
+                    "node",
+                    () ->
+                        main.messages.commitRevision(
+                            "019fee00-0000-7000-8000-0000000000bd",
+                            snapshot("sail", "room"),
+                            null)));
+
+    assertTrue(error.getMessage().contains("may not post as 'sail'"));
+  }
+
+  @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
     var messageId = "00000000-0000-7000-8000-000000000001";
 

@@ -755,7 +755,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
   private void postRoom(String specId, String body) {
     if (messageStore == null) return;
     try {
-      messageStore.append(roomOf(specId), Event.SAIL_AGENT, body, null);
+      messageStore.append(roomOf(specId), MessageStore.SAIL_AUTHOR, body, null);
       syncTrigger.run();
     } catch (RuntimeException e) {
       System.err.println(
