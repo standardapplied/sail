@@ -367,8 +367,11 @@ class LocalApiRouterTest {
             Map.of(),
             inviteAuth(),
             "status=archived".getBytes(StandardCharsets.UTF_8)));
-    assertEquals(Role.VIEWER, ops.lastActor.role());
-    assertFalse(ops.lastActor.agentLane());
+    assertEquals(Role.VIEWER, ops.lastActor.role(), "viewer tier — the security property");
+    assertEquals(
+        Actor.Lane.ROOM,
+        ops.lastActor.lane(),
+        "the read-only run resolves to the room principal, never the write-capable agent principal");
   }
 
   @Test

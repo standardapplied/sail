@@ -109,7 +109,7 @@ class PersonalRoomMintTest {
     rooms("acme", new Actor(null, Role.MEMBER, Actor.Lane.API));
 
     assertEquals(
-        List.of("fde-uday-acme", "fde-rajesh-acme"),
+        List.of(PersonalRooms.idOf("uday", "acme"), PersonalRooms.idOf("rajesh", "acme")),
         roomStore.list("acme").stream().map(RoomStore.RoomRow::id).toList());
   }
 }
