@@ -31,6 +31,14 @@ class PtyHostEventsTest {
     return path;
   }
 
+  private Path drops() {
+    return dir.resolve(PtyEventDrops.FILE_NAME);
+  }
+
+  private PtyHostEvents events(Path dbPath) {
+    return new PtyHostEvents(dbPath, drops());
+  }
+
   private static List<EventStore.EventRow> recent(Path path) {
     try (var db = Sqlite.open(path)) {
       return new EventStore(db).recent(10);
@@ -40,7 +48,7 @@ class PtyHostEventsTest {
   @Test
   void theThreeSessionFactsBecomeRecordClassRows() {
     var path = migrated();
-    var events = new PtyHostEvents(path);
+    var events = events(path);
     var origin = new PtySession.Origin("lounge", "uday", "acme", "", List.of("bash", "-l"));
 
     events.sessionStarted(origin);
@@ -75,7 +83,7 @@ class PtyHostEventsTest {
   @Test
   void aRoomBoundSessionsRowsCarryTheRoomAndTheStartNamesOnlyTheExecutable() {
     var path = migrated();
-    var events = new PtyHostEvents(path);
+    var events = events(path);
     var origin =
         new PtySession.Origin(
             "brainstorm",
@@ -113,5 +121,67 @@ class PtyHostEventsTest {
             .filter(e -> !e.type().equals("pty_session_started"))
             .anyMatch(e -> e.data().contains("executable")),
         "only the start fact narrates the executable");
+  }
+
+  @Test
+  void aCleanRunLeavesNoDropMeter() {
+    var events = events(migrated());
+    var origin = new PtySession.Origin("clean", "uday", "acme", "", List.of("bash", "-l"));
+
+    events.sessionStarted(origin);
+
+    assertFalse(java.nio.file.Files.exists(drops()), "a delivered event bumps nothing");
+  }
+
+  @Test
+  void anInducedInsertFailureIsMeasuredNotThrown() {
+    var unmigrated = dir.resolve("unmigrated.db");
+    var events = events(unmigrated);
+    var origin = new PtySession.Origin("lounge", "uday", "acme", "", List.of("bash", "-l"));
+    var stderr = new java.io.ByteArrayOutputStream();
+    var original = System.err;
+    System.setErr(new java.io.PrintStream(stderr, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      events.sessionStarted(origin);
+      events.sessionAttached(origin, "mady");
+      events.sessionEnded(origin, "exited(0)");
+    } finally {
+      System.setErr(original);
+    }
+
+    var meter = PtyEventDrops.read(drops());
+    assertEquals(3, meter.count());
+    assertEquals("pty_session_ended", meter.lastType());
+    assertTrue(meter.lastCause() != null && !meter.lastCause().isBlank(), "the cause is named");
+    assertTrue(meter.lastAt() != null && !meter.lastAt().isBlank(), "the drop is timestamped");
+
+    var lines =
+        stderr
+            .toString(java.nio.charset.StandardCharsets.UTF_8)
+            .lines()
+            .filter(line -> line.startsWith("pty-events: dropped "))
+            .toList();
+    assertEquals(3, lines.size(), "one structured line per drop, nothing else");
+    assertTrue(
+        lines.getFirst().contains("pty_session_started")
+            && lines.getFirst().contains("session=lounge")
+            && lines.getFirst().contains("project=acme")
+            && lines.getFirst().contains("cause="),
+        "the line names the event type, the session, and the cause: " + lines.getFirst());
+  }
+
+  @Test
+  void theDropMeterSurvivesACorruptFileAndAnUnwritablePath() throws Exception {
+    var corrupt = drops();
+    java.nio.file.Files.writeString(corrupt, "not json at all {{{");
+    assertEquals(0, PtyEventDrops.read(corrupt).count(), "a corrupt meter reads as zero");
+
+    PtyEventDrops.record(corrupt, "pty_session_started", "boom");
+    assertEquals(1, PtyEventDrops.read(corrupt).count(), "recording over a corrupt meter restarts");
+
+    var unwritable = dir.resolve("nope").resolve(PtyEventDrops.FILE_NAME);
+    PtyEventDrops.record(unwritable, "pty_session_started", "boom");
+    assertEquals(
+        0, PtyEventDrops.read(unwritable).count(), "an unwritable meter is a silent no-op");
   }
 }

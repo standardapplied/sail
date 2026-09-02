@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The pty event lane is measured, and its live half now exists. A `pty_session_*` row the pty
+  host cannot write no longer vanishes silently: each drop leaves one structured line in the
+  host's journal (`sail-pty-host.service`) and bumps a drop meter file beside the pty socket that
+  the new `sail session ls --json` surfaces (`event_drops`: count, last type, cause, timestamp).
+  The fail-open contract is pinned on both sides of the seam — `PtySession` now swallows whatever
+  a `PtyEvents` implementation throws, so a session can never die or stall because eventing
+  failed. And the lane's structural gap is closed: the pty host writes its event rows straight
+  into the events table from its own process, so `/v1/events/stream` — the live lane mast treats
+  as its accelerator — never carried them at all; the server now bridges new pty rows onto its
+  event bus every 2 seconds, and the audit persister skips pty facts (persisted at source) so a
+  row is never written twice.
+
 - `sail agent attach` resumes a completed run's conversation inside a host-owned session
   (`resume-<run id>`, pinned to the run's room) instead of a raw `incus exec` tty: `Ctrl-]`
   detaches and the conversation lives on, attaching again joins the live session instead of

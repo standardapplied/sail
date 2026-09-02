@@ -12,7 +12,10 @@ import java.util.function.Predicate;
 
 /**
  * Event subscriber that persists events to the SQLite-backed {@link EventStore}. Replaces the
- * file-based {@link AuditPersister} when the control plane server is running.
+ * file-based {@link AuditPersister} when the control plane server is running. Pty session facts are
+ * never persisted here: the pty host already wrote them to the events table from its own process,
+ * and their bus appearance is the {@link PtyEventBridge} republishing that row for live consumers —
+ * persisting again would double every terminal fact and feed the bridge its own output.
  */
 public final class SpecStoreAuditPersister implements EventSubscriber {
 
@@ -30,7 +33,8 @@ public final class SpecStoreAuditPersister implements EventSubscriber {
   @Override
   public Predicate<Event> filter() {
     return event ->
-        Event.WellKnownTypes.retentionClass(event.type()) != Event.RetentionClass.EPHEMERAL;
+        Event.WellKnownTypes.retentionClass(event.type()) != Event.RetentionClass.EPHEMERAL
+            && !Event.WellKnownTypes.ptySessionFact(event.type());
   }
 
   @Override

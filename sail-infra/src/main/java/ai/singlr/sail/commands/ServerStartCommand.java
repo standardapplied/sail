@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
+import ai.singlr.sail.api.PtyEventBridge;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RoomWakeReactor;
 import ai.singlr.sail.api.RunActivityStamper;
@@ -280,6 +281,7 @@ public final class ServerStartCommand implements Runnable {
             reviewController);
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
+    var ptyEventBridge = new PtyEventBridge(eventStore, bus);
     var reconciler =
         new StuckSpecReconciler(
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
@@ -310,6 +312,7 @@ public final class ServerStartCommand implements Runnable {
         .register(server)
         .register(sweeper)
         .register(eventSweeper)
+        .register(ptyEventBridge)
         .register(reconciler)
         .register(missedStops)
         .register(rearmer)
@@ -318,6 +321,7 @@ public final class ServerStartCommand implements Runnable {
       server.start();
       sweeper.start();
       eventSweeper.start();
+      ptyEventBridge.start(PtyEventBridge.INTERVAL);
       reconciler.start();
       var replayed = missedStops.sweep();
       if (replayed > 0) {

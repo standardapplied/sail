@@ -89,7 +89,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               64 * 1024,
               token -> new PtyIdentity("it", true),
               new PtyHostRooms(dbPath),
-              new PtyHostEvents(dbPath))) {
+              new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")))) {
         host.start();
         launchPrepared(CONTAINER);
         installDevUserAndStandInClaude();

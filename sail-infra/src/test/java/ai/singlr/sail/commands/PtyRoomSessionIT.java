@@ -51,7 +51,9 @@ import picocli.CommandLine;
  * production local API over the bind-mounted socket with the box's ambient credential — creates
  * specs that are born in room X, mint no identity room, and honor an explicit {@code --room}. A
  * session opened without a room behaves exactly as before. The pty host's own event rows carry the
- * room. Self-cleaning.
+ * room, and every session — CLI-token or session-token identified, room-bound or not — leaves all
+ * three lifecycle facts (started, attached, ended) in the event store, from which the bridge
+ * republishes them onto the live bus. Self-cleaning.
  */
 class PtyRoomSessionIT extends AbstractIncusIT {
 
@@ -76,6 +78,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
       rooms.create(room("other-talk", "Other talk"));
       var fdeStore = new FdeStore(db);
       fdeStore.add("it", "IT", "it@example.dev", "admin");
+      fdeStore.add("mady", "Mady", "mady@example.dev", "admin");
       var boxStore = new BoxCredentialStore(db);
       BoxCredentialFile.ensure(boxStore, "it", socketDir);
       var bus = new EventBus();
@@ -102,11 +105,32 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   dir.resolve("h.sock"),
                   dir.resolve("s"),
                   64 * 1024,
-                  token -> new PtyIdentity("it", true),
+                  token -> new PtyIdentity(token.isBlank() ? "it" : "mady", true),
                   new PtyHostRooms(dbPath),
-                  new PtyHostEvents(dbPath))) {
+                  new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")))) {
         api.start();
         host.start();
+
+        var live = new java.util.concurrent.ConcurrentLinkedQueue<ai.singlr.sail.api.Event>();
+        bus.subscribe(
+            new ai.singlr.sail.api.EventSubscriber() {
+              @Override
+              public String name() {
+                return "it-live-collector";
+              }
+
+              @Override
+              public java.util.function.Predicate<ai.singlr.sail.api.Event> filter() {
+                return event ->
+                    ai.singlr.sail.api.Event.WellKnownTypes.ptySessionFact(event.type());
+              }
+
+              @Override
+              public void onEvent(ai.singlr.sail.api.Event event) {
+                live.add(event);
+              }
+            });
+        var bridge = new ai.singlr.sail.api.PtyEventBridge(new EventStore(db), bus);
 
         launchPrepared(CONTAINER);
         var dev =
@@ -134,6 +158,13 @@ class PtyRoomSessionIT extends AbstractIncusIT {
 
         var solo = runToExit("plain", "", "spec create --id solo --title Solo && echo done");
         assertTrue(solo.contains("done"), solo);
+
+        var mast =
+            runToExitAs(
+                "mast-session-token", "mast-term", "design-talk", "echo mast-was=$SAIL_ROOM_ID");
+        assertTrue(
+            mast.contains("mast-was=design-talk"),
+            "the token-identified session sees its room too: " + mast);
 
         assertEquals(
             "design-talk",
@@ -169,10 +200,76 @@ class PtyRoomSessionIT extends AbstractIncusIT {
             started.stream()
                 .anyMatch(d -> "plain".equals(d.get("session")) && !d.containsKey("room_id")),
             "an unbound session's event names none: " + started);
+
+        var all = new EventStore(db).recent(100);
+        for (var expected :
+            List.of(
+                new String[] {"brainstorm", "it", "design-talk"},
+                new String[] {"plain", "it", null},
+                new String[] {"mast-term", "mady", "design-talk"})) {
+          var session = expected[0];
+          var owner = expected[1];
+          var room = expected[2];
+          assertTrue(
+              hasFact(all, "pty_session_started", session, owner, room),
+              session + " must record its start for " + owner);
+          assertTrue(
+              hasFact(all, "pty_session_attached", session, owner, room),
+              session + " must record its attach for " + owner);
+          assertTrue(
+              hasFact(all, "pty_session_ended", session, "sail", room),
+              session + " must record its ending");
+        }
+
+        bridge.publishNewRows();
+        var deadline = System.nanoTime() + 10_000_000_000L;
+        while (live.size() < 9 && System.nanoTime() < deadline) {
+          Thread.sleep(10);
+        }
+        assertEquals(
+            9,
+            live.size(),
+            "all nine lifecycle facts must reach the live event lane: "
+                + live.stream().map(e -> e.type() + ":" + e.data().get("session")).toList());
+        bridge.close();
       }
     } finally {
       deleteContainerQuietly(CONTAINER);
       deleteRecursively(socketDir);
+    }
+  }
+
+  private static boolean hasFact(
+      List<EventStore.EventRow> rows, String type, String session, String agent, String room) {
+    return rows.stream()
+        .anyMatch(
+            row ->
+                row.type().equals(type)
+                    && row.agent().equals(agent)
+                    && java.util.Objects.equals(row.specId(), room)
+                    && session.equals(YamlUtil.parseMap(row.data()).get("session")));
+  }
+
+  private String runToExitAs(String token, String session, String room, String script)
+      throws Exception {
+    try (var client = SessionClient.connect(dir.resolve("h.sock"), token)) {
+      client.create(
+          session,
+          List.of("bash", "-lc", script + "; exit 0"),
+          System.getProperty("user.home", "/home/dev"),
+          CONTAINER,
+          room,
+          80,
+          24);
+    }
+    try (var client = SessionClient.connect(dir.resolve("h.sock"), token)) {
+      var channel = client.attach(session, true);
+      var stdin = new PipedInputStream(new PipedOutputStream());
+      var stdout = new ByteArrayOutputStream();
+      var reason = AttachLoop.run(channel, stdin, stdout);
+      var rendered = stdout.toString(StandardCharsets.UTF_8);
+      assertEquals("exited(0)", reason, "the session's script must succeed: " + rendered);
+      return rendered;
     }
   }
 

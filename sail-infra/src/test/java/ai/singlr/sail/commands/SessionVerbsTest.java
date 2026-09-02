@@ -102,6 +102,39 @@ class SessionVerbsTest {
   }
 
   @Test
+  void lsJsonNamesTheSessionsAndSurfacesTheDropMeter() throws Exception {
+    try (var host =
+        PtyHostCommand.startHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ROOMS,
+            ai.singlr.sail.pty.PtyEvents.NONE)) {
+      var socket = dir.resolve("h.sock").toString();
+      assertEquals(0, run("new", "--socket", socket, "t1", "--command", "sh", "-c", "read a"));
+      PtyEventDrops.record(
+          PtyEventDrops.fileOf(dir.resolve("h.sock")), "pty_session_started", "db locked");
+
+      var stdout = new java.io.ByteArrayOutputStream();
+      var original = System.out;
+      System.setOut(new java.io.PrintStream(stdout, true, java.nio.charset.StandardCharsets.UTF_8));
+      try {
+        assertEquals(0, run("ls", "--socket", socket, "--json"));
+      } finally {
+        System.setOut(original);
+      }
+
+      var json = stdout.toString(java.nio.charset.StandardCharsets.UTF_8);
+      assertTrue(json.contains("\"schema_version\": 1"), json);
+      assertTrue(json.contains("\"name\": \"t1\""), json);
+      assertTrue(json.contains("\"event_drops\": {\"count\": 1"), json);
+      assertTrue(json.contains("\"last_type\": \"pty_session_started\""), json);
+      assertTrue(json.contains("\"last_cause\": \"db locked\""), json);
+      assertTrue(host.sessionCount() == 1);
+    }
+  }
+
+  @Test
   void attachToAMissingSessionFailsBeforeTouchingTheTerminal() throws Exception {
     try (var host =
         PtyHostCommand.startHost(
