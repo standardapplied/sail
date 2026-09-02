@@ -161,10 +161,17 @@ class PtyRoomSessionIT extends AbstractIncusIT {
 
         var mast =
             runToExitAs(
-                "mast-session-token", "mast-term", "design-talk", "echo mast-was=$SAIL_ROOM_ID");
+                "mast-session-token",
+                "mast-term",
+                "design-talk",
+                "spec create --id mast-made --title 'Mast made' && echo mast-was=$SAIL_ROOM_ID");
         assertTrue(
             mast.contains("mast-was=design-talk"),
             "the token-identified session sees its room too: " + mast);
+        assertEquals(
+            "design-talk",
+            specStore.findById("mast-made").orElseThrow().roomIdOrIdentity(),
+            "a token-identified room-bound session births specs in its room too");
 
         assertEquals(
             "design-talk",
