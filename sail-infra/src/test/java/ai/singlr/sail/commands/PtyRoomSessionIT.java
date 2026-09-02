@@ -208,7 +208,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                 .anyMatch(d -> "plain".equals(d.get("session")) && !d.containsKey("room_id")),
             "an unbound session's event names none: " + started);
 
-        var all = new EventStore(db).recent(100);
+        var eventStore = new EventStore(db);
         for (var expected :
             List.of(
                 new String[] {"brainstorm", "it", "design-talk"},
@@ -217,15 +217,9 @@ class PtyRoomSessionIT extends AbstractIncusIT {
           var session = expected[0];
           var owner = expected[1];
           var room = expected[2];
-          assertTrue(
-              hasFact(all, "pty_session_started", session, owner, room),
-              session + " must record its start for " + owner);
-          assertTrue(
-              hasFact(all, "pty_session_attached", session, owner, room),
-              session + " must record its attach for " + owner);
-          assertTrue(
-              hasFact(all, "pty_session_ended", session, "sail", room),
-              session + " must record its ending");
+          awaitFact(eventStore, "pty_session_started", session, owner, room);
+          awaitFact(eventStore, "pty_session_attached", session, owner, room);
+          awaitFact(eventStore, "pty_session_ended", session, "sail", room);
         }
 
         bridge.publishNewRows();
@@ -243,6 +237,19 @@ class PtyRoomSessionIT extends AbstractIncusIT {
     } finally {
       deleteContainerQuietly(CONTAINER);
       deleteRecursively(socketDir);
+    }
+  }
+
+  private static void awaitFact(
+      EventStore events, String type, String session, String agent, String room)
+      throws InterruptedException {
+    var deadline = System.nanoTime() + 10_000_000_000L;
+    while (!hasFact(events.recent(200), type, session, agent, room)) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError(
+            type + " for session '" + session + "' (agent " + agent + ") never reached the store");
+      }
+      Thread.sleep(20);
     }
   }
 
