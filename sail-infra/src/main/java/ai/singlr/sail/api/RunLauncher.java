@@ -28,9 +28,9 @@ import java.util.Optional;
  * The one run-launch engine every lane shares: stage the run-scoped task and session files, build
  * and run the launch command for the run's own systemd unit, and — once the process is confirmed —
  * verify it against a concurrent cancel and publish {@code agent_session_started}. The build,
- * ad-hoc, room, and invite lanes differ only in the {@link LaunchSpec} they fill and the {@link
- * RunContext} they finish with; keeping the sequence here means the reserve→launch→verify→publish
- * shape has a single definition rather than a copy per lane.
+ * ad-hoc, and room lanes differ only in the {@link LaunchSpec} they fill and the {@link RunContext}
+ * they finish with; keeping the sequence here means the reserve→launch→verify→publish shape has a
+ * single definition rather than a copy per lane.
  */
 public final class RunLauncher {
 
@@ -63,11 +63,11 @@ public final class RunLauncher {
 
   /**
    * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
-   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, room, and invite
-   * lanes differ only in the fields they fill: a build carries a spec id, model, and reasoning
-   * effort; an ad-hoc a blank spec id; a room/invite a viewer role and no repo reservation. {@code
-   * task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused when only
-   * the launch command is built.
+   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, and room lanes
+   * differ only in the fields they fill: a build carries a spec id, model, and reasoning effort; an
+   * ad-hoc a blank spec id; a room a viewer role and no repo reservation. {@code task}, {@code
+   * branch}, and {@code repoPaths} stage the session file and so are unused when only the launch
+   * command is built.
    */
   record LaunchSpec(
       String project,
@@ -93,8 +93,7 @@ public final class RunLauncher {
    * and publish {@code agent_session_started}. One value so every lane runs the identical tail —
    * the reserve→launch→verify→publish sequence whose four hand-copied variants hosted the #142/#148
    * field bugs — differing only in the {@code specId}/{@code role} it carries. A background run
-   * (room, invite, background dispatch/ad-hoc) skips the foreground completion via {@code
-   * background}.
+   * (room, background dispatch/ad-hoc) skips the foreground completion via {@code background}.
    */
   record RunContext(
       String project,

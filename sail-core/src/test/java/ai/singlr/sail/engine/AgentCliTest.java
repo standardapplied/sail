@@ -337,15 +337,9 @@ class AgentCliTest {
   }
 
   @Test
-  void readOnlyInviteSupportMatchesTheRoomLaneBoundary() {
-    assertTrue(AgentCli.CLAUDE_CODE.supportsReadOnlyInvite());
-    assertFalse(AgentCli.CODEX.supportsReadOnlyInvite());
-  }
-
-  @Test
-  void readOnlyInviteRefusalNamesTheFullLaneAsTheAlternative() {
-    assertNull(AgentCli.CLAUDE_CODE.readOnlyInviteRefusal());
-    var reason = AgentCli.CODEX.readOnlyInviteRefusal();
+  void readOnlyRefusalNamesTheFullLaneAsTheAlternative() {
+    assertNull(AgentCli.CLAUDE_CODE.readOnlyRefusal());
+    var reason = AgentCli.CODEX.readOnlyRefusal();
     assertTrue(reason.contains("Codex CLI"), reason);
     assertTrue(reason.contains("full access"), reason);
   }

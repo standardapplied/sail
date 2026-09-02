@@ -118,7 +118,7 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<RoomsListResponse> rooms(String project) {
+  public Result<RoomsListResponse> rooms(String project, Actor actor) {
     return Result.success(new RoomsListResponse(java.util.List.of(), null, null));
   }
 
@@ -168,12 +168,6 @@ class TestOperations implements Operations {
                     "1-a",
                     null,
                     request.question()))));
-  }
-
-  @Override
-  public Result<InviteResponse> inviteToRoom(
-      String roomId, InviteRequest request, Actor actor, String localHandle) {
-    return Result.success(new InviteResponse("run-1", "claude/invite-run-1", "read_only", ""));
   }
 
   @Override

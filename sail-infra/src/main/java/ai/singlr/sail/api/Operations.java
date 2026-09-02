@@ -113,9 +113,6 @@ public interface Operations extends LocalLaneOperations {
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request, Actor actor);
 
-  Result<InviteResponse> inviteToRoom(
-      String specId, InviteRequest request, Actor actor, String localHandle);
-
   Result<RoomMembersResponse> roomMembers(String roomId);
 
   Result<SpecMessagesResponse> roomMessages(String roomId, String before, String after, int limit);
@@ -130,7 +127,7 @@ public interface Operations extends LocalLaneOperations {
 
   Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor);
 
-  Result<RoomsListResponse> rooms(String project);
+  Result<RoomsListResponse> rooms(String project, Actor actor);
 
   Result<RoomDetailResponse> room(String roomId);
 

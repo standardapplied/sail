@@ -240,16 +240,6 @@ public record Event(
     /** {@link #RUN_ROLE} value: a fix run — its own stop must never re-enter the pipeline. */
     public static final String RUN_ROLE_FIX = Lane.FIX.wire();
 
-    /** {@link #RUN_ROLE} value: a read-only invited consultant — chat only, never a review. */
-    public static final String RUN_ROLE_INVITE = Lane.INVITE.wire();
-
-    /**
-     * {@link #RUN_ROLE} value: a full-access invited agent. Its stop never triggers the review
-     * pipeline — the review loop stays anchored to dispatch; commits it pushed surface in the room
-     * and the next build's review sees them.
-     */
-    public static final String RUN_ROLE_INVITE_FULL = Lane.INVITE_FULL.wire();
-
     /**
      * Whether a run role names a lane whose own stop must never drive the review pipeline — every
      * lane except a dispatch build and an ad-hoc run. Reactors on {@code agent_session_stopped}

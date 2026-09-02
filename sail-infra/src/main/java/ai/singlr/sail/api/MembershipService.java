@@ -60,8 +60,19 @@ public final class MembershipService {
     this.shell = shell;
   }
 
-  /** A room's conversation-side state: the effective wake mode and the standing member. */
-  public record RoomState(String wake, Engagement standing) {}
+  /**
+   * A room's conversation-side state: the stored wake mode (null for "derive from the roster"), the
+   * standing member, and how many members the roster seats.
+   */
+  public record RoomState(String wake, Engagement standing, int members) {
+    public static final RoomState EMPTY = new RoomState(null, null, 0);
+
+    /** The state a room row runs under — one reading of the roster for every consumer. */
+    public static RoomState of(RoomStore.RoomRow room) {
+      var roster = Roster.fromJson(room.roster());
+      return new RoomState(room.wake(), roster.standing(), roster.members().size());
+    }
+  }
 
   /**
    * The conversation-side state a spec's room runs under — the room row, the one home this state
@@ -70,10 +81,7 @@ public final class MembershipService {
    */
   public static RoomState stateOf(RoomStore rooms, SpecStore.SpecRow spec) {
     var room = rooms == null ? null : rooms.findById(spec.roomIdOrIdentity()).orElse(null);
-    if (room == null) {
-      return new RoomState(null, null);
-    }
-    return new RoomState(room.wake(), Roster.fromJson(room.roster()).standing());
+    return room == null ? RoomState.EMPTY : RoomState.of(room);
   }
 
   /** The members of {@code roomId}'s roster — the room row is the only home a roster has. */
@@ -100,8 +108,8 @@ public final class MembershipService {
    * snapshot runs off the request thread ({@code completion}) because a {@code dir}-backend
    * snapshot would blow the HTTP timeout; the membership is then persisted only after the snapshot
    * succeeds — the payment precedes the access — and a failure publishes {@code spec_engage_failed}
-   * into the room instead of seating anyone. Requires the dispatch tier on the spec, exactly like
-   * an invite.
+   * into the room instead of seating anyone. Requires the dispatch tier on the spec, exactly like a
+   * dispatch.
    */
   public EngageLaunch engage(
       String specId,
@@ -133,8 +141,8 @@ public final class MembershipService {
     if (!member.full() && !agentCli.supportsRoomLane()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyInviteRefusal(),
-          "Engage " + agentCli.yamlName() + " with full access instead.");
+          agentCli.readOnlyRefusal(),
+          "Add " + agentCli.yamlName() + " with full access instead.");
     }
     var project = spec.project();
     projects.loadRunning(project);
@@ -189,8 +197,8 @@ public final class MembershipService {
     if (!member.full() && !agentCli.supportsRoomLane()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyInviteRefusal(),
-          "Engage " + agentCli.yamlName() + " with full access instead.");
+          agentCli.readOnlyRefusal(),
+          "Add " + agentCli.yamlName() + " with full access instead.");
     }
     projects.loadRunning(room.project());
     admission.requireInstalled(agentCli, room.project());

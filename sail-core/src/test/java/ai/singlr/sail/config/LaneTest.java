@@ -27,8 +27,6 @@ class LaneTest {
     assertEquals("adhoc", Lane.ADHOC.wire());
     assertEquals("room", Lane.ROOM.wire());
     assertEquals("room-full", Lane.ROOM_FULL.wire());
-    assertEquals("invite", Lane.INVITE.wire());
-    assertEquals("invite-full", Lane.INVITE_FULL.wire());
     assertEquals("review", Lane.REVIEW.wire());
     assertEquals("fix", Lane.FIX.wire());
   }
@@ -68,27 +66,20 @@ class LaneTest {
   void chatIsTheTwoRoomModes() {
     assertTrue(Lane.ROOM.isChat());
     assertTrue(Lane.ROOM_FULL.isChat());
-    assertFalse(Lane.INVITE.isChat());
     assertFalse(Lane.BUILD.isChat());
   }
 
   @Test
-  void inviteIsTheTwoInviteModes() {
-    assertTrue(Lane.INVITE.isInvite());
-    assertTrue(Lane.INVITE_FULL.isInvite());
-    assertFalse(Lane.ROOM.isInvite());
+  void theRetiredInviteRolesResolveToNoLane() {
+    assertEquals(Optional.empty(), Lane.of("invite"));
+    assertEquals(Optional.empty(), Lane.of("invite-full"));
   }
 
   @Test
   void sessionIsEveryAgentSessionButNotAReviewExecution() {
     for (var lane : Lane.values()) {
       var expected =
-          lane == Lane.BUILD
-              || lane == Lane.ADHOC
-              || lane == Lane.ROOM
-              || lane == Lane.ROOM_FULL
-              || lane == Lane.INVITE
-              || lane == Lane.INVITE_FULL;
+          lane == Lane.BUILD || lane == Lane.ADHOC || lane == Lane.ROOM || lane == Lane.ROOM_FULL;
       assertEquals(expected, lane.isSession(), lane + " session classification");
     }
     assertFalse(Lane.REVIEW.isSession());
@@ -96,11 +87,9 @@ class LaneTest {
   }
 
   @Test
-  void readOnlyIsAWakeOrAReadOnlyInvite() {
+  void readOnlyIsTheWakeLane() {
     assertTrue(Lane.ROOM.readOnly());
-    assertTrue(Lane.INVITE.readOnly());
     assertFalse(Lane.ROOM_FULL.readOnly());
-    assertFalse(Lane.INVITE_FULL.readOnly());
     assertFalse(Lane.BUILD.readOnly());
   }
 }

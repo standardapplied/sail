@@ -797,82 +797,6 @@ class RoomWakeReactorTest {
   }
 
   @Test
-  void aReadOnlyInviteStopOnAnOwnedRunTriggersTheCommitGuard() {
-    seed("auth", "done", "uday", null);
-    var runId = DateTimeUtils.newId().toString();
-    runStore.create(
-        runId,
-        "acme",
-        "auth",
-        "uday",
-        "uday",
-        "invite",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + runId);
-    runStore.complete(runId, "completed", 0);
-    var stop = new LinkedHashMap<String, Object>();
-    stop.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
-    stop.put(Event.WellKnownData.RUN_ID, runId);
-    stop.put(Event.WellKnownData.RUN_ROLE, "invite");
-
-    reactor()
-        .onEvent(
-            Event.of(
-                "acme",
-                "auth",
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-                "claude-code",
-                "host",
-                stop));
-
-    assertEquals(
-        List.of("acme/" + runId),
-        launcher.guarded,
-        "a read-only invite carries the same worktree-digest guard as a wake");
-  }
-
-  @Test
-  void aFullInviteStopNeverGuardsItMayLegitimatelyChangeCode() {
-    seed("auth", "done", "uday", null);
-    var runId = DateTimeUtils.newId().toString();
-    runStore.create(
-        runId,
-        "acme",
-        "auth",
-        "uday",
-        "uday",
-        "invite-full",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + runId);
-    var stop = new LinkedHashMap<String, Object>();
-    stop.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
-    stop.put(Event.WellKnownData.RUN_ID, runId);
-    stop.put(Event.WellKnownData.RUN_ROLE, "invite-full");
-
-    reactor()
-        .onEvent(
-            Event.of(
-                "acme",
-                "auth",
-                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-                "claude-code",
-                "host",
-                stop));
-
-    assertTrue(launcher.guarded.isEmpty());
-  }
-
-  @Test
   void stopsThatAreNotThisBoxsRoomRunsNeverGuard() {
     seed("auth", "done", "uday", null);
     var reactor = reactor();
@@ -1003,8 +927,8 @@ class RoomWakeReactorTest {
 
   @Test
   void aMemberRecordedOnlyOnTheRoomRowWakesTheAgent() {
-    seed("auth", "in_progress", "uday", "off");
-    roomStore.ensureFor("auth", "acme", "auth", "uday", "off", "uday");
+    seed("auth", "in_progress", "uday", null);
+    roomStore.ensureFor("auth", "acme", "auth", "uday", null, "uday");
     roomStore.updateRoster(
         "auth", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]", "uday");
 
@@ -1012,6 +936,36 @@ class RoomWakeReactorTest {
     reactor.onEvent(message("auth", "uday", "hello"));
 
     assertEquals(1, launcher.woken.size(), "the room row is the authoritative membership home");
+  }
+
+  @Test
+  void anExplicitWakeModeIsNeverOverriddenBySeatedMembers() {
+    seed("muted", "in_progress", "uday", "off");
+    engage("muted", "claude-code", "full");
+    seed("addressed", "in_progress", "uday", "mention");
+    engage("addressed", "claude-code", "full");
+
+    reactor().onEvent(message("muted", "uday", "@agent anyone?"));
+    reactor().onEvent(message("addressed", "uday", "no address here"));
+    reactor().onEvent(message("addressed", "uday", "@agent now"));
+
+    assertEquals(List.of("acme/addressed"), launcher.woken, "off stays off; mention needs @agent");
+  }
+
+  @Test
+  void aSecondMemberTurnsAnUnsetWakeIntoMention() {
+    seed("crowded", "in_progress", "uday", null);
+    roomStore.updateRoster(
+        "crowded",
+        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"},"
+            + "{\"agent\":\"codex\",\"mode\":\"full\",\"engaged_at\":\"t1\"}]",
+        "uday");
+
+    reactor().onEvent(message("crowded", "uday", "thoughts?"));
+    assertTrue(launcher.woken.isEmpty(), "two members: a plain message wakes nobody");
+
+    reactor().onEvent(message("crowded", "uday", "@agent thoughts?"));
+    assertEquals(List.of("acme/crowded"), launcher.woken);
   }
 
   @Test

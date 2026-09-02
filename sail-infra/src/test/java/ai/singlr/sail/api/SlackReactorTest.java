@@ -254,7 +254,7 @@ class SlackReactorTest {
     var reactor = reactor(poster);
     reactor.onEvent(event("spec_dispatched"));
 
-    for (var role : java.util.List.of("room", "room-full", "invite", "invite-full")) {
+    for (var role : java.util.List.of("room", "room-full")) {
       reactor.onEvent(
           event(
               Event.WellKnownTypes.AGENT_SESSION_STOPPED,

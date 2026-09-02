@@ -369,7 +369,7 @@ class EngagementLifecycleTest {
                   runStore)
               .useMessages(new MessageStore(db))
               .useRooms(roomStore)
-              .useInviteExecutor(Runnable::run);
+              .useLaunchExecutor(Runnable::run);
 
       var engaged =
           sailOps.addRoomMember(

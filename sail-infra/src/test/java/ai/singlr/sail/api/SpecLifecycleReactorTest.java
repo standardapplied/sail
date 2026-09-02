@@ -89,24 +89,6 @@ class SpecLifecycleReactorTest {
   }
 
   @Test
-  void anInviteStopNeverAdvancesTheSpecInEitherMode() {
-    seed("auth", "in_progress");
-    for (var role :
-        List.of(Event.WellKnownData.RUN_ROLE_INVITE, Event.WellKnownData.RUN_ROLE_INVITE_FULL)) {
-      var stop =
-          Event.of(
-              "acme",
-              "auth",
-              Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-              "claude-code",
-              "host",
-              java.util.Map.of(Event.WellKnownData.RUN_ROLE, role));
-
-      assertFalse(reactor.filter().test(stop), "an invited agent's turn end is not a build");
-    }
-  }
-
-  @Test
   void aReviewOrFixStopNeverAdvancesTheSpec() {
     seed("auth", "in_progress");
     for (var role :

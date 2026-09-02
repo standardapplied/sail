@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Breaking (CLI + API):** the one-shot invite lane is gone — one verb per primitive. `sail spec
+  invite` no longer exists and `POST /v1/rooms/{id}/invite` answers 404 with a pointer to the two
+  verbs that remain: add a member (`sail spec engage`, `POST /v1/rooms/{id}/members`) to converse,
+  dispatch a spec to delegate. `Lane` has no `invite`/`invite-full` values; a historical invite run
+  row still lists as plain history with an unknown lane, and old `invite-<run>` snapshots keep
+  their provenance label. CLI copy now says member: `spec engage` adds a member, `spec disengage`
+  removes one.
+
+- Personal rooms: every FDE gets one room per project, minted lazily on their first rooms read
+  (`GET /v1/rooms`, filtered or not) — id `fde-<handle>-<project>`, titled by the handle, assigned
+  to the FDE, the project's default agent seated as its first member. Every field derives from the
+  FDE and project rows, so two boxes minting the same room converge as a no-op on sync; a deleted
+  personal room stays deleted until the FDE recreates it.
+
+- Wake defaults derive from the roster instead of a stored value: a room whose `wake` is unset
+  runs `on` with one member or none and `mention` with two or more, so a multi-member room answers
+  only when addressed. An explicit `wake` a human set is never overridden — including `off` on a
+  room with a seated member, which previously answered regardless. Rooms now render
+  `effective_wake` beside the stored `wake`. No data migration: existing explicit values keep
+  their meaning; existing nulls take the derived default.
+
 - The pty event lane is measured, and its live half now exists. A `pty_session_*` row the pty
   host cannot write no longer vanishes silently: each drop leaves one structured line in the
   host's journal (`sail-pty-host.service`) and bumps a drop meter file beside the pty socket that

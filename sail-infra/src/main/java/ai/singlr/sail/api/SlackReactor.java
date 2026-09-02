@@ -184,10 +184,10 @@ public final class SlackReactor implements EventSubscriber {
   }
 
   /**
-   * A non-triggering lane's clean stop is plumbing, not news: chat and invite turns speak through
-   * their room replies, review and fix runs through the pipeline's own stage events — so Slack must
-   * not narrate "agent stopped (exit 0)" after every turn of an engaged conversation. Failures
-   * still post, and build stops are untouched.
+   * A non-triggering lane's clean stop is plumbing, not news: chat turns speak through their room
+   * replies, review and fix runs through the pipeline's own stage events — so Slack must not
+   * narrate "agent stopped (exit 0)" after every turn of an engaged conversation. Failures still
+   * post, and build stops are untouched.
    */
   private static boolean isCleanChatStop(Event event) {
     var role = Objects.toString(event.data().get(Event.WellKnownData.RUN_ROLE), null);

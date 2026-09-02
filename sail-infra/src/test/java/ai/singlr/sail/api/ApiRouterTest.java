@@ -983,7 +983,7 @@ class ApiRouterTest {
   }
 
   @Test
-  void agentsListsTheInviteModeSupportToAnAuthenticatedCaller() throws Exception {
+  void agentsListsTheMemberModeSupportToAnAuthenticatedCaller() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/agents", "token");
 
@@ -1119,46 +1119,14 @@ class ApiRouterTest {
   }
 
   @Test
-  void invitePostRoutesTheBodyToTheOperation() throws Exception {
-    var ops = new FakeOperations();
-    try (var server = serverWith(ops, true)) {
-      var response =
-          post(
-              server,
-              "/v1/rooms/auth-flow/invite",
-              "token",
-              "{\"agent\": \"codex\", \"model\": \"gpt-6\", \"full\": true}");
-
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"run_id\": \"run-9\""));
-      assertTrue(response.body().contains("\"principal\": \"claude/invite-run-9\""));
-      assertTrue(response.body().contains("\"mode\": \"full\""));
-      assertTrue(response.body().contains("\"snapshot\": \"invite-run-9\""));
-      assertEquals("auth-flow", ops.lastInvite.specId());
-      assertEquals("codex", ops.lastInvite.request().agent());
-      assertEquals("gpt-6", ops.lastInvite.request().model());
-      assertTrue(ops.lastInvite.request().full());
-    }
-  }
-
-  @Test
-  void invitePostDefaultsToReadOnly() throws Exception {
-    var ops = new FakeOperations();
-    try (var server = serverWith(ops, true)) {
+  void inviteDoorIsRetiredWithAPointedNotFound() throws Exception {
+    try (var server = server()) {
       var response =
           post(server, "/v1/rooms/auth-flow/invite", "token", "{\"agent\": \"claude-code\"}");
 
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"mode\": \"read_only\""));
-      assertFalse(ops.lastInvite.request().full());
-    }
-  }
-
-  @Test
-  void inviteRejectsNonPost() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/rooms/auth-flow/invite", "token");
-      assertEquals(405, response.statusCode());
+      assertEquals(404, response.statusCode());
+      assertTrue(response.body().contains("Room invites are retired"));
+      assertTrue(response.body().contains("POST /v1/rooms/{id}/members"));
     }
   }
 
@@ -1503,10 +1471,6 @@ class ApiRouterTest {
   }
 
   private static class FakeOperations implements Operations {
-    record Invite(String specId, InviteRequest request, String localHandle) {}
-
-    volatile Invite lastInvite;
-
     @Override
     public Result<HealthResponse> health() {
       return Result.success(new HealthResponse("ok"));
@@ -1599,6 +1563,7 @@ class ApiRouterTest {
                   request.title(),
                   request.createdBy(),
                   request.wake(),
+                  "on",
                   java.util.List.of(),
                   java.util.List.of(),
                   request.createdBy(),
@@ -1610,7 +1575,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RoomsListResponse> rooms(String project) {
+    public Result<RoomsListResponse> rooms(String project, Actor actor) {
       lastRoomsProject = project;
       return Result.success(
           new RoomsListResponse(
@@ -1620,6 +1585,7 @@ class ApiRouterTest {
                       "acme",
                       "Design talk",
                       "uday",
+                      "on",
                       "on",
                       java.util.List.of(),
                       java.util.List.of("attached-spec"),
@@ -1641,6 +1607,7 @@ class ApiRouterTest {
                   "acme",
                   "Design talk",
                   "uday",
+                  "on",
                   "on",
                   java.util.List.of(),
                   java.util.List.of(),
@@ -1679,18 +1646,6 @@ class ApiRouterTest {
                   null,
                   "2026-08-23T00:00:00Z",
                   false)));
-    }
-
-    @Override
-    public Result<InviteResponse> inviteToRoom(
-        String specId, InviteRequest request, Actor actor, String localHandle) {
-      lastInvite = new Invite(specId, request, localHandle);
-      return Result.success(
-          new InviteResponse(
-              "run-9",
-              "claude/invite-run-9",
-              request.full() ? "full" : "read_only",
-              request.full() ? "invite-run-9" : ""));
     }
 
     @Override

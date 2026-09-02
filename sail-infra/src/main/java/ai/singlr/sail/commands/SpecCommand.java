@@ -23,7 +23,6 @@ import picocli.CommandLine.Command;
       ApiSpecRestoreCommand.class,
       ApiSpecCommentCommand.class,
       ApiSpecCommentsCommand.class,
-      ApiSpecInviteCommand.class,
       ApiSpecEngageCommand.class,
       ApiSpecDisengageCommand.class,
       DispatchCommand.class,

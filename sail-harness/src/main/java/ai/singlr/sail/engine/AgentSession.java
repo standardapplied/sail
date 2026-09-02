@@ -536,12 +536,11 @@ public final class AgentSession {
   }
 
   /**
-   * The headless invocation for the run's lane. A {@code room} run — and a read-only {@code invite}
-   * run, which is the same contract under an explicit human invitation — gets the
-   * harness-restricted chat command — no mutating tools, print-mode default-deny, only the {@code
-   * spec} CLI and read-only git auto-approved — regardless of {@code fullPermissions}, so no caller
-   * can launch a full-permission chat by mispassing a flag. Every other lane, {@code invite-full}
-   * included, keeps the full-permission dispatch command.
+   * The headless invocation for the run's lane. A {@code room} run gets the harness-restricted chat
+   * command — no mutating tools, print-mode default-deny, only the {@code spec} CLI and read-only
+   * git auto-approved — regardless of {@code fullPermissions}, so no caller can launch a
+   * full-permission chat by mispassing a flag. Every other lane keeps the full-permission dispatch
+   * command.
    */
   private static String agentCommand(
       AgentCli cli,
@@ -552,7 +551,7 @@ public final class AgentSession {
       String role,
       String resumeSessionId,
       AgentUnit unit) {
-    if ("room".equals(role) || "invite".equals(role)) {
+    if ("room".equals(role)) {
       return resumeSessionId == null
           ? cli.headlessRoomCommand(unit.taskPath(), model, settingsPath, true)
           : cli.headlessRoomResumeCommand(

@@ -159,9 +159,9 @@ public final class RunReservation {
   /**
    * Ends the resumed conversations this claim displaces: a run's resume session is judged as if the
    * run were still running a working lane over its repos, so a read-only room wake displaces
-   * nothing while a build, full turn, or invite over an overlapping repo (or the same spec) ends
-   * it. Best-effort after the claim, like pruning: the reservation stands either way, and a host
-   * that refuses or cannot be reached is a warning, never a failed launch.
+   * nothing while a build or full turn over an overlapping repo (or the same spec) ends it.
+   * Best-effort after the claim, like pruning: the reservation stands either way, and a host that
+   * refuses or cannot be reached is a warning, never a failed launch.
    */
   private void yieldDisplacedSessions(
       String runId, String project, String specId, String role, List<String> repos) {

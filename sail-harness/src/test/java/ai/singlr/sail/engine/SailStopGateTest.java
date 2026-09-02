@@ -426,29 +426,6 @@ class SailStopGateTest {
     assertTrue(reason.contains("commit your work in api"), reason);
   }
 
-  @Test
-  void aReadOnlyInviteRoleRunSkipsTheGitProtocolLikeARoom() throws Exception {
-    var repo = repo("api");
-    Files.writeString(repo.resolve("dirty.txt"), "wip");
-    writeSessionRole("invite");
-
-    var result = runGate(STOP_INPUT, RUN_ID);
-
-    assertEquals("", result.stdout(), "a read-only invite is never nudged about shared trees");
-    assertFalse(Files.exists(marker()), "the git concern never runs for a read-only invite");
-  }
-
-  @Test
-  void aFullInviteRoleSessionFileKeepsTheGitProtocol() throws Exception {
-    var repo = repo("api");
-    Files.writeString(repo.resolve("dirty.txt"), "wip");
-    writeSessionRole("invite-full");
-
-    var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
-
-    assertTrue(reason.contains("commit your work in api"), reason);
-  }
-
   private String blockReason(GateResult result) {
     var block = YamlUtil.parseMap(result.stdout());
     assertEquals("block", block.get("decision"), result.stdout());
