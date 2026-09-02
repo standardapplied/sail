@@ -269,7 +269,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
     try (var client = SessionClient.connect(dir.resolve("h.sock"), token)) {
       client.create(
           session,
-          List.of("bash", "-lc", script + "; exit 0"),
+          List.of("bash", "-lc", "read _; " + script + "; exit 0"),
           System.getProperty("user.home", "/home/dev"),
           CONTAINER,
           room,
@@ -278,8 +278,11 @@ class PtyRoomSessionIT extends AbstractIncusIT {
     }
     try (var client = SessionClient.connect(dir.resolve("h.sock"), token)) {
       var channel = client.attach(session, true);
-      var stdin = new PipedInputStream(new PipedOutputStream());
+      var toChild = new PipedOutputStream();
+      var stdin = new PipedInputStream(toChild);
       var stdout = new ByteArrayOutputStream();
+      toChild.write('\n');
+      toChild.flush();
       var reason = AttachLoop.run(channel, stdin, stdout);
       var rendered = stdout.toString(StandardCharsets.UTF_8);
       assertEquals("exited(0)", reason, "the session's script must succeed: " + rendered);
