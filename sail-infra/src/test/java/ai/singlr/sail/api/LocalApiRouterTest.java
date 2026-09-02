@@ -39,6 +39,10 @@ class LocalApiRouterTest {
     return Map.of("authorization", "Bearer " + TestOperations.ROOM_RUN_CREDENTIAL);
   }
 
+  private static Map<String, String> inviteAuth() {
+    return Map.of("authorization", "Bearer " + TestOperations.INVITE_RUN_CREDENTIAL);
+  }
+
   private static LocalApiRequest get(String path, Map<String, String> query) {
     return new LocalApiRequest("GET", path, query, auth(), new byte[0]);
   }
@@ -345,6 +349,26 @@ class LocalApiRouterTest {
     assertEquals(200, response.status());
     assertEquals("01900000-0000-7000-8000-000000000001", ops.lastAfter);
     assertNull(ops.lastBefore);
+  }
+
+  @Test
+  void aHistoricalReadOnlyInviteCredentialStaysViewerTierAcrossTheUpgrade() {
+    var whoami =
+        router.handle(
+            new LocalApiRequest("GET", "/v1/whoami", Map.of(), inviteAuth(), new byte[0]));
+    assertEquals(200, whoami.status());
+    assertEquals("viewer", whoami.body().get("role"), "the retired lane never gains write tier");
+    assertEquals("run-3", whoami.body().get("run_id"));
+
+    router.handle(
+        new LocalApiRequest(
+            "PUT",
+            "/v1/specs/oauth",
+            Map.of(),
+            inviteAuth(),
+            "status=archived".getBytes(StandardCharsets.UTF_8)));
+    assertEquals(Role.VIEWER, ops.lastActor.role());
+    assertFalse(ops.lastActor.agentLane());
   }
 
   @Test

@@ -14,7 +14,6 @@ import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,7 +22,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -219,10 +217,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     /**
      * Whether this run's own stop hands its spec to the review pipeline — only a build or ad-hoc
      * does. A row-less or unrecognized role is treated as a normal triggering stop, matching the
-     * role-marker path.
+     * role-marker path; a retired invite row never triggers.
      */
     public boolean triggersReview() {
-      return lane().map(Lane::triggersReview).orElse(true);
+      return Lane.triggersReview(role);
     }
 
     /** Whether this row is a build attempt of a spec. */
@@ -255,7 +253,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * derives the credential tier from this predicate, never from anything the session says.
      */
     public boolean readOnlyLane() {
-      return lane().map(Lane::readOnly).orElse(false);
+      return Lane.readOnly(role);
     }
 
     /**
@@ -275,7 +273,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      * any other.
      */
     public boolean sessionRole() {
-      return lane().map(Lane::isSession).orElse(false);
+      return Lane.isSession(role);
     }
 
     /**
@@ -290,15 +288,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
   }
 
-  private static final String SESSION_ROLES = roleIn(Lane::isSession);
-
-  /** A {@code role IN (...)} clause over the lanes matching {@code which}, in enum order. */
-  private static String roleIn(Predicate<Lane> which) {
-    return Arrays.stream(Lane.values())
-        .filter(which)
-        .map(lane -> "'" + lane.wire() + "'")
-        .collect(Collectors.joining(", ", "role IN (", ")"));
-  }
+  /** The {@code role IN (...)} clause over every session role, live and retired. */
+  private static final String SESSION_ROLES =
+      Lane.sessionRoles().stream()
+          .map(role -> "'" + role + "'")
+          .collect(Collectors.joining(", ", "role IN (", ")"));
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"

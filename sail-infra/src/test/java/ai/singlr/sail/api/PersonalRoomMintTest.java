@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -81,7 +82,8 @@ class PersonalRoomMintTest {
 
     assertEquals(1, first.size());
     var personal = first.getFirst();
-    assertEquals("fde-rajesh-acme", personal.id());
+    assertEquals(PersonalRooms.idOf("rajesh", "acme"), personal.id());
+    assertEquals("rajesh", personal.personalOf(), "the wire marks whose personal room it is");
     assertEquals("rajesh", personal.title());
     assertEquals("rajesh", personal.assignee());
     assertEquals("claude-code", personal.members().getFirst().agent());
@@ -94,7 +96,8 @@ class PersonalRoomMintTest {
     var all = rooms(null, Actor.cliOperator("uday"));
 
     assertEquals(
-        List.of("fde-uday-acme", "fde-uday-nautilus"), all.stream().map(RoomView::id).toList());
+        List.of(PersonalRooms.idOf("uday", "acme"), PersonalRooms.idOf("uday", "nautilus")),
+        all.stream().map(RoomView::id).toList());
     assertEquals("codex", all.getLast().members().getFirst().agent());
   }
 

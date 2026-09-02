@@ -5,13 +5,17 @@
 
 package ai.singlr.sail.store;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
@@ -24,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 class PersonalRoomsTest {
 
   private static final String DEFINITION = "name: acme\nagent:\n  type: claude-code\n";
+  private static final String RAJESH_ACME = PersonalRooms.idOf("rajesh", "acme");
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -59,19 +64,75 @@ class PersonalRoomsTest {
   }
 
   @Test
-  void theIdIsDeterministicAndValidInTheSharedNamespace() {
-    assertEquals("fde-rajesh-acme", PersonalRooms.idOf("rajesh", "acme"));
-    assertEquals("fde-m-day-acme", PersonalRooms.idOf("M.Day", "acme"));
-    assertTrue(PersonalRooms.isPersonal("fde-rajesh-acme", "rajesh", "acme"));
-    assertFalse(PersonalRooms.isPersonal("fde-rajesh-acme", "uday", "acme"));
-    assertFalse(PersonalRooms.isPersonal(null, "rajesh", "acme"));
+  void theIdIsDeterministicReadableAndValidInTheSharedNamespace() {
+    assertEquals(RAJESH_ACME, PersonalRooms.idOf("rajesh", "acme"));
+    assertTrue(RAJESH_ACME.startsWith("fde-rajesh-acme-"), RAJESH_ACME);
+    assertTrue(PersonalRooms.idOf("M.Day", "acme").startsWith("fde-m-day-acme-"));
+    assertDoesNotThrow(() -> NameValidator.requireValidSpecId(RAJESH_ACME));
+  }
+
+  @Test
+  void distinctPairsWithOneSlugMintDistinctIds() {
+    assertNotEquals(PersonalRooms.idOf("M.Day", "acme"), PersonalRooms.idOf("m-day", "acme"));
+    assertNotEquals(PersonalRooms.idOf("m-day", "acme"), PersonalRooms.idOf("m", "day-acme"));
+  }
+
+  @Test
+  void theLongestValidPairStillMintsAValidId() {
+    var handle = "H" + "x".repeat(62);
+    var project = "p" + "y".repeat(62);
+
+    var id = PersonalRooms.idOf(handle, project);
+
+    assertDoesNotThrow(() -> NameValidator.requireValidSpecId(id));
+    assertEquals(80, id.length());
+    assertNotEquals(id, PersonalRooms.idOf(handle, "p" + "y".repeat(61) + "z"));
+  }
+
+  @Test
+  void anInvalidHandleOrProjectFailsLoud() {
+    assertThrows(IllegalArgumentException.class, () -> PersonalRooms.idOf("../x", "acme"));
+    assertThrows(IllegalArgumentException.class, () -> PersonalRooms.idOf("rajesh", "Acme"));
+  }
+
+  @Test
+  void ownerOfIsTheCreatorOnlyForTheCreatorsOwnPersonalRoom() {
+    assertTrue(PersonalRooms.ensure(rooms, null, rajesh("t0"), acme(DEFINITION)));
+    var personal = rooms.findById(RAJESH_ACME).orElseThrow();
+    var other =
+        new RoomStore.RoomRow(
+            "design-talk", "acme", "Design", null, null, null, "rajesh", "t0", "t0", "rajesh");
+    var forged =
+        new RoomStore.RoomRow(
+            RAJESH_ACME, "acme", "rajesh", null, null, null, "uday", "t0", "t0", "uday");
+    var anonymous =
+        new RoomStore.RoomRow(
+            RAJESH_ACME, "acme", "rajesh", null, null, null, null, "t0", "t0", null);
+    var agentMade =
+        new RoomStore.RoomRow(
+            "fde-notes",
+            "acme",
+            "Notes",
+            null,
+            null,
+            null,
+            "codex/run-1",
+            "t0",
+            "t0",
+            "codex/run-1");
+
+    assertEquals("rajesh", PersonalRooms.ownerOf(personal));
+    assertNull(PersonalRooms.ownerOf(other));
+    assertNull(PersonalRooms.ownerOf(forged), "another creator's room is not this handle's");
+    assertNull(PersonalRooms.ownerOf(anonymous));
+    assertNull(PersonalRooms.ownerOf(agentMade), "a non-handle creator never throws");
   }
 
   @Test
   void mintsOneRoomTitledByTheHandleWithTheDefaultAgentSeated() {
     assertTrue(PersonalRooms.ensure(rooms, null, rajesh("2026-08-01T00:00:00Z"), acme(DEFINITION)));
 
-    var room = rooms.findById("fde-rajesh-acme").orElseThrow();
+    var room = rooms.findById(RAJESH_ACME).orElseThrow();
     assertEquals("rajesh", room.title());
     assertEquals("rajesh", room.assignee());
     assertEquals("acme", room.project());
@@ -95,7 +156,7 @@ class PersonalRoomsTest {
   @Test
   void aProjectWithoutAnAgentBlockMintsAnEmptyRoster() {
     assertTrue(PersonalRooms.ensure(rooms, null, rajesh("t0"), acme("name: acme\n")));
-    assertNull(rooms.findById("fde-rajesh-acme").orElseThrow().roster());
+    assertNull(rooms.findById(RAJESH_ACME).orElseThrow().roster());
   }
 
   @Test
@@ -103,7 +164,7 @@ class PersonalRoomsTest {
     var specs = new SpecStore(db);
     specs.create(
         new SpecStore.SpecRow(
-            "fde-rajesh-acme",
+            RAJESH_ACME,
             "acme",
             "Impostor",
             SpecStatus.DRAFT,
@@ -126,10 +187,10 @@ class PersonalRoomsTest {
   void aDeletedPersonalRoomStaysDeleted() {
     var fde = rajesh("2026-08-01T00:00:00Z");
     PersonalRooms.ensure(rooms, null, fde, acme(DEFINITION));
-    assertTrue(rooms.delete("fde-rajesh-acme"));
+    assertTrue(rooms.delete(RAJESH_ACME));
 
     assertFalse(PersonalRooms.ensure(rooms, null, fde, acme(DEFINITION)));
-    assertTrue(rooms.findById("fde-rajesh-acme").isEmpty(), "the tombstone wins");
+    assertTrue(rooms.findById(RAJESH_ACME).isEmpty(), "the tombstone wins");
   }
 
   @Test
@@ -141,8 +202,8 @@ class PersonalRoomsTest {
       assertTrue(PersonalRooms.ensure(nodeRooms, null, fde, acme(DEFINITION)));
 
       assertEquals(
-          rooms.latestRev("fde-rajesh-acme"),
-          nodeRooms.latestRev("fde-rajesh-acme"),
+          rooms.latestRev(RAJESH_ACME),
+          nodeRooms.latestRev(RAJESH_ACME),
           "identical inputs mint an identical content-hash rev on every box");
 
       var report =

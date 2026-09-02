@@ -929,7 +929,7 @@ class RunStoreTest {
   }
 
   @Test
-  void aHistoricalInviteRowReadsAsAnUnknownLaneWithoutShadowingAnything() {
+  void aHistoricalInviteRowReadsAsAnUnknownLaneButKeepsItsSessionContract() {
     var build = newRun("backend", "auth");
     var historical = DateTimeUtils.newId().toString();
     store.create(
@@ -951,15 +951,19 @@ class RunStoreTest {
     assertTrue(row.lane().isEmpty(), "a retired role resolves to no lane instead of throwing");
     assertEquals("codex/" + historical, row.principal());
     assertFalse(row.chatRole());
-    assertFalse(row.readOnlyLane());
-    assertFalse(row.sessionRole());
-    assertTrue(row.triggersReview(), "an unknown lane keeps the conservative default");
+    assertFalse(row.readOnlyLane(), "a full invite held a member-tier credential");
+    assertTrue(row.sessionRole(), "stop and the reaper still address a historical invite");
+    assertFalse(row.triggersReview(), "a retired invite's stop never enters the review loop");
+    assertTrue(
+        store.running().stream().map(RunStore.RunRow::id).toList().contains(historical),
+        "the session queries still see a historical invite row");
     assertTrue(
         store.listForSpec("auth").stream().map(RunStore.RunRow::id).toList().contains(historical));
     assertEquals(
-        build,
+        historical,
         store.latestForProjectOnNode("backend", "node-a").orElseThrow().id(),
-        "a row outside every lane never becomes the project's session");
+        "a still-running historical invite stays the box's addressable session");
+    assertTrue(store.findById(build).isPresent());
   }
 
   @Test

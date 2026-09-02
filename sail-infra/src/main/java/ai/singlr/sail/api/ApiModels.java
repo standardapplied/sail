@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -817,6 +818,7 @@ record RoomView(
     String assignee,
     String wake,
     String effectiveWake,
+    String personalOf,
     List<ai.singlr.sail.config.Engagement> members,
     List<String> specIds,
     String createdBy,
@@ -834,6 +836,7 @@ record RoomView(
         row.assignee(),
         row.wake(),
         RoomWakePolicy.effectiveMode(row.wake(), members.size()),
+        PersonalRooms.ownerOf(row),
         members,
         specIds,
         row.createdBy(),
@@ -851,6 +854,7 @@ record RoomView(
     if (assignee != null) m.put("assignee", assignee);
     if (wake != null) m.put("wake", wake);
     m.put("effective_wake", effectiveWake);
+    if (personalOf != null) m.put("personal_of", personalOf);
     m.put(
         "members",
         members.stream()

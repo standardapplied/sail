@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
+import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.RoomStore;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +74,20 @@ class RoomViewTest {
     var members = (List<Map<String, Object>>) map.get("members");
     assertFalse(members.getFirst().containsKey("model"));
     assertEquals("read_only", members.getFirst().get("mode"));
+  }
+
+  @Test
+  void aPersonalRoomCarriesItsOwnerOnTheWireAndAnyOtherRoomDoesNot() {
+    var id = PersonalRooms.idOf("uday", "acme");
+    var personal =
+        new RoomStore.RoomRow(id, "acme", "uday", "uday", null, null, "uday", "t0", "t1", "uday");
+
+    var view = RoomView.from(personal, List.of());
+
+    assertEquals("uday", view.personalOf());
+    assertEquals("uday", view.toMap().get("personal_of"));
+    assertFalse(
+        RoomView.from(row(null, "uday", "on"), List.of()).toMap().containsKey("personal_of"));
   }
 
   @Test

@@ -244,11 +244,12 @@ public record Event(
      * Whether a run role names a lane whose own stop must never drive the review pipeline — every
      * lane except a dispatch build and an ad-hoc run. Reactors on {@code agent_session_stopped}
      * drop such stops by role so the loop can never re-enter on its own agents. Null (a role-less
-     * stop), like an unrecognized role, is treated as a normal triggering stop. Delegates to {@link
-     * Lane} so this classification and {@code RunRow}'s share one source.
+     * stop), like an unrecognized role, is treated as a normal triggering stop; a retired invite
+     * role never triggers. Delegates to {@link Lane} so this classification and {@code RunRow}'s
+     * share one source.
      */
     public static boolean nonTriggeringLane(String role) {
-      return Lane.of(role).map(lane -> !lane.triggersReview()).orElse(false);
+      return !Lane.triggersReview(role);
     }
 
     private WellKnownData() {}

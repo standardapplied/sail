@@ -18,6 +18,7 @@ class TestOperations implements Operations {
   static final String OWNER = "uday";
   static final String BOX_CREDENTIAL = "sailbox_test";
   static final String ROOM_RUN_CREDENTIAL = "sailroom_test";
+  static final String INVITE_RUN_CREDENTIAL = "sailinvite_test";
   static final String BOX_HANDLE = "uday";
 
   @Override
@@ -31,33 +32,10 @@ class TestOperations implements Operations {
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {
     if (ROOM_RUN_CREDENTIAL.equals(credential)) {
-      return Optional.of(
-          new RunStore.RunRow(
-              "run-2",
-              "acme",
-              null,
-              "node-a",
-              "room",
-              "claude-code",
-              null,
-              "chat",
-              null,
-              null,
-              "running",
-              null,
-              null,
-              null,
-              "t0",
-              null,
-              List.of(),
-              null,
-              PRINCIPAL,
-              OWNER,
-              null,
-              null,
-              null,
-              null,
-              "lounge"));
+      return Optional.of(roomRun("run-2", "room"));
+    }
+    if (INVITE_RUN_CREDENTIAL.equals(credential)) {
+      return Optional.of(roomRun("run-3", "invite"));
     }
     if (!RUN_CREDENTIAL.equals(credential)) {
       return Optional.empty();
@@ -84,6 +62,35 @@ class TestOperations implements Operations {
             null,
             PRINCIPAL,
             OWNER));
+  }
+
+  private static RunStore.RunRow roomRun(String id, String role) {
+    return new RunStore.RunRow(
+        id,
+        "acme",
+        null,
+        "node-a",
+        role,
+        "claude-code",
+        null,
+        "chat",
+        null,
+        null,
+        "running",
+        null,
+        null,
+        null,
+        "t0",
+        null,
+        List.of(),
+        null,
+        PRINCIPAL,
+        OWNER,
+        null,
+        null,
+        null,
+        null,
+        "lounge");
   }
 
   @Override

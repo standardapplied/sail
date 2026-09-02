@@ -6,13 +6,19 @@
   invite` no longer exists and `POST /v1/rooms/{id}/invite` answers 404 with a pointer to the two
   verbs that remain: add a member (`sail spec engage`, `POST /v1/rooms/{id}/members`) to converse,
   dispatch a spec to delegate. `Lane` has no `invite`/`invite-full` values; a historical invite run
-  row still lists as plain history with an unknown lane, and old `invite-<run>` snapshots keep
-  their provenance label. CLI copy now says member: `spec engage` adds a member, `spec disengage`
+  row lists as plain history with an unknown lane but keeps the contract it was minted under — a
+  plain invite still running across the upgrade stays viewer-tier, neither role's stop enters the
+  review pipeline, and stop and the reaper still address the row — and old `invite-<run>`
+  snapshots keep their provenance label. CLI copy now says member: `spec engage` adds a member, `spec disengage`
   removes one.
 
 - Personal rooms: every FDE gets one room per project, minted lazily on their first rooms read
-  (`GET /v1/rooms`, filtered or not) — id `fde-<handle>-<project>`, titled by the handle, assigned
-  to the FDE, the project's default agent seated as its first member. Every field derives from the
+  (`GET /v1/rooms`, filtered or not) — id `fde-<handle>-<project>-<fingerprint>`, where the
+  fingerprint of the exact handle/project pair keeps the id unique when the readable slug is not
+  (case and punctuation fold, a hyphenated handle shifts the boundary, a long pair truncates) —
+  titled by the handle, assigned to the FDE, the project's default agent seated as its first
+  member. Rooms render `personal_of` (the handle) on a personal room so clients pin it without
+  re-deriving the id. Every field derives from the
   FDE and project rows, so two boxes minting the same room converge as a no-op on sync; a deleted
   personal room stays deleted until the FDE recreates it.
 

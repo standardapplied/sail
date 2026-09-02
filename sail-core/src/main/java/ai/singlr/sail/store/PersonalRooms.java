@@ -27,22 +27,42 @@ import java.util.Locale;
 public final class PersonalRooms {
 
   private static final String PREFIX = "fde-";
+  private static final int FINGERPRINT_LENGTH = 16;
+  private static final int MAX_SLUG_LENGTH =
+      NameValidator.MAX_SPEC_ID_LENGTH - PREFIX.length() - 1 - FINGERPRINT_LENGTH;
 
   private PersonalRooms() {}
 
   /**
-   * The deterministic room id for {@code handle} in {@code project}, valid in the shared id space.
+   * The deterministic room id for {@code handle} in {@code project}, valid in the shared id space:
+   * a readable slug of the pair, then a fingerprint of the exact pair. The fingerprint is what
+   * keeps the id injective — the slug lower-cases and folds punctuation, so {@code M.Day} and
+   * {@code m-day} share one, and a hyphenated handle can shift the handle/project boundary — and
+   * what keeps the truncated slug of a long pair unique within the id length.
    */
   public static String idOf(String handle, String project) {
-    return PREFIX + handle.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "-") + "-" + project;
+    NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidProjectName(project);
+    return derive(handle, project);
+  }
+
+  private static String derive(String handle, String project) {
+    var slug = handle.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "-") + "-" + project;
+    var fingerprint = TokenStore.sha256(handle + "\0" + project).substring(0, FINGERPRINT_LENGTH);
+    return PREFIX + slug.substring(0, Math.min(slug.length(), MAX_SLUG_LENGTH)) + "-" + fingerprint;
   }
 
   /**
-   * Whether {@code roomId} is the personal room of {@code handle} in {@code project} — the
-   * client-side check Mast pins the room with, kept beside the id rule so they cannot drift.
+   * The handle whose personal room {@code row} is, or null for any other room. Derived from the row
+   * alone — a personal room is minted by its FDE, so the id rule over the creator and project
+   * identifies it — and rendered on the wire so Mast pins the reader's room without re-deriving the
+   * id. Never throws: a creator that is no FDE handle (an agent principal) simply derives no match.
    */
-  public static boolean isPersonal(String roomId, String handle, String project) {
-    return roomId != null && handle != null && roomId.equals(idOf(handle, project));
+  public static String ownerOf(RoomStore.RoomRow row) {
+    if (row.createdBy() == null || !row.id().startsWith(PREFIX)) {
+      return null;
+    }
+    return row.id().equals(derive(row.createdBy(), row.project())) ? row.createdBy() : null;
   }
 
   /**
@@ -52,7 +72,6 @@ public final class PersonalRooms {
   public static boolean ensure(
       RoomStore rooms, SpecStore specs, FdeStore.Fde fde, ProjectStore.ProjectRow project) {
     var id = idOf(fde.handle(), project.name());
-    NameValidator.requireValidSpecId(id);
     return rooms.atomically(
         () -> {
           if (rooms.findById(id).isPresent()
