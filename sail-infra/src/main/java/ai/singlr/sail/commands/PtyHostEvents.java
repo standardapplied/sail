@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.Event;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
@@ -25,37 +26,41 @@ import java.util.Map;
  * shows who opened a terminal there and with what. "With what" is the executable alone — {@code
  * claude} versus {@code bash} — never the full argv: arguments carry tokens, signed URLs, and
  * inline scripts, and an event row is durable, room-readable history. Failures are swallowed by
- * design: a session must never die because an event row could not be written.
+ * design — a session must never die because an event row could not be written — but never silently:
+ * each drop leaves one structured stderr line (journald, via the pty host service) and bumps the
+ * {@link PtyEventDrops} meter that {@code sail session ls --json} surfaces.
  */
 final class PtyHostEvents implements PtyEvents {
 
   private final Path dbPath;
+  private final Path dropsPath;
 
   PtyHostEvents() {
-    this(SailPaths.controlPlaneDb());
+    this(SailPaths.controlPlaneDb(), PtyEventDrops.fileOf(SailPaths.ptySocketPath()));
   }
 
-  PtyHostEvents(Path dbPath) {
+  PtyHostEvents(Path dbPath, Path dropsPath) {
     this.dbPath = dbPath;
+    this.dropsPath = dropsPath;
   }
 
   @Override
   public void sessionStarted(PtySession.Origin origin) {
     var data = dataFor(origin);
     data.put("executable", origin.command().getFirst());
-    insert("pty_session_started", origin, origin.ownerFde(), data);
+    insert(Event.WellKnownTypes.PTY_SESSION_STARTED, origin, origin.ownerFde(), data);
   }
 
   @Override
   public void sessionAttached(PtySession.Origin origin, String fde) {
-    insert("pty_session_attached", origin, fde, dataFor(origin));
+    insert(Event.WellKnownTypes.PTY_SESSION_ATTACHED, origin, fde, dataFor(origin));
   }
 
   @Override
   public void sessionEnded(PtySession.Origin origin, String reason) {
     var data = dataFor(origin);
     data.put("reason", reason);
-    insert("pty_session_ended", origin, "sail", data);
+    insert(Event.WellKnownTypes.PTY_SESSION_ENDED, origin, "sail", data);
   }
 
   private static Map<String, Object> dataFor(PtySession.Origin origin) {
@@ -81,8 +86,17 @@ final class PtyHostEvents implements PtyEvents {
                   agent,
                   HostInfo.hostname(),
                   YamlUtil.dumpJson(data)));
-    } catch (RuntimeException swallowed) {
-      var unused = swallowed;
+    } catch (RuntimeException failed) {
+      System.err.println(
+          "pty-events: dropped "
+              + type
+              + " session="
+              + origin.name()
+              + " project="
+              + origin.project()
+              + " cause="
+              + failed);
+      PtyEventDrops.record(dropsPath, type, failed.toString());
     }
   }
 }

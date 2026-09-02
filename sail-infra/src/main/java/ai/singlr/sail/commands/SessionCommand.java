@@ -87,10 +87,24 @@ public final class SessionCommand {
     @Option(names = "--socket", hidden = true, description = "Host socket override.")
     private java.nio.file.Path socket;
 
+    @Option(names = "--json", description = "Output in JSON format.")
+    private boolean json;
+
+    record Listing(
+        int schemaVersion,
+        List<ai.singlr.sail.pty.PtyMessage.SessionInfo> sessions,
+        PtyEventDrops.Drops eventDrops) {}
+
     @Override
     public Integer call() throws Exception {
-      try (var client = SessionClient.connect(socketOrDefault(socket))) {
+      var socketPath = socketOrDefault(socket);
+      try (var client = SessionClient.connect(socketPath)) {
         var sessions = client.list();
+        if (json) {
+          var drops = PtyEventDrops.read(PtyEventDrops.fileOf(socketPath));
+          System.out.println(CliJson.stringify(new Listing(1, sessions, drops)));
+          return 0;
+        }
         if (sessions.isEmpty()) {
           System.out.println("No sessions. Start one with: sail session new <name>");
           return 0;

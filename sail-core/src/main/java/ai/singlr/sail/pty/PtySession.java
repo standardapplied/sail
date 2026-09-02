@@ -137,8 +137,20 @@ public final class PtySession implements AutoCloseable {
     }
     var session = new PtySession(origin, events, pty, child, journal, queueCapacity, replayMax);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
-    events.sessionStarted(origin);
+    emitQuietly(() -> events.sessionStarted(origin));
     return session;
+  }
+
+  /**
+   * Runs one event emission, swallowing anything it throws: the session facts are observational, so
+   * no {@link PtyEvents} failure may end, stall, or refuse the session it describes.
+   */
+  private static void emitQuietly(Runnable emission) {
+    try {
+      emission.run();
+    } catch (RuntimeException ignored) {
+      var unused = ignored;
+    }
   }
 
   private void gather() {
@@ -175,11 +187,7 @@ public final class PtySession implements AutoCloseable {
           var ended = new PtyMessage.SessionEnded(reason);
           subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
         }
-        try {
-          events.sessionEnded(origin, reason);
-        } catch (RuntimeException ignored) {
-          var unused = ignored;
-        }
+        emitQuietly(() -> events.sessionEnded(origin, reason));
       } finally {
         gatherDone.countDown();
       }
@@ -235,7 +243,7 @@ public final class PtySession implements AutoCloseable {
         writerFde = fde;
       }
     }
-    events.sessionAttached(origin, fde);
+    emitQuietly(() -> events.sessionAttached(origin, fde));
     Thread.ofVirtual()
         .name("pty-send-" + name() + "-" + subscriber.id())
         .start(() -> send(subscriber));

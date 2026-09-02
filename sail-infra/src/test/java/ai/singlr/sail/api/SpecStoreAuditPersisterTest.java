@@ -61,6 +61,21 @@ class SpecStoreAuditPersisterTest {
   }
 
   @Test
+  void filterRejectsPtySessionFactsBecauseTheyArePersistedAtSource() {
+    for (var type :
+        java.util.List.of(
+            Event.WellKnownTypes.PTY_SESSION_STARTED,
+            Event.WellKnownTypes.PTY_SESSION_ATTACHED,
+            Event.WellKnownTypes.PTY_SESSION_ENDED)) {
+      assertFalse(
+          persister.filter().test(Event.of("proj", null, type, "uday", "host")),
+          type + " on the bus is the bridge's republication, never something to persist again");
+    }
+    assertFalse(Event.WellKnownTypes.ptySessionFact("pty_session_renamed"));
+    assertFalse(Event.WellKnownTypes.ptySessionFact(Event.WellKnownTypes.SPEC_DISPATCHED));
+  }
+
+  @Test
   void onEventPersistsToDatabase() {
     var event = Event.of("backend", "auth", "spec_dispatched", "sail", "host1", Map.of("k", "v"));
     persister.onEvent(event);

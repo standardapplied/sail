@@ -114,6 +114,27 @@ public record Event(
 
     public static final String AGENT_PRESENCE = "agent_presence";
 
+    /** A host-owned terminal session started; emitted by the pty host, room-scoped when bound. */
+    public static final String PTY_SESSION_STARTED = "pty_session_started";
+
+    /** A client attached to a host-owned terminal session. */
+    public static final String PTY_SESSION_ATTACHED = "pty_session_attached";
+
+    /** A host-owned terminal session ended; {@code data.reason} says how. */
+    public static final String PTY_SESSION_ENDED = "pty_session_ended";
+
+    /**
+     * Whether {@code type} is one of the pty session facts. They are persisted at source — the pty
+     * host writes its own event rows straight into the events table from its own process — so on
+     * the bus they are always the {@link PtyEventBridge}'s republication for live consumers, never
+     * something to persist again.
+     */
+    public static boolean ptySessionFact(String type) {
+      return PTY_SESSION_STARTED.equals(type)
+          || PTY_SESSION_ATTACHED.equals(type)
+          || PTY_SESSION_ENDED.equals(type);
+    }
+
     /** A spec left in_progress/review past the reconciler threshold — surfaced for triage. */
     public static final String SPEC_STRANDED = "spec_stranded";
 

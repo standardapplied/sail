@@ -9,6 +9,10 @@ package ai.singlr.sail.pty;
  * The record-class facts a session emits — started, attached, ended — with the existing source
  * discipline: observational only, nothing here drives run or spec state. Each fact carries the
  * session's {@link PtySession.Origin}, so a room-bound session's room travels with it.
+ *
+ * <p>Emission is fail-open on both sides of this seam: {@link PtySession} swallows whatever an
+ * implementation throws, and an implementation is still expected to swallow (and measure) its own
+ * failures — a session must never die or stall because an event could not be recorded.
  */
 public interface PtyEvents {
 

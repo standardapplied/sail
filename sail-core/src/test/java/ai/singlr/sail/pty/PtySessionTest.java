@@ -369,6 +369,49 @@ class PtySessionTest {
   }
 
   @Test
+  void anEventsImplThatAlwaysThrowsNeverKillsOrStallsTheSession() throws Exception {
+    var hostile =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(PtySession.Origin origin) {
+            throw new RuntimeException("the event sink is down");
+          }
+
+          @Override
+          public void sessionAttached(PtySession.Origin origin, String fde) {
+            throw new RuntimeException("the event sink is down");
+          }
+
+          @Override
+          public void sessionEnded(PtySession.Origin origin, String reason) {
+            throw new RuntimeException("the event sink is down");
+          }
+        };
+    var session =
+        PtySession.start(
+            origin("hostile", "uday", "acme"),
+            hostile,
+            List.of("sh", "-c", "echo up; read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("hostile.ring"),
+            64 * 1024,
+            80,
+            24);
+    try {
+      var client = new Collector();
+      session.attach(client, true, "uday");
+      client.awaitOutput("up");
+      session.end("displaced");
+      assertTrue(
+          client.ended.await(10, TimeUnit.SECONDS),
+          "the ending must reach the subscriber despite the throwing sink");
+    } finally {
+      assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), session::close);
+    }
+  }
+
+  @Test
   void aPausedSubscriberIsResyncedFromTheJournalNotLeftCorrupt() throws Exception {
     var session =
         PtySession.start(
