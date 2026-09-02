@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -760,7 +761,7 @@ record SpecRestoreRequest(String rev) {
   }
 }
 
-/** Body of {@code POST /v1/specs/{id}/invite}: the agent to invite and the one mode choice. */
+/** Body of {@code POST /v1/rooms/{id}/members}: the agent to seat and the one mode choice. */
 record EngageRequest(String agent, String mode, String model, boolean snapshot) {
   static EngageRequest fromMap(Map<String, Object> map) {
     return new EngageRequest(
@@ -816,6 +817,8 @@ record RoomView(
     String title,
     String assignee,
     String wake,
+    String effectiveWake,
+    String personalOf,
     List<ai.singlr.sail.config.Engagement> members,
     List<String> specIds,
     String createdBy,
@@ -825,13 +828,16 @@ record RoomView(
     implements Mappable {
 
   static RoomView from(RoomStore.RoomRow row, List<String> specIds) {
+    var members = ai.singlr.sail.config.Roster.fromJson(row.roster()).members();
     return new RoomView(
         row.id(),
         row.project(),
         row.title(),
         row.assignee(),
         row.wake(),
-        ai.singlr.sail.config.Roster.fromJson(row.roster()).members(),
+        RoomWakePolicy.effectiveMode(row.wake(), members.size()),
+        PersonalRooms.ownerOf(row),
+        members,
         specIds,
         row.createdBy(),
         row.createdAt(),
@@ -847,6 +853,8 @@ record RoomView(
     m.put("title", title);
     if (assignee != null) m.put("assignee", assignee);
     if (wake != null) m.put("wake", wake);
+    m.put("effective_wake", effectiveWake);
+    if (personalOf != null) m.put("personal_of", personalOf);
     m.put(
         "members",
         members.stream()
@@ -949,31 +957,7 @@ record RoomMembersResponse(List<ai.singlr.sail.config.Engagement> members) imple
   }
 }
 
-record InviteRequest(String agent, String model, boolean full, boolean snapshot) {
-  static InviteRequest fromMap(Map<String, Object> map) {
-    return new InviteRequest(
-        (String) map.get("agent"),
-        (String) map.get("model"),
-        Boolean.TRUE.equals(map.get("full")),
-        !Boolean.FALSE.equals(map.get("snapshot")));
-  }
-}
-
-/** Response of {@code POST /v1/specs/{id}/invite}: the launched invite run. */
-record InviteResponse(String runId, String principal, String mode, String snapshot)
-    implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("run_id", runId);
-    m.put("principal", principal);
-    m.put("mode", mode);
-    m.put("snapshot", snapshot);
-    return m;
-  }
-}
-
-/** One invite mode an agent does or does not support, with the seam-declared reason when not. */
+/** One member mode an agent does or does not support, with the seam-declared reason when not. */
 record AgentModeView(String mode, boolean supported, String reason) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -987,7 +971,7 @@ record AgentModeView(String mode, boolean supported, String reason) implements M
   }
 }
 
-/** One installable agent CLI and its invite-mode support, for {@code GET /v1/agents}. */
+/** One installable agent CLI and its member-mode support, for {@code GET /v1/agents}. */
 record AgentView(String name, String displayName, List<AgentModeView> modes) implements Mappable {
   @Override
   public Map<String, Object> toMap() {

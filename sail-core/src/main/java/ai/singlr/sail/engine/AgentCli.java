@@ -191,30 +191,22 @@ public enum AgentCli {
   }
 
   /**
-   * Whether this CLI can run an invite's read-only mode. The read-only invite is the room lane's
-   * contract verbatim — viewer credential, harness tool cut, no reservation — so support is exactly
-   * {@link #supportsRoomLane}: offered only where the harness can enforce it, never where
-   * enforcement would be a promise. Every agent supports the full mode; it buys its authority with
-   * the pre-launch snapshot and the repo reservation, not a sandbox.
-   */
-  public boolean supportsReadOnlyInvite() {
-    return supportsRoomLane();
-  }
-
-  /**
-   * Why the read-only invite mode is unavailable for this CLI, or null when it is supported.
+   * Why the read-only member mode is unavailable for this CLI, or null when it is supported.
    * Declared here, at the agent seam, so the API reports the same reason the launch gate refuses
-   * with and clients can grey the option out honestly.
+   * with and clients can grey the option out honestly. Support is exactly {@link
+   * #supportsRoomLane}: offered only where the harness can enforce it, never where enforcement
+   * would be a promise. Every agent supports the full mode; it buys its authority with the per-turn
+   * repo reservation, not a sandbox.
    */
-  public String readOnlyInviteRefusal() {
-    if (supportsReadOnlyInvite()) {
+  public String readOnlyRefusal() {
+    if (supportsRoomLane()) {
       return null;
     }
     return displayName()
         + " has no harness-enforced read-only session inside a sail container: its bubblewrap"
         + " sandbox needs user namespaces, which incus containers block, so its only working mode"
-        + " bypasses all restrictions. Invite it with full access instead — a pre-launch snapshot"
-        + " and the repo reservation guard that lane.";
+        + " bypasses all restrictions. Add it with full access instead — the per-turn repo"
+        + " reservation guards that lane.";
   }
 
   /**

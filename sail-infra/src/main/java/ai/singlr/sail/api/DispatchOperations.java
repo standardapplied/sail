@@ -39,8 +39,6 @@ public final class DispatchOperations {
 
   private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
 
-  private static final Duration INVITE_SNAPSHOT_TIMEOUT = Duration.ofHours(1);
-
   /** One dispatch invocation, lane-agnostic. */
   public record Request(
       String specId, String mode, boolean dryRun, List<String> repos, boolean restart) {}
@@ -63,18 +61,6 @@ public final class DispatchOperations {
       AgentSession.SessionInfo session,
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher) {}
-
-  /**
-   * One accepted invite: the run it reserved, the principal it posts under, its mode, and — full
-   * mode only — the label of the pre-launch snapshot ({@code ""} for read only). {@code completion}
-   * runs the deferred work — the snapshot (full) and the launch — off the request thread, so the
-   * caller returns immediately (a dir-backend snapshot is a slow full copy that would blow the
-   * client timeout and, if the request were force-killed mid-copy, leave the container in Error).
-   * The reservation is already held when this record exists; {@code completion} releases it and
-   * publishes a failure event if the snapshot or launch fails.
-   */
-  public record InviteLaunch(
-      String runId, String principal, boolean full, String snapshot, Runnable completion) {}
 
   /**
    * Container preparation that must not run until the whole-container reservation is won — the
@@ -178,7 +164,6 @@ public final class DispatchOperations {
   private final RunReservation runReservation;
   private final AdhocRunner adhocRunner;
   private final RoomWakeLauncher roomWakeLauncher;
-  private final InviteLauncher inviteLauncher;
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
@@ -241,17 +226,6 @@ public final class DispatchOperations {
             runReservation,
             runLauncher,
             roomCommitGuard);
-    this.inviteLauncher =
-        new InviteLauncher(
-            specStore,
-            projects,
-            () -> messageStore,
-            runStore,
-            admission,
-            runReservation,
-            runLauncher,
-            this.events,
-            shell);
     this.buildDispatch =
         new BuildDispatch(
             projects,
@@ -329,49 +303,6 @@ public final class DispatchOperations {
    */
   public String startRoomRun(String project, String specId, String localHandle) {
     return roomWakeLauncher.wake(project, specId, localHandle);
-  }
-
-  /**
-   * Launches an invited agent into {@code specId}'s room — the explicit lane beside the wake lane's
-   * automatic one: a human chose the agent, the model, and the mode, so the human's choice decides
-   * the contract. Read only is the room lane verbatim under a new role ({@code invite}): viewer
-   * credential, harness tool cut, no repo reservation (the gate lets it run alongside anything, its
-   * own spec's live build included), worktree-digest guard. Full ({@code invite-full}) is the
-   * member credential a dispatched agent holds, bought with two structural payments: the repo
-   * reservation (reserved like a build, so one writer per repo always holds — a held reservation
-   * refuses the invite with the same vocabulary as a dispatch conflict) and a mandatory pre-launch
-   * snapshot labeled {@code invite-<runId>}, published into the room as {@code snapshot_created}; a
-   * failed snapshot aborts the launch loudly. Neither mode claims the spec, checks out a branch, or
-   * triggers the review pipeline on stop — the review loop stays anchored to dispatch. Inviting
-   * requires the same tier as dispatching on the spec, checked via {@link DispatchPolicy}. Always a
-   * fresh session: the point of an invite is a new participant.
-   */
-  public InviteLaunch startInvite(
-      String specId,
-      String agentYamlName,
-      boolean full,
-      String model,
-      Actor actor,
-      String localHandle) {
-    return startInvite(specId, agentYamlName, full, true, model, actor, localHandle);
-  }
-
-  /**
-   * As {@link #startInvite(String, String, boolean, String, Actor, String)}, but {@code
-   * takeSnapshot} may waive the pre-launch snapshot on a full invite. Skipping trades the rollback
-   * point for an instant launch — the escape hatch for the {@code dir} backend, where a snapshot is
-   * a slow full filesystem copy. Read only never snapshots, so the flag is a no-op there.
-   */
-  public InviteLaunch startInvite(
-      String specId,
-      String agentYamlName,
-      boolean full,
-      boolean takeSnapshot,
-      String model,
-      Actor actor,
-      String localHandle) {
-    return inviteLauncher.start(
-        specId, agentYamlName, full, takeSnapshot, model, actor, localHandle);
   }
 
   /**

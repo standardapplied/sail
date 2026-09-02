@@ -112,10 +112,24 @@ class RoomsSurfaceTest {
         ((Result.Success<RoomMembersResponse>) members).value().members().isEmpty(),
         "a fresh chat room seats nobody");
 
-    var listed = ops.rooms("acme");
+    var listed = ops.rooms("acme", admin());
     var view = ((Result.Success<RoomsListResponse>) listed).value();
     assertEquals(1, view.rooms().size());
     assertNotNull(view.latestByRoom().get("design-room"), "the message decorates the rooms list");
+  }
+
+  @Test
+  void theAgentsRosterDeclaresMemberModeSupportWithTheSeamRefusal() {
+    var agents = ((Result.Success<AgentsResponse>) ops.agents()).value().agents();
+
+    var claude =
+        agents.stream().filter(a -> a.name().equals("claude-code")).findFirst().orElseThrow();
+    var codex = agents.stream().filter(a -> a.name().equals("codex")).findFirst().orElseThrow();
+    assertTrue(claude.modes().stream().allMatch(AgentModeView::supported));
+    var codexReadOnly =
+        codex.modes().stream().filter(m -> m.mode().equals("read_only")).findFirst().orElseThrow();
+    assertTrue(!codexReadOnly.supported(), "codex has no harness-enforced read-only session");
+    assertTrue(codexReadOnly.reason().contains("full access"), codexReadOnly.reason());
   }
 
   @Test
@@ -235,7 +249,7 @@ class RoomsSurfaceTest {
             admin());
     assertEquals("mention", ((Result.Success<RoomDetailResponse>) created).value().room().wake());
 
-    var all = ops.rooms(null);
+    var all = ops.rooms(null, admin());
     assertEquals(1, ((Result.Success<RoomsListResponse>) all).value().rooms().size());
   }
 
@@ -266,7 +280,7 @@ class RoomsSurfaceTest {
             .errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
-        ((Result.Failure<RoomsListResponse>) unwired.rooms(null)).errorCode());
+        ((Result.Failure<RoomsListResponse>) unwired.rooms(null, admin())).errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
         ((Result.Failure<RoomDetailResponse>) unwired.room("any")).errorCode());
@@ -292,7 +306,7 @@ class RoomsSurfaceTest {
             .useRooms(roomStore);
     create("quiet-room", "Quiet");
 
-    var listed = ((Result.Success<RoomsListResponse>) quiet.rooms("acme")).value();
+    var listed = ((Result.Success<RoomsListResponse>) quiet.rooms("acme", admin())).value();
     assertTrue(listed.latestByRoom().isEmpty(), "no message store, no decoration");
     var detail = ((Result.Success<RoomDetailResponse>) quiet.room("quiet-room")).value();
     assertEquals("quiet-room", detail.room().id());
@@ -358,7 +372,7 @@ class RoomsSurfaceTest {
                 new RunStore(db))
             .useRooms(roomStore);
     create("no-spec-store", "NoSpecs");
-    var listed = ((Result.Success<RoomsListResponse>) specless.rooms(null)).value();
+    var listed = ((Result.Success<RoomsListResponse>) specless.rooms(null, admin())).value();
     assertTrue(
         listed.rooms().stream().allMatch(view -> view.specIds().isEmpty()),
         "a box without a spec store lists rooms with empty attachments");

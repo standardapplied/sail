@@ -19,59 +19,52 @@ class RoomWakePolicyTest {
     assertFalse(RoomWakePolicy.humanAuthor("sail"));
     assertFalse(RoomWakePolicy.humanAuthor("claude/room-0195a2f0"));
     assertFalse(RoomWakePolicy.humanAuthor("codex/review-0195a2f0"));
-    assertFalse(
-        RoomWakePolicy.humanAuthor("codex/invite-0195a2f0"),
-        "an invited agent's post never wakes or invites anything");
     assertFalse(RoomWakePolicy.humanAuthor(""));
     assertFalse(RoomWakePolicy.humanAuthor(null));
   }
 
   @Test
-  void anUnsetModeDefaultsToOnOnlyOnceDispatched() {
-    assertEquals("off", RoomWakePolicy.effectiveMode(null, false));
-    assertEquals("on", RoomWakePolicy.effectiveMode(null, true));
-    assertEquals("off", RoomWakePolicy.effectiveMode("", false));
-    assertEquals("mention", RoomWakePolicy.effectiveMode("mention", false));
-    assertEquals("off", RoomWakePolicy.effectiveMode("off", true));
+  void anUnsetModeIsDerivedFromTheRosterSize() {
+    assertEquals("on", RoomWakePolicy.effectiveMode(null, 0));
+    assertEquals("on", RoomWakePolicy.effectiveMode(null, 1));
+    assertEquals("mention", RoomWakePolicy.effectiveMode(null, 2));
+    assertEquals("mention", RoomWakePolicy.effectiveMode("", 3));
   }
 
   @Test
-  void onWakesOnAnyHumanMessage() {
-    assertTrue(RoomWakePolicy.shouldWake("on", false, false, "uday", "hello"));
-    assertTrue(RoomWakePolicy.shouldWake(null, true, false, "uday", "hello"));
+  void anExplicitModeIsNeverOverriddenByTheRoster() {
+    assertEquals("mention", RoomWakePolicy.effectiveMode("mention", 1));
+    assertEquals("off", RoomWakePolicy.effectiveMode("off", 1));
+    assertEquals("on", RoomWakePolicy.effectiveMode("on", 4));
   }
 
   @Test
-  void mentionWakesOnlyWhenTheMessageAddressesTheAgent() {
-    assertTrue(RoomWakePolicy.shouldWake("mention", true, false, "uday", "hey @agent what's up"));
-    assertFalse(RoomWakePolicy.shouldWake("mention", true, false, "uday", "hey what's up"));
-    assertFalse(RoomWakePolicy.shouldWake("mention", true, false, "uday", null));
+  void aSoloRoomAnswersAnyHumanMessageByDefault() {
+    assertTrue(RoomWakePolicy.shouldWake(null, 1, "uday", "hello"));
+    assertTrue(RoomWakePolicy.shouldWake(null, 0, "uday", "hello"));
+    assertTrue(RoomWakePolicy.shouldWake("on", 3, "uday", "hello"));
   }
 
   @Test
-  void offAndUndispatchedDefaultsNeverWake() {
-    assertFalse(RoomWakePolicy.shouldWake("off", true, false, "uday", "@agent please"));
-    assertFalse(RoomWakePolicy.shouldWake(null, false, false, "uday", "hello"));
+  void aMultiMemberRoomWakesOnlyWhenAddressedByDefault() {
+    assertTrue(RoomWakePolicy.shouldWake(null, 2, "uday", "hey @agent what's up"));
+    assertFalse(RoomWakePolicy.shouldWake(null, 2, "uday", "hey what's up"));
+    assertFalse(RoomWakePolicy.shouldWake(null, 2, "uday", null));
+    assertTrue(RoomWakePolicy.shouldWake("mention", 1, "uday", "@agent please"));
+    assertFalse(RoomWakePolicy.shouldWake("mention", 1, "uday", "please"));
+  }
+
+  @Test
+  void offNeverWakesEvenWhenAddressed() {
+    assertFalse(RoomWakePolicy.shouldWake("off", 1, "uday", "@agent please"));
+    assertFalse(RoomWakePolicy.shouldWake("off", 0, "uday", "hello"));
   }
 
   @Test
   void agentsAndSailNeverWakeRegardlessOfMode() {
-    assertFalse(RoomWakePolicy.shouldWake("on", true, false, "sail", "Review passed."));
-    assertFalse(RoomWakePolicy.shouldWake("on", true, false, "claude/room-1", "answered"));
-    assertFalse(RoomWakePolicy.shouldWake("mention", true, false, "claude/1", "@agent"));
-  }
-
-  @Test
-  void anEngagedRoomAnswersEveryHumanMessageRegardlessOfWakeMode() {
-    assertTrue(RoomWakePolicy.shouldWake(null, false, true, "uday", "hello"));
-    assertTrue(RoomWakePolicy.shouldWake("off", false, true, "uday", "hello"));
-    assertTrue(RoomWakePolicy.shouldWake("mention", false, true, "uday", "no address"));
-  }
-
-  @Test
-  void engagementNeverOverridesTheHumanAuthorRule() {
-    assertFalse(RoomWakePolicy.shouldWake(null, false, true, "sail", "Review passed."));
-    assertFalse(RoomWakePolicy.shouldWake(null, false, true, "claude/room-1", "answered"));
-    assertFalse(RoomWakePolicy.shouldWake(null, false, true, "", "hello"));
+    assertFalse(RoomWakePolicy.shouldWake("on", 1, "sail", "Review passed."));
+    assertFalse(RoomWakePolicy.shouldWake("on", 1, "claude/room-1", "answered"));
+    assertFalse(RoomWakePolicy.shouldWake(null, 2, "claude/1", "@agent"));
+    assertFalse(RoomWakePolicy.shouldWake(null, 1, "", "hello"));
   }
 }

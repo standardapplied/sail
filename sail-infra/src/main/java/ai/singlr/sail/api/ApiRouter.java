@@ -309,16 +309,17 @@ public final class ApiRouter implements HttpHandler {
 
   /**
    * Routes the rooms surface: the room resource itself, its membership ({@code GET|POST|DELETE
-   * /v1/rooms/{id}/members}), its conversation ({@code /v1/rooms/{id}/messages}), and one-shot
-   * invites ({@code POST /v1/rooms/{id}/invite}). The spec-shaped conversation doors are retired;
-   * every id resolves spec-first, so a spec's room answers under the spec's id unchanged.
+   * /v1/rooms/{id}/members}) and its conversation ({@code /v1/rooms/{id}/messages}). The
+   * spec-shaped conversation doors are retired; every id resolves spec-first, so a spec's room
+   * answers under the spec's id unchanged. The retired one-shot invite door answers with a pointed
+   * 404 so an old client learns where the verb went.
    */
   private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
     if (request.size() == 2) {
       return switch (request.method()) {
         case GET -> {
           var params = QueryParameters.from(request.uri()).values();
-          yield ApiResponse.from(operations.rooms(params.get("project")));
+          yield ApiResponse.from(operations.rooms(params.get("project"), actorOf(exchange)));
         }
         case POST ->
             ApiResponse.fromCreated(
@@ -361,13 +362,11 @@ public final class ApiRouter implements HttpHandler {
       };
     }
     if (INVITE.equals(sub)) {
-      requireMethod(request, POST);
-      return ApiResponse.from(
-          operations.inviteToRoom(
-              roomId,
-              InviteRequest.fromMap(JsonBody.readMap(exchange)),
-              actorOf(exchange),
-              nodeHandle.get()));
+      throw new ApiException(
+          ErrorCode.NOT_FOUND,
+          "Room invites are retired: each room verb maps to one primitive.",
+          "Add a member (POST /v1/rooms/{id}/members) to converse, or dispatch a spec to"
+              + " delegate work.");
     }
     if (MESSAGES.equals(sub)) {
       return switch (request.method()) {

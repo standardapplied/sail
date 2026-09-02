@@ -33,11 +33,9 @@ import java.util.concurrent.TimeoutException;
  * or previous dispatch in the shared container) never nudges this run. When the session lists no
  * repos — a missing session file or a non-dispatch launch — every workspace repo is checked, the
  * prior behavior. A {@code room}-role run (the wake lane's chat sessions, marked by {@code role} in
- * the session file) and a read-only {@code invite} run skip the git protocol entirely: a chat owns
- * no repos, so a dirty tree in the shared container is never its concern — but both keep the room
- * last-look below, so a human reply racing the chat's end is still guaranteed a reading. A full
- * invite ({@code invite-full}) runs the git protocol like a build: it reserved repos and may have
- * changed code, so it commits and pushes before its turn may end.
+ * the session file) skips the git protocol entirely: a chat owns no repos, so a dirty tree in the
+ * shared container is never its concern — but it keeps the room last-look below, so a human reply
+ * racing the chat's end is still guaranteed a reading.
  *
  * <p>Beyond the git protocol, the gate takes one last look at the spec room: the run's undelivered
  * messages ({@code GET /v1/run/messages}, run-credential-scoped) block the stop with their bodies
@@ -90,12 +88,11 @@ public final class SailStopGate {
       # the git protocol, stop-room-nudged for the room), so a message that
       # arrives after a git nudge still gets its one block and neither concern
       # can wedge a run. stdout is reserved for the hook-protocol block JSON.
-      # A chat turn (role "room" or "room-full" in its session file) and a
-      # read-only invite (role "invite") skip the git protocol entirely — a
-      # conversation is not a task: a full turn's workspace changes are the
-      # human's to keep or roll back (the engage snapshot), and a chat owns no
-      # repos and must never be nudged about other runs' trees — while keeping
-      # the room last-look. A full invite (role "invite-full") keeps it.
+      # A chat turn (role "room" or "room-full" in its session file) skips the
+      # git protocol entirely — a conversation is not a task: a full turn's
+      # workspace changes are the human's to keep or roll back (the engage
+      # snapshot), and a chat owns no repos and must never be nudged about
+      # other runs' trees — while keeping the room last-look.
       # Any unexpected condition fails open: this gate is a nudge, not a jail.
       set -u
 
@@ -151,7 +148,7 @@ public final class SailStopGate {
 
       REASONS=""
       if [ "$RUN_ROLE" != "room" ] && [ "$RUN_ROLE" != "room-full" ] \
-          && [ "$RUN_ROLE" != "invite" ] && [ ! -f "$GIT_MARKER" ]; then
+          && [ ! -f "$GIT_MARKER" ]; then
         REPOS="$(python3 -c '
       import json, sys
       try:

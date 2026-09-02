@@ -18,8 +18,8 @@ import java.util.List;
  * snapshot: is the actor allowed to act on this spec from this box, is the box's FDE in the synced
  * roster, is the chosen agent a known name actually installed in the container, and is the model a
  * shell-safe token. Each refusal is an {@link ApiException} thrown before any side effect, so a
- * rejected launch never leaves a half-provisioned run. Shared by the dispatch, ad-hoc, room,
- * invite, and engagement lanes so admission is decided in exactly one place.
+ * rejected launch never leaves a half-provisioned run. Shared by the dispatch, ad-hoc, room, and
+ * membership lanes so admission is decided in exactly one place.
  */
 public final class LaunchAdmission {
 
@@ -123,9 +123,7 @@ public final class LaunchAdmission {
   public static AgentCli resolveAgent(String agentYamlName) {
     if (Strings.isBlank(agentYamlName)) {
       throw new ApiException(
-          ErrorCode.BAD_REQUEST,
-          "An invite must name the agent to launch.",
-          "Pass agent: claude-code or codex.");
+          ErrorCode.BAD_REQUEST, "Name the agent to seat.", "Pass agent: claude-code or codex.");
     }
     try {
       return AgentCli.fromYamlName(agentYamlName);

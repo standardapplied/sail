@@ -8,9 +8,9 @@ package ai.singlr.sail.config;
 /**
  * The access level a room agent holds — full write access or read-only. The canonical wire form is
  * snake_case ({@code full} / {@code read_only}), the spelling most surfaces (the agents endpoint,
- * invites, and the Mast client) already use; {@link #of} additionally accepts the legacy hyphenated
- * {@code read-only} an engagement stored before this unification, so old data reads back correctly
- * and migrates to the canonical form the next time it is written.
+ * memberships, and the Mast client) already use; {@link #of} additionally accepts the legacy
+ * hyphenated {@code read-only} an engagement stored before this unification, so old data reads back
+ * correctly and migrates to the canonical form the next time it is written.
  */
 public enum EngagementMode {
   FULL("full"),

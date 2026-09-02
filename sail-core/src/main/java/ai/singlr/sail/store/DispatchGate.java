@@ -35,18 +35,6 @@ public final class DispatchGate {
   public static final String ROOM_ROLE = Lane.ROOM.wire();
 
   /**
-   * The read-only invite lane: a consultant a human explicitly invited into the room. It reserves
-   * no repos and holds no write authority, so it conflicts with nothing at all — not even a live
-   * run of its own spec, because "a read-only consultant alongside the live build" is exactly the
-   * lane's purpose. The same-spec backstop stays for {@link #ROOM_ROLE} wakes, which fire
-   * automatically and must never race a live run.
-   */
-  public static final String READ_ONLY_INVITE_ROLE = Lane.INVITE.wire();
-
-  /** The full invite lane: reserves like a build, so one writer per repo always holds. */
-  public static final String FULL_INVITE_ROLE = Lane.INVITE_FULL.wire();
-
-  /**
    * The full chat lane: an engaged agent's turn with write access. It reserves the spec's repos
    * (the whole container when the spec names none), so one writer per repo holds for conversations
    * exactly as for builds — a full turn defers on a live build through the ordinary repo rule and
@@ -67,26 +55,20 @@ public final class DispatchGate {
   public record Conflict(RunningRun run, List<String> overlap) {}
 
   /**
-   * The first running run that blocks the dispatch, or empty to allow. A {@link
-   * #READ_ONLY_INVITE_ROLE} run on either side conflicts with nothing — a read-only consultant runs
-   * alongside anything, including its own spec's live build. A run of {@code targetSpecId} itself
-   * blocks when both sides are working lanes (a spec has one lifecycle and one review pipeline, so
-   * a second live execution — reachable via restart with a repo override — would race the first
-   * over shared spec state) and when both sides are chat lanes (one conversational turn at a time).
-   * A mixed same-spec pair falls through to the repo rules: a read-only chat turn answers the room
-   * while the build works, and a full chat turn defers on the build through its repo claim. Any
-   * other run blocks only on repo overlap, and a {@link #ROOM_ROLE} run on either side never
-   * overlaps anything: a read-only chat reserves no repos, so its empty repo set must not carry the
-   * whole-container meaning the working lanes give it. {@link #ROOM_FULL_ROLE} carries real repo
-   * claims and gets no such exemption.
+   * The first running run that blocks the dispatch, or empty to allow. A run of {@code
+   * targetSpecId} itself blocks when both sides are working lanes (a spec has one lifecycle and one
+   * review pipeline, so a second live execution — reachable via restart with a repo override —
+   * would race the first over shared spec state) and when both sides are chat lanes (one
+   * conversational turn at a time). A mixed same-spec pair falls through to the repo rules: a
+   * read-only chat turn answers the room while the build works, and a full chat turn defers on the
+   * build through its repo claim. Any other run blocks only on repo overlap, and a {@link
+   * #ROOM_ROLE} run on either side never overlaps anything: a read-only chat reserves no repos, so
+   * its empty repo set must not carry the whole-container meaning the working lanes give it. {@link
+   * #ROOM_FULL_ROLE} carries real repo claims and gets no such exemption.
    */
   public static Optional<Conflict> decide(
       String targetSpecId, String targetRole, List<String> targetRepos, List<RunningRun> running) {
-    if (READ_ONLY_INVITE_ROLE.equals(targetRole)) {
-      return Optional.empty();
-    }
     return running.stream()
-        .filter(run -> !READ_ONLY_INVITE_ROLE.equals(run.role()))
         .map(
             run ->
                 sameSpec(run.specId(), targetSpecId) && chatLane(targetRole) == chatLane(run.role())

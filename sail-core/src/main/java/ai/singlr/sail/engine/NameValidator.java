@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 public final class NameValidator {
 
   private static final int MAX_LENGTH = 63;
-  private static final int MAX_SPEC_ID_LENGTH = 80;
+  public static final int MAX_SPEC_ID_LENGTH = 80;
   private static final Pattern PROJECT_NAME = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
   private static final Pattern SPEC_ID = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
   private static final Pattern SNAPSHOT_LABEL = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]*$");

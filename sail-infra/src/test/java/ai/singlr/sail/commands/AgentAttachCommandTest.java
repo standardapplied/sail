@@ -191,25 +191,13 @@ class AgentAttachCommandTest {
   }
 
   /**
-   * The lanes the latest-session query leaves out still hold repos: a full invite or a full room
-   * turn over the planned run's repo refuses the resume through the dispatch gate — the same rule a
-   * reservation applies to yield a live resume session — while the read-only lanes, which reserve
-   * nothing, never do.
+   * The gate read from the conversation's side: a live full turn over the planned run's repo
+   * refuses the resume through the dispatch gate — the same rule a reservation applies to yield a
+   * live resume session — while the read-only lane, which reserves nothing, never does.
    */
   @Test
-  void aLiveLaneTheLatestQueryHidesStillRefusesThroughTheGate() {
+  void aLiveLaneStillRefusesThroughTheGate() {
     var completed = row("r1", "completed", List.of("app"));
-    var fullInvite = running("inv", DispatchGate.FULL_INVITE_ROLE, List.of("app"));
-    var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                AgentAttachCommand.requireStillLatestAndIdle(
-                    completed, latest(completed, fullInvite), "acme"));
-    assertTrue(
-        refused.getMessage().startsWith("Run inv (invite-full) is live in repo(s) [app]"),
-        refused.getMessage());
-
     var wholeContainer = running("adhoc", "adhoc", List.of());
     assertTrue(
         assertThrows(
@@ -221,20 +209,23 @@ class AgentAttachCommandTest {
             .contains("live in container 'acme'"));
 
     var fullTurn = running("turn", DispatchGate.ROOM_FULL_ROLE, List.of("app"));
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            AgentAttachCommand.requireStillLatestAndIdle(
-                completed, latest(completed, fullTurn), "acme"));
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentAttachCommand.requireStillLatestAndIdle(
+                    completed, latest(completed, fullTurn), "acme"));
+    assertTrue(
+        refused.getMessage().startsWith("Run turn (room-full) is live in repo(s) [app]"),
+        refused.getMessage());
 
     var elsewhere = running("other", "build", List.of("web"));
-    var readOnlyInvite = running("ro", DispatchGate.READ_ONLY_INVITE_ROLE, List.of("app"));
     var wake = running("wake", DispatchGate.ROOM_ROLE, List.of());
     assertDoesNotThrow(
         () ->
             AgentAttachCommand.requireStillLatestAndIdle(
-                completed, latest(completed, elsewhere, readOnlyInvite, wake), "acme"),
-        "a disjoint repo and the read-only lanes hold nothing the resume would take");
+                completed, latest(completed, elsewhere, wake), "acme"),
+        "a disjoint repo and the read-only lane hold nothing the resume would take");
   }
 
   private static AgentAttachCommand.Latest latest(
@@ -273,44 +264,6 @@ class AgentAttachCommandTest {
           attachParkedBehindClaim(
               socket, host, hostYield, runs, () -> reserve(runs, "r2", "build", List.of()));
       assertTrue(refused.getMessage().startsWith("Run r2 is live"), refused.getMessage());
-    }
-  }
-
-  /**
-   * The same interleaving against the claim the latest-session query hides: a full invite reserves
-   * the completed run's repo while the attach waits. The reread still returns the completed run as
-   * the latest session — invites never are — so the refusal must come from the dispatch gate over
-   * every live row, not from the latest run's status.
-   */
-  @Test
-  @EnabledOnOs(OS.LINUX)
-  void anAttachWaitingOnAFullInviteRereadsTheGateAndRefuses(@TempDir Path dir) throws Exception {
-    var socket = dir.resolve("h.sock");
-    var hostYield = new PtyHostYield(socket, dir.resolve("locks"));
-    try (var db = Sqlite.open(dir.resolve("t.db"));
-        var host =
-            PtyHostCommand.startHost(
-                socket,
-                dir.resolve("s"),
-                token -> new PtyIdentity("uday", true),
-                PtyRooms.NONE,
-                PtyEvents.NONE)) {
-      new SchemaManager(db).migrate();
-      var runs = new RunStore(db);
-      var refused =
-          attachParkedBehindClaim(
-              socket,
-              host,
-              hostYield,
-              runs,
-              () -> reserve(runs, "inv", DispatchGate.FULL_INVITE_ROLE, List.of("app")));
-      assertEquals(
-          "r1",
-          runs.latestForProjectOnNode("acme", "it").orElseThrow().id(),
-          "the latest session is still the completed run — the invite is invisible to it");
-      assertTrue(
-          refused.getMessage().startsWith("Run inv (invite-full) is live in repo(s) [app]"),
-          refused.getMessage());
     }
   }
 

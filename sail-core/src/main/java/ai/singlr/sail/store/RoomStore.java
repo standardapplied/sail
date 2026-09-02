@@ -178,6 +178,15 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Whether the journal's last word on {@code id} is a deletion — a room that once existed here and
+   * was removed, so an idempotent minter must not resurrect it.
+   */
+  public boolean isTombstoned(String id) {
+    var history = changeLog.history(ENTITY, id);
+    return !history.isEmpty() && history.getLast().deleted();
+  }
+
+  /**
    * Composes a check-then-create across the stores sharing this database into one write-locked
    * transaction (see {@link Sqlite#immediateTransaction}): the spec-id collision check a room
    * create runs and the insert it guards cannot be split by a spec being born on the same id.

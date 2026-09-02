@@ -156,22 +156,6 @@ class SyncTransitionEventsTest {
   }
 
   @Test
-  void aSyncedInviteStopKeepsItsRoleSoTheReviewLoopIgnoresIt() {
-    for (var role : java.util.List.of("invite", "invite-full")) {
-      var snapshot = run("completed", 0);
-      snapshot.put("role", role);
-
-      var stop = map(new SyncTransition("run", "r1", "running", "completed", snapshot)).getFirst();
-
-      assertEquals(
-          role,
-          stop.data().get(Event.WellKnownData.RUN_ROLE),
-          "an invite's terminal stop must carry its role across sync — the review loop stays"
-              + " anchored to dispatch");
-    }
-  }
-
-  @Test
   void aSyncedBuildStopCarriesNoRoomRole() {
     var stop =
         map(new SyncTransition("run", "r1", "running", "completed", run("completed", 0)))

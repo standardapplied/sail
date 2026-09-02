@@ -84,11 +84,11 @@ final class LocalApiRouter implements LocalApiHandler {
       }
 
       /**
-       * A read-only lane run's credential — a {@code room} wake or a read-only {@code invite} —
-       * resolves to the read-and-converse room principal, never the write-capable agent principal:
-       * the lane's authority is decided here, at the boundary, by the run row the server minted —
-       * not by anything the session says. A full invite carries the member-tier agent principal a
-       * dispatched agent holds, nothing more.
+       * A read-only lane run's credential — a {@code room} wake, or a read-only invite launched
+       * before that lane was retired — resolves to the read-and-converse room principal, never the
+       * write-capable agent principal: the lane's authority is decided here, at the boundary, by
+       * the run row the server minted — not by anything the session says. A full turn carries the
+       * member-tier agent principal a dispatched agent holds, nothing more.
        */
       @Override
       public Actor actor() {

@@ -193,7 +193,19 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       boolean owned,
       MembershipService.RoomState state,
       boolean dispatched,
-      List<RunStore.RunRow> runs) {}
+      boolean workItem,
+      List<RunStore.RunRow> runs) {
+
+    /**
+     * Whether anyone is there to wake: a seated member always; for a spec's room, also the spec's
+     * own agent once a dispatch put it in the room or a human set a wake mode explicitly. A
+     * spec-less room with an empty roster has nobody to answer.
+     */
+    boolean wakeable() {
+      return state.standing() != null
+          || (workItem && (dispatched || Strings.isNotBlank(state.wake())));
+    }
+  }
 
   private Target resolveTarget(String id) {
     var spec = specStore.findById(id).orElse(null);
@@ -204,6 +216,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
           spec.assignedTo(localHandle.get()),
           MembershipService.stateOf(roomStore, spec),
           dispatchedAtLeastOnce(id),
+          true,
           runStore.listForSpec(id));
     }
     var room = roomStore.findById(id).orElse(null);
@@ -212,12 +225,12 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     }
     var owner =
         room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
-    var standing = ai.singlr.sail.config.Roster.fromJson(room.roster()).standing();
     return new Target(
         id,
         room.project(),
         owner != null && owner.equals(localHandle.get()),
-        new MembershipService.RoomState(null, standing),
+        MembershipService.RoomState.of(room),
+        false,
         false,
         runStore.listForRoom(id));
   }
@@ -229,11 +242,19 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     }
     var engaged = target.state().standing() != null;
     var message = messageOf(event);
-    if (!RoomWakePolicy.shouldWake(
-        target.state().wake(), target.dispatched(), engaged, message.author(), message.body())) {
+    if (!wakes(target, message)) {
       return;
     }
     schedule(event.spec(), message, engaged);
+  }
+
+  /** Whether {@code message} wakes the target: someone to wake, and the effective mode agrees. */
+  private static boolean wakes(Target target, Message message) {
+    if (!target.wakeable()) {
+      return false;
+    }
+    return RoomWakePolicy.shouldWake(
+        target.state().wake(), target.state().members(), message.author(), message.body());
   }
 
   private void schedule(String specId, Message message, boolean engaged) {
@@ -261,8 +282,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
         return;
       }
       var engaged = target.state().standing() != null;
-      if (!RoomWakePolicy.shouldWake(
-          target.state().wake(), target.dispatched(), engaged, message.author(), message.body())) {
+      if (!wakes(target, message)) {
         return;
       }
       var runs = target.runs();
@@ -291,8 +311,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   private void guardChatStop(Event event) throws Exception {
     var role = event.data().get(Event.WellKnownData.RUN_ROLE);
-    if (!Event.WellKnownData.RUN_ROLE_ROOM.equals(role)
-        && !Event.WellKnownData.RUN_ROLE_INVITE.equals(role)) {
+    if (!Event.WellKnownData.RUN_ROLE_ROOM.equals(role)) {
       return;
     }
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);

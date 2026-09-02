@@ -109,7 +109,6 @@ class CommandTaxonomyTest {
             "board",
             "history",
             "restore",
-            "invite",
             "engage",
             "disengage",
             "comment",

@@ -269,8 +269,8 @@ public final class RoomWakeLauncher {
 
   /**
    * The engagement's own conversation: the newest chat-turn session of the engaged agent this box
-   * can resume. A build or invite session never qualifies — a working lane's conversation must not
-   * reopen under a chat turn's contract, and the engaged agent's memory is its chat turns.
+   * can resume. A build session never qualifies — a working lane's conversation must not reopen
+   * under a chat turn's contract, and the engaged agent's memory is its chat turns.
    */
   private String engagedSessionId(String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()

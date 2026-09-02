@@ -28,6 +28,7 @@ import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -66,7 +67,7 @@ public final class SailOperations implements Operations {
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
-  private Executor inviteExecutor = Executors.newVirtualThreadPerTaskExecutor();
+  private Executor launchExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
   private RoomStore roomStore;
   private BoxCredentialStore boxCredentialStore;
@@ -193,13 +194,13 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * Overrides the executor that runs the deferred half of an invite (snapshot + launch). Production
-   * keeps the default virtual-thread executor; a test injects {@code Runnable::run} to make the
-   * completion run inline, so its assertions and teardown see a finished launch. Returns {@code
-   * this}.
+   * Overrides the executor that runs the deferred half of a membership (the engage-time snapshot).
+   * Production keeps the default virtual-thread executor; a test injects {@code Runnable::run} to
+   * make the completion run inline, so its assertions and teardown see a finished launch. Returns
+   * {@code this}.
    */
-  SailOperations useInviteExecutor(Executor executor) {
-    this.inviteExecutor = Objects.requireNonNull(executor, "executor");
+  SailOperations useLaunchExecutor(Executor executor) {
+    this.launchExecutor = Objects.requireNonNull(executor, "executor");
     return this;
   }
 
@@ -435,7 +436,7 @@ public final class SailOperations implements Operations {
   }
 
   /**
-   * The known agent CLIs and their invite-mode support, declared at the {@link AgentCli} seam: read
+   * The known agent CLIs and their member-mode support, declared at the {@link AgentCli} seam: read
    * only is offered only where the harness enforces it, and the refusal reason travels so clients
    * grey the option out with the same words the launch gate refuses with.
    */
@@ -451,22 +452,11 @@ public final class SailOperations implements Operations {
                         List.of(
                             new AgentModeView(
                                 EngagementMode.READ_ONLY.wire(),
-                                cli.supportsReadOnlyInvite(),
-                                cli.readOnlyInviteRefusal()),
+                                cli.supportsRoomLane(),
+                                cli.readOnlyRefusal()),
                             new AgentModeView(EngagementMode.FULL.wire(), true, null))))
             .toList();
     return Result.success(new AgentsResponse(agents));
-  }
-
-  @Override
-  public Result<InviteResponse> inviteToRoom(
-      String specId, InviteRequest request, Actor actor, String localHandle) {
-    freshenForRead();
-    var result = safe(() -> inviteValue(specId, request, actor, localHandle));
-    if (result instanceof Result.Success<InviteResponse>) {
-      triggerSyncAfterWrite();
-    }
-    return result;
   }
 
   @Override
@@ -486,7 +476,7 @@ public final class SailOperations implements Operations {
                       actor,
                       localHandle);
               if (launch.completion() != null) {
-                inviteExecutor.execute(launch.completion());
+                launchExecutor.execute(launch.completion());
               }
               return new EngageResponse(launch.agent(), launch.mode(), launch.snapshot());
             });
@@ -659,11 +649,19 @@ public final class SailOperations implements Operations {
     }
   }
 
+  /**
+   * Lists rooms, minting the reading FDE's personal room in every project in scope first — the
+   * new-FDE on-ramp, lazy and idempotent ({@link PersonalRooms}). A minted room is pushed on the
+   * next sync; a box that already holds it (minted there, or synced) mints nothing.
+   */
   @Override
-  public Result<RoomsListResponse> rooms(String project) {
+  public Result<RoomsListResponse> rooms(String project, Actor actor) {
     return safeRead(
         () -> {
           var store = requireRoomStore();
+          if (mintPersonalRooms(store, project, actor)) {
+            triggerSyncAfterWrite();
+          }
           var rows = project == null || project.isBlank() ? store.listAll() : store.list(project);
           var views = rows.stream().map(row -> RoomView.from(row, specIdsOf(row.id()))).toList();
           if (messageStore == null) {
@@ -725,6 +723,25 @@ public final class SailOperations implements Operations {
     return result;
   }
 
+  private boolean mintPersonalRooms(RoomStore store, String project, Actor actor) {
+    if (fdeStore == null || projectStore == null || actor == null || actor.handle() == null) {
+      return false;
+    }
+    var fde = fdeStore.byHandle(actor.handle()).orElse(null);
+    if (fde == null) {
+      return false;
+    }
+    var scope =
+        project == null || project.isBlank()
+            ? projectStore.list()
+            : projectStore.findByName(project).stream().toList();
+    var minted = false;
+    for (var row : scope) {
+      minted |= PersonalRooms.ensure(store, specStore, fde, row);
+    }
+    return minted;
+  }
+
   private RoomDetailResponse detailOf(RoomStore.RoomRow row) {
     var view = RoomView.from(row, specIdsOf(row.id()));
     if (messageStore == null) {
@@ -776,35 +793,6 @@ public final class SailOperations implements Operations {
       triggerSyncAfterWrite();
     }
     return result;
-  }
-
-  private InviteResponse inviteValue(
-      String specId, InviteRequest request, Actor actor, String localHandle) {
-    if (specStore != null && specStore.findById(specId).isEmpty()) {
-      requireRoomOrSpec(specId);
-      throw new ApiException(
-          ErrorCode.COMMAND_FAILED,
-          "Room '"
-              + specId
-              + "' has no attached spec, and an invite is a one-shot turn on a"
-              + " spec's checkout.",
-          "Seat a standing member instead (POST /v1/rooms/{id}/members), or attach a spec first.");
-    }
-    var launch =
-        dispatchOps.startInvite(
-            specId,
-            request.agent(),
-            request.full(),
-            request.snapshot(),
-            request.model(),
-            actor,
-            localHandle);
-    inviteExecutor.execute(launch.completion());
-    return new InviteResponse(
-        launch.runId(),
-        launch.principal(),
-        launch.full() ? EngagementMode.FULL.wire() : EngagementMode.READ_ONLY.wire(),
-        launch.snapshot());
   }
 
   @Override

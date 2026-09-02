@@ -110,8 +110,7 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * The latest run, its room when that room exists on this box, and every run live on this box in
-   * the project — all lanes, since a full invite or a full room turn holds repos exactly as a build
-   * does yet never counts as the project's latest session.
+   * the project — all lanes, since a full room turn holds repos exactly as a build does.
    */
   record Latest(RunStore.RunRow run, String room, List<DispatchGate.RunningRun> running) {
     static final Latest NONE = new Latest(null, "", List.of());
@@ -177,10 +176,10 @@ public final class AgentAttachCommand implements Runnable {
    * Opens or joins under the project's claim lock — the lock a dispatch holds from its run-row
    * insert through the yield of displaced sessions — re-reading the run rows first. The plan was
    * built from an unlocked read, so a claim that landed in between shows up here as a live run and
-   * refuses: as the project's latest session when it is a build, or through the dispatch gate when
-   * it is a lane the latest-session query leaves out, a full invite above all. A dispatch that
-   * reserves after this returns finds the session live and yields it. Either way no resumed agent
-   * ever works repos a claim holds. Returns whether this call opened the session.
+   * refuses: as the project's latest session when it is live, or through the dispatch gate over
+   * every live row when an older run still holds repos. A dispatch that reserves after this returns
+   * finds the session live and yields it. Either way no resumed agent ever works repos a claim
+   * holds. Returns whether this call opened the session.
    */
   static boolean openLocked(
       SessionYield hostYield,
@@ -214,8 +213,8 @@ public final class AgentAttachCommand implements Runnable {
   /**
    * The dispatch gate read from the conversation's side: resuming {@code run} puts a working agent
    * on its repos, so any live run the gate would refuse a build of that spec over those repos — a
-   * build, a full invite, a full room turn — refuses the resume. This is the exact mirror of the
-   * rule a reservation uses to yield a live resume session, so the two sides can never disagree.
+   * build, a full room turn — refuses the resume. This is the exact mirror of the rule a
+   * reservation uses to yield a live resume session, so the two sides can never disagree.
    */
   static void requireNoLiveConflict(
       RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
