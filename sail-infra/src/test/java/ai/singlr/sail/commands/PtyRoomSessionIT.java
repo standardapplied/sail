@@ -290,6 +290,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
     }
   }
 
+  /** The child gates on attach ({@code read _}) so it can never exit before we connect. */
   private String runToExit(String session, String room, String script) throws Exception {
     var socket = dir.resolve("h.sock").toString();
     var args =
@@ -298,13 +299,16 @@ class PtyRoomSessionIT extends AbstractIncusIT {
     if (!room.isEmpty()) {
       args.addAll(List.of("--room", room));
     }
-    args.addAll(List.of("--command", "bash", "-lc", script + "; exit 0"));
+    args.addAll(List.of("--command", "bash", "-lc", "read _; " + script + "; exit 0"));
     assertEquals(0, new CommandLine(new SessionCommand()).execute(args.toArray(String[]::new)));
 
     try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
       var channel = client.attach(session, true);
-      var stdin = new PipedInputStream(new PipedOutputStream());
+      var toChild = new PipedOutputStream();
+      var stdin = new PipedInputStream(toChild);
       var stdout = new ByteArrayOutputStream();
+      toChild.write('\n');
+      toChild.flush();
       var reason = AttachLoop.run(channel, stdin, stdout);
       var rendered = stdout.toString(StandardCharsets.UTF_8);
       assertEquals("exited(0)", reason, "the session's script must succeed: " + rendered);
