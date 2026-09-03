@@ -66,6 +66,7 @@ final class PtyHostEvents implements PtyEvents {
   private static Map<String, Object> dataFor(PtySession.Origin origin) {
     var data = new LinkedHashMap<String, Object>();
     data.put("session", origin.name());
+    data.put("instance_id", origin.instanceId());
     if (origin.roomBound()) {
       data.put("room_id", origin.room());
     }

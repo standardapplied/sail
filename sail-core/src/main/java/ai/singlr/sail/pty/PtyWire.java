@@ -22,7 +22,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY2".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY3".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -33,7 +33,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v2; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v3; refusing the connection.");
     }
   }
 
@@ -136,12 +136,13 @@ public final class PtyWire {
       }
       case PtyMessage.Ok m -> out.type(30);
       case PtyMessage.Err m -> out.type(31).string(m.message());
+      case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
   }
 
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
-    out.string(info.name());
+    out.string(info.name()).string(info.instanceId());
     out.buffer.put((byte) (info.live() ? 1 : 0)).putInt(info.attached());
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
@@ -186,13 +187,14 @@ public final class PtyWire {
       }
       case 30 -> new PtyMessage.Ok();
       case 31 -> new PtyMessage.Err(string(in));
+      case 32 -> new PtyMessage.Welcome(string(in));
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };
   }
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
     return new PtyMessage.SessionInfo(
-        string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
+        string(in), string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
   }
 
   private static String string(ByteBuffer in) throws IOException {

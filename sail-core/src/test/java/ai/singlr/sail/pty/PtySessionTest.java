@@ -84,7 +84,7 @@ class PtySessionTest {
   }
 
   private static PtySession.Origin origin(String name, String owner, String project) {
-    return new PtySession.Origin(name, owner, project, "", List.of("sh"));
+    return new PtySession.Origin(name, "inst-" + name, owner, project, "", List.of("sh"));
   }
 
   private PtySession session(String script) throws IOException {
@@ -184,7 +184,8 @@ class PtySessionTest {
         };
     var session =
         PtySession.start(
-            new PtySession.Origin("owned", "mady", "acme", "lounge", List.of("claude")),
+            new PtySession.Origin(
+                "owned", "inst-owned", "mady", "acme", "lounge", List.of("claude")),
             recorder,
             List.of("sh", "-c", "read a"),
             Map.of("TERM", "dumb"),

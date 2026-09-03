@@ -64,10 +64,22 @@ class PtyWireTest {
                 new PtyMessage.Sessions(
                     List.of(
                         new PtyMessage.SessionInfo(
-                            "a", true, 2, "uday", "design", List.of("claude", "--resume")),
-                        new PtyMessage.SessionInfo("b", false, 0, "", "", List.of("bash", "-l"))),
+                            "a",
+                            "inst-a",
+                            true,
+                            2,
+                            "uday",
+                            "design",
+                            List.of("claude", "--resume")),
+                        new PtyMessage.SessionInfo(
+                            "b", "inst-b", false, 0, "", "", List.of("bash", "-l"))),
                     "b"));
     assertEquals(2, sessions.sessions().size());
+    assertEquals(
+        "inst-a",
+        sessions.sessions().getFirst().instanceId(),
+        "the incarnation id rides the listing beside the reusable name");
+    assertEquals("inst-b", sessions.sessions().getLast().instanceId());
     assertEquals("b", sessions.next(), "the page cursor rides the listing");
     assertEquals("uday", sessions.sessions().getFirst().writerFde());
     assertEquals("design", sessions.sessions().getFirst().room());
@@ -81,6 +93,10 @@ class PtyWireTest {
     assertEquals(
         "", ((PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(List.of(), ""))).next());
     assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
+    assertEquals(
+        "boot-7",
+        ((PtyMessage.Welcome) roundTrip(new PtyMessage.Welcome("boot-7"))).hostBootId(),
+        "the host's boot id rides the Hello reply");
     assertEquals(
         new PtyMessage.Yield("resume-1", "yielded to dispatch 2"),
         roundTrip(new PtyMessage.Yield("resume-1", "yielded to dispatch 2")));
@@ -109,7 +125,7 @@ class PtyWireTest {
     var name = "n".repeat(255);
     var page = new java.util.ArrayList<PtyMessage.SessionInfo>();
     for (var i = 0; i < PtyMessage.PAGE_LIMIT; i++) {
-      page.add(new PtyMessage.SessionInfo(name + i, true, 3, name, name, densest));
+      page.add(new PtyMessage.SessionInfo(name + i, name, true, 3, name, name, densest));
     }
 
     var listed = (PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(page, name));
@@ -139,6 +155,15 @@ class PtyWireTest {
     var reply = Pipe.open();
     evil.sink().write(ByteBuffer.wrap("NOTSAIL1".getBytes(StandardCharsets.US_ASCII)));
     assertThrows(IOException.class, () -> PtyWire.handshake(evil.source(), reply.sink()));
+
+    var v2 = Pipe.open();
+    var v2Reply = Pipe.open();
+    v2.sink().write(ByteBuffer.wrap("SAILPTY2".getBytes(StandardCharsets.US_ASCII)));
+    var skew =
+        assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
+    assertTrue(
+        skew.getMessage().contains("v3"),
+        "a v2 peer predates the boot id and is refused by name: " + skew.getMessage());
   }
 
   @Test

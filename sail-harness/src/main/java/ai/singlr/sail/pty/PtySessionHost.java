@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.common.Ids;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -54,6 +55,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyRooms rooms;
   private final PtyEvents events;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
+  private final String bootId = Ids.newId().toString();
   private volatile ServerSocketChannel server;
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
@@ -71,6 +73,16 @@ public final class PtySessionHost implements AutoCloseable {
     this.identity = identity;
     this.rooms = rooms;
     this.events = events;
+  }
+
+  /**
+   * This run of the host, minted once at construction: every {@code Hello} is answered with it, so
+   * a client comparing ids across connections can tell "the host restarted and lost the session"
+   * from "the session ended". Sessions do not survive a restart, so the id changing is the one fact
+   * that explains every session the previous run held.
+   */
+  public String bootId() {
+    return bootId;
   }
 
   public void start() throws IOException {
@@ -165,7 +177,7 @@ public final class PtySessionHost implements AutoCloseable {
           reply(channel, new PtyMessage.Err(refused.getMessage()));
           return;
         }
-        reply(channel, new PtyMessage.Ok());
+        reply(channel, new PtyMessage.Welcome(bootId));
       } else {
         reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
         return;
@@ -320,7 +332,12 @@ public final class PtySessionHost implements AutoCloseable {
       Files.deleteIfExists(ring);
       var origin =
           new PtySession.Origin(
-              m.session(), who.fde(), m.project(), room, requestedOrShell(m.command()));
+              m.session(),
+              Ids.newId().toString(),
+              who.fde(),
+              m.project(),
+              room,
+              requestedOrShell(m.command()));
       var env = childEnv(room);
       var session =
           PtySession.start(
@@ -363,6 +380,7 @@ public final class PtySessionHost implements AutoCloseable {
   private static PtyMessage.SessionInfo infoOf(PtySession session) {
     return new PtyMessage.SessionInfo(
         session.name(),
+        session.origin().instanceId(),
         session.live(),
         session.attachedCount(),
         session.writerFde(),
