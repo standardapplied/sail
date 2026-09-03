@@ -19,9 +19,15 @@ import java.util.List;
 public final class SessionClient implements AutoCloseable {
 
   private final SocketChannel channel;
+  private String hostBootId = "";
 
   private SessionClient(SocketChannel channel) {
     this.channel = channel;
+  }
+
+  /** The boot id the host welcomed this connection with — see {@link PtyMessage.Welcome}. */
+  public String hostBootId() {
+    return hostBootId;
   }
 
   public static SessionClient connect(Path socket) throws IOException {
@@ -41,8 +47,19 @@ public final class SessionClient implements AutoCloseable {
     }
     var client = new SessionClient(channel);
     PtyWire.write(channel, new PtyMessage.Hello(token));
-    client.expectOk("hello");
+    client.hostBootId = client.expectWelcome();
     return client;
+  }
+
+  private String expectWelcome() throws IOException {
+    var reply = PtyWire.read(channel);
+    if (reply instanceof PtyMessage.Err(var message)) {
+      throw new IOException(message);
+    }
+    if (!(reply instanceof PtyMessage.Welcome(var bootId))) {
+      throw new IOException("Unexpected host reply to hello: " + reply.getClass());
+    }
+    return bootId;
   }
 
   public void create(

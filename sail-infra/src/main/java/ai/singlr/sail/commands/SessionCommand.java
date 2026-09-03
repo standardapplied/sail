@@ -92,6 +92,7 @@ public final class SessionCommand {
 
     record Listing(
         int schemaVersion,
+        String hostBootId,
         List<ai.singlr.sail.pty.PtyMessage.SessionInfo> sessions,
         PtyEventDrops.Drops eventDrops) {}
 
@@ -102,7 +103,8 @@ public final class SessionCommand {
         var sessions = client.list();
         if (json) {
           var drops = PtyEventDrops.read(PtyEventDrops.fileOf(socketPath));
-          System.out.println(CliJson.stringify(new Listing(1, sessions, drops)));
+          System.out.println(
+              CliJson.stringify(new Listing(1, client.hostBootId(), sessions, drops)));
           return 0;
         }
         if (sessions.isEmpty()) {

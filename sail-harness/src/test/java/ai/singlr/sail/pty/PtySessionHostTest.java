@@ -7,6 +7,7 @@ package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,13 +91,29 @@ class PtySessionHostTest {
   private SocketChannel connect(String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
     channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
-    PtyWire.handshake(channel, channel);
-    PtyWire.write(channel, new PtyMessage.Hello(token));
-    var reply = PtyWire.read(channel);
+    var reply = hello(channel, token);
     if (reply instanceof PtyMessage.Err(var message)) {
       throw new IOException(message);
     }
     return channel;
+  }
+
+  private static PtyMessage hello(SocketChannel channel, String token) throws IOException {
+    PtyWire.handshake(channel, channel);
+    PtyWire.write(channel, new PtyMessage.Hello(token));
+    return PtyWire.read(channel);
+  }
+
+  private String welcome() throws IOException {
+    var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
+    channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+    try (channel) {
+      var reply = hello(channel, "tok-uday");
+      if (!(reply instanceof PtyMessage.Welcome(var hostBootId))) {
+        throw new AssertionError("Hello was not answered with Welcome: " + reply);
+      }
+      return hostBootId;
+    }
   }
 
   private static PtyMessage awaitText(SocketChannel channel, String marker) throws IOException {
@@ -112,6 +129,23 @@ class PtySessionHostTest {
       if (message instanceof PtyMessage.SessionEnded ended) {
         throw new AssertionError("session ended before '" + marker + "': " + seen);
       }
+    }
+  }
+
+  @Test
+  void helloIsAnsweredWithTheHostsBootIdWhichEveryConnectionSharesAndARestartChanges()
+      throws Exception {
+    String first;
+    try (var started = startHost()) {
+      first = welcome();
+      assertEquals(started.bootId(), first, "the Hello reply carries this host's boot id");
+      assertEquals(first, welcome(), "every connection to one host sees the same id");
+      assertTrue(!first.isBlank(), "a boot id is never blank");
+    }
+    try (var restarted = startHost()) {
+      var second = welcome();
+      assertEquals(restarted.bootId(), second);
+      assertNotEquals(first, second, "a restarted host is a new boot: the id changes");
     }
   }
 

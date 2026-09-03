@@ -82,6 +82,10 @@ class PtyWireTest {
         "", ((PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(List.of(), ""))).next());
     assertEquals("tok", ((PtyMessage.Hello) roundTrip(new PtyMessage.Hello("tok"))).token());
     assertEquals(
+        "boot-7",
+        ((PtyMessage.Welcome) roundTrip(new PtyMessage.Welcome("boot-7"))).hostBootId(),
+        "the host's boot id rides the Hello reply");
+    assertEquals(
         new PtyMessage.Yield("resume-1", "yielded to dispatch 2"),
         roundTrip(new PtyMessage.Yield("resume-1", "yielded to dispatch 2")));
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));
@@ -139,6 +143,15 @@ class PtyWireTest {
     var reply = Pipe.open();
     evil.sink().write(ByteBuffer.wrap("NOTSAIL1".getBytes(StandardCharsets.US_ASCII)));
     assertThrows(IOException.class, () -> PtyWire.handshake(evil.source(), reply.sink()));
+
+    var v2 = Pipe.open();
+    var v2Reply = Pipe.open();
+    v2.sink().write(ByteBuffer.wrap("SAILPTY2".getBytes(StandardCharsets.US_ASCII)));
+    var skew =
+        assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
+    assertTrue(
+        skew.getMessage().contains("v3"),
+        "a v2 peer predates the boot id and is refused by name: " + skew.getMessage());
   }
 
   @Test

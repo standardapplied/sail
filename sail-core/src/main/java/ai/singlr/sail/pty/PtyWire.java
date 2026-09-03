@@ -22,7 +22,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY2".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY3".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -33,7 +33,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v2; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v3; refusing the connection.");
     }
   }
 
@@ -136,6 +136,7 @@ public final class PtyWire {
       }
       case PtyMessage.Ok m -> out.type(30);
       case PtyMessage.Err m -> out.type(31).string(m.message());
+      case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
   }
@@ -186,6 +187,7 @@ public final class PtyWire {
       }
       case 30 -> new PtyMessage.Ok();
       case 31 -> new PtyMessage.Err(string(in));
+      case 32 -> new PtyMessage.Welcome(string(in));
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };
   }

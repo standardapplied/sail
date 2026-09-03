@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Breaking (pty wire): SAILPTY3.** The session host answers an admitted `Hello` with `Welcome`
+  carrying its boot id — a fresh id per run of the host process, the same on every connection
+  until the host restarts — so a terminal client that remembers the id a session was last seen
+  under can tell "the host restarted and lost it" from "it ended". The handshake magic moves to
+  `SAILPTY3`; a client speaking `SAILPTY2` is refused by name (Mast renders its skew card until
+  one side is upgraded). `sail session ls --json` now includes `host_boot_id`. The pty host
+  restarts on `sail upgrade`, as before.
+
 - **Breaking (CLI + API):** the one-shot invite lane is gone — one verb per primitive. `sail spec
   invite` no longer exists and `POST /v1/rooms/{id}/invite` answers 404 with a pointer to the two
   verbs that remain: add a member (`sail spec engage`, `POST /v1/rooms/{id}/members`) to converse,

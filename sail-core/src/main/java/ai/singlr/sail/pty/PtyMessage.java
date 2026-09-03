@@ -9,9 +9,10 @@ import java.util.List;
 
 /**
  * The session-host wire vocabulary — one sealed hierarchy for both directions. Client to host:
- * create, attach, input, resize, write-token, detach, list, kill, yield. Host to client: output
- * (carrying the last applied input sequence — the one enabler client-side predictive echo needs),
- * replay bracketing, writer and size changes, flow control, endings, listings, and errors.
+ * create, attach, input, resize, write-token, detach, list, kill, yield. Host to client: welcome
+ * (the host's boot id), output (carrying the last applied input sequence — the one enabler
+ * client-side predictive echo needs), replay bracketing, writer and size changes, flow control,
+ * endings, listings, and errors.
  */
 public sealed interface PtyMessage {
 
@@ -19,6 +20,14 @@ public sealed interface PtyMessage {
   int MAX_COMMAND_BYTES = 32 * 1024;
 
   record Hello(String token) implements PtyMessage {}
+
+  /**
+   * The host's answer to an admitted {@link Hello}: {@code hostBootId} names this run of the host
+   * process, minted at start and shared by every connection until the host restarts. A client that
+   * remembers the id a session was last seen under can tell a session that died from one the host
+   * lost by restarting. Served only after identity, never before.
+   */
+  record Welcome(String hostBootId) implements PtyMessage {}
 
   /**
    * Starts a session. {@code room} is the room this session is pinned to — blank for none. The host
