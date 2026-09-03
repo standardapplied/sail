@@ -6,6 +6,7 @@
 package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -684,5 +685,47 @@ class PtySessionHostTest {
         assertEquals(0, host.sessionCount(), "grace elapsed: both reaped");
       }
     }
+  }
+
+  @Test
+  void aRecreatedNameIsANewIncarnationTheListingTellsApartByItsInstanceId() throws Exception {
+    try (var ignored = startHost();
+        var owner = connect()) {
+      PtyWire.write(
+          owner,
+          new PtyMessage.Create("again", List.of("sh", "-c", "exit 0"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+      var first = listed(owner, "again");
+      assertFalse(first.instanceId().isBlank(), "an incarnation is minted an id at create");
+
+      var deadline = System.nanoTime() + 5_000_000_000L;
+      while (!events.contains("ended:again") && System.nanoTime() < deadline) {
+        Thread.onSpinWait();
+      }
+      var corpse = listed(owner, "again");
+      assertFalse(corpse.live(), "the child exited: " + events);
+      assertEquals(first.instanceId(), corpse.instanceId(), "a corpse keeps the id it lived under");
+
+      PtyWire.write(
+          owner,
+          new PtyMessage.Create("again", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner), "a corpse's name may be reused");
+      var second = listed(owner, "again");
+      assertTrue(second.live());
+      assertNotEquals(
+          first.instanceId(),
+          second.instanceId(),
+          "the reused name is a new incarnation — a client that only saw the corpse of one"
+              + " and the corpse of the other can still tell them apart");
+      PtyWire.write(owner, new PtyMessage.Kill("again"));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+    }
+  }
+
+  private static PtyMessage.SessionInfo listed(SocketChannel channel, String name)
+      throws IOException {
+    PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+    var listed = (PtyMessage.Sessions) PtyWire.read(channel);
+    return listed.sessions().stream().filter(s -> s.name().equals(name)).findFirst().orElseThrow();
   }
 }

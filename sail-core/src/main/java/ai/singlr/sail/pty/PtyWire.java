@@ -142,7 +142,7 @@ public final class PtyWire {
   }
 
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
-    out.string(info.name());
+    out.string(info.name()).string(info.instanceId());
     out.buffer.put((byte) (info.live() ? 1 : 0)).putInt(info.attached());
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
@@ -194,7 +194,7 @@ public final class PtyWire {
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
     return new PtyMessage.SessionInfo(
-        string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
+        string(in), string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
   }
 
   private static String string(ByteBuffer in) throws IOException {

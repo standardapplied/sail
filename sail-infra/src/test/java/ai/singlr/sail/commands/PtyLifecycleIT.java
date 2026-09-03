@@ -6,12 +6,14 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.ByteArrayOutputStream;
@@ -47,6 +49,10 @@ class PtyLifecycleIT extends AbstractIncusIT {
     return host;
   }
 
+  private static PtyMessage.SessionInfo listed(SessionClient client, String name) throws Exception {
+    return client.list().stream().filter(s -> s.name().equals(name)).findFirst().orElseThrow();
+  }
+
   private void prepareDevWorkspace(String container) throws Exception {
     var prepared =
         exec(
@@ -66,6 +72,9 @@ class PtyLifecycleIT extends AbstractIncusIT {
       try (var host = startHost();
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create("c1", List.of("sh", "-c", "read a; exit 3"), "/tmp", container, "", 80, 24);
+        var born = listed(client, "c1");
+        assertTrue(born.live());
+        assertFalse(born.instanceId().isBlank(), "every incarnation is minted an id at create");
         var channel = client.attach("c1", true);
 
         var stdinFeed = new PipedOutputStream();
@@ -80,9 +89,15 @@ class PtyLifecycleIT extends AbstractIncusIT {
             reason,
             "the ending frame carries the child's exit status; a bare EOF would read as"
                 + " 'connection closed' and the client would retry a session that is gone");
-        assertTrue(
-            client.list().stream().anyMatch(s -> s.name().equals("c1") && !s.live()),
+        var corpse = listed(client, "c1");
+        assertFalse(
+            corpse.live(),
             "the corpse stays listed as ended so a later listing explains the absence");
+        assertEquals(
+            born.instanceId(),
+            corpse.instanceId(),
+            "the corpse is the same incarnation the client watched live — a client keyed on the"
+                + " id can tell it from a replacement that dies before anyone sees it run");
       }
     } finally {
       deleteContainerQuietly(container);

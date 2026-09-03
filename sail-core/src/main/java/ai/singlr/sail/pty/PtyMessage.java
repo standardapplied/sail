@@ -94,12 +94,20 @@ public sealed interface PtyMessage {
   record SessionEnded(String reason) implements PtyMessage {}
 
   /**
-   * One listed session. {@code command} is the child as requested (the default login shell when
-   * none was), so a client can tell an agent session from a plain shell; {@code room} is blank when
-   * the session is not room-bound.
+   * One listed session. {@code name} is reusable across lives; {@code instanceId} names this life
+   * of it (see {@link PtySession.Origin}), so two corpses of one name are distinguishable. {@code
+   * command} is the child as requested (the default login shell when none was), so a client can
+   * tell an agent session from a plain shell; {@code room} is blank when the session is not
+   * room-bound.
    */
   record SessionInfo(
-      String name, boolean live, int attached, String writerFde, String room, List<String> command)
+      String name,
+      String instanceId,
+      boolean live,
+      int attached,
+      String writerFde,
+      String room,
+      List<String> command)
       implements PtyMessage {}
 
   /** One page of sessions; {@code next} is blank on the last page, else the cursor to continue. */

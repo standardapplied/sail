@@ -40,13 +40,24 @@ public final class PtySession implements AutoCloseable {
   private record Subscriber(long id, Client client, SubscriberQueue queue) {}
 
   /**
-   * What a session was born as: its name, the FDE who created it, the project whose container it
-   * runs in (blank for the node itself), the room it is pinned to (blank for none), and the child
-   * as requested — the facts every listing and every emitted event carry.
+   * What a session was born as: its name, the id of this incarnation of that name, the FDE who
+   * created it, the project whose container it runs in (blank for the node itself), the room it is
+   * pinned to (blank for none), and the child as requested — the facts every listing and every
+   * emitted event carry. Names are reusable (a corpse's name may be created again); {@code
+   * instanceId} is minted once per create and never reused, so a client that only ever saw two
+   * corpses of one name can still tell which life each belonged to.
    */
   public record Origin(
-      String name, String ownerFde, String project, String room, List<String> command) {
+      String name,
+      String instanceId,
+      String ownerFde,
+      String project,
+      String room,
+      List<String> command) {
     public Origin {
+      if (instanceId == null || instanceId.isBlank()) {
+        throw new IllegalArgumentException("A session incarnation needs a non-blank instance id.");
+      }
       command = List.copyOf(command);
     }
 

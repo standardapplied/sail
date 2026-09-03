@@ -332,7 +332,12 @@ public final class PtySessionHost implements AutoCloseable {
       Files.deleteIfExists(ring);
       var origin =
           new PtySession.Origin(
-              m.session(), who.fde(), m.project(), room, requestedOrShell(m.command()));
+              m.session(),
+              Ids.newId().toString(),
+              who.fde(),
+              m.project(),
+              room,
+              requestedOrShell(m.command()));
       var env = childEnv(room);
       var session =
           PtySession.start(
@@ -375,6 +380,7 @@ public final class PtySessionHost implements AutoCloseable {
   private static PtyMessage.SessionInfo infoOf(PtySession session) {
     return new PtyMessage.SessionInfo(
         session.name(),
+        session.origin().instanceId(),
         session.live(),
         session.attachedCount(),
         session.writerFde(),

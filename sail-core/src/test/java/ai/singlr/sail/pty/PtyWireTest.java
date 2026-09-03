@@ -64,10 +64,22 @@ class PtyWireTest {
                 new PtyMessage.Sessions(
                     List.of(
                         new PtyMessage.SessionInfo(
-                            "a", true, 2, "uday", "design", List.of("claude", "--resume")),
-                        new PtyMessage.SessionInfo("b", false, 0, "", "", List.of("bash", "-l"))),
+                            "a",
+                            "inst-a",
+                            true,
+                            2,
+                            "uday",
+                            "design",
+                            List.of("claude", "--resume")),
+                        new PtyMessage.SessionInfo(
+                            "b", "inst-b", false, 0, "", "", List.of("bash", "-l"))),
                     "b"));
     assertEquals(2, sessions.sessions().size());
+    assertEquals(
+        "inst-a",
+        sessions.sessions().getFirst().instanceId(),
+        "the incarnation id rides the listing beside the reusable name");
+    assertEquals("inst-b", sessions.sessions().getLast().instanceId());
     assertEquals("b", sessions.next(), "the page cursor rides the listing");
     assertEquals("uday", sessions.sessions().getFirst().writerFde());
     assertEquals("design", sessions.sessions().getFirst().room());
@@ -113,7 +125,7 @@ class PtyWireTest {
     var name = "n".repeat(255);
     var page = new java.util.ArrayList<PtyMessage.SessionInfo>();
     for (var i = 0; i < PtyMessage.PAGE_LIMIT; i++) {
-      page.add(new PtyMessage.SessionInfo(name + i, true, 3, name, name, densest));
+      page.add(new PtyMessage.SessionInfo(name + i, name, true, 3, name, name, densest));
     }
 
     var listed = (PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(page, name));

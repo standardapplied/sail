@@ -49,7 +49,8 @@ class PtyHostEventsTest {
   void theThreeSessionFactsBecomeRecordClassRows() {
     var path = migrated();
     var events = events(path);
-    var origin = new PtySession.Origin("lounge", "uday", "acme", "", List.of("bash", "-l"));
+    var origin =
+        new PtySession.Origin("lounge", "inst-lounge-1", "uday", "acme", "", List.of("bash", "-l"));
 
     events.sessionStarted(origin);
     events.sessionAttached(origin, "mady");
@@ -57,6 +58,14 @@ class PtyHostEventsTest {
 
     var recent = recent(path);
     assertEquals(3, recent.size());
+    for (var row : recent) {
+      assertEquals(
+          "inst-lounge-1",
+          YamlUtil.parseMap(row.data()).get("instance_id"),
+          row.type()
+              + " names the incarnation, so a reader can tell this life of the name from the"
+              + " next one");
+    }
     assertTrue(
         recent.stream()
             .anyMatch(
@@ -87,6 +96,7 @@ class PtyHostEventsTest {
     var origin =
         new PtySession.Origin(
             "brainstorm",
+            "inst-brainstorm-1",
             "uday",
             "acme",
             "design-talk",
@@ -126,7 +136,8 @@ class PtyHostEventsTest {
   @Test
   void aCleanRunLeavesNoDropMeter() {
     var events = events(migrated());
-    var origin = new PtySession.Origin("clean", "uday", "acme", "", List.of("bash", "-l"));
+    var origin =
+        new PtySession.Origin("clean", "inst-clean-1", "uday", "acme", "", List.of("bash", "-l"));
 
     events.sessionStarted(origin);
 
@@ -137,7 +148,8 @@ class PtyHostEventsTest {
   void anInducedInsertFailureIsMeasuredNotThrown() {
     var unmigrated = dir.resolve("unmigrated.db");
     var events = events(unmigrated);
-    var origin = new PtySession.Origin("lounge", "uday", "acme", "", List.of("bash", "-l"));
+    var origin =
+        new PtySession.Origin("lounge", "inst-lounge-2", "uday", "acme", "", List.of("bash", "-l"));
     var stderr = new java.io.ByteArrayOutputStream();
     var original = System.err;
     System.setErr(new java.io.PrintStream(stderr, true, java.nio.charset.StandardCharsets.UTF_8));

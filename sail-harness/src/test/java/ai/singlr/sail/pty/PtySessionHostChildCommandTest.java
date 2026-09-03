@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 class PtySessionHostChildCommandTest {
 
   private static PtySession.Origin origin(String project, String room, String... command) {
-    return new PtySession.Origin("s", "uday", project, room, List.of(command));
+    return new PtySession.Origin("s", "inst-s", "uday", project, room, List.of(command));
   }
 
   @Test
