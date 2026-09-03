@@ -21,17 +21,16 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 /**
- * Adds an agent as a member of a spec's room: it joins the conversation and answers every human
- * message until removed. Full access is the default — conversations produce artifacts. {@code
- * --snapshot} opts into a rollback point first (off by default: a dir-backend snapshot is a slow
- * full copy); {@code --read-only} is the explicit narrow choice, offered only where the harness
- * enforces it. A thin client of {@code POST /v1/rooms/{id}/members}; the server's refusals render
- * verbatim.
+ * Adds an agent to a spec's room: it joins the conversation and answers every human message until
+ * removed. Full access is the default — conversations produce artifacts. {@code --snapshot} opts
+ * into a rollback point first (off by default: a dir-backend snapshot is a slow full copy); {@code
+ * --read-only} is the explicit narrow choice, offered only where the harness enforces it. A thin
+ * client of {@code POST /v1/rooms/{id}/members}; the server's refusals render verbatim.
  */
 @Command(
     name = "engage",
     description =
-        "Add an agent as a member of this spec's room — it answers every message until"
+        "Add an agent to this spec's room — it answers every message until"
             + " 'spec disengage' removes it. Full access by default; --read-only for the enforced"
             + " narrow mode, --snapshot for a rollback point first.",
     mixinStandardHelpOptions = true)
@@ -40,13 +39,10 @@ public final class ApiSpecEngageCommand implements Runnable {
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
-  @Option(
-      names = "--agent",
-      required = true,
-      description = "Agent to add as a member: claude-code, codex.")
+  @Option(names = "--agent", required = true, description = "Agent to add: claude-code, codex.")
   private String agent;
 
-  @Option(names = "--model", description = "Model override for the member.")
+  @Option(names = "--model", description = "Model override for the agent.")
   private String model;
 
   @Option(

@@ -18,12 +18,12 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 /**
- * Removes a spec room's member. Idempotent — removing from an empty room reports that nobody was
+ * Removes a spec room's agent. Idempotent — removing from an empty room reports that nobody was
  * there rather than erroring. A thin client of {@code DELETE /v1/rooms/{id}/members}.
  */
 @Command(
     name = "disengage",
-    description = "Remove this spec room's member.",
+    description = "Remove this spec room's agent.",
     mixinStandardHelpOptions = true)
 public final class ApiSpecDisengageCommand implements Runnable {
 
@@ -56,7 +56,7 @@ public final class ApiSpecDisengageCommand implements Runnable {
       }
       var agent = result.get("agent");
       if (agent == null) {
-        System.out.println("  No member was in spec '" + specId + "'.");
+        System.out.println("  No agent was in spec '" + specId + "'.");
         return;
       }
       System.out.println(
