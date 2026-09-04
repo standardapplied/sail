@@ -43,7 +43,8 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             64 * 1024,
             token -> new PtyIdentity("uday", true),
             PtyRooms.NONE,
-            PtyEvents.NONE);
+            PtyEvents.NONE,
+            "0.0.0-test");
     host.start();
     return host;
   }

@@ -76,7 +76,8 @@ class PtySessionHostTest {
               public void sessionEnded(PtySession.Origin origin, String reason) {
                 events.add("ended:" + origin.name());
               }
-            });
+            },
+            "0.0.0-test");
     host.start();
     return host;
   }

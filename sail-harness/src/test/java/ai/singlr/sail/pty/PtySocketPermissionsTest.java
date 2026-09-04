@@ -40,7 +40,8 @@ class PtySocketPermissionsTest {
             64 * 1024,
             token -> new PtyIdentity("uday", true),
             PtyRooms.NONE,
-            PtyEvents.NONE)) {
+            PtyEvents.NONE,
+            "0.0.0-test")) {
       host.start();
 
       assertGroupAndOtherDenied(Files.getPosixFilePermissions(socket), "socket");
