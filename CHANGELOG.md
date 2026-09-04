@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.39.1
+
 - **Fix: `sail session ls --json` and `sail dispatch --json` died in the native binary** with a
   GraalVM unsupported-feature error (record components unavailable for reflection) — the records
   `CliJson` prints were never registered for reflection, and only the JVM tests exercised them.
