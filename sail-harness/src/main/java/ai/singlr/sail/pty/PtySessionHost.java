@@ -54,6 +54,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyIdentity.Resolver identity;
   private final PtyRooms rooms;
   private final PtyEvents events;
+  private final String version;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final String bootId = Ids.newId().toString();
   private volatile ServerSocketChannel server;
@@ -66,13 +67,15 @@ public final class PtySessionHost implements AutoCloseable {
       long journalCapacity,
       PtyIdentity.Resolver identity,
       PtyRooms rooms,
-      PtyEvents events) {
+      PtyEvents events,
+      String version) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
     this.rooms = rooms;
     this.events = events;
+    this.version = version;
   }
 
   /**
@@ -267,13 +270,19 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * The environment a session's child inherits: a terminal type, plus {@code SAIL_ROOM_ID} when the
-   * session is room-bound — the one fact that lets everything the child creates ({@code spec
-   * create} above all) land in the room the session serves.
+   * The environment a session's child inherits: what terminal it is in ({@code TERM} stays {@code
+   * xterm-256color} because containers ship no other terminfo; {@code COLORTERM}, {@code
+   * TERM_PROGRAM} and {@code TERM_PROGRAM_VERSION} say truecolor, Mast, and this host's version so
+   * programs stop probing), plus {@code SAIL_ROOM_ID} when the session is room-bound — the one fact
+   * that lets everything the child creates ({@code spec create} above all) land in the room the
+   * session serves.
    */
-  static Map<String, String> childEnv(String room) {
+  static Map<String, String> childEnv(String room, String version) {
     var env = new java.util.LinkedHashMap<String, String>();
     env.put("TERM", "xterm-256color");
+    env.put("COLORTERM", "truecolor");
+    env.put("TERM_PROGRAM", "mast");
+    env.put("TERM_PROGRAM_VERSION", version);
     if (room != null && !room.isBlank()) {
       env.put("SAIL_ROOM_ID", room);
     }
@@ -338,7 +347,7 @@ public final class PtySessionHost implements AutoCloseable {
               m.project(),
               room,
               requestedOrShell(m.command()));
-      var env = childEnv(room);
+      var env = childEnv(room, version);
       var session =
           PtySession.start(
               origin,

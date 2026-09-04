@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.util.concurrent.Callable;
@@ -51,7 +52,9 @@ public final class PtyHostCommand implements Callable<Integer> {
       ai.singlr.sail.pty.PtyRooms rooms,
       ai.singlr.sail.pty.PtyEvents events)
       throws java.io.IOException {
-    var host = new PtySessionHost(socket, sessions, JOURNAL_CAPACITY, identity, rooms, events);
+    var host =
+        new PtySessionHost(
+            socket, sessions, JOURNAL_CAPACITY, identity, rooms, events, SailVersion.version());
     host.start();
     Thread.ofVirtual()
         .start(

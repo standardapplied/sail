@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Pty sessions tell programs what terminal they are in.** The child of every host-owned session
+  now inherits `COLORTERM=truecolor`, `TERM_PROGRAM=mast` and `TERM_PROGRAM_VERSION=<sail
+  version>` beside `TERM=xterm-256color` (which stays: containers ship no other terminfo), so
+  agent TUIs detect truecolor and identify the host without probing.
+
 ## 0.39.1
 
 - **Fix: `sail session ls --json` and `sail dispatch --json` died in the native binary** with a
