@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fix: `sail session ls --json` and `sail dispatch --json` died in the native binary** with a
+  GraalVM unsupported-feature error (record components unavailable for reflection) — the records
+  `CliJson` prints were never registered for reflection, and only the JVM tests exercised them.
+  They are registered now, and `_pty-selftest` (the release smoke test) stringifies one of each
+  on every platform so a future `--json` record cannot ship unregistered.
+
 - **Breaking (pty wire): SAILPTY3.** The session host answers an admitted `Hello` with `Welcome`
   carrying its boot id — a fresh id per run of the host process, the same on every connection
   until the host restarts — so a terminal client that remembers the id a session was last seen

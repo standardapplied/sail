@@ -1,0 +1,27 @@
+[
+  {
+    "name": "ai.singlr.sail.commands.SessionCommand$Ls$Listing",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.pty.PtyMessage$SessionInfo",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.commands.PtyEventDrops$Drops",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.commands.DispatchCommand$DispatchPreview",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.commands.DispatchCommand$NoDispatch",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  }
+]
