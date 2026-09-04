@@ -76,7 +76,7 @@ Always write modern Java — leverage JDK 25 features, never write old-style cod
 - Build command: `JAVA_HOME=/path/to/graalvm-jdk-25 mvn clean package -Pnative -DskipTests`
 - The `native` Maven profile uses `native-maven-plugin` 0.11.4 with `compile-no-fork` goal
 - Binary output: `sail-infra/target/sail` (<1ms startup)
-- **No manual reflection metadata needed.** SnakeYAML Engine parses to `Map<String, Object>`, and records use explicit `fromMap()`/`toMap()` factory methods — no reflection involved. picocli's annotation processor (`picocli-codegen`) auto-generates its own native-image metadata at compile time for command classes.
+- **Reflection metadata: one exception.** SnakeYAML Engine parses to `Map<String, Object>`, and records use explicit `fromMap()`/`toMap()` factory methods — no reflection involved. picocli's annotation processor (`picocli-codegen`) auto-generates its own native-image metadata at compile time for command classes. The exception is `CliJson`, which reads record components reflectively: every record a `--json` verb prints must be listed in `sail-infra/src/main/resources/META-INF/native-image/ai.singlr/sail-cli/reflect-config.json` AND stringified in `PtySelfTestCommand.jsonProbe()`, which the release smoke test runs on the native binary — an unregistered record dies only there, never in the JVM tests.
 - Maven plugin guide: https://graalvm.github.io/native-build-tools/latest/end-to-end-maven-guide.html
 
 ## Dependency Versions (pinned)
