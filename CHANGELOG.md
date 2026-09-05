@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.39.2
+
 - **An attach replays everything the journal holds.** The pty host used to replay at most 256 KB of a
   session's 4 MB journal on attach and on a flow-control resync, because the tail crossed as one
   frame and the wire refuses frames over 1 MiB. The tail now crosses as a run of `Output` frames of at
