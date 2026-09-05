@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **An attach replays everything the journal holds.** The pty host used to replay at most 256 KB of a
+  session's 4 MB journal on attach and on a flow-control resync, because the tail crossed as one
+  frame and the wire refuses frames over 1 MiB. The tail now crosses as a run of `Output` frames of at
+  most 256 KiB inside the same `ReplayBegin`/`ReplayEnd` bracket, so a client that reconnects (a Mast
+  relaunch) sees the whole history the host has. No wire change.
+
 - **Pty sessions tell programs what terminal they are in.** The child of every host-owned session
   now inherits `COLORTERM=truecolor`, `TERM_PROGRAM=mast` and `TERM_PROGRAM_VERSION=<sail
   version>` beside `TERM=xterm-256color` (which stays: containers ship no other terminfo), so

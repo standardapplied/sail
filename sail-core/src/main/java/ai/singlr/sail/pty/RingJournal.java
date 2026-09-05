@@ -143,6 +143,10 @@ public final class RingJournal implements AutoCloseable {
     return new Tail(from, safe, bytes);
   }
 
+  public long capacity() {
+    return capacity;
+  }
+
   public long totalWritten() {
     return totalWritten;
   }

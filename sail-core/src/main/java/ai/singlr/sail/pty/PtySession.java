@@ -73,7 +73,13 @@ public final class PtySession implements AutoCloseable {
   private final RingJournal journal;
   private final TermBoundary boundary = new TermBoundary();
   private final int queueCapacity;
+
+  /** A replayed journal crosses the wire in frames this large — well under the 1 MiB frame cap. */
+  static final int REPLAY_CHUNK = 256 * 1024;
+
+  /** The replay window: everything the journal holds. */
   private final int replayMax;
+
   private final Map<Long, Subscriber> subscribers = new ConcurrentHashMap<>();
   private final Object fanout = new Object();
   private final AtomicLong subscriberIds = new AtomicLong();
@@ -93,15 +99,14 @@ public final class PtySession implements AutoCloseable {
       Pty pty,
       Process child,
       RingJournal journal,
-      int queueCapacity,
-      int replayMax) {
+      int queueCapacity) {
     this.origin = origin;
     this.events = events;
     this.pty = pty;
     this.child = child;
     this.journal = journal;
     this.queueCapacity = queueCapacity;
-    this.replayMax = replayMax;
+    this.replayMax = (int) Math.min(journal.capacity(), Integer.MAX_VALUE);
   }
 
   /**
@@ -119,8 +124,7 @@ public final class PtySession implements AutoCloseable {
       int cols,
       int rows)
       throws IOException {
-    return start(
-        origin, events, argv, env, cwd, journalPath, journalCapacity, cols, rows, 4096, 262_144);
+    return start(origin, events, argv, env, cwd, journalPath, journalCapacity, cols, rows, 4096);
   }
 
   static PtySession start(
@@ -133,8 +137,7 @@ public final class PtySession implements AutoCloseable {
       long journalCapacity,
       int cols,
       int rows,
-      int queueCapacity,
-      int replayMax)
+      int queueCapacity)
       throws IOException {
     var journal = RingJournal.open(journalPath, journalCapacity);
     var pty = Pty.open(cols, rows);
@@ -146,7 +149,7 @@ public final class PtySession implements AutoCloseable {
       journal.close();
       throw e;
     }
-    var session = new PtySession(origin, events, pty, child, journal, queueCapacity, replayMax);
+    var session = new PtySession(origin, events, pty, child, journal, queueCapacity);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
     emitQuietly(() -> events.sessionStarted(origin));
     return session;
@@ -214,18 +217,32 @@ public final class PtySession implements AutoCloseable {
   private void resync(Subscriber subscriber) {
     synchronized (fanout) {
       try {
-        var tail = journal.tail(replayMax);
-        var messages = new java.util.ArrayList<PtyMessage>(3);
-        messages.add(new PtyMessage.ReplayBegin(tail.safe()));
-        if (tail.bytes().length > 0) {
-          messages.add(new PtyMessage.Output(lastInputSeq.get(), tail.bytes()));
-        }
-        messages.add(new PtyMessage.ReplayEnd());
-        subscriber.queue().replaceWith(List.copyOf(messages));
+        subscriber.queue().replaceWith(replayMessages());
       } catch (IOException e) {
         subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
       }
     }
+  }
+
+  /**
+   * The journal's whole history as a bracketed replay: {@code ReplayBegin}, then the tail in {@code
+   * Output} frames of at most {@link #REPLAY_CHUNK} bytes each, then {@code ReplayEnd}. The wire
+   * refuses frames over 1 MiB, so a 4 MB journal must cross as a run of frames; a client
+   * concatenates {@code Output} frames regardless, so the bracket is all it sees.
+   */
+  private List<PtyMessage> replayMessages() throws IOException {
+    var tail = journal.tail(replayMax);
+    var messages = new java.util.ArrayList<PtyMessage>();
+    messages.add(new PtyMessage.ReplayBegin(tail.safe()));
+    var bytes = tail.bytes();
+    for (var offset = 0; offset < bytes.length; offset += REPLAY_CHUNK) {
+      var chunk =
+          java.util.Arrays.copyOfRange(
+              bytes, offset, Math.min(bytes.length, offset + REPLAY_CHUNK));
+      messages.add(new PtyMessage.Output(lastInputSeq.get(), chunk));
+    }
+    messages.add(new PtyMessage.ReplayEnd());
+    return List.copyOf(messages);
   }
 
   /** Attaches a client: replay first, live stream after, write token if free and requested. */
@@ -237,12 +254,7 @@ public final class PtySession implements AutoCloseable {
     var subscriber =
         new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
     synchronized (fanout) {
-      var tail = journal.tail(replayMax);
-      subscriber.queue().force(new PtyMessage.ReplayBegin(tail.safe()));
-      if (tail.bytes().length > 0) {
-        subscriber.queue().force(new PtyMessage.Output(lastInputSeq.get(), tail.bytes()));
-      }
-      subscriber.queue().force(new PtyMessage.ReplayEnd());
+      replayMessages().forEach(subscriber.queue()::force);
       subscribers.put(subscriber.id, subscriber);
       if (endedReason != null) {
         subscriber.queue().force(new PtyMessage.SessionEnded(endedReason));
