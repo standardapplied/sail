@@ -180,7 +180,7 @@ public final class PtySession implements AutoCloseable {
           journal.append(buf, n);
           boundary.feed(buf, n);
           if (boundary.atSafeLineStart()) {
-            journal.markSafe(Math.max(0, journal.totalWritten() - replayMax));
+            journal.markSafe();
           }
           var chunk = new byte[n];
           System.arraycopy(buf, 0, chunk, 0, n);

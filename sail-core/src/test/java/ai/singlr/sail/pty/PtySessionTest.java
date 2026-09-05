@@ -58,10 +58,13 @@ class PtySessionTest {
       }
     }
 
+    /** The screen a client would show: a replay bracket replaces everything before it. */
     String outputText() {
       var out = new StringBuilder();
       for (var message : messages) {
-        if (message instanceof PtyMessage.Output(var seq, var bytes)) {
+        if (message instanceof PtyMessage.ReplayBegin) {
+          out.setLength(0);
+        } else if (message instanceof PtyMessage.Output(var seq, var bytes)) {
           out.append(new String(bytes, StandardCharsets.UTF_8));
         }
       }
@@ -504,8 +507,11 @@ class PtySessionTest {
       client.awaitOutput("PHASE2");
       var text = client.outputText();
       assertEquals(text.indexOf("PHASE2"), text.lastIndexOf("PHASE2"), "no duplicated bytes");
+      var kindsAfter = client.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals(
-          text.indexOf("BURST-END"), text.lastIndexOf("BURST-END"), "no duplicated resync");
+          text.indexOf("BURST-END"),
+          text.lastIndexOf("BURST-END"),
+          "no duplicated resync; messages: " + kindsAfter);
     } finally {
       session.close();
     }

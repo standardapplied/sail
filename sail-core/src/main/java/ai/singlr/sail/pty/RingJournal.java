@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayDeque;
 
 /**
  * A fixed-capacity ring of raw session bytes, journaled to one file so history survives a host
@@ -34,13 +35,33 @@ public final class RingJournal implements AutoCloseable {
   private final FileChannel channel;
   private final long capacity;
   private long totalWritten;
+
+  /**
+   * The oldest safe replay start still inside the ring; the one checkpoint that survives a restart.
+   */
   private long safeWatermark;
+
+  /** Safe replay starts inside the ring, oldest first, at least a stride apart. */
+  private final ArrayDeque<Long> checkpoints = new ArrayDeque<>();
 
   private RingJournal(FileChannel channel, long capacity, long totalWritten, long safeWatermark) {
     this.channel = channel;
     this.capacity = capacity;
     this.totalWritten = totalWritten;
     this.safeWatermark = safeWatermark;
+    if (safeWatermark >= windowStart()) {
+      checkpoints.add(safeWatermark);
+    }
+  }
+
+  /** Checkpoints are spaced so the ring never holds more than a few dozen of them. */
+  private long checkpointStride() {
+    return Math.max(1, capacity / 64);
+  }
+
+  /** The oldest offset still in the ring. */
+  private long windowStart() {
+    return totalWritten - Math.min(totalWritten, capacity);
   }
 
   /** Opens or creates the journal at {@code path}; an existing file must match the capacity. */
@@ -110,25 +131,42 @@ public final class RingJournal implements AutoCloseable {
    * keepFloor} (the replay budget's edge). Advancing eagerly would mean "nothing to replay" after
    * every quiet moment; a late attacher wants history, starting clean.
    */
-  public void markSafe(long keepFloor) throws IOException {
-    if (safeWatermark < keepFloor) {
-      safeWatermark = totalWritten;
+  /**
+   * Records that the stream is at a safe replay boundary right now. The journal keeps every such
+   * boundary still inside the ring (a stride apart, so the set stays small); a replay of any width
+   * then starts at the oldest boundary inside its window, so a late attacher gets the most history
+   * the ring can offer, and never a screen that begins mid-sequence.
+   */
+  public void markSafe() throws IOException {
+    var boundary = totalWritten;
+    var start = windowStart();
+    while (!checkpoints.isEmpty() && checkpoints.peekFirst() < start) {
+      checkpoints.pollFirst();
+    }
+    if (checkpoints.isEmpty() || boundary - checkpoints.peekLast() >= checkpointStride()) {
+      checkpoints.addLast(boundary);
+    }
+    var oldest = checkpoints.peekFirst();
+    if (oldest != safeWatermark) {
+      safeWatermark = oldest;
       writeHeader();
     }
   }
 
   /**
-   * The newest at-most-{@code maxBytes} of history, starting at the retained safe start when it
-   * lies still inside the window; otherwise from the window start, flagged unsafe so the client
+   * The newest at-most-{@code maxBytes} of history, starting at the oldest safe boundary inside
+   * that window when there is one; otherwise from the window start, flagged unsafe so the client
    * clears its screen before applying.
    */
   public Tail tail(int maxBytes) throws IOException {
-    var available = Math.min(totalWritten, capacity);
-    var windowStart = totalWritten - available;
-    var from = Math.max(windowStart, totalWritten - maxBytes);
-    var safe = safeWatermark >= from && safeWatermark <= totalWritten;
-    if (safe) {
-      from = safeWatermark;
+    var from = Math.max(windowStart(), totalWritten - maxBytes);
+    var safe = false;
+    for (var checkpoint : checkpoints) {
+      if (checkpoint >= from) {
+        from = checkpoint;
+        safe = true;
+        break;
+      }
     }
     var length = (int) (totalWritten - from);
     var bytes = new byte[length];

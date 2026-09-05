@@ -30,9 +30,9 @@ class RingJournalTest {
   void aRetainedSafeStartReplaysHistoryNotNothing() throws Exception {
     try (var ring = RingJournal.open(dir.resolve("s.ring"), 1024)) {
       ring.append(bytes("first\n"), 6);
-      ring.markSafe(0);
+      ring.markSafe();
       ring.append(bytes("second"), 6);
-      ring.markSafe(0);
+      ring.markSafe();
 
       var tail = ring.tail(1024);
 
@@ -43,18 +43,43 @@ class RingJournalTest {
   }
 
   @Test
-  void theSafeStartAdvancesOnlyOnceItFallsOutOfTheBudget() throws Exception {
+  void aNarrowerWindowStartsAtTheOldestSafeBoundaryInsideIt() throws Exception {
+    // capacity 1024 → checkpoints at least 16 bytes apart; each line below is 20 bytes.
     try (var ring = RingJournal.open(dir.resolve("s.ring"), 1024)) {
-      ring.append(bytes("old\n"), 4);
-      ring.markSafe(0);
-      ring.append(bytes("new\n"), 4);
-      ring.markSafe(ring.totalWritten() - 4);
+      for (var i = 0; i < 4; i++) {
+        ring.append(bytes("line-" + i + "-aaaaaaaaaaaa\n"), 20);
+        ring.markSafe();
+      }
 
-      var tail = ring.tail(4);
+      var whole = ring.tail(1024);
+      assertTrue(whole.safe());
+      assertEquals(0, whole.startOffset(), "the stream start is a safe start");
 
+      var narrow = ring.tail(50); // the window begins at 30, inside line 1
+      assertTrue(narrow.safe());
+      assertEquals(40, narrow.startOffset(), "starts at the first boundary inside the window");
+      assertArrayEquals(bytes("line-2-aaaaaaaaaaaa\nline-3-aaaaaaaaaaaa\n"), narrow.bytes());
+
+      ring.append(bytes("x".repeat(30)), 30); // a partial line, no boundary yet
+      var tiny = ring.tail(10); // no boundary inside: from the window start, flagged unsafe
+      assertFalse(tiny.safe());
+      assertEquals(100, tiny.startOffset());
+    }
+  }
+
+  @Test
+  void safeStartsThatLeaveTheRingAreForgottenAndTheNextOneInsideWins() throws Exception {
+    try (var ring = RingJournal.open(dir.resolve("s.ring"), 100)) {
+      for (var i = 0; i < 12; i++) {
+        ring.append(bytes(String.format("%09d\n", i)), 10);
+        ring.markSafe();
+      }
+      // 120 bytes written into a 100-byte ring: offsets below 20 are gone.
+      var tail = ring.tail(100);
       assertTrue(tail.safe());
-      assertEquals(8, tail.startOffset(), "the stale mark jumped to the current boundary");
-      assertArrayEquals(bytes(""), tail.bytes());
+      assertEquals(20, tail.startOffset(), "the oldest boundary still in the ring");
+      assertEquals(100, tail.bytes().length);
+      assertEquals("000000002\n", new String(tail.bytes(), 0, 10, StandardCharsets.UTF_8));
     }
   }
 
@@ -63,7 +88,7 @@ class RingJournalTest {
     var path = dir.resolve("s.ring");
     try (var ring = RingJournal.open(path, 64)) {
       ring.append(bytes("persisted\n"), 10);
-      ring.markSafe(0);
+      ring.markSafe();
     }
     try (var ring = RingJournal.open(path, 64)) {
       assertEquals(10, ring.totalWritten());
