@@ -17,32 +17,43 @@ import java.util.Deque;
  */
 final class SubscriberQueue {
 
+  /** One queued message; {@code live} marks stream output that counts toward the backlog cap. */
+  private record Entry(PtyMessage message, boolean live) {}
+
   private final int capacity;
-  private final Deque<PtyMessage> queue = new ArrayDeque<>();
+  private final Deque<Entry> queue = new ArrayDeque<>();
+  private int live;
   private boolean paused;
 
   SubscriberQueue(int capacity) {
     this.capacity = capacity;
   }
 
-  /** Offers a live message; a full queue trips the pause, a paused queue drops silently. */
+  /**
+   * Offers a live message; a full backlog of live messages trips the pause, a paused queue drops
+   * silently. Only live messages count: a replay installed with {@link #replaceWith} or a forced
+   * message may exceed the cap without tripping a second pause behind the first (which would resync
+   * again, and again).
+   */
   synchronized void enqueue(PtyMessage message) {
     if (paused) {
       return;
     }
-    if (queue.size() >= capacity) {
+    if (live >= capacity) {
       paused = true;
       queue.clear();
-      queue.add(new PtyMessage.Paused());
+      live = 0;
+      queue.add(new Entry(new PtyMessage.Paused(), false));
     } else {
-      queue.add(message);
+      queue.add(new Entry(message, true));
+      live++;
     }
     notifyAll();
   }
 
   /** Enqueues regardless of pause — endings and poison must always arrive. */
   synchronized void force(PtyMessage message) {
-    queue.add(message);
+    queue.add(new Entry(message, false));
     notifyAll();
   }
 
@@ -55,19 +66,22 @@ final class SubscriberQueue {
   synchronized void replaceWith(java.util.List<PtyMessage> messages) {
     var terminal =
         queue.stream()
+            .map(Entry::message)
             .filter(m -> m instanceof PtyMessage.Ok || m instanceof PtyMessage.SessionEnded)
             .toList();
     queue.clear();
-    queue.addAll(messages);
-    queue.addAll(terminal);
+    live = 0;
+    messages.forEach(m -> queue.add(new Entry(m, false)));
+    terminal.forEach(m -> queue.add(new Entry(m, false)));
     notifyAll();
   }
 
   /** Empties the queue and delivers only {@code message} next — the detach path. */
   synchronized void clearAnd(PtyMessage message) {
     queue.clear();
+    live = 0;
     paused = false;
-    queue.add(message);
+    queue.add(new Entry(message, false));
     notifyAll();
   }
 
@@ -83,6 +97,10 @@ final class SubscriberQueue {
       }
       wait();
     }
-    return queue.poll();
+    var entry = queue.poll();
+    if (entry.live()) {
+      live--;
+    }
+    return entry.message();
   }
 }

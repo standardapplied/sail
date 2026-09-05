@@ -58,10 +58,13 @@ class PtySessionTest {
       }
     }
 
+    /** The screen a client would show: a replay bracket replaces everything before it. */
     String outputText() {
       var out = new StringBuilder();
       for (var message : messages) {
-        if (message instanceof PtyMessage.Output(var seq, var bytes)) {
+        if (message instanceof PtyMessage.ReplayBegin) {
+          out.setLength(0);
+        } else if (message instanceof PtyMessage.Output(var seq, var bytes)) {
           out.append(new String(bytes, StandardCharsets.UTF_8));
         }
       }
@@ -256,6 +259,50 @@ class PtySessionTest {
   }
 
   @Test
+  void aLateAttacherReceivesTheWholeJournalInChunkedFrames() throws Exception {
+    var payload = 1_572_864; // 1.5 MiB: past the wire's 1 MiB frame cap
+    try (var session =
+        PtySession.start(
+            origin("big", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "head -c " + payload + " /dev/zero | tr '\\0' x; echo; echo BIG-DONE; read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("big.ring"),
+            4L * 1024 * 1024,
+            80,
+            24)) {
+      var writer = new Collector();
+      session.attach(writer, true, "uday");
+      writer.awaitOutput("BIG-DONE");
+
+      var late = new Collector();
+      session.attach(late, false, "uday");
+      late.awaitOutput("BIG-DONE");
+
+      var text = late.outputText();
+      assertTrue(text.chars().filter(c -> c == 'x').count() >= payload, "every byte replayed");
+      var frames =
+          late.messages.stream()
+              .filter(m -> m instanceof PtyMessage.Output)
+              .map(m -> (PtyMessage.Output) m)
+              .toList();
+      assertTrue(frames.size() > 1, "the tail crossed as several frames, not one oversized frame");
+      assertTrue(
+          frames.stream().allMatch(f -> f.bytes().length <= PtySession.REPLAY_CHUNK),
+          "every replay frame fits the chunk");
+      var kinds = late.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals("ReplayBegin", kinds.getFirst(), "still bracketed: " + kinds);
+      assertTrue(
+          kinds.indexOf("ReplayEnd") > kinds.lastIndexOf("Output") - 1,
+          "ends the bracket after the tail");
+    }
+  }
+
+  @Test
   void onlyTheTokenHolderWritesAndTakeoverIsExplicitAndAnnounced() throws Exception {
     try (var session = session("read a; echo done:$a")) {
       var first = new Collector();
@@ -315,8 +362,7 @@ class PtySessionTest {
             256 * 1024,
             80,
             24,
-            2,
-            65536)) {
+            2)) {
       var writer = new Collector();
       var writerId = session.attach(writer, true, "uday");
       var stalled = new Collector();
@@ -429,8 +475,7 @@ class PtySessionTest {
             1024 * 1024,
             80,
             24,
-            1,
-            64 * 1024);
+            1);
     try {
       var client = new Collector();
       var gate = new CountDownLatch(1);
@@ -462,8 +507,11 @@ class PtySessionTest {
       client.awaitOutput("PHASE2");
       var text = client.outputText();
       assertEquals(text.indexOf("PHASE2"), text.lastIndexOf("PHASE2"), "no duplicated bytes");
+      var kindsAfter = client.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals(
-          text.indexOf("BURST-END"), text.lastIndexOf("BURST-END"), "no duplicated resync");
+          text.indexOf("BURST-END"),
+          text.lastIndexOf("BURST-END"),
+          "no duplicated resync; messages: " + kindsAfter);
     } finally {
       session.close();
     }
