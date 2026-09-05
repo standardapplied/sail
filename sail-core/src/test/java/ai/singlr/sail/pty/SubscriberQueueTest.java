@@ -8,9 +8,14 @@ package ai.singlr.sail.pty;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SubscriberQueueTest {
+
+  private static PtyMessage.Output output(String text) {
+    return new PtyMessage.Output(0, text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
 
   private static PtyMessage.Output out(int n) {
     return new PtyMessage.Output(n, new byte[] {(byte) n});
@@ -70,6 +75,29 @@ class SubscriberQueueTest {
 
     assertInstanceOf(PtyMessage.ReplayBegin.class, queue.next());
     assertInstanceOf(PtyMessage.Ok.class, queue.next(), "detach still terminates the send loop");
+  }
+
+  @Test
+  void aReplayLargerThanTheCapDoesNotTripAnotherPause() throws Exception {
+    var queue = new SubscriberQueue(2);
+    queue.replaceWith(
+        List.of(
+            new PtyMessage.ReplayBegin(true),
+            output("a"),
+            output("b"),
+            output("c"),
+            new PtyMessage.ReplayEnd()));
+    queue.enqueue(output("live-1"));
+    queue.enqueue(output("live-2"));
+
+    var kinds = new java.util.ArrayList<String>();
+    for (int i = 0; i < 7; i++) {
+      kinds.add(queue.next().getClass().getSimpleName());
+    }
+    assertEquals(
+        List.of("ReplayBegin", "Output", "Output", "Output", "ReplayEnd", "Output", "Output"),
+        kinds,
+        "a five-message replay in a two-message queue is delivered whole, then live output");
   }
 
   @Test
