@@ -73,8 +73,16 @@ final class SubscriberQueue {
     notifyAll();
   }
 
-  /** Enqueues regardless of pause — endings and poison must always arrive. */
+  /**
+   * Enqueues regardless of pause — endings and poison must always arrive. A state notification
+   * ({@code WriterChanged}, {@code Resized}) replaces any of its kind still pending: only the
+   * latest writer or geometry matters to a reader that is catching up, and a client can raise these
+   * at will (a TakeWrite storm), so they must not accumulate the way the caps forbid output to.
+   */
   synchronized void force(PtyMessage message) {
+    if (message instanceof PtyMessage.WriterChanged || message instanceof PtyMessage.Resized) {
+      queue.removeIf(entry -> entry.message().getClass() == message.getClass());
+    }
     queue.add(new Entry(message, false, 0));
     notifyAll();
   }

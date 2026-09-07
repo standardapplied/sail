@@ -471,8 +471,8 @@ public final class PtySessionHost implements AutoCloseable {
     if (existing != null) {
       remove(m.session(), existing);
     }
+    var ring = sessionsDir.resolve(m.session() + ".ring");
     try {
-      var ring = sessionsDir.resolve(m.session() + ".ring");
       Files.deleteIfExists(ring);
       var origin =
           new PtySession.Origin(
@@ -497,6 +497,7 @@ public final class PtySessionHost implements AutoCloseable {
       sessions.put(m.session(), session);
       return new PtyMessage.Ok();
     } catch (IOException e) {
+      deleteRing(ring, who.fde(), m.session());
       return new PtyMessage.Err("Could not start session '" + m.session() + "': " + e.getMessage());
     }
   }
@@ -587,10 +588,14 @@ public final class PtySessionHost implements AutoCloseable {
   private void remove(String name, PtySession session) {
     sessions.remove(name, session);
     session.close();
+    deleteRing(sessionsDir.resolve(name + ".ring"), session.ownerFde(), name);
+  }
+
+  private void deleteRing(Path ring, String fde, String name) {
     try {
-      Files.deleteIfExists(sessionsDir.resolve(name + ".ring"));
+      Files.deleteIfExists(ring);
     } catch (IOException e) {
-      log("ring-delete-failed", session.ownerFde(), name, e.toString());
+      log("ring-delete-failed", fde, name, e.toString());
     }
   }
 

@@ -11,9 +11,10 @@
     SIGTERM does not outlive its session), then every subscriber hears
     `SessionEnded(reason=io-error)`.
   - **Ring files are deleted and never leak.** A session's `~/.sail/sessions/<name>.ring` is removed
-    when the session is killed, swept, or re-created, and every orphan ring is swept at host start
-    (sessions do not survive a restart — there is no rehydration). New rings are created owner-only
-    (0600).
+    when the session is killed, swept, or re-created — and when its create fails to spawn, so a
+    bad working directory cannot litter rings that no quota counts — and every orphan ring is swept
+    at host start (sessions do not survive a restart — there is no rehydration). New rings are
+    created owner-only (0600).
   - **Input never pins a connection.** The write-token holder's keystrokes drain through a dedicated
     per-session writer thread over a queue bounded in frames and bytes (1 MiB queued plus in-flight,
     reserved before the payload is copied), so a child that has stopped reading (Ctrl-S, a stopped
@@ -29,7 +30,12 @@
     escape the sessions directory or delete another session's ring.
   - **Backlog is bounded by bytes as well as frames.** A stalled subscriber's queue pauses at 1 MiB
     of live output (not only 4096 frames), and a resync replays a bounded 256 KiB tail rather than
-    the whole 4 MB ring on the link that just proved too slow.
+    the whole 4 MB ring on the link that just proved too slow. Writer and geometry notifications
+    coalesce to the latest of each, so a client that stops reading and hammers `TakeWrite` or
+    `Resize` cannot grow anyone's queue past the caps.
+  - **`sail session attach` narrates a refused keystroke.** The host's `Err` for a rejected input
+    (no write token, or a full input backlog) is rendered inline as `[sail: …]` instead of being
+    dropped, so a paste that outran the session is visibly incomplete rather than silently short.
   - **Resource caps.** Sessions per FDE (32) and subscribers per session (16) are each refused with
     an `Err` naming the cap, and each admission is atomic with its registration, so concurrent
     creates or attaches cannot all take the last slot. A socket over the host's connection cap

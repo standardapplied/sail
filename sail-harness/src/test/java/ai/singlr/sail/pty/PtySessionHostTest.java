@@ -771,6 +771,34 @@ class PtySessionHostTest {
   }
 
   @Test
+  void aCreateThatFailsToSpawnLeavesNoRingBehind() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256));
+        var channel = connect()) {
+      for (var i = 0; i < 5; i++) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create(
+                "doomed" + i,
+                List.of("sh"),
+                dir.resolve("no-such-dir").toString(),
+                "",
+                "",
+                80,
+                24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+        assertTrue(refused.message().contains("Could not start session"), refused.message());
+      }
+      try (var rings = Files.list(dir.resolve("sessions"))) {
+        assertEquals(
+            List.of(),
+            rings.map(p -> p.getFileName().toString()).filter(n -> n.endsWith(".ring")).toList(),
+            "a failed create owns no session, so it must own no ring either");
+      }
+      assertEquals(0, host.sessionCount());
+    }
+  }
+
+  @Test
   void aSessionsRingIsDeletedWhenItIsKilledAndNoOrphanSurvivesAHostRestart() throws Exception {
     var ring = dir.resolve("sessions").resolve("ringed.ring");
     try (var ignored = startHost();

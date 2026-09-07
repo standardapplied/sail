@@ -142,4 +142,60 @@ class AttachLoopTest {
       }
     }
   }
+
+  @Test
+  void aRefusedInputIsNarratedInsteadOfSilentlyDropped() throws Exception {
+    try (var host =
+        new PtySessionHost(
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            64 * 1024,
+            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            ai.singlr.sail.pty.PtyRooms.NONE,
+            ai.singlr.sail.pty.PtyEvents.NONE,
+            "0.0.0-test")) {
+      host.start();
+      try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
+        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+        var channel = client.attach("s1", false);
+
+        var refused = new java.util.concurrent.CountDownLatch(1);
+        var stdout =
+            new ByteArrayOutputStream() {
+              @Override
+              public synchronized void write(byte[] b, int off, int len) {
+                super.write(b, off, len);
+                if (toString(StandardCharsets.UTF_8).contains("[sail: ")) {
+                  refused.countDown();
+                }
+              }
+            };
+        var stdinFeed = new PipedOutputStream();
+        var stdin = new PipedInputStream(stdinFeed);
+        var loop =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      try {
+                        AttachLoop.run(channel, stdin, stdout);
+                      } catch (java.io.IOException e) {
+                        throw new java.io.UncheckedIOException(e);
+                      }
+                    });
+        stdinFeed.write("x".getBytes(StandardCharsets.UTF_8));
+        stdinFeed.flush();
+
+        assertTrue(
+            refused.await(10, java.util.concurrent.TimeUnit.SECONDS),
+            "the host's Err reaches the operator's screen: " + stdout);
+        assertTrue(
+            stdout.toString(StandardCharsets.UTF_8).contains("You do not hold the write token"),
+            stdout.toString(StandardCharsets.UTF_8));
+
+        stdinFeed.write(new byte[] {AttachLoop.DETACH_KEY});
+        stdinFeed.flush();
+        loop.join();
+      }
+    }
+  }
 }
