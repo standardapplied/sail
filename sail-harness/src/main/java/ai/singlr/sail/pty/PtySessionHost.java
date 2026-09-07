@@ -6,6 +6,7 @@
 package ai.singlr.sail.pty;
 
 import ai.singlr.sail.common.Ids;
+import ai.singlr.sail.engine.NameValidator;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -24,6 +25,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The per-container session host: owns every {@link PtySession}, serves the {@link PtyWire}
@@ -48,6 +50,15 @@ public final class PtySessionHost implements AutoCloseable {
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
 
+  /**
+   * The host's resource ceilings, each refused with an {@code Err} that names the cap: sessions one
+   * FDE may own at once, subscribers one session may fan out to, and connections the host serves at
+   * once. {@link #DEFAULTS} is production; tests inject smaller values.
+   */
+  public record Limits(int sessionsPerFde, int subscribersPerSession, int connections) {
+    public static final Limits DEFAULTS = new Limits(32, 16, 256);
+  }
+
   private final Path socketPath;
   private final Path sessionsDir;
   private final long journalCapacity;
@@ -55,8 +66,10 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyRooms rooms;
   private final PtyEvents events;
   private final String version;
+  private final Limits limits;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final String bootId = Ids.newId().toString();
+  private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
@@ -69,6 +82,26 @@ public final class PtySessionHost implements AutoCloseable {
       PtyRooms rooms,
       PtyEvents events,
       String version) {
+    this(
+        socketPath,
+        sessionsDir,
+        journalCapacity,
+        identity,
+        rooms,
+        events,
+        version,
+        Limits.DEFAULTS);
+  }
+
+  PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyRooms rooms,
+      PtyEvents events,
+      String version,
+      Limits limits) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
@@ -76,6 +109,7 @@ public final class PtySessionHost implements AutoCloseable {
     this.rooms = rooms;
     this.events = events;
     this.version = version;
+    this.limits = limits;
   }
 
   /**
@@ -90,6 +124,7 @@ public final class PtySessionHost implements AutoCloseable {
 
   public void start() throws IOException {
     Files.createDirectories(sessionsDir);
+    sweepOrphanRings();
     var socketDir = socketPath.getParent();
     if (socketDir != null) {
       Files.createDirectories(socketDir);
@@ -109,6 +144,38 @@ public final class PtySessionHost implements AutoCloseable {
    */
   public static Path dispatchCredentialOf(Path socket) {
     return socket.resolveSibling(DISPATCH_CREDENTIAL_FILE);
+  }
+
+  /**
+   * Deletes every {@code *.ring} left in the sessions directory. Sessions do not survive a host
+   * restart (there is no rehydration — the child is dead anyway), so any ring on disk at start is
+   * an orphan of a previous run; leaving them would leak 4 MB per distinct name forever and let a
+   * fresh create collide with a stranger's history that no {@link #admitted} check guards.
+   */
+  private void sweepOrphanRings() throws IOException {
+    try (var rings = Files.list(sessionsDir)) {
+      for (var ring : rings.filter(p -> p.getFileName().toString().endsWith(".ring")).toList()) {
+        Files.deleteIfExists(ring);
+      }
+    }
+  }
+
+  /**
+   * One structured line to the host's journald unit (stderr): the principal, the session, and why.
+   * The wire {@code Err} names only what the caller may see; this is where the host records the
+   * rest — every attach, every refusal, every last-resort exception — so a silent close leaves a
+   * trace.
+   */
+  private static void log(String event, String principal, String session, String reason) {
+    System.err.println(
+        "pty-host: "
+            + event
+            + " principal="
+            + principal
+            + " session="
+            + session
+            + " reason="
+            + reason);
   }
 
   private void mintDispatchCredential() throws IOException {
@@ -170,16 +237,29 @@ public final class PtySessionHost implements AutoCloseable {
   private void serve(SocketChannel channel) {
     PtySession attached = null;
     var subscriberId = -1L;
+    var principal = "?";
+    var overCap = connections.incrementAndGet() > limits.connections();
     try (channel) {
       PtyWire.handshake(channel, channel);
       PtyIdentity who;
       if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
+        if (overCap) {
+          log("refused", principal, "-", "connection cap " + limits.connections());
+          reply(
+              channel,
+              new PtyMessage.Err(
+                  "The host is at its connection cap of "
+                      + limits.connections()
+                      + "; try again shortly."));
+          return;
+        }
         try {
           who = identify(token);
         } catch (IOException refused) {
           reply(channel, new PtyMessage.Err(refused.getMessage()));
           return;
         }
+        principal = who.fde();
         reply(channel, new PtyMessage.Welcome(bootId));
       } else {
         reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
@@ -205,21 +285,46 @@ public final class PtySessionHost implements AutoCloseable {
               break;
             }
             if (!admitted(who, session)) {
+              log("refused", principal, m.session(), "not admitted");
+              reply(
+                  channel,
+                  new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
+              break;
+            }
+            if (session.attachedCount() >= limits.subscribersPerSession()) {
+              log(
+                  "refused",
+                  principal,
+                  m.session(),
+                  "subscriber cap " + limits.subscribersPerSession());
               reply(
                   channel,
                   new PtyMessage.Err(
-                      "Session '" + m.session() + "' belongs to " + session.ownerFde() + "."));
+                      "Session '"
+                          + m.session()
+                          + "' is at its subscriber cap of "
+                          + limits.subscribersPerSession()
+                          + "."));
               break;
             }
             reply(channel, new PtyMessage.Ok());
             subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
             attached = session;
+            log("attached", principal, m.session(), m.write() ? "write" : "observe");
           }
           case PtyMessage.Input m -> {
             if (attached == null) {
               reply(channel, new PtyMessage.Err("Attach before writing."));
-            } else if (!attached.input(subscriberId, m.seq(), m.bytes())) {
-              reply(channel, new PtyMessage.Err("You do not hold the write token."));
+            } else {
+              switch (attached.input(subscriberId, m.seq(), m.bytes())) {
+                case NOT_WRITER ->
+                    reply(channel, new PtyMessage.Err("You do not hold the write token."));
+                case BACKLOG ->
+                    reply(
+                        channel,
+                        new PtyMessage.Err("Input backlog is full; the session is not reading."));
+                case ACCEPTED -> {}
+              }
             }
           }
           case PtyMessage.Resize m -> {
@@ -253,10 +358,16 @@ public final class PtySessionHost implements AutoCloseable {
           default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
       }
-    } catch (IOException e) {
+    } catch (IOException disconnected) {
+      var unused = disconnected;
+    } catch (RuntimeException crashed) {
+      log("exception", principal, "-", crashed.toString());
+      reply(channel, new PtyMessage.Err("The host could not serve that request."));
+    } finally {
       if (attached != null) {
         attached.detach(subscriberId);
       }
+      connections.decrementAndGet();
     }
   }
 
@@ -303,14 +414,31 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+    Path cwd;
+    try {
+      NameValidator.requireValidSessionName(m.session());
+      if (m.project() != null && !m.project().isBlank()) {
+        NameValidator.requireValidProjectName(m.project());
+      }
+      requireValidGeometry(m.cols(), m.rows());
+      cwd = requireValidCwd(m.cwd());
+    } catch (IllegalArgumentException bad) {
+      log("refused", who.fde(), m.session(), bad.getMessage());
+      return new PtyMessage.Err(bad.getMessage());
+    }
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {
-      return new PtyMessage.Err(
-          "Session '" + m.session() + "' belongs to " + existing.ownerFde() + ".");
+      log("refused", who.fde(), m.session(), "not admitted");
+      return new PtyMessage.Err("Session '" + m.session() + "' is not yours.");
     }
     if (existing != null && existing.live()) {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
+    }
+    if (existing == null && ownedBy(who.fde()) >= limits.sessionsPerFde()) {
+      log("refused", who.fde(), m.session(), "session cap " + limits.sessionsPerFde());
+      return new PtyMessage.Err(
+          "You are at your session cap of " + limits.sessionsPerFde() + "; kill one first.");
     }
     var commandBytes = PtyWire.wireSize(m.command());
     if (commandBytes > PtyMessage.MAX_COMMAND_BYTES) {
@@ -354,7 +482,7 @@ public final class PtySessionHost implements AutoCloseable {
               events,
               childCommand(origin, env),
               env,
-              Path.of(m.cwd()),
+              cwd,
               ring,
               journalCapacity,
               m.cols(),
@@ -364,6 +492,29 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException e) {
       return new PtyMessage.Err("Could not start session '" + m.session() + "': " + e.getMessage());
     }
+  }
+
+  private static void requireValidGeometry(int cols, int rows) {
+    if (cols < 1 || cols > 65535 || rows < 1 || rows > 65535) {
+      throw new IllegalArgumentException(
+          "Invalid terminal size "
+              + cols
+              + "x"
+              + rows
+              + "; each of cols and rows must be 1..65535.");
+    }
+  }
+
+  private static Path requireValidCwd(String cwd) {
+    try {
+      return Path.of(java.util.Objects.requireNonNullElse(cwd, ""));
+    } catch (java.nio.file.InvalidPathException bad) {
+      throw new IllegalArgumentException("Invalid working directory: " + bad.getMessage());
+    }
+  }
+
+  private long ownedBy(String fde) {
+    return sessions.values().stream().filter(s -> s.ownerFde().equals(fde)).count();
   }
 
   /**
@@ -403,7 +554,8 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err("No session '" + name + "'.");
     }
     if (!admitted(who, session)) {
-      return new PtyMessage.Err("Session '" + name + "' belongs to " + session.ownerFde() + ".");
+      log("refused", who.fde(), name, "not admitted");
+      return new PtyMessage.Err("Session '" + name + "' is not yours.");
     }
     remove(name, session);
     return new PtyMessage.Ok();
@@ -428,6 +580,11 @@ public final class PtySessionHost implements AutoCloseable {
   private void remove(String name, PtySession session) {
     sessions.remove(name, session);
     session.close();
+    try {
+      Files.deleteIfExists(sessionsDir.resolve(name + ".ring"));
+    } catch (IOException e) {
+      log("ring-delete-failed", session.ownerFde(), name, e.toString());
+    }
   }
 
   /** One reaping pass at {@code nowNanos}: the mosh grace and retention rules, nothing else. */

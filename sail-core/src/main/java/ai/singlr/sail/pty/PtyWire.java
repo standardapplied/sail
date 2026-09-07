@@ -74,7 +74,7 @@ public final class PtyWire {
   }
 
   private static byte[] encode(PtyMessage message) {
-    var out = new Writer();
+    var out = new Writer(sizeHint(message));
     switch (message) {
       case PtyMessage.Hello m -> out.type(9).string(m.token());
       case PtyMessage.Create m -> {
@@ -139,6 +139,20 @@ public final class PtyWire {
       case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
+  }
+
+  /**
+   * A starting buffer size that fits {@code message} without a realloc for the frames whose length
+   * we know up front — {@code Output}, the hot path, above all, where doubling from 512 would cost
+   * a handful of copies per 64 KiB frame per subscriber. Everything small keeps the modest default.
+   */
+  private static int sizeHint(PtyMessage message) {
+    return switch (message) {
+      case PtyMessage.Output(var seq, var bytes) -> bytes.length + 16;
+      case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
+      case PtyMessage.Err(var text) -> text.length() + 16;
+      default -> 512;
+    };
   }
 
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
@@ -251,7 +265,11 @@ public final class PtyWire {
   }
 
   private static final class Writer {
-    private ByteBuffer buffer = ByteBuffer.allocate(512);
+    private ByteBuffer buffer;
+
+    Writer(int initialCapacity) {
+      buffer = ByteBuffer.allocate(Math.max(16, initialCapacity));
+    }
 
     Writer type(int type) {
       ensure(1);

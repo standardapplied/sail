@@ -103,6 +103,71 @@ class PtySessionTest {
         24);
   }
 
+  private static final class FailingJournal implements Journal {
+    @Override
+    public void append(byte[] buf, int len) throws IOException {
+      throw new IOException("disk full");
+    }
+
+    @Override
+    public void markSafe() {}
+
+    @Override
+    public Tail tail(int maxBytes) {
+      return new Tail(0, true, new byte[0]);
+    }
+
+    @Override
+    public long capacity() {
+      return 64 * 1024;
+    }
+
+    @Override
+    public long totalWritten() {
+      return 0;
+    }
+
+    @Override
+    public void close() {}
+  }
+
+  @Test
+  void anInjectedJournalFailureEndsTheSessionInsteadOfWedging() throws Exception {
+    var session =
+        PtySession.start(
+            origin("wedge", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of("sh", "-c", "read x; echo boom"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            new FailingJournal(),
+            80,
+            24,
+            4096);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+
+      assertTrue(
+          client.ended.await(10, TimeUnit.SECONDS),
+          "a journal that throws must end the session loudly, never wedge it");
+      assertFalse(session.live(), "the failed session is no longer live");
+      assertTrue(
+          client.messages.stream()
+              .anyMatch(
+                  m ->
+                      m instanceof PtyMessage.SessionEnded(var reason)
+                          && reason.contains("io-error")),
+          "every subscriber hears an io-error ending: " + client.messages);
+    } finally {
+      assertTimeoutPreemptively(
+          java.time.Duration.ofSeconds(10),
+          session::close,
+          "close must not hang after a journal failure ended the session");
+    }
+  }
+
   @Test
   void endDeliversTheNoticeAndTheReasonEvenToASubscriberStillDraining() throws Exception {
     var endings = new java.util.concurrent.ConcurrentLinkedQueue<String>();
@@ -310,7 +375,8 @@ class PtySessionTest {
       var firstId = session.attach(first, true, "uday");
       var secondId = session.attach(second, false, "uday");
 
-      assertFalse(
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
           session.input(secondId, 1, "nope\n".getBytes(StandardCharsets.UTF_8)),
           "a non-writer's input is refused, not fatal");
 
@@ -321,7 +387,8 @@ class PtySessionTest {
       }
       assertTrue(first.saw(PtyMessage.WriterChanged.class), "the old writer hears the takeover");
 
-      assertFalse(
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
           session.input(firstId, 2, "stale\n".getBytes(StandardCharsets.UTF_8)),
           "the demoted writer can no longer write");
       session.input(secondId, 3, "fresh\n".getBytes(StandardCharsets.UTF_8));

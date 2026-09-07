@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -54,6 +55,10 @@ class PtySessionHostTest {
       };
 
   private PtySessionHost startHost() throws IOException {
+    return startHost(PtySessionHost.Limits.DEFAULTS);
+  }
+
+  private PtySessionHost startHost(PtySessionHost.Limits limits) throws IOException {
     host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -77,7 +82,8 @@ class PtySessionHostTest {
                 events.add("ended:" + origin.name());
               }
             },
-            "0.0.0-test");
+            "0.0.0-test",
+            limits);
     host.start();
     return host;
   }
@@ -720,6 +726,157 @@ class PtySessionHostTest {
               + " and the corpse of the other can still tell them apart");
       PtyWire.write(owner, new PtyMessage.Kill("again"));
       assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+    }
+  }
+
+  @Test
+  void aPathIshSessionNameIsRefusedBeforeAnythingIsSpawned() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel, new PtyMessage.Create("../escape", List.of("sh"), "/tmp", "", "", 80, 24));
+      var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+      assertTrue(refused.message().contains("Invalid session name"), refused.message());
+      assertFalse(
+          Files.exists(dir.resolve("sessions").resolve("../escape.ring").normalize()),
+          "a traversing name never touched the filesystem");
+      assertEquals(0, host.sessionCount());
+    }
+  }
+
+  @Test
+  void anInvalidProjectYieldsErrNotAConnectionDrop() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel, new PtyMessage.Create("s", List.of("sh"), "/tmp", "Bad Project", "", 80, 24));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel), "an Err, never a silent EOF");
+      PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      assertInstanceOf(
+          PtyMessage.Sessions.class, PtyWire.read(channel), "the connection survives the refusal");
+    }
+  }
+
+  @Test
+  void aSessionsRingIsDeletedWhenItIsKilledAndNoOrphanSurvivesAHostRestart() throws Exception {
+    var ring = dir.resolve("sessions").resolve("ringed.ring");
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel,
+          new PtyMessage.Create("ringed", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      assertTrue(Files.exists(ring), "a live session has a ring on disk");
+
+      PtyWire.write(channel, new PtyMessage.Kill("ringed"));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      assertFalse(Files.exists(ring), "killing the session deletes its ring");
+    }
+
+    var orphan = dir.resolve("sessions").resolve("orphan.ring");
+    Files.write(orphan, "stale".getBytes(StandardCharsets.UTF_8));
+    try (var ignored = startHost()) {
+      assertFalse(Files.exists(orphan), "a restart sweeps every orphan ring — no rehydration");
+    }
+  }
+
+  @Test
+  void aStoppedChildWithAFloodingWriterDoesNotStallOtherConnections() throws Exception {
+    try (var ignored = startHost()) {
+      try (var flooder = connect()) {
+        PtyWire.write(
+            flooder,
+            new PtyMessage.Create(
+                "stuck", List.of("sh", "-c", "sleep 30"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(flooder));
+        PtyWire.write(flooder, new PtyMessage.Attach("stuck", true));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(flooder));
+
+        var drain =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      try {
+                        while (true) {
+                          PtyWire.read(flooder);
+                        }
+                      } catch (IOException done) {
+                        var unused = done;
+                      }
+                    });
+        var big = new byte[16384];
+        for (var i = 0; i < 700; i++) {
+          PtyWire.write(flooder, new PtyMessage.Input(i, big));
+        }
+
+        try (var other = connect("tok-mady")) {
+          PtyWire.write(other, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          var reply =
+              assertTimeoutPreemptively(
+                  java.time.Duration.ofSeconds(10),
+                  () -> PtyWire.read(other),
+                  "a stuck writer must never pin the accept lane or a second connection");
+          assertInstanceOf(PtyMessage.Sessions.class, reply);
+        }
+        drain.interrupt();
+      }
+    }
+  }
+
+  @Test
+  void createRefusesBeyondThePerFdeSessionCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(2, 8, 8));
+        var channel = connect()) {
+      for (var i = 0; i < 2; i++) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create("s" + i, List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      }
+      PtyWire.write(
+          channel,
+          new PtyMessage.Create("s2", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+      var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+      assertTrue(refused.message().contains("session cap of 2"), refused.message());
+    }
+  }
+
+  @Test
+  void attachRefusesBeyondThePerSessionSubscriberCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 2, 8))) {
+      try (var owner = connect()) {
+        PtyWire.write(
+            owner,
+            new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+      }
+      var held = new java.util.ArrayList<SocketChannel>();
+      try {
+        for (var i = 0; i < 2; i++) {
+          var observer = connect();
+          held.add(observer);
+          PtyWire.write(observer, new PtyMessage.Attach("shared", false));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(observer));
+        }
+        try (var third = connect()) {
+          PtyWire.write(third, new PtyMessage.Attach("shared", false));
+          var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(third));
+          assertTrue(refused.message().contains("subscriber cap of 2"), refused.message());
+        }
+      } finally {
+        for (var channel : held) {
+          channel.close();
+        }
+      }
+    }
+  }
+
+  @Test
+  void theHostRefusesConnectionsBeyondItsCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1));
+        var first = connect()) {
+      var refused = assertThrows(IOException.class, this::connect);
+      assertTrue(refused.getMessage().contains("connection cap of 1"), refused.getMessage());
     }
   }
 

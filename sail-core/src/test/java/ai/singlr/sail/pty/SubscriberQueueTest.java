@@ -111,4 +111,19 @@ class SubscriberQueueTest {
     assertInstanceOf(PtyMessage.Paused.class, queue.next());
     assertInstanceOf(PtyMessage.SessionEnded.class, queue.next(), "an ending outranks the pause");
   }
+
+  @Test
+  void theByteCapTripsThePauseLongBeforeTheCountCapWouldWithLargeFrames() throws Exception {
+    var queue = new SubscriberQueue(4096, 256 * 1024);
+    var big = new PtyMessage.Output(0, new byte[64 * 1024]);
+    for (var i = 0; i < 5; i++) {
+      queue.enqueue(big);
+    }
+
+    assertInstanceOf(
+        PtyMessage.Paused.class,
+        queue.next(),
+        "five 64 KiB frames overrun the 256 KiB byte cap, pausing at 5 of 4096 slots — the byte cap"
+            + " bounds heap where a frame count never could");
+  }
 }

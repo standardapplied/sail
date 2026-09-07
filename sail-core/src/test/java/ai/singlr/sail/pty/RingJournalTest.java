@@ -139,4 +139,17 @@ class RingJournalTest {
       assertArrayEquals(bytes("ccccc"), tail.bytes());
     }
   }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void aFreshRingIsCreatedOwnerOnly() throws Exception {
+    var path = dir.resolve("private.ring");
+    try (var ring = RingJournal.open(path, 1024)) {
+      ring.append(bytes("secret"), 6);
+    }
+    assertEquals(
+        "rw-------",
+        java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(path)),
+        "session bytes are as private as the socket that serves them");
+  }
 }
