@@ -865,6 +865,68 @@ class PtySessionHostTest {
   }
 
   @Test
+  void aYieldedSessionsRingIsDeletedLikeAKilledOnes() throws Exception {
+    var ring = dir.resolve("sessions").resolve("resume-y.ring");
+    try (var ignored = startHost();
+        var owner = connect()) {
+      PtyWire.write(
+          owner,
+          new PtyMessage.Create("resume-y", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+      assertTrue(Files.exists(ring), "a live session has a ring on disk");
+
+      try (var dispatch = connect(dispatchCredential())) {
+        PtyWire.write(dispatch, new PtyMessage.Yield("resume-y", "yielded to dispatch 2"));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
+      }
+      assertFalse(Files.exists(ring), "a yield leaves no ring behind, exactly like a kill");
+      assertEquals(0, host.sessionCount());
+    }
+  }
+
+  @Test
+  void recreatingAnotherOwnersCorpseCountsAgainstTheRecreatorsSessionCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8))) {
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create("keep", List.of("sh", "-c", "exit 0"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+        awaitCorpse(uday, "keep");
+      }
+      try (var admin = connect("tok-root")) {
+        PtyWire.write(
+            admin,
+            new PtyMessage.Create("own", List.of("sh", "-c", "exit 0"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(admin));
+        awaitCorpse(admin, "own");
+        PtyWire.write(
+            admin,
+            new PtyMessage.Create("own", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(
+            PtyMessage.Ok.class,
+            readControl(admin),
+            "recreating your own corpse replaces it and takes no extra slot");
+        PtyWire.write(
+            admin,
+            new PtyMessage.Create("keep", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        var refused = assertInstanceOf(PtyMessage.Err.class, readControl(admin));
+        assertTrue(
+            refused.message().contains("session cap of 1"),
+            "another owner's corpse is a new session for the admin: " + refused.message());
+      }
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(uday, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        var listed = (PtyMessage.Sessions) readControl(uday);
+        assertEquals(
+            "keep",
+            listed.sessions().getFirst().name(),
+            "the refused recreate left the corpse intact");
+      }
+    }
+  }
+
+  @Test
   void createRefusesBeyondThePerFdeSessionCap() throws Exception {
     try (var ignored = startHost(new PtySessionHost.Limits(2, 8, 8));
         var channel = connect()) {

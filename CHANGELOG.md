@@ -11,7 +11,7 @@
     SIGTERM does not outlive its session), then every subscriber hears
     `SessionEnded(reason=io-error)`.
   - **Ring files are deleted and never leak.** A session's `~/.sail/sessions/<name>.ring` is removed
-    when the session is killed, swept, or re-created — and when its create fails to spawn, so a
+    when the session is killed, yielded to a dispatch, swept, or re-created — and when its create fails to spawn, so a
     bad working directory cannot litter rings that no quota counts — and every orphan ring is swept
     at host start (sessions do not survive a restart — there is no rehydration). New rings are
     created owner-only (0600).
@@ -38,7 +38,9 @@
     dropped, so a paste that outran the session is visibly incomplete rather than silently short.
   - **Resource caps.** Sessions per FDE (32) and subscribers per session (16) are each refused with
     an `Err` naming the cap, and each admission is atomic with its registration, so concurrent
-    creates or attaches cannot all take the last slot. A socket over the host's connection cap
+    creates or attaches cannot all take the last slot. Recreating another owner's corpse (an admin
+    reusing a name) counts as a new session against the recreator's cap; only replacing your own
+    corpse takes no extra slot. A socket over the host's connection cap
     (256) is closed before a byte of it is read: a peer that opens many and never speaks holds no
     handler, descriptor, or frame past the cap.
   - **The host logs one line per attach, refusal, and exception** (principal, session, reason) to its

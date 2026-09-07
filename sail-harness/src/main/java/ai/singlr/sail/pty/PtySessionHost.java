@@ -442,7 +442,8 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
     }
-    if (existing == null && ownedBy(who.fde()) >= limits.sessionsPerFde()) {
+    var replacesOwn = existing != null && existing.ownerFde().equals(who.fde());
+    if (!replacesOwn && ownedBy(who.fde()) >= limits.sessionsPerFde()) {
       log("refused", who.fde(), m.session(), "session cap " + limits.sessionsPerFde());
       return new PtyMessage.Err(
           "You are at your session cap of " + limits.sessionsPerFde() + "; kill one first.");
@@ -573,7 +574,7 @@ public final class PtySessionHost implements AutoCloseable {
    * Ends a live session that a reservation displaced — the reason lands in the stream and on the
    * ended event. Idempotent: a session that is not live has nothing to end, so the answer is {@code
    * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
-   * whichever FDE opened it.
+   * whichever FDE opened it. The ring goes with the session, as it does on a kill.
    */
   private PtyMessage yieldSession(String name, String reason) {
     var session = sessions.get(name);
@@ -582,6 +583,7 @@ public final class PtySessionHost implements AutoCloseable {
     }
     sessions.remove(name, session);
     session.end(reason);
+    deleteRing(sessionsDir.resolve(name + ".ring"), session.ownerFde(), name);
     return new PtyMessage.Ok();
   }
 
