@@ -111,4 +111,41 @@ class SubscriberQueueTest {
     assertInstanceOf(PtyMessage.Paused.class, queue.next());
     assertInstanceOf(PtyMessage.SessionEnded.class, queue.next(), "an ending outranks the pause");
   }
+
+  @Test
+  void theByteCapTripsThePauseLongBeforeTheCountCapWouldWithLargeFrames() throws Exception {
+    var queue = new SubscriberQueue(4096, 256 * 1024);
+    var big = new PtyMessage.Output(0, new byte[64 * 1024]);
+    for (var i = 0; i < 5; i++) {
+      queue.enqueue(big);
+    }
+
+    assertInstanceOf(
+        PtyMessage.Paused.class,
+        queue.next(),
+        "five 64 KiB frames overrun the 256 KiB byte cap, pausing at 5 of 4096 slots — the byte cap"
+            + " bounds heap where a frame count never could");
+  }
+
+  @Test
+  void repeatedStateNotificationsCoalesceSoAStalledReaderCannotBeFloodedWithThem()
+      throws Exception {
+    var queue = new SubscriberQueue(4);
+    queue.enqueue(out(1));
+    queue.force(new PtyMessage.Resized(80, 24));
+    for (var i = 0; i < 100_000; i++) {
+      queue.force(new PtyMessage.WriterChanged("fde-" + i));
+    }
+    queue.force(new PtyMessage.Resized(100, 40));
+    queue.force(new PtyMessage.SessionEnded("gone"));
+
+    assertEquals(1, ((PtyMessage.Output) queue.next()).lastInputSeq(), "output is untouched");
+    assertEquals(
+        new PtyMessage.WriterChanged("fde-99999"),
+        queue.next(),
+        "only the latest writer is pending — a TakeWrite storm cannot grow the queue");
+    assertEquals(
+        new PtyMessage.Resized(100, 40), queue.next(), "only the latest geometry is pending");
+    assertInstanceOf(PtyMessage.SessionEnded.class, queue.next(), "the ending still arrives");
+  }
 }

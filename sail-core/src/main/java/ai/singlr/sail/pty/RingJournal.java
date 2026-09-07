@@ -10,27 +10,31 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayDeque;
+import java.util.Set;
 
 /**
- * A fixed-capacity ring of raw session bytes, journaled to one file so history survives a host
- * restart — the durability tmux never had. The layout is a small header (magic, version, capacity,
- * total bytes ever written, safe watermark) followed by the ring region; the write position is
- * always {@code totalWritten % capacity}.
+ * A fixed-capacity ring of raw session bytes, journaled to one file that backs a live session's
+ * replay — the whole history the host serves an attacher or a resync from. The layout is a small
+ * header (magic, version, capacity, total bytes ever written, safe watermark) followed by the ring
+ * region; the write position is always {@code totalWritten % capacity}.
+ *
+ * <p>The file is a session's working history, not a durable record: sessions do not survive a host
+ * restart (there is no rehydration), so the host sweeps every ring at start and deletes a session's
+ * ring when it removes the session. The file is created owner-only (0600) — session bytes are as
+ * private as the socket that serves them.
  *
  * <p>The journal stores bytes and one number; it never inspects the stream. The session host owns
  * safety: it feeds the same bytes to a {@link TermBoundary} and calls {@link #markSafe()} at clean
  * points, and {@link #tail(int)} starts replay at the newest safe watermark still inside the window
  * — falling back to the raw window start, flagged unsafe, when history has overwritten it.
  */
-public final class RingJournal implements AutoCloseable {
+public final class RingJournal implements Journal {
 
   private static final long MAGIC = 0x5341494C52494E47L;
   private static final int VERSION = 1;
   private static final int HEADER_BYTES = 40;
-
-  /** One replayable tail: bytes from {@code startOffset} of the stream, safe or best-effort. */
-  public record Tail(long startOffset, boolean safe, byte[] bytes) {}
 
   private final FileChannel channel;
   private final long capacity;
@@ -69,9 +73,7 @@ public final class RingJournal implements AutoCloseable {
     if (capacity <= 0) {
       throw new IllegalArgumentException("Ring capacity must be positive, got " + capacity + ".");
     }
-    var channel =
-        FileChannel.open(
-            path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+    var channel = openOwnerOnly(path);
     if (channel.size() == 0) {
       var journal = new RingJournal(channel, capacity, 0, 0);
       journal.writeHeader();
@@ -112,7 +114,22 @@ public final class RingJournal implements AutoCloseable {
     return new RingJournal(channel, capacity, header.getLong(), header.getLong());
   }
 
+  private static FileChannel openOwnerOnly(Path path) throws IOException {
+    var options =
+        Set.of(StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+    try {
+      return FileChannel.open(
+          path,
+          options,
+          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+    } catch (UnsupportedOperationException notPosix) {
+      return FileChannel.open(
+          path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+    }
+  }
+
   /** Appends {@code buf[0..len)} to the ring and persists the header. */
+  @Override
   public void append(byte[] buf, int len) throws IOException {
     var offset = 0;
     while (offset < len) {
@@ -126,17 +143,12 @@ public final class RingJournal implements AutoCloseable {
   }
 
   /**
-   * Records that the stream is at a safe replay boundary right now — but keeps the OLDEST safe
-   * start still worth replaying: the stored mark only advances once it has fallen below {@code
-   * keepFloor} (the replay budget's edge). Advancing eagerly would mean "nothing to replay" after
-   * every quiet moment; a late attacher wants history, starting clean.
-   */
-  /**
    * Records that the stream is at a safe replay boundary right now. The journal keeps every such
    * boundary still inside the ring (a stride apart, so the set stays small); a replay of any width
    * then starts at the oldest boundary inside its window, so a late attacher gets the most history
    * the ring can offer, and never a screen that begins mid-sequence.
    */
+  @Override
   public void markSafe() throws IOException {
     var boundary = totalWritten;
     var start = windowStart();
@@ -158,7 +170,8 @@ public final class RingJournal implements AutoCloseable {
    * that window when there is one; otherwise from the window start, flagged unsafe so the client
    * clears its screen before applying.
    */
-  public Tail tail(int maxBytes) throws IOException {
+  @Override
+  public Journal.Tail tail(int maxBytes) throws IOException {
     var from = Math.max(windowStart(), totalWritten - maxBytes);
     var safe = false;
     for (var checkpoint : checkpoints) {
@@ -178,13 +191,15 @@ public final class RingJournal implements AutoCloseable {
       channel.read(slice, HEADER_BYTES + position);
       read += chunk;
     }
-    return new Tail(from, safe, bytes);
+    return new Journal.Tail(from, safe, bytes);
   }
 
+  @Override
   public long capacity() {
     return capacity;
   }
 
+  @Override
   public long totalWritten() {
     return totalWritten;
   }

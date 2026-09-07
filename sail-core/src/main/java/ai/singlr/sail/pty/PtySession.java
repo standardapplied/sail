@@ -11,8 +11,11 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -25,10 +28,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * backlog dropped, marked by {@code Paused}/{@code Continued} frames — while the writer and
  * everyone else stay live.
  *
- * <p>Exactly one subscriber holds the write token; input from anyone else is refused. Attach
- * replays the journal tail bracketed by {@code ReplayBegin}/{@code ReplayEnd}, then streams. When
- * the child exits, every subscriber hears {@code SessionEnded} and the corpse (ring included) stays
- * readable until the host reaps it.
+ * <p>Exactly one subscriber holds the write token; input from anyone else is refused. Input never
+ * blocks the connection that sends it: the write-token holder's keystrokes are offered onto a queue
+ * bounded in frames and bytes, drained by a dedicated platform writer thread (the mirror of the
+ * gather thread), so a child that has stopped reading (Ctrl-S, a stopped job) backs up the queue —
+ * answered {@code BACKLOG} — rather than pinning the caller's virtual thread inside a blocking
+ * foreign write or growing the host heap. Attach replays the journal tail bracketed by {@code
+ * ReplayBegin}/{@code ReplayEnd}, then streams. When the child exits — or a pty or journal failure
+ * ends it — every subscriber hears {@code SessionEnded} and the corpse stays readable until the
+ * host reaps it.
  */
 public final class PtySession implements AutoCloseable {
 
@@ -37,7 +45,18 @@ public final class PtySession implements AutoCloseable {
     void deliver(PtyMessage message);
   }
 
+  /**
+   * The outcome of offering input: taken onto the writer queue, refused, or refused for backlog.
+   */
+  public enum WriteOutcome {
+    ACCEPTED,
+    NOT_WRITER,
+    BACKLOG
+  }
+
   private record Subscriber(long id, Client client, SubscriberQueue queue) {}
+
+  private record Keystroke(long seq, byte[] bytes) {}
 
   /**
    * What a session was born as: its name, the id of this incarnation of that name, the FDE who
@@ -70,21 +89,38 @@ public final class PtySession implements AutoCloseable {
   private final PtyEvents events;
   private final Pty pty;
   private final Process child;
-  private final RingJournal journal;
+  private final Journal journal;
   private final TermBoundary boundary = new TermBoundary();
   private final int queueCapacity;
 
   /** A replayed journal crosses the wire in frames this large — well under the 1 MiB frame cap. */
   static final int REPLAY_CHUNK = 256 * 1024;
 
-  /** The replay window: everything the journal holds. */
+  /**
+   * A resync replays only this recent a tail — the link just proved too slow for the whole ring.
+   */
+  static final int RESYNC_TAIL = 256 * 1024;
+
+  /** The writer queue backs up to this many keystrokes before input is refused as backlog. */
+  static final int MAX_INPUT_BACKLOG = 512;
+
+  /**
+   * Queued plus in-flight input is held to this many bytes: a writer whose child stopped reading
+   * hears {@code BACKLOG} before it can grow the host heap, however large its legal frames are.
+   */
+  static final int MAX_INPUT_BACKLOG_BYTES = 1 << 20;
+
+  /** The attach replay window: everything the journal holds. */
   private final int replayMax;
 
   private final Map<Long, Subscriber> subscribers = new ConcurrentHashMap<>();
+  private final BlockingQueue<Keystroke> inputQueue = new ArrayBlockingQueue<>(MAX_INPUT_BACKLOG);
+  private final Semaphore inputBudget = new Semaphore(MAX_INPUT_BACKLOG_BYTES);
   private final Object fanout = new Object();
   private final AtomicLong subscriberIds = new AtomicLong();
   private final AtomicLong lastInputSeq = new AtomicLong(-1);
   private final CountDownLatch gatherDone = new CountDownLatch(1);
+  private volatile Thread writerThread;
   private final long createdAt = System.nanoTime();
   private volatile long writerId = -1;
   private volatile String writerFde = "";
@@ -94,12 +130,7 @@ public final class PtySession implements AutoCloseable {
   private volatile boolean everAttached;
 
   private PtySession(
-      Origin origin,
-      PtyEvents events,
-      Pty pty,
-      Process child,
-      RingJournal journal,
-      int queueCapacity) {
+      Origin origin, PtyEvents events, Pty pty, Process child, Journal journal, int queueCapacity) {
     this.origin = origin;
     this.events = events;
     this.pty = pty;
@@ -139,8 +170,36 @@ public final class PtySession implements AutoCloseable {
       int rows,
       int queueCapacity)
       throws IOException {
-    var journal = RingJournal.open(journalPath, journalCapacity);
-    var pty = Pty.open(cols, rows);
+    return start(
+        origin,
+        events,
+        argv,
+        env,
+        cwd,
+        RingJournal.open(journalPath, journalCapacity),
+        cols,
+        rows,
+        queueCapacity);
+  }
+
+  static PtySession start(
+      Origin origin,
+      PtyEvents events,
+      List<String> argv,
+      Map<String, String> env,
+      Path cwd,
+      Journal journal,
+      int cols,
+      int rows,
+      int queueCapacity)
+      throws IOException {
+    Pty pty;
+    try {
+      pty = Pty.open(cols, rows);
+    } catch (IOException e) {
+      journal.close();
+      throw e;
+    }
     Process child;
     try {
       child = pty.spawn(argv, env, cwd);
@@ -151,6 +210,8 @@ public final class PtySession implements AutoCloseable {
     }
     var session = new PtySession(origin, events, pty, child, journal, queueCapacity);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
+    session.writerThread =
+        Thread.ofPlatform().name("pty-write-" + origin.name()).start(session::drainInput);
     emitQuietly(() -> events.sessionStarted(origin));
     return session;
   }
@@ -189,12 +250,10 @@ public final class PtySession implements AutoCloseable {
         }
       }
     } catch (IOException e) {
-      failure = "pty failed: " + e.getMessage();
+      failure = "io-error: " + e.getMessage();
     } finally {
       try {
-        var exit = "exited(" + child.onExit().join().exitValue() + ")";
-        var reason = failure != null ? failure : Objects.requireNonNullElse(yieldedReason, exit);
-        pty.close();
+        var reason = endReason(failure);
         synchronized (fanout) {
           endedAtNanos = System.nanoTime();
           endedReason = reason;
@@ -209,6 +268,45 @@ public final class PtySession implements AutoCloseable {
   }
 
   /**
+   * The reason the session ends, computed with the pty already released so nothing can wedge. On a
+   * pty or journal failure the child may still be alive — close the pty, kill it outright and reap
+   * it before the ending is published, because {@link #close()} skips its escalation once the
+   * gather is done and a child that shrugs off SIGHUP and SIGTERM would otherwise outlive its
+   * session untracked; the reason is the failure. Otherwise the child has exited (or a yield
+   * displaced it): close the pty, then read its exit status, which returns at once because the
+   * child is already gone.
+   */
+  private String endReason(String failure) {
+    if (failure != null) {
+      pty.close();
+      child.destroyForcibly();
+      child.onExit().join();
+      return failure;
+    }
+    pty.close();
+    return Objects.requireNonNullElse(
+        yieldedReason, "exited(" + child.onExit().join().exitValue() + ")");
+  }
+
+  private void drainInput() {
+    try {
+      while (true) {
+        var keystroke = inputQueue.take();
+        try {
+          lastInputSeq.set(keystroke.seq());
+          pty.write(keystroke.bytes());
+        } finally {
+          inputBudget.release(keystroke.bytes().length);
+        }
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    } catch (IOException failed) {
+      var unused = failed;
+    }
+  }
+
+  /**
    * Re-baselines a subscriber whose pause dropped part of the stream: under the fanout lock, the
    * journal tail replaces whatever accumulated in its queue (those bytes are inside the snapshot),
    * so the client hears {@code Continued}, a bracketed replay, then live traffic — exactly-once
@@ -217,7 +315,7 @@ public final class PtySession implements AutoCloseable {
   private void resync(Subscriber subscriber) {
     synchronized (fanout) {
       try {
-        subscriber.queue().replaceWith(replayMessages());
+        subscriber.queue().replaceWith(replayMessages(RESYNC_TAIL));
       } catch (IOException e) {
         subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
       }
@@ -225,13 +323,14 @@ public final class PtySession implements AutoCloseable {
   }
 
   /**
-   * The journal's whole history as a bracketed replay: {@code ReplayBegin}, then the tail in {@code
-   * Output} frames of at most {@link #REPLAY_CHUNK} bytes each, then {@code ReplayEnd}. The wire
-   * refuses frames over 1 MiB, so a 4 MB journal must cross as a run of frames; a client
-   * concatenates {@code Output} frames regardless, so the bracket is all it sees.
+   * At most {@code maxBytes} of history as a bracketed replay: {@code ReplayBegin}, then the tail
+   * in {@code Output} frames of at most {@link #REPLAY_CHUNK} bytes each, then {@code ReplayEnd}.
+   * The wire refuses frames over 1 MiB, so a wide replay must cross as a run of frames; a client
+   * concatenates {@code Output} frames regardless, so the bracket is all it sees. Attach replays
+   * the whole ring ({@link #replayMax}); a resync replays only a recent {@link #RESYNC_TAIL} tail.
    */
-  private List<PtyMessage> replayMessages() throws IOException {
-    var tail = journal.tail(replayMax);
+  private List<PtyMessage> replayMessages(int maxBytes) throws IOException {
+    var tail = journal.tail(maxBytes);
     var messages = new java.util.ArrayList<PtyMessage>();
     messages.add(new PtyMessage.ReplayBegin(tail.safe()));
     var bytes = tail.bytes();
@@ -254,7 +353,7 @@ public final class PtySession implements AutoCloseable {
     var subscriber =
         new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
     synchronized (fanout) {
-      replayMessages().forEach(subscriber.queue()::force);
+      replayMessages(replayMax).forEach(subscriber.queue()::force);
       subscribers.put(subscriber.id, subscriber);
       if (endedReason != null) {
         subscriber.queue().force(new PtyMessage.SessionEnded(endedReason));
@@ -294,18 +393,26 @@ public final class PtySession implements AutoCloseable {
   }
 
   /**
-   * Writes input on behalf of {@code subscriberId}; only the write-token holder may. Returns {@code
-   * false} — never throws — when the caller does not hold the token, so a non-writer's stray input
-   * is a refusable outcome, not a fatal error that tears down its connection. An {@link
-   * IOException} means the pty write itself failed. The sequence rides future output.
+   * Offers input on behalf of {@code subscriberId}; only the write-token holder may. Never blocks
+   * and never throws: a non-writer is {@code NOT_WRITER}, and a writer whose keystrokes have backed
+   * up behind a child that stopped reading is {@code BACKLOG} — both refusable outcomes, not a
+   * fatal error that tears down the connection or pins its thread in a blocking foreign write.
+   * Backlog is bounded in bytes as well as frames, and the bytes are reserved before the payload is
+   * copied — so the budget, not the heap, is what a stalled child exhausts. Accepted keystrokes are
+   * drained by the writer thread; the sequence rides future output.
    */
-  public boolean input(long subscriberId, long seq, byte[] bytes) throws IOException {
+  public WriteOutcome input(long subscriberId, long seq, byte[] bytes) {
     if (subscriberId != writerId) {
-      return false;
+      return WriteOutcome.NOT_WRITER;
     }
-    lastInputSeq.set(seq);
-    pty.write(bytes);
-    return true;
+    if (!inputBudget.tryAcquire(bytes.length)) {
+      return WriteOutcome.BACKLOG;
+    }
+    if (inputQueue.offer(new Keystroke(seq, bytes.clone()))) {
+      return WriteOutcome.ACCEPTED;
+    }
+    inputBudget.release(bytes.length);
+    return WriteOutcome.BACKLOG;
   }
 
   /** Transfers the write token to {@code subscriberId}; everyone hears about it. */
@@ -436,6 +543,10 @@ public final class PtySession implements AutoCloseable {
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+    var writer = writerThread;
+    if (writer != null) {
+      writer.interrupt();
     }
     synchronized (this) {
       subscribers.clear();

@@ -259,4 +259,32 @@ class NameValidatorTest {
   void nullFdeHandleIsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(null));
   }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"resume-abc123", "room-oauth-flow.2", "MyShell", "s1", "a", "0", "a.b-c-d"})
+  void validSessionNames(String name) {
+    assertDoesNotThrow(() -> NameValidator.requireValidSessionName(name));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"../foo", "a/b", "..", "a..b", "has space", "", ".hidden", "-dash"})
+  void invalidSessionNames(String name) {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> NameValidator.requireValidSessionName(name));
+    assertTrue(ex.getMessage().contains("Invalid session name"));
+  }
+
+  @Test
+  void nullSessionNameIsInvalid() {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidSessionName(null));
+  }
+
+  @Test
+  void sessionNameExceedingMaxLengthIsInvalid() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> NameValidator.requireValidSessionName("a".repeat(81)));
+  }
 }

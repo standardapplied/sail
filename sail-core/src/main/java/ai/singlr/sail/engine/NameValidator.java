@@ -15,6 +15,8 @@ public final class NameValidator {
 
   private static final int MAX_LENGTH = 63;
   public static final int MAX_SPEC_ID_LENGTH = 80;
+  public static final int MAX_SESSION_NAME_LENGTH = 80;
+  private static final Pattern SESSION_NAME = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]*$");
   private static final Pattern PROJECT_NAME = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
   private static final Pattern SPEC_ID = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
   private static final Pattern SNAPSHOT_LABEL = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]*$");
@@ -44,6 +46,28 @@ public final class NameValidator {
               + name
               + "'. Must match [a-z0-9][a-z0-9-]*, max "
               + MAX_LENGTH
+              + " characters.");
+    }
+  }
+
+  /**
+   * Validates a pty session name. The name becomes a file name ({@code <name>.ring}) the host
+   * resolves under its sessions directory and deletes on remove, so the charset (no slash, no
+   * {@code ..}, bounded length) is a path-traversal boundary, not just hygiene — a name like {@code
+   * ../foo} could otherwise escape the directory or delete another session's history. Dots are
+   * allowed (room sessions are named {@code room-<id>.2} upward); {@code ..} is not.
+   */
+  public static void requireValidSessionName(String name) {
+    if (name == null
+        || name.isEmpty()
+        || name.length() > MAX_SESSION_NAME_LENGTH
+        || !SESSION_NAME.matcher(name).matches()
+        || containsDotDot(name)) {
+      throw new IllegalArgumentException(
+          "Invalid session name: '"
+              + name
+              + "'. Must match [A-Za-z0-9][A-Za-z0-9._-]* with no '..' segments, max "
+              + MAX_SESSION_NAME_LENGTH
               + " characters.");
     }
   }

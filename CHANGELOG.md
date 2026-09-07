@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **The pty host ends a session loudly instead of wedging, and never leaks its ring.** A hardening
+  pass over the per-container session host (no wire change):
+  - **A pty or journal failure ends the session.** A read error, or a journal append that throws
+    (a full disk), used to leave the gather thread joining a still-live child that nobody was
+    draining — the session wedged live forever, unreapable, until an explicit kill. It now closes
+    the pty, kills the child outright and reaps it first (a child that shrugs off SIGHUP and
+    SIGTERM does not outlive its session), then every subscriber hears
+    `SessionEnded(reason=io-error)`.
+  - **Ring files are deleted and never leak.** A session's `~/.sail/sessions/<name>.ring` is removed
+    when the session is killed, yielded to a dispatch, swept, or re-created — and when its create fails to spawn, so a
+    bad working directory cannot litter rings that no quota counts — and every orphan ring is swept
+    at host start (sessions do not survive a restart — there is no rehydration). New rings are
+    created owner-only (0600).
+  - **Input never pins a connection.** The write-token holder's keystrokes drain through a dedicated
+    per-session writer thread over a queue bounded in frames and bytes (1 MiB queued plus in-flight,
+    reserved before the payload is copied), so a child that has stopped reading (Ctrl-S, a stopped
+    job) backs up to an `Err("input backlog")` instead of blocking the writer's connection or
+    growing the host heap — and one stuck writer can no longer freeze the accept lane or every
+    other connection.
+  - **Unchecked failures answer `Err`, not a silent close.** An invalid session name, project, cwd,
+    or terminal size is validated up front and refused with `Err`; any other runtime exception (a
+    truncated frame, say) is a logged last resort that still answers `Err` on the open socket and
+    then closes it cleanly, so Mast reads a real refusal rather than a transport fault it retries
+    forever.
+  - **Session names are validated as path segments.** A name like `../foo` is refused before it can
+    escape the sessions directory or delete another session's ring.
+  - **Backlog is bounded by bytes as well as frames.** A stalled subscriber's queue pauses at 1 MiB
+    of live output (not only 4096 frames), and a resync replays a bounded 256 KiB tail rather than
+    the whole 4 MB ring on the link that just proved too slow. Writer and geometry notifications
+    coalesce to the latest of each, so a client that stops reading and hammers `TakeWrite` or
+    `Resize` cannot grow anyone's queue past the caps.
+  - **`sail session attach` narrates a refused keystroke.** The host's `Err` for a rejected input
+    (no write token, or a full input backlog) is rendered inline as `[sail: …]` instead of being
+    dropped, so a paste that outran the session is visibly incomplete rather than silently short.
+  - **Resource caps.** Sessions per FDE (32) and subscribers per session (16) are each refused with
+    an `Err` naming the cap, and each admission is atomic with its registration, so concurrent
+    creates or attaches cannot all take the last slot. Recreating another owner's corpse (an admin
+    reusing a name) counts as a new session against the recreator's cap; only replacing your own
+    corpse takes no extra slot. A socket over the host's connection cap
+    (256) is closed before a byte of it is read: a peer that opens many and never speaks holds no
+    handler, descriptor, or frame past the cap.
+  - **The host logs one line per attach, refusal, and exception** (principal, session, reason) to its
+    journald unit; wire `Err` strings no longer name another FDE's ownership.
+
 ## 0.39.2
 
 - **An attach replays everything the journal holds.** The pty host used to replay at most 256 KB of a

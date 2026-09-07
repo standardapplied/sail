@@ -103,6 +103,116 @@ class PtySessionTest {
         24);
   }
 
+  /** A journal whose disk fills the moment {@code trigger} is appended (empty: at once). */
+  private static final class FailingJournal implements Journal {
+    private final String trigger;
+
+    FailingJournal() {
+      this("");
+    }
+
+    FailingJournal(String trigger) {
+      this.trigger = trigger;
+    }
+
+    @Override
+    public void append(byte[] buf, int len) throws IOException {
+      if (new String(buf, 0, len, StandardCharsets.UTF_8).contains(trigger)) {
+        throw new IOException("disk full");
+      }
+    }
+
+    @Override
+    public void markSafe() {}
+
+    @Override
+    public Tail tail(int maxBytes) {
+      return new Tail(0, true, new byte[0]);
+    }
+
+    @Override
+    public long capacity() {
+      return 64 * 1024;
+    }
+
+    @Override
+    public long totalWritten() {
+      return 0;
+    }
+
+    @Override
+    public void close() {}
+  }
+
+  @Test
+  void anIoErrorEndingReapsAChildThatIgnoresTermination() throws Exception {
+    var session =
+        PtySession.start(
+            origin("stubborn", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "trap '' HUP TERM; echo \"pid=$$;\"; read x; echo boom; while :; do sleep 1; done"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            new FailingJournal("boom"),
+            80,
+            24,
+            4096);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      client.awaitOutput(";");
+      var pid = Long.parseLong(client.outputText().replaceAll("(?s).*pid=(\\d+);.*", "$1"));
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the failure ends the session");
+
+      assertFalse(
+          ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
+          "a child that shrugs off SIGHUP and SIGTERM is dead before the ending is published");
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void anInjectedJournalFailureEndsTheSessionInsteadOfWedging() throws Exception {
+    var session =
+        PtySession.start(
+            origin("wedge", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of("sh", "-c", "read x; echo boom"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            new FailingJournal(),
+            80,
+            24,
+            4096);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+
+      assertTrue(
+          client.ended.await(10, TimeUnit.SECONDS),
+          "a journal that throws must end the session loudly, never wedge it");
+      assertFalse(session.live(), "the failed session is no longer live");
+      assertTrue(
+          client.messages.stream()
+              .anyMatch(
+                  m ->
+                      m instanceof PtyMessage.SessionEnded(var reason)
+                          && reason.contains("io-error")),
+          "every subscriber hears an io-error ending: " + client.messages);
+    } finally {
+      assertTimeoutPreemptively(
+          java.time.Duration.ofSeconds(10),
+          session::close,
+          "close must not hang after a journal failure ended the session");
+    }
+  }
+
   @Test
   void endDeliversTheNoticeAndTheReasonEvenToASubscriberStillDraining() throws Exception {
     var endings = new java.util.concurrent.ConcurrentLinkedQueue<String>();
@@ -310,7 +420,8 @@ class PtySessionTest {
       var firstId = session.attach(first, true, "uday");
       var secondId = session.attach(second, false, "uday");
 
-      assertFalse(
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
           session.input(secondId, 1, "nope\n".getBytes(StandardCharsets.UTF_8)),
           "a non-writer's input is refused, not fatal");
 
@@ -321,7 +432,8 @@ class PtySessionTest {
       }
       assertTrue(first.saw(PtyMessage.WriterChanged.class), "the old writer hears the takeover");
 
-      assertFalse(
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
           session.input(firstId, 2, "stale\n".getBytes(StandardCharsets.UTF_8)),
           "the demoted writer can no longer write");
       session.input(secondId, 3, "fresh\n".getBytes(StandardCharsets.UTF_8));
@@ -380,6 +492,32 @@ class PtySessionTest {
       }
 
       assertTrue(session.live(), "the child never blocked on the stalled observer");
+    }
+  }
+
+  @Test
+  void aChildThatStoppedReadingBoundsQueuedInputByBytesNotJustFrames() throws Exception {
+    try (var session = session("stty raw -echo; echo raw-ready; sleep 60")) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("raw-ready");
+
+      var chunk = new byte[256 * 1024];
+      var accepted = 0;
+      var refused = false;
+      for (var i = 0; i < 16 && !refused; i++) {
+        switch (session.input(writerId, i, chunk)) {
+          case ACCEPTED -> accepted++;
+          case BACKLOG -> refused = true;
+          case NOT_WRITER -> throw new AssertionError("the writer holds the token");
+        }
+      }
+
+      assertTrue(refused, "a child that stopped reading must back input up to BACKLOG");
+      assertTrue(
+          (long) accepted * chunk.length <= PtySession.MAX_INPUT_BACKLOG_BYTES,
+          "queued plus in-flight input exceeded the byte budget: " + accepted + " chunks");
+      assertTrue(session.live(), "backlog is refusable, never fatal");
     }
   }
 
