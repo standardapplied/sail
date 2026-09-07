@@ -13,9 +13,11 @@
     (sessions do not survive a restart — there is no rehydration). New rings are created owner-only
     (0600).
   - **Input never pins a connection.** The write-token holder's keystrokes drain through a dedicated
-    per-session writer thread over a bounded queue, so a child that has stopped reading (Ctrl-S, a
-    stopped job) backs up to an `Err("input backlog")` instead of blocking the writer's connection —
-    and one stuck writer can no longer freeze the accept lane or every other connection.
+    per-session writer thread over a queue bounded in frames and bytes (1 MiB queued plus in-flight,
+    reserved before the payload is copied), so a child that has stopped reading (Ctrl-S, a stopped
+    job) backs up to an `Err("input backlog")` instead of blocking the writer's connection or
+    growing the host heap — and one stuck writer can no longer freeze the accept lane or every
+    other connection.
   - **Unchecked failures answer `Err`, not a silent close.** An invalid session name, project, cwd,
     or terminal size is validated up front and refused with `Err`; any other runtime exception is a
     logged last resort that still answers `Err` and closes cleanly, so Mast reads a real refusal

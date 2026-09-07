@@ -15,6 +15,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -28,13 +29,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * everyone else stay live.
  *
  * <p>Exactly one subscriber holds the write token; input from anyone else is refused. Input never
- * blocks the connection that sends it: the write-token holder's keystrokes are offered onto a
- * bounded queue drained by a dedicated platform writer thread (the mirror of the gather thread), so
- * a child that has stopped reading (Ctrl-S, a stopped job) backs up the queue — answered {@code
- * BACKLOG} — rather than pinning the caller's virtual thread inside a blocking foreign write.
- * Attach replays the journal tail bracketed by {@code ReplayBegin}/{@code ReplayEnd}, then streams.
- * When the child exits — or a pty or journal failure ends it — every subscriber hears {@code
- * SessionEnded} and the corpse stays readable until the host reaps it.
+ * blocks the connection that sends it: the write-token holder's keystrokes are offered onto a queue
+ * bounded in frames and bytes, drained by a dedicated platform writer thread (the mirror of the
+ * gather thread), so a child that has stopped reading (Ctrl-S, a stopped job) backs up the queue —
+ * answered {@code BACKLOG} — rather than pinning the caller's virtual thread inside a blocking
+ * foreign write or growing the host heap. Attach replays the journal tail bracketed by {@code
+ * ReplayBegin}/{@code ReplayEnd}, then streams. When the child exits — or a pty or journal failure
+ * ends it — every subscriber hears {@code SessionEnded} and the corpse stays readable until the
+ * host reaps it.
  */
 public final class PtySession implements AutoCloseable {
 
@@ -102,11 +104,18 @@ public final class PtySession implements AutoCloseable {
   /** The writer queue backs up to this many keystrokes before input is refused as backlog. */
   static final int MAX_INPUT_BACKLOG = 512;
 
+  /**
+   * Queued plus in-flight input is held to this many bytes: a writer whose child stopped reading
+   * hears {@code BACKLOG} before it can grow the host heap, however large its legal frames are.
+   */
+  static final int MAX_INPUT_BACKLOG_BYTES = 1 << 20;
+
   /** The attach replay window: everything the journal holds. */
   private final int replayMax;
 
   private final Map<Long, Subscriber> subscribers = new ConcurrentHashMap<>();
   private final BlockingQueue<Keystroke> inputQueue = new ArrayBlockingQueue<>(MAX_INPUT_BACKLOG);
+  private final Semaphore inputBudget = new Semaphore(MAX_INPUT_BACKLOG_BYTES);
   private final Object fanout = new Object();
   private final AtomicLong subscriberIds = new AtomicLong();
   private final AtomicLong lastInputSeq = new AtomicLong(-1);
@@ -280,8 +289,12 @@ public final class PtySession implements AutoCloseable {
     try {
       while (true) {
         var keystroke = inputQueue.take();
-        lastInputSeq.set(keystroke.seq());
-        pty.write(keystroke.bytes());
+        try {
+          lastInputSeq.set(keystroke.seq());
+          pty.write(keystroke.bytes());
+        } finally {
+          inputBudget.release(keystroke.bytes().length);
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -381,15 +394,22 @@ public final class PtySession implements AutoCloseable {
    * and never throws: a non-writer is {@code NOT_WRITER}, and a writer whose keystrokes have backed
    * up behind a child that stopped reading is {@code BACKLOG} — both refusable outcomes, not a
    * fatal error that tears down the connection or pins its thread in a blocking foreign write.
-   * Accepted keystrokes are drained by the writer thread; the sequence rides future output.
+   * Backlog is bounded in bytes as well as frames, and the bytes are reserved before the payload is
+   * copied — so the budget, not the heap, is what a stalled child exhausts. Accepted keystrokes are
+   * drained by the writer thread; the sequence rides future output.
    */
   public WriteOutcome input(long subscriberId, long seq, byte[] bytes) {
     if (subscriberId != writerId) {
       return WriteOutcome.NOT_WRITER;
     }
-    return inputQueue.offer(new Keystroke(seq, bytes.clone()))
-        ? WriteOutcome.ACCEPTED
-        : WriteOutcome.BACKLOG;
+    if (!inputBudget.tryAcquire(bytes.length)) {
+      return WriteOutcome.BACKLOG;
+    }
+    if (inputQueue.offer(new Keystroke(seq, bytes.clone()))) {
+      return WriteOutcome.ACCEPTED;
+    }
+    inputBudget.release(bytes.length);
+    return WriteOutcome.BACKLOG;
   }
 
   /** Transfers the write token to {@code subscriberId}; everyone hears about it. */

@@ -451,6 +451,32 @@ class PtySessionTest {
   }
 
   @Test
+  void aChildThatStoppedReadingBoundsQueuedInputByBytesNotJustFrames() throws Exception {
+    try (var session = session("stty raw -echo; echo raw-ready; sleep 60")) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("raw-ready");
+
+      var chunk = new byte[256 * 1024];
+      var accepted = 0;
+      var refused = false;
+      for (var i = 0; i < 16 && !refused; i++) {
+        switch (session.input(writerId, i, chunk)) {
+          case ACCEPTED -> accepted++;
+          case BACKLOG -> refused = true;
+          case NOT_WRITER -> throw new AssertionError("the writer holds the token");
+        }
+      }
+
+      assertTrue(refused, "a child that stopped reading must back input up to BACKLOG");
+      assertTrue(
+          (long) accepted * chunk.length <= PtySession.MAX_INPUT_BACKLOG_BYTES,
+          "queued plus in-flight input exceeded the byte budget: " + accepted + " chunks");
+      assertTrue(session.live(), "backlog is refusable, never fatal");
+    }
+  }
+
+  @Test
   void aFailingEndEventStillReleasesTheSessionInsteadOfWedgingClose() throws Exception {
     var brittle =
         new PtyEvents() {
