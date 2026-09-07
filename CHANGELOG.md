@@ -7,7 +7,9 @@
   - **A pty or journal failure ends the session.** A read error, or a journal append that throws
     (a full disk), used to leave the gather thread joining a still-live child that nobody was
     draining — the session wedged live forever, unreapable, until an explicit kill. It now closes
-    the pty and kills the child first, then every subscriber hears `SessionEnded(reason=io-error)`.
+    the pty, kills the child outright and reaps it first (a child that shrugs off SIGHUP and
+    SIGTERM does not outlive its session), then every subscriber hears
+    `SessionEnded(reason=io-error)`.
   - **Ring files are deleted and never leak.** A session's `~/.sail/sessions/<name>.ring` is removed
     when the session is killed, swept, or re-created, and every orphan ring is swept at host start
     (sessions do not survive a restart — there is no rehydration). New rings are created owner-only
@@ -19,16 +21,20 @@
     growing the host heap — and one stuck writer can no longer freeze the accept lane or every
     other connection.
   - **Unchecked failures answer `Err`, not a silent close.** An invalid session name, project, cwd,
-    or terminal size is validated up front and refused with `Err`; any other runtime exception is a
-    logged last resort that still answers `Err` and closes cleanly, so Mast reads a real refusal
-    rather than a transport fault it retries forever.
+    or terminal size is validated up front and refused with `Err`; any other runtime exception (a
+    truncated frame, say) is a logged last resort that still answers `Err` on the open socket and
+    then closes it cleanly, so Mast reads a real refusal rather than a transport fault it retries
+    forever.
   - **Session names are validated as path segments.** A name like `../foo` is refused before it can
     escape the sessions directory or delete another session's ring.
   - **Backlog is bounded by bytes as well as frames.** A stalled subscriber's queue pauses at 1 MiB
     of live output (not only 4096 frames), and a resync replays a bounded 256 KiB tail rather than
     the whole 4 MB ring on the link that just proved too slow.
-  - **Resource caps.** Sessions per FDE (32), subscribers per session (16), and connections per host
-    (256) are each refused with an `Err` naming the cap.
+  - **Resource caps.** Sessions per FDE (32) and subscribers per session (16) are each refused with
+    an `Err` naming the cap, and each admission is atomic with its registration, so concurrent
+    creates or attaches cannot all take the last slot. A socket over the host's connection cap
+    (256) is closed before a byte of it is read: a peer that opens many and never speaks holds no
+    handler, descriptor, or frame past the cap.
   - **The host logs one line per attach, refusal, and exception** (principal, session, reason) to its
     journald unit; wire `Err` strings no longer name another FDE's ownership.
 

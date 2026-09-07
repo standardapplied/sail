@@ -269,15 +269,18 @@ public final class PtySession implements AutoCloseable {
 
   /**
    * The reason the session ends, computed with the pty already released so nothing can wedge. On a
-   * pty or journal failure the child may still be alive — kill it and the pty first, never join a
-   * live child while nobody drains the master — and the reason is the failure. Otherwise the child
-   * has exited (or a yield displaced it): close the pty, then read its exit status, which returns
-   * at once because the child is already gone.
+   * pty or journal failure the child may still be alive — close the pty, kill it outright and reap
+   * it before the ending is published, because {@link #close()} skips its escalation once the
+   * gather is done and a child that shrugs off SIGHUP and SIGTERM would otherwise outlive its
+   * session untracked; the reason is the failure. Otherwise the child has exited (or a yield
+   * displaced it): close the pty, then read its exit status, which returns at once because the
+   * child is already gone.
    */
   private String endReason(String failure) {
     if (failure != null) {
       pty.close();
-      child.destroy();
+      child.destroyForcibly();
+      child.onExit().join();
       return failure;
     }
     pty.close();

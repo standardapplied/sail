@@ -51,9 +51,11 @@ public final class PtySessionHost implements AutoCloseable {
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
 
   /**
-   * The host's resource ceilings, each refused with an {@code Err} that names the cap: sessions one
-   * FDE may own at once, subscribers one session may fan out to, and connections the host serves at
-   * once. {@link #DEFAULTS} is production; tests inject smaller values.
+   * The host's resource ceilings: sessions one FDE may own at once and subscribers one session may
+   * fan out to, each refused with an {@code Err} that names the cap; and connections the host
+   * serves at once, an excess socket being closed before a byte of it is read, so a peer that opens
+   * many and never speaks holds no handler, descriptor, or frame past the cap. {@link #DEFAULTS} is
+   * production; tests inject smaller values.
    */
   public record Limits(int sessionsPerFde, int subscribersPerSession, int connections) {
     public static final Limits DEFAULTS = new Limits(32, 16, 256);
@@ -240,129 +242,130 @@ public final class PtySessionHost implements AutoCloseable {
     var principal = "?";
     var overCap = connections.incrementAndGet() > limits.connections();
     try (channel) {
-      PtyWire.handshake(channel, channel);
-      PtyIdentity who;
-      if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
-        if (overCap) {
-          log("refused", principal, "-", "connection cap " + limits.connections());
-          reply(
-              channel,
-              new PtyMessage.Err(
-                  "The host is at its connection cap of "
-                      + limits.connections()
-                      + "; try again shortly."));
-          return;
-        }
-        try {
-          who = identify(token);
-        } catch (IOException refused) {
-          reply(channel, new PtyMessage.Err(refused.getMessage()));
-          return;
-        }
-        principal = who.fde();
-        reply(channel, new PtyMessage.Welcome(bootId));
-      } else {
-        reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
+      if (overCap) {
+        log("refused", principal, "-", "connection cap " + limits.connections());
         return;
       }
-      while (true) {
-        var message = PtyWire.read(channel);
-        if (who.dispatchAuthority() && !(message instanceof PtyMessage.Yield)) {
-          reply(channel, new PtyMessage.Err("The dispatch authority may only yield sessions."));
-          continue;
-        }
-        switch (message) {
-          case PtyMessage.Create m -> reply(channel, create(m, who));
-          case PtyMessage.Attach m -> {
-            if (attached != null) {
-              reply(channel, new PtyMessage.Err("This connection is already attached."));
-              break;
-            }
-            var session = sessions.get(m.session());
-            if (session == null || !session.live()) {
-              reply(
-                  channel, new PtyMessage.Err("No live session '" + m.session() + "' to attach."));
-              break;
-            }
-            if (!admitted(who, session)) {
-              log("refused", principal, m.session(), "not admitted");
-              reply(
-                  channel,
-                  new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
-              break;
-            }
-            if (session.attachedCount() >= limits.subscribersPerSession()) {
-              log(
-                  "refused",
-                  principal,
-                  m.session(),
-                  "subscriber cap " + limits.subscribersPerSession());
-              reply(
-                  channel,
-                  new PtyMessage.Err(
-                      "Session '"
-                          + m.session()
-                          + "' is at its subscriber cap of "
-                          + limits.subscribersPerSession()
-                          + "."));
-              break;
-            }
-            reply(channel, new PtyMessage.Ok());
-            subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
-            attached = session;
-            log("attached", principal, m.session(), m.write() ? "write" : "observe");
+      try {
+        PtyWire.handshake(channel, channel);
+        PtyIdentity who;
+        if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
+          try {
+            who = identify(token);
+          } catch (IOException refused) {
+            reply(channel, new PtyMessage.Err(refused.getMessage()));
+            return;
           }
-          case PtyMessage.Input m -> {
-            if (attached == null) {
-              reply(channel, new PtyMessage.Err("Attach before writing."));
-            } else {
-              switch (attached.input(subscriberId, m.seq(), m.bytes())) {
-                case NOT_WRITER ->
-                    reply(channel, new PtyMessage.Err("You do not hold the write token."));
-                case BACKLOG ->
-                    reply(
-                        channel,
-                        new PtyMessage.Err("Input backlog is full; the session is not reading."));
-                case ACCEPTED -> {}
+          principal = who.fde();
+          reply(channel, new PtyMessage.Welcome(bootId));
+        } else {
+          reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
+          return;
+        }
+        while (true) {
+          var message = PtyWire.read(channel);
+          if (who.dispatchAuthority() && !(message instanceof PtyMessage.Yield)) {
+            reply(channel, new PtyMessage.Err("The dispatch authority may only yield sessions."));
+            continue;
+          }
+          switch (message) {
+            case PtyMessage.Create m -> reply(channel, create(m, who));
+            case PtyMessage.Attach m -> {
+              if (attached != null) {
+                reply(channel, new PtyMessage.Err("This connection is already attached."));
+                break;
+              }
+              var session = sessions.get(m.session());
+              if (session == null || !session.live()) {
+                reply(
+                    channel,
+                    new PtyMessage.Err("No live session '" + m.session() + "' to attach."));
+                break;
+              }
+              if (!admitted(who, session)) {
+                log("refused", principal, m.session(), "not admitted");
+                reply(
+                    channel,
+                    new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
+                break;
+              }
+              // The cap check and the registration it admits are one step, or concurrent attaches
+              // all take the last slot.
+              synchronized (session) {
+                if (session.attachedCount() >= limits.subscribersPerSession()) {
+                  log(
+                      "refused",
+                      principal,
+                      m.session(),
+                      "subscriber cap " + limits.subscribersPerSession());
+                  reply(
+                      channel,
+                      new PtyMessage.Err(
+                          "Session '"
+                              + m.session()
+                              + "' is at its subscriber cap of "
+                              + limits.subscribersPerSession()
+                              + "."));
+                  break;
+                }
+                reply(channel, new PtyMessage.Ok());
+                subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
+                attached = session;
+              }
+              log("attached", principal, m.session(), m.write() ? "write" : "observe");
+            }
+            case PtyMessage.Input m -> {
+              if (attached == null) {
+                reply(channel, new PtyMessage.Err("Attach before writing."));
+              } else {
+                switch (attached.input(subscriberId, m.seq(), m.bytes())) {
+                  case NOT_WRITER ->
+                      reply(channel, new PtyMessage.Err("You do not hold the write token."));
+                  case BACKLOG ->
+                      reply(
+                          channel,
+                          new PtyMessage.Err("Input backlog is full; the session is not reading."));
+                  case ACCEPTED -> {}
+                }
               }
             }
-          }
-          case PtyMessage.Resize m -> {
-            if (attached != null) {
-              var unused = attached.resize(subscriberId, m.cols(), m.rows());
+            case PtyMessage.Resize m -> {
+              if (attached != null) {
+                var unused = attached.resize(subscriberId, m.cols(), m.rows());
+              }
             }
-          }
-          case PtyMessage.TakeWrite m -> {
-            if (attached == null) {
-              reply(channel, new PtyMessage.Err("Attach before taking the write token."));
-            } else {
-              attached.takeWrite(subscriberId, who.fde());
+            case PtyMessage.TakeWrite m -> {
+              if (attached == null) {
+                reply(channel, new PtyMessage.Err("Attach before taking the write token."));
+              } else {
+                attached.takeWrite(subscriberId, who.fde());
+              }
             }
-          }
-          case PtyMessage.Detach m -> {
-            if (attached != null) {
-              attached.detach(subscriberId);
-              attached = null;
-              subscriberId = -1;
+            case PtyMessage.Detach m -> {
+              if (attached != null) {
+                attached.detach(subscriberId);
+                attached = null;
+                subscriberId = -1;
+              }
+              reply(channel, new PtyMessage.Ok());
             }
-            reply(channel, new PtyMessage.Ok());
+            case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
+            case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
+            case PtyMessage.Yield m ->
+                reply(
+                    channel,
+                    who.dispatchAuthority()
+                        ? yieldSession(m.session(), m.reason())
+                        : new PtyMessage.Err("Yield requires host dispatch authority."));
+            default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
-          case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
-          case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
-          case PtyMessage.Yield m ->
-              reply(
-                  channel,
-                  who.dispatchAuthority()
-                      ? yieldSession(m.session(), m.reason())
-                      : new PtyMessage.Err("Yield requires host dispatch authority."));
-          default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
         }
+      } catch (RuntimeException crashed) {
+        log("exception", principal, "-", crashed.toString());
+        reply(channel, new PtyMessage.Err("The host could not serve that request."));
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
-    } catch (RuntimeException crashed) {
-      log("exception", principal, "-", crashed.toString());
-      reply(channel, new PtyMessage.Err("The host could not serve that request."));
     } finally {
       if (attached != null) {
         attached.detach(subscriberId);
@@ -413,7 +416,11 @@ public final class PtySessionHost implements AutoCloseable {
         : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
 
-  private PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+  /**
+   * Serialized: the per-FDE quota check and the registration of the session it admits must be one
+   * step, or concurrent creates each see the same spare slot and all spawn.
+   */
+  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
     Path cwd;
     try {
       NameValidator.requireValidSessionName(m.session());

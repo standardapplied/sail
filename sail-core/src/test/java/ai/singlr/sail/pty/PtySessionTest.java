@@ -103,10 +103,23 @@ class PtySessionTest {
         24);
   }
 
+  /** A journal whose disk fills the moment {@code trigger} is appended (empty: at once). */
   private static final class FailingJournal implements Journal {
+    private final String trigger;
+
+    FailingJournal() {
+      this("");
+    }
+
+    FailingJournal(String trigger) {
+      this.trigger = trigger;
+    }
+
     @Override
     public void append(byte[] buf, int len) throws IOException {
-      throw new IOException("disk full");
+      if (new String(buf, 0, len, StandardCharsets.UTF_8).contains(trigger)) {
+        throw new IOException("disk full");
+      }
     }
 
     @Override
@@ -129,6 +142,38 @@ class PtySessionTest {
 
     @Override
     public void close() {}
+  }
+
+  @Test
+  void anIoErrorEndingReapsAChildThatIgnoresTermination() throws Exception {
+    var session =
+        PtySession.start(
+            origin("stubborn", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "trap '' HUP TERM; echo \"pid=$$;\"; read x; echo boom; while :; do sleep 1; done"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            new FailingJournal("boom"),
+            80,
+            24,
+            4096);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      client.awaitOutput(";");
+      var pid = Long.parseLong(client.outputText().replaceAll("(?s).*pid=(\\d+);.*", "$1"));
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the failure ends the session");
+
+      assertFalse(
+          ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
+          "a child that shrugs off SIGHUP and SIGTERM is dead before the ending is published");
+    } finally {
+      session.close();
+    }
   }
 
   @Test

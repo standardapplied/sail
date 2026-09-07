@@ -21,6 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -34,6 +36,8 @@ class PtySessionHostTest {
   private PtySessionHost host;
   private final java.util.concurrent.ConcurrentLinkedQueue<String> events =
       new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private volatile CountDownLatch startGate;
+  private final CountDownLatch startGated = new CountDownLatch(1);
 
   private static final PtyIdentity.Resolver RESOLVER =
       token ->
@@ -70,6 +74,15 @@ class PtySessionHostTest {
               @Override
               public void sessionStarted(PtySession.Origin origin) {
                 events.add("started:" + origin.name() + ":" + origin.ownerFde());
+                var gate = startGate;
+                if (gate != null) {
+                  startGated.countDown();
+                  try {
+                    gate.await();
+                  } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                  }
+                }
               }
 
               @Override
@@ -875,8 +888,120 @@ class PtySessionHostTest {
   void theHostRefusesConnectionsBeyondItsCap() throws Exception {
     try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1));
         var first = connect()) {
-      var refused = assertThrows(IOException.class, this::connect);
-      assertTrue(refused.getMessage().contains("connection cap of 1"), refused.getMessage());
+      assertThrows(IOException.class, this::connect);
+    }
+  }
+
+  @Test
+  void aSocketOverTheConnectionCapIsClosedBeforeItSpeaks() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1));
+        var first = connect();
+        var silent = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+      silent.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+      var read =
+          assertTimeoutPreemptively(
+              java.time.Duration.ofSeconds(10),
+              () -> silent.read(java.nio.ByteBuffer.allocate(PtyWire.MAGIC.length)),
+              "an over-cap socket must not be held waiting for its handshake");
+      assertEquals(-1, read, "the host closes an excess socket without reading or greeting it");
+    }
+  }
+
+  @Test
+  void concurrentCreatesCannotExceedThePerFdeSessionCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8));
+        var first = connect();
+        var second = connect()) {
+      startGate = new CountDownLatch(1);
+      PtyWire.write(
+          first,
+          new PtyMessage.Create("s0", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+      assertTrue(startGated.await(10, TimeUnit.SECONDS), "the first create is mid-admission");
+      PtyWire.write(second, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      PtyWire.write(
+          second,
+          new PtyMessage.Create("s1", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(second));
+      try (var fence = connect()) {
+        PtyWire.write(fence, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertInstanceOf(
+            PtyMessage.Sessions.class,
+            PtyWire.read(fence),
+            "the second create has had a whole round trip to reach admission before the gate opens");
+      }
+      startGate.countDown();
+
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(first));
+      var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(second));
+      assertTrue(refused.message().contains("session cap of 1"), refused.message());
+      assertEquals(1, host.sessionCount(), "a create racing an admitted one spawns nothing");
+    }
+  }
+
+  @Test
+  void concurrentAttachesCannotExceedTheSubscriberCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 1, 16))) {
+      try (var owner = connect()) {
+        PtyWire.write(
+            owner,
+            new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
+      }
+      var contenders = new java.util.ArrayList<SocketChannel>();
+      try {
+        for (var i = 0; i < 8; i++) {
+          contenders.add(connect());
+        }
+        var go = new CountDownLatch(1);
+        var replies = new java.util.concurrent.ConcurrentLinkedQueue<PtyMessage>();
+        var threads =
+            contenders.stream()
+                .map(
+                    channel ->
+                        Thread.ofVirtual()
+                            .start(
+                                () -> {
+                                  try {
+                                    go.await();
+                                    PtyWire.write(channel, new PtyMessage.Attach("shared", false));
+                                    replies.add(PtyWire.read(channel));
+                                  } catch (IOException | InterruptedException e) {
+                                    throw new AssertionError(e);
+                                  }
+                                }))
+                .toList();
+        go.countDown();
+        for (var thread : threads) {
+          thread.join();
+        }
+        assertEquals(
+            1,
+            replies.stream().filter(PtyMessage.Ok.class::isInstance).count(),
+            "exactly one contender takes the last slot: " + replies);
+        assertEquals(
+            7, replies.stream().filter(PtyMessage.Err.class::isInstance).count(), "" + replies);
+        try (var lister = connect()) {
+          assertEquals(1, listed(lister, "shared").attached());
+        }
+      } finally {
+        for (var channel : contenders) {
+          channel.close();
+        }
+      }
+    }
+  }
+
+  @Test
+  void aMalformedFrameIsAnsweredWithErrBeforeTheConnectionCloses() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      var truncatedInput = java.nio.ByteBuffer.allocate(5).putInt(1).put((byte) 3).flip();
+      while (truncatedInput.hasRemaining()) {
+        channel.write(truncatedInput);
+      }
+      var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
+      assertTrue(refused.message().contains("could not serve"), refused.message());
+      assertThrows(IOException.class, () -> PtyWire.read(channel), "then the host hangs up");
     }
   }
 
