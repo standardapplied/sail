@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.40.0
+
 - **The pty host ends a session loudly instead of wedging, and never leaks its ring.** A hardening
   pass over the per-container session host (no wire change):
   - **A pty or journal failure ends the session.** A read error, or a journal append that throws
