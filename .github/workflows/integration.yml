@@ -41,7 +41,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install and initialize incus
+        # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt
+        # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a
+        # plain update refreshes them all — so only Ubuntu's own sources are refreshed here.
         run: |
+          sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
           sudo apt-get update
           sudo apt-get install -y incus
           sudo incus admin init --minimal
