@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -53,6 +55,9 @@ class PtySessionTest {
         }
       }
       messages.add(message);
+      synchronized (this) {
+        notifyAll();
+      }
       if (message instanceof PtyMessage.SessionEnded) {
         ended.countDown();
       }
@@ -76,12 +81,25 @@ class PtySessionTest {
     }
 
     void awaitOutput(String marker) throws InterruptedException {
+      await(
+          () -> outputText().contains(marker),
+          () -> "never saw '" + marker + "'; got: " + outputText());
+    }
+
+    void awaitFrame(Class<? extends PtyMessage> type) throws InterruptedException {
+      await(() -> saw(type), () -> "never saw " + type.getSimpleName() + "; got: " + messages);
+    }
+
+    /** Blocks on this collector's monitor until {@code condition} holds; each delivery wakes it. */
+    private synchronized void await(BooleanSupplier condition, Supplier<String> failure)
+        throws InterruptedException {
       var deadline = System.nanoTime() + 10_000_000_000L;
-      while (!outputText().contains(marker)) {
-        if (System.nanoTime() > deadline) {
-          throw new AssertionError("never saw '" + marker + "'; got: " + outputText());
+      while (!condition.getAsBoolean()) {
+        var remaining = deadline - System.nanoTime();
+        if (remaining <= 0) {
+          throw new AssertionError(failure.get());
         }
-        Thread.sleep(5);
+        TimeUnit.NANOSECONDS.timedWait(this, remaining);
       }
     }
   }
@@ -153,7 +171,8 @@ class PtySessionTest {
             List.of(
                 "sh",
                 "-c",
-                "trap '' HUP TERM; echo \"pid=$$;\"; read x; echo boom; while :; do sleep 1; done"),
+                "trap '' HUP TERM; read go; echo \"pid=$$;\"; read x; echo boom;"
+                    + " while :; do sleep 1; done"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             new FailingJournal("boom"),
@@ -163,9 +182,11 @@ class PtySessionTest {
     try {
       var client = new Collector();
       var id = session.attach(client, true, "uday");
+      // The journal fake replays nothing, so the child speaks only once this subscriber listens.
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
       client.awaitOutput(";");
       var pid = Long.parseLong(client.outputText().replaceAll("(?s).*pid=(\\d+);.*", "$1"));
-      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      session.input(id, 2, "\n".getBytes(StandardCharsets.UTF_8));
       assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the failure ends the session");
 
       assertFalse(
@@ -361,7 +382,7 @@ class PtySessionTest {
       session.attach(observer, false, "uday");
       observer.awaitOutput("early-line");
       assertTrue(observer.saw(PtyMessage.ReplayBegin.class), "replay is bracketed");
-      assertTrue(observer.saw(PtyMessage.ReplayEnd.class));
+      observer.awaitFrame(PtyMessage.ReplayEnd.class);
 
       session.input(writerId, 1, "go\n".getBytes(StandardCharsets.UTF_8));
       observer.awaitOutput("late-line");
@@ -392,6 +413,7 @@ class PtySessionTest {
       var late = new Collector();
       session.attach(late, false, "uday");
       late.awaitOutput("BIG-DONE");
+      late.awaitFrame(PtyMessage.ReplayEnd.class);
 
       var text = late.outputText();
       assertTrue(text.chars().filter(c -> c == 'x').count() >= payload, "every byte replayed");
@@ -405,7 +427,7 @@ class PtySessionTest {
           frames.stream().allMatch(f -> f.bytes().length <= PtySession.REPLAY_CHUNK),
           "every replay frame fits the chunk");
       var kinds = late.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
-      assertEquals("ReplayBegin", kinds.getFirst(), "still bracketed: " + kinds);
+      assertEquals("ReplayBegin", kinds.get(1), "still bracketed, behind the geometry: " + kinds);
       assertTrue(
           kinds.indexOf("ReplayEnd") > kinds.lastIndexOf("Output") - 1,
           "ends the bracket after the tail");
@@ -426,11 +448,7 @@ class PtySessionTest {
           "a non-writer's input is refused, not fatal");
 
       session.takeWrite(secondId, "mady");
-      var deadline = System.nanoTime() + 5_000_000_000L;
-      while (!first.saw(PtyMessage.WriterChanged.class) && System.nanoTime() < deadline) {
-        Thread.sleep(5);
-      }
-      assertTrue(first.saw(PtyMessage.WriterChanged.class), "the old writer hears the takeover");
+      first.awaitFrame(PtyMessage.WriterChanged.class);
 
       assertEquals(
           PtySession.WriteOutcome.NOT_WRITER,
@@ -442,11 +460,133 @@ class PtySessionTest {
   }
 
   @Test
+  void attachAnswersWithTheGeometryThenTheReplayThenTheWriter() throws Exception {
+    try (var session = session("echo wide-line; read a")) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("wide-line");
+      assertTrue(session.resize(writerId, 126, 40), "the writer sizes the pty");
+
+      var observer = new Collector();
+      session.attach(observer, false, "uday");
+      observer.awaitOutput("wide-line");
+      observer.awaitFrame(PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(observer.messages);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.getFirst(),
+          "the pty's live geometry comes before anything else: " + frames);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          frames.get(kinds.indexOf("ReplayEnd") + 1),
+          "and the token holder right after the replay: " + frames);
+    }
+  }
+
+  @Test
+  void aResizeRacingTheAttachCannotStripTheGeometryAheadOfTheReplay() throws Exception {
+    var onAttached = new java.util.concurrent.atomic.AtomicReference<Runnable>(() -> {});
+    var events =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(PtySession.Origin origin) {}
+
+          @Override
+          public void sessionAttached(PtySession.Origin origin, String fde) {
+            onAttached.get().run();
+          }
+
+          @Override
+          public void sessionEnded(PtySession.Origin origin, String reason) {}
+        };
+    try (var session =
+        PtySession.start(
+            origin("race", "uday", "acme"),
+            events,
+            List.of("sh", "-c", "echo wide-line; read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("race.ring"),
+            64 * 1024,
+            80,
+            24)) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("wide-line");
+      assertTrue(session.resize(writerId, 126, 40));
+
+      // The attach event fires after the observer's queue is seeded and before its sender runs:
+      // the writer resizing in that window is the race.
+      onAttached.set(
+          () -> {
+            try {
+              session.resize(writerId, 100, 30);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          });
+      var observer = new Collector();
+      session.attach(observer, false, "mady");
+      observer.awaitFrame(PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(observer.messages);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.getFirst(),
+          "the replay was produced at 126 columns, so that geometry precedes it: " + frames);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
+      assertTrue(
+          frames.indexOf(new PtyMessage.Resized(100, 30)) > kinds.indexOf("ReplayEnd"),
+          "and the racing resize lands after it, where the stream it governs begins: " + frames);
+    }
+  }
+
+  @Test
+  void theSameFdeReclaimsTheTokenFromItsGhostWhileAnotherFdeWaits() throws Exception {
+    try (var session = session("read a; echo got:$a; read b")) {
+      var ghost = new Collector();
+      var ghostId = session.attach(ghost, true, "uday");
+      var returning = new Collector();
+      var returningId = session.attach(returning, true, "uday");
+      ghost.awaitFrame(PtyMessage.WriterChanged.class);
+
+      assertEquals(
+          returningId, session.writerId(), "the same FDE's new connection holds the token");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(ghostId, 1, "stale\n".getBytes(StandardCharsets.UTF_8)),
+          "the ghost's next keystroke is refused");
+      session.input(returningId, 2, "fresh\n".getBytes(StandardCharsets.UTF_8));
+      returning.awaitOutput("got:fresh");
+
+      var other = new Collector();
+      var otherId = session.attach(other, true, "mady");
+      other.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(
+          returningId, session.writerId(), "a different FDE never takes the token by attaching");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(otherId, 3, "nope\n".getBytes(StandardCharsets.UTF_8)));
+      var kinds = other.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          List.copyOf(other.messages).get(kinds.indexOf("ReplayEnd") + 1),
+          "and is told who holds it right after the replay: " + other.messages);
+    }
+  }
+
+  @Test
   void everySubscriberHearsTheEndingAndLateAttachIsRefused() throws Exception {
-    var session = session("echo bye; exit 3");
+    var session = session("read go; echo bye; exit 3");
     try {
       var client = new Collector();
-      session.attach(client, true, "uday");
+      var id = session.attach(client, true, "uday");
+      // The child exits only once this subscriber is attached, so the ending has someone to reach.
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
       assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the ending reaches subscribers");
       assertEquals("exited(3)", session.endedReason());
 
@@ -593,6 +733,65 @@ class PtySessionTest {
           "the ending must reach the subscriber despite the throwing sink");
     } finally {
       assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), session::close);
+    }
+  }
+
+  @Test
+  void aResyncCarriesTheGeometryAndTheWriterTheOverflowDiscarded() throws Exception {
+    var session =
+        PtySession.start(
+            origin("resync-answer", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "read _; i=0; while [ $i -lt 300 ]; do printf '%01000d' $i; i=$((i+1)); done;"
+                    + " printf BURST-END; read _"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("resync-answer.ring"),
+            1024 * 1024,
+            80,
+            24,
+            1);
+    try {
+      var client = new Collector();
+      var gate = new CountDownLatch(1);
+      client.gate = gate;
+      var id = session.attach(client, true, "uday");
+      // The sender is parked on the attach's first frame while the pty grows past the queue: the
+      // overflow clears the replay and the writer answer still pending behind that frame.
+      assertTrue(session.resize(id, 126, 40), "the writer sizes the pty before the burst");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      var deadline = System.nanoTime() + 10_000_000_000L;
+      while (session.journaledBytes() < 300_000) {
+        if (System.nanoTime() > deadline) {
+          throw new AssertionError("burst never landed; journaled=" + session.journaledBytes());
+        }
+        Thread.onSpinWait();
+      }
+
+      client.gate = null;
+      gate.countDown();
+      client.awaitOutput("BURST-END");
+      client.awaitFrame(PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(client.messages);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      var continuedAt = kinds.indexOf("Continued");
+      assertTrue(continuedAt >= 0, "the drain resumed the subscriber: " + kinds);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.get(continuedAt + 1),
+          "the snapshot is parsed in the geometry that produced it: " + kinds);
+      assertEquals("ReplayBegin", kinds.get(continuedAt + 2), "then the replay: " + kinds);
+      var replayEndAt = kinds.subList(continuedAt, kinds.size()).indexOf("ReplayEnd") + continuedAt;
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          frames.get(replayEndAt + 1),
+          "and the writer the overflow discarded is answered again after it: " + kinds);
+    } finally {
+      session.close();
     }
   }
 

@@ -17,9 +17,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * The interactive half of {@code sail session attach}, free of terminal-mode side effects so it is
  * testable with plain streams: pumps stdin to {@code Input} frames (detaching on Ctrl-]), renders
- * {@code Output} bytes to stdout, narrates flow control and the host's refusals inline (a rejected
- * keystroke is never silently lost). Returns the ending reason, or null when the operator detached
- * and the session lives on.
+ * {@code Output} bytes to stdout, narrates flow control, the write token's holder, a replay that
+ * starts mid-sequence, and the host's refusals inline (a rejected keystroke is never silently
+ * lost). Returns the ending reason, or null when the operator detached and the session lives on.
  */
 public final class AttachLoop {
 
@@ -108,16 +108,19 @@ public final class AttachLoop {
           case PtyMessage.Ok ok -> {
             return null;
           }
-          case PtyMessage.Paused paused ->
-              stdout.write(
-                  "\r\n[sail: output paused — falling behind]\r\n"
-                      .getBytes(StandardCharsets.UTF_8));
-          case PtyMessage.Continued resumed ->
-              stdout.write("\r\n[sail: output resumed]\r\n".getBytes(StandardCharsets.UTF_8));
-          case PtyMessage.Err(var refusal) -> {
-            stdout.write(("\r\n[sail: " + refusal + "]\r\n").getBytes(StandardCharsets.UTF_8));
-            stdout.flush();
+          case PtyMessage.Paused paused -> narrate(stdout, "output paused — falling behind");
+          case PtyMessage.Continued resumed -> narrate(stdout, "output resumed");
+          case PtyMessage.WriterChanged(var fde) ->
+              narrate(
+                  stdout,
+                  fde.isBlank() ? "nobody holds the write token" : fde + " holds the write token");
+          case PtyMessage.ReplayBegin(var safe) -> {
+            if (!safe) {
+              narrate(
+                  stdout, "history resumes mid-sequence; the screen settles on the next redraw");
+            }
           }
+          case PtyMessage.Err(var refusal) -> narrate(stdout, refusal);
           default -> {}
         }
       }
@@ -127,5 +130,10 @@ public final class AttachLoop {
       pump.interrupt();
       resizer.interrupt();
     }
+  }
+
+  private static void narrate(OutputStream stdout, String line) throws IOException {
+    stdout.write(("\r\n[sail: " + line + "]\r\n").getBytes(StandardCharsets.UTF_8));
+    stdout.flush();
   }
 }

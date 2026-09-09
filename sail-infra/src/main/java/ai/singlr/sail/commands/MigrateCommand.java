@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.IncusDeviceManager;
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
+import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
@@ -39,7 +41,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -97,7 +98,8 @@ public final class MigrateCommand implements Runnable {
       applyDataImports(db, jsonOutput);
       relocateHostConfig(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
-      relocateContainerSockets(jsonOutput);
+      ensureSshdKeepalive(jsonOutput);
+      convergeContainers(jsonOutput);
       ensurePtyHostService(jsonOutput);
       return runs;
     }
@@ -248,20 +250,60 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Re-points every project container's event-socket bind mount from the legacy {@code /run/sail}
-   * location to the current {@link SailPaths#apiSocketHostDir()} after the socket moved off the
-   * volatile {@code /run} tmpfs. Idempotent and quiet: a container already on the new source is
-   * skipped, one without the device is left untouched (provisioning owns that). Needs root for the
-   * {@code incus} calls; {@link ContainerSailSetup#ensureInstalled} re-adds the device live and
-   * rewrites the in-container scripts to the new path.
-   *
-   * <p>The new host directory is created (and made traversable) first, because {@code sail upgrade}
-   * runs migrate <em>before</em> it restarts {@code sail-api} onto the new path — so the bind-mount
-   * source must exist here, or the re-pointed mounts would strand on a missing directory until the
-   * server start materializes it. The directory bind mount then surfaces the socket the moment the
-   * restart binds it.
+   * Writes the {@link SshdKeepalive} drop-in on the host and reloads sshd when it changed. Lives
+   * here for the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD
+   * binary, which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade
+   * path runs with new-binary code. Needs root; quiet and never fatal otherwise.
    */
-  private static void relocateContainerSockets(boolean jsonOutput) {
+  private static void ensureSshdKeepalive(boolean jsonOutput) {
+    ensureSshdKeepalive(
+        SailPaths.isRoot(),
+        new ShellExecutor(false),
+        Path.of(SshdKeepalive.DROP_IN_PATH),
+        jsonOutput);
+  }
+
+  static void ensureSshdKeepalive(boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
+    if (!root) {
+      return;
+    }
+    try {
+      if (Files.exists(dropIn) && Files.readString(dropIn).equals(SshdKeepalive.content())) {
+        return;
+      }
+      var result = shell.exec(SshdKeepalive.installCommand(dropIn.toString()));
+      if (!result.ok()) {
+        throw new IOException(result.stderr());
+      }
+      if (!jsonOutput) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ sshd keepalive drop-in written"));
+      }
+    } catch (IOException | TimeoutException e) {
+      if (!jsonOutput) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ sshd keepalive drop-in not written: " + e.getMessage()));
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * Brings every running Sail container's machinery — the event-socket bind mount and every
+   * sail-owned file, the sshd drop-in included — up to this binary's payloads, so an upgrade
+   * converges containers without waiting for the next dispatch to heal them. Only instances Sail
+   * itself provisioned qualify (the same provenance gate {@code project apply --all} trusts): a
+   * foreign container on the host must never be handed the API socket and box credential by an
+   * upgrade. Needs root for the {@code incus} calls; a container that fails is named with the
+   * command that converges it.
+   *
+   * <p>The socket's host directory is created (and made traversable) first, because {@code sail
+   * upgrade} runs migrate <em>before</em> it restarts {@code sail-api} onto the new path — so the
+   * bind-mount source must exist here, or the re-pointed mounts would strand on a missing directory
+   * until the server start materializes it.
+   */
+  private static void convergeContainers(boolean jsonOutput) {
     if (!SailPaths.isRoot()) {
       return;
     }
@@ -273,60 +315,55 @@ public final class MigrateCommand implements Runnable {
       return;
     }
     var shell = new ShellExecutor(false);
-    var devices = new IncusDeviceManager(shell);
-    var desired = hostDir.toString();
     List<String> names;
     try {
       names =
           new ContainerManager(shell)
-              .listAll().stream().map(ContainerManager.ContainerInfo::name).toList();
+              .listAll().stream()
+                  .filter(info -> info.state() instanceof ContainerState.Running)
+                  .map(ContainerManager.ContainerInfo::name)
+                  .toList();
     } catch (Exception e) {
       return;
     }
-    var moved = 0;
-    for (var name : containersToRelocate(names, n -> currentSocketSource(devices, n), desired)) {
+    var converged = 0;
+    for (var name : sailManagedContainers(names, new IncusDeviceManager(shell))) {
       try {
-        ContainerSailSetup.ensureInstalled(shell, name);
-        moved++;
+        if (ContainerSailSetup.ensureInstalled(shell, name) == ContainerSailSetup.Result.UPDATED) {
+          converged++;
+        }
       } catch (Exception e) {
         System.err.println(
-            "  socket relocation for "
+            "  machinery for "
                 + name
-                + " failed: "
+                + " not converged: "
                 + e.getMessage()
                 + ". Converge with 'sudo sail project apply "
                 + name
                 + "'.");
       }
     }
-    if (!jsonOutput && moved > 0) {
+    if (!jsonOutput && converged > 0) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|green ✓|@ re-pointed " + moved + " container socket(s) to " + desired));
+              "  @|green ✓|@ converged sail machinery in " + converged + " container(s)"));
     }
   }
 
   /**
-   * The containers whose event-socket device exists but still points at a source other than {@code
-   * desired}. A {@code null} source (no device) is skipped — provisioning, not migration, owns
-   * that. Pure for testing.
+   * The instances among {@code names} that carry Sail's provenance marker. A probe that fails
+   * counts as foreign: migration converges what it can prove is Sail's and claims nothing else.
+   * Pure for testing.
    */
-  static List<String> containersToRelocate(
-      List<String> names, UnaryOperator<String> sourceOf, String desired) {
-    return names.stream()
-        .filter(
-            name -> {
-              var source = sourceOf.apply(name);
-              return source != null && !desired.equals(source);
-            })
-        .toList();
+  static List<String> sailManagedContainers(List<String> names, IncusDeviceManager devices) {
+    return names.stream().filter(name -> sailManaged(name, devices)).toList();
   }
 
-  private static String currentSocketSource(IncusDeviceManager devices, String container) {
+  private static boolean sailManaged(String name, IncusDeviceManager devices) {
     try {
-      return devices.currentEventSocketSource(container);
+      return ProjectApplyCommand.sailManaged(name, devices);
     } catch (Exception e) {
-      return null;
+      return false;
     }
   }
 

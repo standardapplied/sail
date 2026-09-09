@@ -75,16 +75,34 @@ final class SubscriberQueue {
 
   /**
    * Enqueues regardless of pause — endings and poison must always arrive. A state notification
-   * ({@code WriterChanged}, {@code Resized}) replaces any of its kind still pending: only the
-   * latest writer or geometry matters to a reader that is catching up, and a client can raise these
-   * at will (a TakeWrite storm), so they must not accumulate the way the caps forbid output to.
+   * ({@code WriterChanged}, {@code Resized}) replaces one of its kind still pending: a client can
+   * raise these at will (a TakeWrite storm), so they must not accumulate the way the caps forbid
+   * output to. Only the latest writer matters, wherever it sits. A geometry is different: bytes
+   * queued behind a {@code Resized} were produced in that geometry, so it is replaced only while
+   * nothing but control frames separate it from the newcomer — the attach prologue's {@code
+   * Resized} ahead of the replay survives a resize that lands before the sender drains it.
    */
   synchronized void force(PtyMessage message) {
-    if (message instanceof PtyMessage.WriterChanged || message instanceof PtyMessage.Resized) {
-      queue.removeIf(entry -> entry.message().getClass() == message.getClass());
+    if (message instanceof PtyMessage.WriterChanged) {
+      queue.removeIf(entry -> entry.message() instanceof PtyMessage.WriterChanged);
+    } else if (message instanceof PtyMessage.Resized) {
+      dropTrailingResized();
     }
     queue.add(new Entry(message, false, 0));
     notifyAll();
+  }
+
+  private void dropTrailingResized() {
+    var pending = queue.descendingIterator();
+    while (pending.hasNext()) {
+      var next = pending.next().message();
+      if (!(next instanceof PtyMessage.WriterChanged || next instanceof PtyMessage.Resized)) {
+        return;
+      }
+      if (next instanceof PtyMessage.Resized) {
+        pending.remove();
+      }
+    }
   }
 
   /**

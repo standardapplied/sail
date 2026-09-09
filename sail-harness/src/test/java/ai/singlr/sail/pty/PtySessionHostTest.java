@@ -39,14 +39,20 @@ class PtySessionHostTest {
   private volatile CountDownLatch startGate;
   private final CountDownLatch startGated = new CountDownLatch(1);
 
-  private static final PtyIdentity.Resolver RESOLVER =
-      token ->
-          switch (token) {
-            case "", "tok-uday" -> new PtyIdentity("uday", false);
-            case "tok-mady" -> new PtyIdentity("mady", false);
-            case "tok-root" -> new PtyIdentity("root", true);
-            default -> throw new IOException("Session token is not valid or has expired.");
-          };
+  private final java.util.Set<String> revoked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  private final PtyIdentity.Resolver resolver =
+      token -> {
+        if (revoked.contains(token)) {
+          throw new IOException("Session token is not valid or has expired.");
+        }
+        return switch (token) {
+          case "", "tok-uday" -> new PtyIdentity("uday", false);
+          case "tok-mady" -> new PtyIdentity("mady", false);
+          case "tok-root" -> new PtyIdentity("root", true);
+          default -> throw new IOException("Session token is not valid or has expired.");
+        };
+      };
 
   private static final PtyRooms ROOMS =
       (room, project, who) -> {
@@ -68,7 +74,7 @@ class PtySessionHostTest {
             dir.resolve("host.sock"),
             dir.resolve("sessions"),
             64 * 1024,
-            RESOLVER,
+            resolver,
             ROOMS,
             new PtyEvents() {
               @Override
@@ -135,6 +141,14 @@ class PtySessionHostTest {
       }
       return hostBootId;
     }
+  }
+
+  /**
+   * The frames every attach answers with before its replay: the pty's geometry, then the bracket.
+   */
+  private static void assertAttachPrologue(SocketChannel channel) throws IOException {
+    assertInstanceOf(PtyMessage.Resized.class, PtyWire.read(channel));
+    assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
   }
 
   private static PtyMessage awaitText(SocketChannel channel, String marker) throws IOException {
@@ -244,7 +258,7 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
         PtyWire.write(owner, new PtyMessage.Attach("resume-1", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(owner));
+        assertAttachPrologue(owner);
         awaitText(owner, "up");
 
         for (var fde : List.of("tok-mady", "tok-uday", "tok-root")) {
@@ -338,7 +352,7 @@ class PtySessionHostTest {
 
         PtyWire.write(channel, new PtyMessage.Attach("pinned", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
+        assertAttachPrologue(channel);
         awaitText(channel, "room=design-talk");
       }
     }
@@ -361,7 +375,7 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
         PtyWire.write(channel, new PtyMessage.Attach("free", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
+        assertAttachPrologue(channel);
         awaitText(channel, "room=[]");
       }
       try (var channel = connect()) {
@@ -502,6 +516,93 @@ class PtySessionHostTest {
   }
 
   @Test
+  void attachAnswersWithTheGeometryTheReplayAndTheWriterOnTheWire() throws Exception {
+    try (var ignored = startHost()) {
+      try (var writer = connect("tok-uday")) {
+        PtyWire.write(
+            writer,
+            new PtyMessage.Create(
+                "sized", List.of("sh", "-c", "echo hi; read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(writer));
+        PtyWire.write(writer, new PtyMessage.Attach("sized", true));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(writer));
+        assertAttachPrologue(writer);
+        awaitText(writer, "hi");
+        PtyWire.write(writer, new PtyMessage.Resize(126, 40));
+
+        try (var observer = connect("tok-root")) {
+          PtyWire.write(observer, new PtyMessage.Attach("sized", true));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(observer));
+          var frames = new java.util.ArrayList<PtyMessage>();
+          PtyMessage frame;
+          do {
+            frame = PtyWire.read(observer);
+            frames.add(frame);
+          } while (!(frame instanceof PtyMessage.WriterChanged));
+          var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+          assertEquals(
+              new PtyMessage.Resized(126, 40),
+              frames.getFirst(),
+              "the writer's geometry is the first frame: " + kinds);
+          assertEquals("ReplayBegin", kinds.get(1), kinds.toString());
+          assertEquals(
+              List.of("ReplayEnd", "WriterChanged"),
+              kinds.subList(kinds.size() - 2, kinds.size()),
+              "the token holder is named right after the replay: " + kinds);
+          assertEquals(
+              new PtyMessage.WriterChanged("uday"),
+              frames.getLast(),
+              "a different FDE asking for write is told who holds it, not given it");
+        }
+      }
+    }
+  }
+
+  @Test
+  void aRevokedCredentialIsSeveredAtTheNextSweep() throws Exception {
+    try (var ignored = startHost()) {
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(
+            mady,
+            new PtyMessage.Create(
+                "hers", List.of("sh", "-c", "echo up; read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+        PtyWire.write(mady, new PtyMessage.Attach("hers", true));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(mady));
+        awaitText(mady, "up");
+
+        revoked.add("tok-mady");
+        host.sweep(System.nanoTime());
+
+        assertThrows(
+            IOException.class,
+            () -> {
+              while (true) {
+                PtyWire.read(mady);
+              }
+            },
+            "the severed connection reads nothing more");
+        try (var admin = connect("tok-root")) {
+          var deadline = System.nanoTime() + 10_000_000_000L;
+          while (true) {
+            PtyWire.write(admin, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+            var listed = (PtyMessage.Sessions) readControl(admin);
+            var hers = listed.sessions().stream().filter(s -> s.name().equals("hers")).findFirst();
+            if (hers.isPresent() && hers.get().attached() == 0) {
+              break;
+            }
+            if (System.nanoTime() > deadline) {
+              throw new AssertionError("the attachment was never dropped: " + listed);
+            }
+          }
+        }
+        assertThrows(
+            IOException.class, () -> connect("tok-mady"), "and the credential no longer admits");
+      }
+    }
+  }
+
+  @Test
   void aNonWritersInputIsRefusedWithoutKillingTheConnection() throws Exception {
     try (var ignored = startHost()) {
       try (var owner = connect("tok-uday")) {
@@ -602,7 +703,7 @@ class PtySessionHostTest {
 
         PtyWire.write(channel, new PtyMessage.Attach("s1", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
+        assertAttachPrologue(channel);
         awaitText(channel, "hi");
 
         PtyWire.write(channel, new PtyMessage.Input(1, "world\n".getBytes(StandardCharsets.UTF_8)));
@@ -612,7 +713,7 @@ class PtySessionHostTest {
       try (var again = connect()) {
         PtyWire.write(again, new PtyMessage.Attach("s1", true));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(again));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(again));
+        assertAttachPrologue(again);
         awaitText(again, "bye:world");
       }
     }
@@ -640,7 +741,7 @@ class PtySessionHostTest {
 
         PtyWire.write(channel, new PtyMessage.Attach("dup", false));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
-        assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
+        assertAttachPrologue(channel);
         var replayed = new StringBuilder();
         PtyMessage message;
         while (!((message = PtyWire.read(channel)) instanceof PtyMessage.ReplayEnd)) {

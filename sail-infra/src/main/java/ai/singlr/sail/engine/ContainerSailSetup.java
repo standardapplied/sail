@@ -85,6 +85,7 @@ public final class ContainerSailSetup {
     new SpecCliHelper(shell).install(container);
     new ClaudeCodeHookConfig(shell).install(container);
     new CodexHookConfig(shell).install(container);
+    new SshdKeepalive(shell).install(container);
     writeStamp(shell, container, expected);
     return Result.UPDATED;
   }
@@ -124,6 +125,7 @@ public final class ContainerSailSetup {
     files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
     files.put(ClaudeCodeHookConfig.SETTINGS_PATH, ClaudeCodeHookConfig.render());
     files.put(CodexHookConfig.SETTINGS_PATH, CodexHookConfig.render());
+    files.put(SshdKeepalive.DROP_IN_PATH, SshdKeepalive.content());
     return files;
   }
 
