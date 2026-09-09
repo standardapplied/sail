@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.41.0
+
 - **A reconnect from the same FDE keeps the keyboard — and its screen.** A laptop that slept left
   a ghost attachment on the box holding the write token; the returning pane attached as a silent
   observer for up to two hours. Now (no wire version bump — every frame already existed):
