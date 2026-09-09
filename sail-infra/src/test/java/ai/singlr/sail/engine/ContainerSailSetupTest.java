@@ -106,6 +106,28 @@ class ContainerSailSetupTest {
   }
 
   @Test
+  void theSshdKeepaliveDropInIsMachineryInstalledAsRootAndVerifiedLikeTheRest() throws Exception {
+    assertEquals(
+        SshdKeepalive.content(),
+        ContainerSailSetup.installedFiles().get(SshdKeepalive.DROP_IN_PATH),
+        "the drop-in is a fingerprinted payload: a stale container heals it on the next probe");
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("config device get " + CONTAINER, "/run/sail\n")
+            .onFail(PROBE, "stale");
+
+    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+
+    var install =
+        shell.invocations().stream()
+            .filter(c -> c.contains(SshdKeepalive.DROP_IN_PATH) && !c.contains(PROBE))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(install.startsWith("incus exec " + CONTAINER + " -- bash"), install);
+    assertFalse(install.contains("--user 1000"), "sshd's config is root's to write: " + install);
+  }
+
+  @Test
   void aFailedVerificationInstallsEverythingAndStamps() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -193,7 +215,8 @@ class ContainerSailSetupTest {
             SpecCliHelper.SCRIPT_PATH,
             SpecCliHelper.PROFILE_PATH,
             ClaudeCodeHookConfig.SETTINGS_PATH,
-            CodexHookConfig.SETTINGS_PATH),
+            CodexHookConfig.SETTINGS_PATH,
+            SshdKeepalive.DROP_IN_PATH),
         java.util.List.copyOf(files.keySet()),
         "the fingerprint must cover every sail-owned in-container file, in stable order — a"
             + " script riding in this list IS its rollout: the fingerprint changes and every"

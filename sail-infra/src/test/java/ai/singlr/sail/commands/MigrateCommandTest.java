@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
@@ -20,8 +21,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,20 +96,25 @@ class MigrateCommandTest {
   }
 
   @Test
-  void containersToRelocateSelectsOnlyDevicesStillOnTheOldSource() {
-    UnaryOperator<String> sourceOf =
-        name ->
-            switch (name) {
-              case "old-box" -> "/run/sail";
-              case "new-box" -> "/var/lib/sail/run";
-              default -> null;
-            };
+  void ensureSshdKeepaliveWritesTheDropInAsRootAndLeavesACurrentOneAlone(@TempDir Path etc)
+      throws Exception {
+    var dropIn = etc.resolve("sshd_config.d/10-sail.conf");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    var targets =
-        MigrateCommand.containersToRelocate(
-            List.of("old-box", "new-box", "no-device"), sourceOf, "/var/lib/sail/run");
+    MigrateCommand.ensureSshdKeepalive(false, shell, dropIn, true);
+    assertTrue(shell.invocations().isEmpty(), "a non-root migrate never touches sshd");
 
-    assertEquals(
-        List.of("old-box"), targets, "only a device still on the old source is re-pointed");
+    MigrateCommand.ensureSshdKeepalive(true, shell, dropIn, true);
+    assertEquals(1, shell.invocations().size(), "root writes the drop-in and reloads sshd");
+    var install = shell.invocations().getFirst();
+    assertTrue(install.contains("ClientAliveInterval 15"), install);
+    assertTrue(install.contains("ClientAliveCountMax 3"), install);
+    assertTrue(install.contains(dropIn.toString()), install);
+    assertTrue(install.contains("systemctl reload ssh"), install);
+
+    Files.createDirectories(dropIn.getParent());
+    Files.writeString(dropIn, SshdKeepalive.content());
+    MigrateCommand.ensureSshdKeepalive(true, shell, dropIn, true);
+    assertEquals(1, shell.invocations().size(), "a drop-in already current is left alone");
   }
 }
