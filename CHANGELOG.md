@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **A reconnect from the same FDE keeps the keyboard — and its screen.** A laptop that slept left
+  a ghost attachment on the box holding the write token; the returning pane attached as a silent
+  observer for up to two hours. Now (no wire version bump — every frame already existed):
+  - **Attach answers with the geometry, the replay, then the writer.** The host sends
+    `Resized(cols, rows)` — the pty's live size — before `ReplayBegin`, so the replay is parsed in
+    the geometry that produced it, and `WriterChanged(current)` right after `ReplayEnd`, so an
+    observer knows it is one.
+  - **Same-FDE reclaim.** `Attach(write)` takes the token when its holder is the same FDE on another
+    connection; the ghost hears `WriterChanged` and its next `Input` is refused. A different FDE
+    still waits (arbitration unchanged) and is told who holds it.
+  - **Revoked credentials are severed.** The host sweep re-resolves every admitted connection's
+    token and closes those the resolver now refuses.
+  - **sshd notices a vanished peer within a minute.** A managed
+    `/etc/ssh/sshd_config.d/10-sail.conf` (`ClientAliveInterval 15`, `ClientAliveCountMax 3`) is
+    written on the host by `sail migrate` (so every `sail upgrade` converges it) and installed in
+    every project container as part of sail's machinery; migrate now converges every running
+    container's machinery on upgrade.
+  - **`sail session attach` narrates the token holder** and a replay that starts mid-sequence
+    instead of dropping the frames.
+
 ## 0.40.0
 
 - **The pty host ends a session loudly instead of wedging, and never leaks its ring.** A hardening
