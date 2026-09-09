@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
+import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
 import ai.singlr.sail.engine.SailPaths;
@@ -289,10 +290,13 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Brings every running project container's sail machinery — the event-socket bind mount and every
+   * Brings every running Sail container's machinery — the event-socket bind mount and every
    * sail-owned file, the sshd drop-in included — up to this binary's payloads, so an upgrade
-   * converges containers without waiting for the next dispatch to heal them. Needs root for the
-   * {@code incus} calls; a container that fails is named with the command that converges it.
+   * converges containers without waiting for the next dispatch to heal them. Only instances Sail
+   * itself provisioned qualify (the same provenance gate {@code project apply --all} trusts): a
+   * foreign container on the host must never be handed the API socket and box credential by an
+   * upgrade. Needs root for the {@code incus} calls; a container that fails is named with the
+   * command that converges it.
    *
    * <p>The socket's host directory is created (and made traversable) first, because {@code sail
    * upgrade} runs migrate <em>before</em> it restarts {@code sail-api} onto the new path — so the
@@ -323,7 +327,7 @@ public final class MigrateCommand implements Runnable {
       return;
     }
     var converged = 0;
-    for (var name : names) {
+    for (var name : sailManagedContainers(names, new IncusDeviceManager(shell))) {
       try {
         if (ContainerSailSetup.ensureInstalled(shell, name) == ContainerSailSetup.Result.UPDATED) {
           converged++;
@@ -343,6 +347,23 @@ public final class MigrateCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ converged sail machinery in " + converged + " container(s)"));
+    }
+  }
+
+  /**
+   * The instances among {@code names} that carry Sail's provenance marker. A probe that fails
+   * counts as foreign: migration converges what it can prove is Sail's and claims nothing else.
+   * Pure for testing.
+   */
+  static List<String> sailManagedContainers(List<String> names, IncusDeviceManager devices) {
+    return names.stream().filter(name -> sailManaged(name, devices)).toList();
+  }
+
+  private static boolean sailManaged(String name, IncusDeviceManager devices) {
+    try {
+      return ProjectApplyCommand.sailManaged(name, devices);
+    } catch (Exception e) {
+      return false;
     }
   }
 

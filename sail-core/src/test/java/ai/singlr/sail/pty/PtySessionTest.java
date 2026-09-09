@@ -469,6 +469,65 @@ class PtySessionTest {
   }
 
   @Test
+  void aResizeRacingTheAttachCannotStripTheGeometryAheadOfTheReplay() throws Exception {
+    var onAttached = new java.util.concurrent.atomic.AtomicReference<Runnable>(() -> {});
+    var events =
+        new PtyEvents() {
+          @Override
+          public void sessionStarted(PtySession.Origin origin) {}
+
+          @Override
+          public void sessionAttached(PtySession.Origin origin, String fde) {
+            onAttached.get().run();
+          }
+
+          @Override
+          public void sessionEnded(PtySession.Origin origin, String reason) {}
+        };
+    try (var session =
+        PtySession.start(
+            origin("race", "uday", "acme"),
+            events,
+            List.of("sh", "-c", "echo wide-line; read a"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("race.ring"),
+            64 * 1024,
+            80,
+            24)) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("wide-line");
+      assertTrue(session.resize(writerId, 126, 40));
+
+      // The attach event fires after the observer's queue is seeded and before its sender runs:
+      // the writer resizing in that window is the race.
+      onAttached.set(
+          () -> {
+            try {
+              session.resize(writerId, 100, 30);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          });
+      var observer = new Collector();
+      session.attach(observer, false, "mady");
+      awaitFrame(observer, PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(observer.messages);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.getFirst(),
+          "the replay was produced at 126 columns, so that geometry precedes it: " + frames);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
+      assertTrue(
+          frames.indexOf(new PtyMessage.Resized(100, 30)) > kinds.indexOf("ReplayEnd"),
+          "and the racing resize lands after it, where the stream it governs begins: " + frames);
+    }
+  }
+
+  @Test
   void theSameFdeReclaimsTheTokenFromItsGhostWhileAnotherFdeWaits() throws Exception {
     try (var session = session("read a; echo got:$a; read b")) {
       var ghost = new Collector();

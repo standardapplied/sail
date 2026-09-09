@@ -18,7 +18,7 @@
     `/etc/ssh/sshd_config.d/10-sail.conf` (`ClientAliveInterval 15`, `ClientAliveCountMax 3`) is
     written on the host by `sail migrate` (so every `sail upgrade` converges it) and installed in
     every project container as part of sail's machinery; migrate now converges every running
-    container's machinery on upgrade.
+    Sail-provisioned container's machinery on upgrade (never a foreign Incus instance).
   - **`sail session attach` narrates the token holder** and a replay that starts mid-sequence
     instead of dropping the frames.
 

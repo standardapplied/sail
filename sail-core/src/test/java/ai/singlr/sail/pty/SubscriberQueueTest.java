@@ -148,4 +148,30 @@ class SubscriberQueueTest {
         new PtyMessage.Resized(100, 40), queue.next(), "only the latest geometry is pending");
     assertInstanceOf(PtyMessage.SessionEnded.class, queue.next(), "the ending still arrives");
   }
+
+  @Test
+  void aGeometryAheadOfPendingOutputSurvivesALaterResize() throws Exception {
+    var queue = new SubscriberQueue(4);
+    queue.force(new PtyMessage.Resized(126, 40));
+    queue.force(new PtyMessage.ReplayBegin(true));
+    queue.enqueue(out(1));
+    queue.force(new PtyMessage.ReplayEnd());
+    queue.force(new PtyMessage.WriterChanged("uday"));
+    queue.force(new PtyMessage.Resized(100, 40));
+    queue.force(new PtyMessage.Resized(90, 30));
+
+    assertEquals(
+        new PtyMessage.Resized(126, 40),
+        queue.next(),
+        "the replay behind it was produced at 126 columns: that geometry must reach the reader"
+            + " ahead of those bytes, whatever the writer does meanwhile");
+    assertInstanceOf(PtyMessage.ReplayBegin.class, queue.next());
+    assertEquals(1, ((PtyMessage.Output) queue.next()).lastInputSeq());
+    assertInstanceOf(PtyMessage.ReplayEnd.class, queue.next());
+    assertEquals(new PtyMessage.WriterChanged("uday"), queue.next());
+    assertEquals(
+        new PtyMessage.Resized(90, 30),
+        queue.next(),
+        "resizes with nothing but control frames between them still collapse to the latest");
+  }
 }
