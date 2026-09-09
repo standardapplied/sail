@@ -238,7 +238,7 @@ class AttachLoopTest {
               @Override
               public synchronized void write(byte[] b, int off, int len) {
                 super.write(b, off, len);
-                if (toString(StandardCharsets.UTF_8).contains("[sail: ")) {
+                if (toString(StandardCharsets.UTF_8).contains("You do not hold the write token")) {
                   refused.countDown();
                 }
               }
