@@ -171,7 +171,8 @@ class PtySessionTest {
             List.of(
                 "sh",
                 "-c",
-                "trap '' HUP TERM; echo \"pid=$$;\"; read x; echo boom; while :; do sleep 1; done"),
+                "trap '' HUP TERM; read go; echo \"pid=$$;\"; read x; echo boom;"
+                    + " while :; do sleep 1; done"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             new FailingJournal("boom"),
@@ -181,9 +182,11 @@ class PtySessionTest {
     try {
       var client = new Collector();
       var id = session.attach(client, true, "uday");
+      // The journal fake replays nothing, so the child speaks only once this subscriber listens.
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
       client.awaitOutput(";");
       var pid = Long.parseLong(client.outputText().replaceAll("(?s).*pid=(\\d+);.*", "$1"));
-      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      session.input(id, 2, "\n".getBytes(StandardCharsets.UTF_8));
       assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the failure ends the session");
 
       assertFalse(
@@ -379,7 +382,7 @@ class PtySessionTest {
       session.attach(observer, false, "uday");
       observer.awaitOutput("early-line");
       assertTrue(observer.saw(PtyMessage.ReplayBegin.class), "replay is bracketed");
-      assertTrue(observer.saw(PtyMessage.ReplayEnd.class));
+      observer.awaitFrame(PtyMessage.ReplayEnd.class);
 
       session.input(writerId, 1, "go\n".getBytes(StandardCharsets.UTF_8));
       observer.awaitOutput("late-line");
@@ -410,6 +413,7 @@ class PtySessionTest {
       var late = new Collector();
       session.attach(late, false, "uday");
       late.awaitOutput("BIG-DONE");
+      late.awaitFrame(PtyMessage.ReplayEnd.class);
 
       var text = late.outputText();
       assertTrue(text.chars().filter(c -> c == 'x').count() >= payload, "every byte replayed");
@@ -444,11 +448,7 @@ class PtySessionTest {
           "a non-writer's input is refused, not fatal");
 
       session.takeWrite(secondId, "mady");
-      var deadline = System.nanoTime() + 5_000_000_000L;
-      while (!first.saw(PtyMessage.WriterChanged.class) && System.nanoTime() < deadline) {
-        Thread.sleep(5);
-      }
-      assertTrue(first.saw(PtyMessage.WriterChanged.class), "the old writer hears the takeover");
+      first.awaitFrame(PtyMessage.WriterChanged.class);
 
       assertEquals(
           PtySession.WriteOutcome.NOT_WRITER,
@@ -581,10 +581,12 @@ class PtySessionTest {
 
   @Test
   void everySubscriberHearsTheEndingAndLateAttachIsRefused() throws Exception {
-    var session = session("echo bye; exit 3");
+    var session = session("read go; echo bye; exit 3");
     try {
       var client = new Collector();
-      session.attach(client, true, "uday");
+      var id = session.attach(client, true, "uday");
+      // The child exits only once this subscriber is attached, so the ending has someone to reach.
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
       assertTrue(client.ended.await(10, TimeUnit.SECONDS), "the ending reaches subscribers");
       assertEquals("exited(3)", session.endedReason());
 
