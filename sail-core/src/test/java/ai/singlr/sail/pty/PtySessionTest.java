@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -53,6 +55,9 @@ class PtySessionTest {
         }
       }
       messages.add(message);
+      synchronized (this) {
+        notifyAll();
+      }
       if (message instanceof PtyMessage.SessionEnded) {
         ended.countDown();
       }
@@ -76,12 +81,25 @@ class PtySessionTest {
     }
 
     void awaitOutput(String marker) throws InterruptedException {
+      await(
+          () -> outputText().contains(marker),
+          () -> "never saw '" + marker + "'; got: " + outputText());
+    }
+
+    void awaitFrame(Class<? extends PtyMessage> type) throws InterruptedException {
+      await(() -> saw(type), () -> "never saw " + type.getSimpleName() + "; got: " + messages);
+    }
+
+    /** Blocks on this collector's monitor until {@code condition} holds; each delivery wakes it. */
+    private synchronized void await(BooleanSupplier condition, Supplier<String> failure)
+        throws InterruptedException {
       var deadline = System.nanoTime() + 10_000_000_000L;
-      while (!outputText().contains(marker)) {
-        if (System.nanoTime() > deadline) {
-          throw new AssertionError("never saw '" + marker + "'; got: " + outputText());
+      while (!condition.getAsBoolean()) {
+        var remaining = deadline - System.nanoTime();
+        if (remaining <= 0) {
+          throw new AssertionError(failure.get());
         }
-        Thread.sleep(5);
+        TimeUnit.NANOSECONDS.timedWait(this, remaining);
       }
     }
   }
@@ -452,7 +470,7 @@ class PtySessionTest {
       var observer = new Collector();
       session.attach(observer, false, "uday");
       observer.awaitOutput("wide-line");
-      awaitFrame(observer, PtyMessage.WriterChanged.class);
+      observer.awaitFrame(PtyMessage.WriterChanged.class);
 
       var frames = List.copyOf(observer.messages);
       assertEquals(
@@ -512,7 +530,7 @@ class PtySessionTest {
           });
       var observer = new Collector();
       session.attach(observer, false, "mady");
-      awaitFrame(observer, PtyMessage.WriterChanged.class);
+      observer.awaitFrame(PtyMessage.WriterChanged.class);
 
       var frames = List.copyOf(observer.messages);
       assertEquals(
@@ -534,7 +552,7 @@ class PtySessionTest {
       var ghostId = session.attach(ghost, true, "uday");
       var returning = new Collector();
       var returningId = session.attach(returning, true, "uday");
-      awaitFrame(ghost, PtyMessage.WriterChanged.class);
+      ghost.awaitFrame(PtyMessage.WriterChanged.class);
 
       assertEquals(
           returningId, session.writerId(), "the same FDE's new connection holds the token");
@@ -547,7 +565,7 @@ class PtySessionTest {
 
       var other = new Collector();
       var otherId = session.attach(other, true, "mady");
-      awaitFrame(other, PtyMessage.WriterChanged.class);
+      other.awaitFrame(PtyMessage.WriterChanged.class);
       assertEquals(
           returningId, session.writerId(), "a different FDE never takes the token by attaching");
       assertEquals(
@@ -558,17 +576,6 @@ class PtySessionTest {
           new PtyMessage.WriterChanged("uday"),
           List.copyOf(other.messages).get(kinds.indexOf("ReplayEnd") + 1),
           "and is told who holds it right after the replay: " + other.messages);
-    }
-  }
-
-  private static void awaitFrame(Collector client, Class<? extends PtyMessage> type)
-      throws InterruptedException {
-    var deadline = System.nanoTime() + 10_000_000_000L;
-    while (!client.saw(type)) {
-      if (System.nanoTime() > deadline) {
-        throw new AssertionError("never saw " + type.getSimpleName() + "; got: " + client.messages);
-      }
-      Thread.sleep(5);
     }
   }
 
@@ -724,6 +731,65 @@ class PtySessionTest {
           "the ending must reach the subscriber despite the throwing sink");
     } finally {
       assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), session::close);
+    }
+  }
+
+  @Test
+  void aResyncCarriesTheGeometryAndTheWriterTheOverflowDiscarded() throws Exception {
+    var session =
+        PtySession.start(
+            origin("resync-answer", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "read _; i=0; while [ $i -lt 300 ]; do printf '%01000d' $i; i=$((i+1)); done;"
+                    + " printf BURST-END; read _"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("resync-answer.ring"),
+            1024 * 1024,
+            80,
+            24,
+            1);
+    try {
+      var client = new Collector();
+      var gate = new CountDownLatch(1);
+      client.gate = gate;
+      var id = session.attach(client, true, "uday");
+      // The sender is parked on the attach's first frame while the pty grows past the queue: the
+      // overflow clears the replay and the writer answer still pending behind that frame.
+      assertTrue(session.resize(id, 126, 40), "the writer sizes the pty before the burst");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      var deadline = System.nanoTime() + 10_000_000_000L;
+      while (session.journaledBytes() < 300_000) {
+        if (System.nanoTime() > deadline) {
+          throw new AssertionError("burst never landed; journaled=" + session.journaledBytes());
+        }
+        Thread.onSpinWait();
+      }
+
+      client.gate = null;
+      gate.countDown();
+      client.awaitOutput("BURST-END");
+      client.awaitFrame(PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(client.messages);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      var continuedAt = kinds.indexOf("Continued");
+      assertTrue(continuedAt >= 0, "the drain resumed the subscriber: " + kinds);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.get(continuedAt + 1),
+          "the snapshot is parsed in the geometry that produced it: " + kinds);
+      assertEquals("ReplayBegin", kinds.get(continuedAt + 2), "then the replay: " + kinds);
+      var replayEndAt = kinds.subList(continuedAt, kinds.size()).indexOf("ReplayEnd") + continuedAt;
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          frames.get(replayEndAt + 1),
+          "and the writer the overflow discarded is answered again after it: " + kinds);
+    } finally {
+      session.close();
     }
   }
 

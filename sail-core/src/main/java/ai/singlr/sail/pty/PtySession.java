@@ -323,12 +323,19 @@ public final class PtySession implements AutoCloseable {
    * Re-baselines a subscriber whose pause dropped part of the stream: under the fanout lock, the
    * journal tail replaces whatever accumulated in its queue (those bytes are inside the snapshot),
    * so the client hears {@code Continued}, a bracketed replay, then live traffic — exactly-once
-   * against the journal, never a screen with its middle missing.
+   * against the journal, never a screen with its middle missing. The overflow that paused it
+   * cleared every pending frame, geometry and writer answers included, so the snapshot is framed
+   * the way an attach is — {@code Resized}, the replay, {@code WriterChanged} — and built under the
+   * session monitor, so a token transfer racing it is heard once, after it, never lost behind it.
    */
-  private void resync(Subscriber subscriber) {
+  private synchronized void resync(Subscriber subscriber) {
     synchronized (fanout) {
       try {
-        subscriber.queue().replaceWith(replayMessages(RESYNC_TAIL));
+        var snapshot = new java.util.ArrayList<PtyMessage>();
+        snapshot.add(new PtyMessage.Resized(cols, rows));
+        snapshot.addAll(replayMessages(RESYNC_TAIL));
+        snapshot.add(new PtyMessage.WriterChanged(writerFde));
+        subscriber.queue().replaceWith(snapshot);
       } catch (IOException e) {
         subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
       }
@@ -383,7 +390,7 @@ public final class PtySession implements AutoCloseable {
     }
     synchronized (this) {
       if (wantsWrite && (writerId < 0 || writerFde.equals(fde))) {
-        takeWrite(subscriber.id, fde);
+        grant(subscriber.id, fde);
       } else {
         subscriber.queue().force(new PtyMessage.WriterChanged(writerFde));
       }
@@ -443,6 +450,16 @@ public final class PtySession implements AutoCloseable {
     if (!subscribers.containsKey(subscriberId)) {
       throw new IllegalArgumentException("No attached subscriber " + subscriberId + ".");
     }
+    grant(subscriberId, fde);
+  }
+
+  /**
+   * Hands the token to a subscriber the caller vouches for and tells every subscriber. An attach
+   * grants to the subscriber it just made without looking it up: a session ending in that same
+   * instant has already cleared the roster and queued the ending, and the grant must not throw
+   * after the host said {@code Ok} — the ending is what the newcomer hears.
+   */
+  private void grant(long subscriberId, String fde) {
     writerId = subscriberId;
     writerFde = fde;
     var changed = new PtyMessage.WriterChanged(fde);

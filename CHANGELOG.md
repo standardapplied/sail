@@ -8,7 +8,8 @@
   - **Attach answers with the geometry, the replay, then the writer.** The host sends
     `Resized(cols, rows)` — the pty's live size — before `ReplayBegin`, so the replay is parsed in
     the geometry that produced it, and `WriterChanged(current)` right after `ReplayEnd`, so an
-    observer knows it is one.
+    observer knows it is one. A resync after a flow-control pause is framed the same way, since the
+    overflow that paused the subscriber discarded whatever answer was still pending.
   - **Same-FDE reclaim.** `Attach(write)` takes the token when its holder is the same FDE on another
     connection; the ghost hears `WriterChanged` and its next `Input` is refused. A different FDE
     still waits (arbitration unchanged) and is told who holds it.
