@@ -405,7 +405,7 @@ class PtySessionTest {
           frames.stream().allMatch(f -> f.bytes().length <= PtySession.REPLAY_CHUNK),
           "every replay frame fits the chunk");
       var kinds = late.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
-      assertEquals("ReplayBegin", kinds.getFirst(), "still bracketed: " + kinds);
+      assertEquals("ReplayBegin", kinds.get(1), "still bracketed, behind the geometry: " + kinds);
       assertTrue(
           kinds.indexOf("ReplayEnd") > kinds.lastIndexOf("Output") - 1,
           "ends the bracket after the tail");
@@ -438,6 +438,78 @@ class PtySessionTest {
           "the demoted writer can no longer write");
       session.input(secondId, 3, "fresh\n".getBytes(StandardCharsets.UTF_8));
       second.awaitOutput("done:fresh");
+    }
+  }
+
+  @Test
+  void attachAnswersWithTheGeometryThenTheReplayThenTheWriter() throws Exception {
+    try (var session = session("echo wide-line; read a")) {
+      var writer = new Collector();
+      var writerId = session.attach(writer, true, "uday");
+      writer.awaitOutput("wide-line");
+      assertTrue(session.resize(writerId, 126, 40), "the writer sizes the pty");
+
+      var observer = new Collector();
+      session.attach(observer, false, "uday");
+      observer.awaitOutput("wide-line");
+      awaitFrame(observer, PtyMessage.WriterChanged.class);
+
+      var frames = List.copyOf(observer.messages);
+      assertEquals(
+          new PtyMessage.Resized(126, 40),
+          frames.getFirst(),
+          "the pty's live geometry comes before anything else: " + frames);
+      var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          frames.get(kinds.indexOf("ReplayEnd") + 1),
+          "and the token holder right after the replay: " + frames);
+    }
+  }
+
+  @Test
+  void theSameFdeReclaimsTheTokenFromItsGhostWhileAnotherFdeWaits() throws Exception {
+    try (var session = session("read a; echo got:$a; read b")) {
+      var ghost = new Collector();
+      var ghostId = session.attach(ghost, true, "uday");
+      var returning = new Collector();
+      var returningId = session.attach(returning, true, "uday");
+      awaitFrame(ghost, PtyMessage.WriterChanged.class);
+
+      assertEquals(
+          returningId, session.writerId(), "the same FDE's new connection holds the token");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(ghostId, 1, "stale\n".getBytes(StandardCharsets.UTF_8)),
+          "the ghost's next keystroke is refused");
+      session.input(returningId, 2, "fresh\n".getBytes(StandardCharsets.UTF_8));
+      returning.awaitOutput("got:fresh");
+
+      var other = new Collector();
+      var otherId = session.attach(other, true, "mady");
+      awaitFrame(other, PtyMessage.WriterChanged.class);
+      assertEquals(
+          returningId, session.writerId(), "a different FDE never takes the token by attaching");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(otherId, 3, "nope\n".getBytes(StandardCharsets.UTF_8)));
+      var kinds = other.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
+      assertEquals(
+          new PtyMessage.WriterChanged("uday"),
+          List.copyOf(other.messages).get(kinds.indexOf("ReplayEnd") + 1),
+          "and is told who holds it right after the replay: " + other.messages);
+    }
+  }
+
+  private static void awaitFrame(Collector client, Class<? extends PtyMessage> type)
+      throws InterruptedException {
+    var deadline = System.nanoTime() + 10_000_000_000L;
+    while (!client.saw(type)) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError("never saw " + type.getSimpleName() + "; got: " + client.messages);
+      }
+      Thread.sleep(5);
     }
   }
 

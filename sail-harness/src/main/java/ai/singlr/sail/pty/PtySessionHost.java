@@ -21,9 +21,11 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -35,7 +37,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * traffic flows through the subscriber queue onto the same channel, serialized per connection.
  *
  * <p>Reaping is driven by {@link #sweep(long)} with an injected clock — the production timer thread
- * merely calls it; tests call it directly with synthetic time.
+ * merely calls it; tests call it directly with synthetic time. The same pass re-validates every
+ * admitted connection's credential: a token the resolver no longer honors (a revoked FDE session)
+ * severs the connections it admitted, so a revocation ends live attachments within one sweep rather
+ * than at the next reconnect.
  *
  * <p>Yielding is the one verb no FDE holds. A dispatch that reserves repos must end whichever
  * resumed conversation sits on them regardless of who opened it, so the host mints a random
@@ -70,11 +75,14 @@ public final class PtySessionHost implements AutoCloseable {
   private final String version;
   private final Limits limits;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
+  private final Set<Admitted> admitted = ConcurrentHashMap.newKeySet();
   private final String bootId = Ids.newId().toString();
   private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
+
+  private record Admitted(SocketChannel channel, String token, String principal) {}
 
   public PtySessionHost(
       Path socketPath,
@@ -238,6 +246,7 @@ public final class PtySessionHost implements AutoCloseable {
 
   private void serve(SocketChannel channel) {
     PtySession attached = null;
+    Admitted me = null;
     var subscriberId = -1L;
     var principal = "?";
     var overCap = connections.incrementAndGet() > limits.connections();
@@ -257,6 +266,8 @@ public final class PtySessionHost implements AutoCloseable {
             return;
           }
           principal = who.fde();
+          me = new Admitted(channel, token, principal);
+          admitted.add(me);
           reply(channel, new PtyMessage.Welcome(bootId));
         } else {
           reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
@@ -369,6 +380,9 @@ public final class PtySessionHost implements AutoCloseable {
     } finally {
       if (attached != null) {
         attached.detach(subscriberId);
+      }
+      if (me != null) {
+        admitted.remove(me);
       }
       connections.decrementAndGet();
     }
@@ -601,8 +615,12 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  /** One reaping pass at {@code nowNanos}: the mosh grace and retention rules, nothing else. */
+  /**
+   * One reaping pass at {@code nowNanos}: revoked credentials severed, then the mosh grace and
+   * retention rules, nothing else.
+   */
   public void sweep(long nowNanos) {
+    severRevoked();
     sessions.forEach(
         (name, session) -> {
           if (session.live()
@@ -621,6 +639,38 @@ public final class PtySessionHost implements AutoCloseable {
 
   public int sessionCount() {
     return sessions.size();
+  }
+
+  /**
+   * Closes every connection whose credential the resolver now refuses; its serve loop fails on the
+   * next read and drops the attachment. Each distinct token is resolved once per pass. A resolver
+   * that cannot answer at all (the store is down) severs nothing — that is an outage, not a
+   * revocation.
+   */
+  private void severRevoked() {
+    var verdicts = new HashMap<String, Boolean>();
+    for (var connection : admitted) {
+      if (verdicts.computeIfAbsent(connection.token(), this::revoked)) {
+        log("severed", connection.principal(), "-", "credential revoked");
+        try {
+          connection.channel().close();
+        } catch (IOException ignored) {
+          var unused = ignored;
+        }
+      }
+    }
+  }
+
+  private boolean revoked(String token) {
+    try {
+      identify(token);
+      return false;
+    } catch (IOException refused) {
+      return true;
+    } catch (RuntimeException unavailable) {
+      log("revalidation-skipped", "-", "-", unavailable.toString());
+      return false;
+    }
   }
 
   private static void reply(SocketChannel channel, PtyMessage message) {

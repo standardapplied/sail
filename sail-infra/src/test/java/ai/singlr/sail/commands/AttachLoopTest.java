@@ -52,9 +52,82 @@ class AttachLoopTest {
         var reason = AttachLoop.run(channel, stdin, stdout);
 
         assertEquals("exited(0)", reason);
-        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("pty-says:hello"));
+        var rendered = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(rendered.contains("pty-says:hello"));
+        assertTrue(
+            rendered.contains("[sail: uday holds the write token]"),
+            "the host's answer to the attach names the keyboard's holder: " + rendered);
       }
     }
+  }
+
+  @Test
+  void anObserverAndAMidSequenceReplayAreNarratedNotDropped() throws Exception {
+    var frames = new ByteArrayOutputStream();
+    var sink = java.nio.channels.Channels.newChannel(frames);
+    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.ReplayBegin(false));
+    ai.singlr.sail.pty.PtyWire.write(
+        sink,
+        new ai.singlr.sail.pty.PtyMessage.Output(-1, "old\n".getBytes(StandardCharsets.UTF_8)));
+    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.ReplayEnd());
+    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.WriterChanged("mady"));
+    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.WriterChanged(""));
+    ai.singlr.sail.pty.PtyWire.write(
+        sink, new ai.singlr.sail.pty.PtyMessage.SessionEnded("exited(0)"));
+    var stdout = new ByteArrayOutputStream();
+
+    var reason =
+        AttachLoop.run(new ScriptedChannel(frames.toByteArray()), new PipedInputStream(), stdout);
+
+    assertEquals("exited(0)", reason);
+    var rendered = stdout.toString(StandardCharsets.UTF_8);
+    var expectedOrder =
+        List.of(
+            "[sail: history resumes mid-sequence; the screen settles on the next redraw]",
+            "old",
+            "[sail: mady holds the write token]",
+            "[sail: nobody holds the write token]");
+    var at = -1;
+    for (var line : expectedOrder) {
+      var next = rendered.indexOf(line, at + 1);
+      assertTrue(next > at, "expected '" + line + "' in order in: " + rendered);
+      at = next;
+    }
+  }
+
+  /** A host that has already said everything it will: the frames, then end of stream. */
+  private static final class ScriptedChannel implements java.nio.channels.ByteChannel {
+    private final java.nio.ByteBuffer script;
+
+    ScriptedChannel(byte[] frames) {
+      this.script = java.nio.ByteBuffer.wrap(frames);
+    }
+
+    @Override
+    public int read(java.nio.ByteBuffer dst) {
+      if (!script.hasRemaining()) {
+        return -1;
+      }
+      var n = Math.min(dst.remaining(), script.remaining());
+      dst.put(script.slice(script.position(), n));
+      script.position(script.position() + n);
+      return n;
+    }
+
+    @Override
+    public int write(java.nio.ByteBuffer src) {
+      var n = src.remaining();
+      src.position(src.limit());
+      return n;
+    }
+
+    @Override
+    public boolean isOpen() {
+      return true;
+    }
+
+    @Override
+    public void close() {}
   }
 
   @Test

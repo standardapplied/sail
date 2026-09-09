@@ -33,10 +33,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * bounded in frames and bytes, drained by a dedicated platform writer thread (the mirror of the
  * gather thread), so a child that has stopped reading (Ctrl-S, a stopped job) backs up the queue —
  * answered {@code BACKLOG} — rather than pinning the caller's virtual thread inside a blocking
- * foreign write or growing the host heap. Attach replays the journal tail bracketed by {@code
- * ReplayBegin}/{@code ReplayEnd}, then streams. When the child exits — or a pty or journal failure
- * ends it — every subscriber hears {@code SessionEnded} and the corpse stays readable until the
- * host reaps it.
+ * foreign write or growing the host heap. Attach answers with the pty's live geometry ({@code
+ * Resized}), the journal tail bracketed by {@code ReplayBegin}/{@code ReplayEnd}, then who holds
+ * the write token ({@code WriterChanged}) — so the replay is parsed in the geometry that produced
+ * it and an observer knows it is one — and streams from there. When the child exits — or a pty or
+ * journal failure ends it — every subscriber hears {@code SessionEnded} and the corpse stays
+ * readable until the host reaps it.
  */
 public final class PtySession implements AutoCloseable {
 
@@ -124,19 +126,30 @@ public final class PtySession implements AutoCloseable {
   private final long createdAt = System.nanoTime();
   private volatile long writerId = -1;
   private volatile String writerFde = "";
+  private int cols;
+  private int rows;
   private volatile String endedReason;
   private volatile String yieldedReason;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
 
   private PtySession(
-      Origin origin, PtyEvents events, Pty pty, Process child, Journal journal, int queueCapacity) {
+      Origin origin,
+      PtyEvents events,
+      Pty pty,
+      Process child,
+      Journal journal,
+      int queueCapacity,
+      int cols,
+      int rows) {
     this.origin = origin;
     this.events = events;
     this.pty = pty;
     this.child = child;
     this.journal = journal;
     this.queueCapacity = queueCapacity;
+    this.cols = cols;
+    this.rows = rows;
     this.replayMax = (int) Math.min(journal.capacity(), Integer.MAX_VALUE);
   }
 
@@ -208,7 +221,7 @@ public final class PtySession implements AutoCloseable {
       journal.close();
       throw e;
     }
-    var session = new PtySession(origin, events, pty, child, journal, queueCapacity);
+    var session = new PtySession(origin, events, pty, child, journal, queueCapacity, cols, rows);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
     session.writerThread =
         Thread.ofPlatform().name("pty-write-" + origin.name()).start(session::drainInput);
@@ -344,7 +357,15 @@ public final class PtySession implements AutoCloseable {
     return List.copyOf(messages);
   }
 
-  /** Attaches a client: replay first, live stream after, write token if free and requested. */
+  /**
+   * Attaches a client. Its queue is seeded, in order, with the pty's live geometry, the replay, and
+   * the write token's holder, then the live stream follows. A write request takes the token when it
+   * is free — or when its holder is this same FDE on another connection: a laptop that slept left a
+   * ghost attachment parked on the box holding the keyboard, and the same person coming back is the
+   * one who should have it. The displaced connection hears {@code WriterChanged} and its next input
+   * is refused. A different FDE's token is never taken here — that is {@link #takeWrite}, an
+   * explicit act — so the newcomer learns it is an observer instead.
+   */
   public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
     if (endedReason != null) {
       throw new IOException("Session '" + name() + "' has ended: " + endedReason + ".");
@@ -353,6 +374,7 @@ public final class PtySession implements AutoCloseable {
     var subscriber =
         new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
     synchronized (fanout) {
+      subscriber.queue().force(new PtyMessage.Resized(cols, rows));
       replayMessages(replayMax).forEach(subscriber.queue()::force);
       subscribers.put(subscriber.id, subscriber);
       if (endedReason != null) {
@@ -360,9 +382,10 @@ public final class PtySession implements AutoCloseable {
       }
     }
     synchronized (this) {
-      if (wantsWrite && writerId < 0) {
-        writerId = subscriber.id;
-        writerFde = fde;
+      if (wantsWrite && (writerId < 0 || writerFde.equals(fde))) {
+        takeWrite(subscriber.id, fde);
+      } else {
+        subscriber.queue().force(new PtyMessage.WriterChanged(writerFde));
       }
     }
     emitQuietly(() -> events.sessionAttached(origin, fde));
@@ -429,17 +452,23 @@ public final class PtySession implements AutoCloseable {
   /**
    * Resizes on behalf of {@code subscriberId}; only the write-token holder may, and observers hear
    * the new geometry. Returns {@code false} — never throws — for a non-writer, so an observer's own
-   * window change is a silent no-op rather than a fatal error: the writer's window wins.
+   * window change is a silent no-op rather than a fatal error: the writer's window wins. The
+   * geometry changes under the fanout lock, so a concurrent attach either seeds its queue with the
+   * new size or is already subscribed when the broadcast goes out — never neither.
    */
   public boolean resize(long subscriberId, int cols, int rows) throws IOException {
     if (subscriberId != writerId) {
       return false;
     }
-    pty.resize(cols, rows);
-    var resized = new PtyMessage.Resized(cols, rows);
-    subscribers.values().stream()
-        .filter(subscriber -> subscriber.id() != subscriberId)
-        .forEach(subscriber -> subscriber.queue().force(resized));
+    synchronized (fanout) {
+      pty.resize(cols, rows);
+      this.cols = cols;
+      this.rows = rows;
+      var resized = new PtyMessage.Resized(cols, rows);
+      subscribers.values().stream()
+          .filter(subscriber -> subscriber.id() != subscriberId)
+          .forEach(subscriber -> subscriber.queue().force(resized));
+    }
     return true;
   }
 
