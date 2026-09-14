@@ -222,9 +222,18 @@ class PtySessionHostTest {
         }
         assertTrue(events.contains("attached:mine:root"), events.toString());
 
+        // TakeWrite is not acknowledged: the holder is observable only through a listing, so poll
+        // the listing rather than the attach event, which fires before the token moves.
         try (var owner = connect("tok-uday")) {
           PtyWire.write(owner, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
           var listed = (PtyMessage.Sessions) PtyWire.read(owner);
+          var taken = System.nanoTime() + 5_000_000_000L;
+          while (!"root".equals(listed.sessions().getFirst().writerFde())
+              && System.nanoTime() < taken) {
+            Thread.onSpinWait();
+            PtyWire.write(owner, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+            listed = (PtyMessage.Sessions) PtyWire.read(owner);
+          }
           assertEquals(
               "root", listed.sessions().getFirst().writerFde(), "the token names its holder");
         }

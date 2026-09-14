@@ -86,9 +86,21 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
     }
   }
 
+  /**
+   * The pids of every {@code bash} in the container, from {@code /proc}: the image has no procps.
+   */
   private String bashPids(String container) {
     try {
-      var result = exec(container, List.of("pgrep", "-x", "bash"));
+      var result =
+          exec(
+              container,
+              List.of(
+                  "sh",
+                  "-c",
+                  "for p in /proc/[0-9]*; do"
+                      + " [ \"$(cat \"$p/comm\" 2>/dev/null)\" = bash ] && echo \"${p#/proc/}\";"
+                      + " done; true"));
+      assertTrue(result.ok(), "listing bash pids failed: " + result.stderr());
       return result.stdout().strip().replace("\n", ",");
     } catch (Exception e) {
       throw new AssertionError(e);
