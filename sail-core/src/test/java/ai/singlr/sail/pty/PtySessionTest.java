@@ -164,6 +164,11 @@ class PtySessionTest {
 
   private PtySession resumed(String script, boolean withShim) throws Exception {
     var files = SessionFiles.in(dir, "r");
+    return resumed(files, RingJournal.open(files.ring(), 64 * 1024), script, withShim);
+  }
+
+  private PtySession resumed(SessionFiles files, Journal journal, String script, boolean withShim)
+      throws Exception {
     var command = List.of("sh", "-c", script);
     var argv = withShim ? PtyChildShimTest.shim(files.exit(), "sh", "-c", script) : command;
     var origin = origin("r", "uday", "");
@@ -171,8 +176,130 @@ class PtySessionTest {
     var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
     var meta =
         new SessionMeta(origin, dir.toString(), 80, 24, "uday", 3, child.pid(), 1L, "t", true);
-    return PtySession.resume(
-        meta, PtyEvents.NONE, pty, RingJournal.open(files.ring(), 64 * 1024), files, SdNotify.NONE);
+    return PtySession.resume(meta, PtyEvents.NONE, pty, journal, files, SdNotify.NONE);
+  }
+
+  /** A ring at {@code files} holding exactly {@code history}, with no safe boundary recorded. */
+  private static RingJournal ringWith(SessionFiles files, long capacity, String... history)
+      throws IOException {
+    try (var seed = RingJournal.open(files.ring(), capacity)) {
+      for (var piece : history) {
+        var bytes = piece.getBytes(StandardCharsets.UTF_8);
+        seed.append(bytes, bytes.length);
+      }
+    }
+    return RingJournal.open(files.ring(), capacity);
+  }
+
+  @Test
+  void aResumedSessionRebuildsItsParserFromTheRingsSafeBoundary() throws Exception {
+    var files = SessionFiles.in(dir, "osc");
+    try (var seed = RingJournal.open(files.ring(), 64 * 1024)) {
+      var line = "line\n".getBytes(StandardCharsets.UTF_8);
+      seed.append(line, line.length);
+      seed.markSafe();
+      var unfinishedOsc = "\u001b]0;".getBytes(StandardCharsets.UTF_8);
+      seed.append(unfinishedOsc, unfinishedOsc.length);
+    }
+    var journal = RingJournal.open(files.ring(), 64 * 1024);
+    var session = resumed(files, journal, "read a; echo title; echo more; read b", false);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      session.input(id, 1, "go\n".getBytes(StandardCharsets.UTF_8));
+      client.awaitOutput("more");
+      var recent = journal.tail(8);
+      assertFalse(
+          recent.safe(),
+          "text after an unterminated OSC is still inside it; a newline there is no safe boundary: "
+              + recent);
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aResumedSessionWhoseChildNeverSpokeStillRecordsSafeBoundaries() throws Exception {
+    var files = SessionFiles.in(dir, "quiet");
+    var journal = ringWith(files, 64);
+    var session = resumed(files, journal, "echo hello; read a; echo world; read b", false);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      client.awaitOutput("hello");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      client.awaitOutput("world");
+      var recent = journal.tail(12);
+      assertTrue(
+          recent.safe(), "an empty ring is exact history: the parser starts in ground state");
+      assertEquals(7, recent.startOffset(), "the line end after 'hello' is a recorded checkpoint");
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aResumedSessionWithEvictedUnmarkedHistoryStopsClaimingSafeBoundaries() throws Exception {
+    var files = SessionFiles.in(dir, "evicted");
+    var journal = ringWith(files, 64, "x".repeat(100));
+    var session = resumed(files, journal, "echo y; read a", false);
+    try {
+      var client = new Collector();
+      session.attach(client, true, "uday");
+      client.awaitOutput("y");
+      assertFalse(
+          journal.tail(64).safe(),
+          "with the stream's start gone and no checkpoint, the parser state is unknowable");
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aResizeRacingAKeyboardTransferNeverPersistsAStaleSnapshot() throws Exception {
+    var files = SessionFiles.in(dir, "race");
+    var session =
+        PtySession.start(
+            origin("race", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of("sh", "-c", "read a"),
+            Map.of("TERM", "dumb"),
+            dir,
+            files,
+            64 * 1024,
+            80,
+            24,
+            "t",
+            SdNotify.NONE);
+    try {
+      var alpha = session.attach(new Collector(), true, "uday");
+      var bravo = session.attach(new Collector(), false, "mady");
+      for (var round = 0; round < 200; round++) {
+        var holder = session.writerId();
+        var taker = holder == alpha ? bravo : alpha;
+        var takerFde = taker == alpha ? "uday" : "mady";
+        var cols = 80 + round % 40;
+        var resizing =
+            Thread.ofPlatform()
+                .start(
+                    () -> {
+                      try {
+                        var unused = session.resize(holder, cols, 24);
+                      } catch (IOException e) {
+                        throw new AssertionError(e);
+                      }
+                    });
+        var taking = Thread.ofPlatform().start(() -> session.takeWrite(taker, takerFde));
+        resizing.join();
+        taking.join();
+        assertEquals(
+            session.meta(),
+            SessionMeta.read(files.meta()),
+            "round " + round + ": the sidecar must be the newest snapshot, never an older one");
+      }
+    } finally {
+      session.close();
+    }
   }
 
   @Test
@@ -898,6 +1025,51 @@ class PtySessionTest {
           new PtyMessage.WriterChanged("uday"),
           frames.get(replayEndAt + 1),
           "and the writer the overflow discarded is answered again after it: " + kinds);
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aResyncAfterALongLineReplaysTheWindowNeverAnEmptySafeTail() throws Exception {
+    var session =
+        PtySession.start(
+            origin("longline", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of(
+                "sh",
+                "-c",
+                "read _; head -c 400000 /dev/zero | tr '\\0' x; printf BURST-END; echo; read _"),
+            Map.of("TERM", "dumb"),
+            Path.of("/tmp"),
+            dir.resolve("longline.ring"),
+            1024 * 1024,
+            80,
+            24,
+            1);
+    try {
+      var client = new Collector();
+      var gate = new CountDownLatch(1);
+      client.gate = gate;
+      var id = session.attach(client, true, "uday");
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      var deadline = System.nanoTime() + 10_000_000_000L;
+      while (session.journaledBytes() < 400_011) {
+        if (System.nanoTime() > deadline) {
+          throw new AssertionError("burst never landed; journaled=" + session.journaledBytes());
+        }
+        Thread.onSpinWait();
+      }
+      client.gate = null;
+      gate.countDown();
+
+      client.awaitOutput("BURST-END");
+      assertTrue(client.saw(PtyMessage.Continued.class), "the drain resumed a paused subscriber");
+      var text = client.outputText();
+      assertTrue(
+          text.length() > 200_000,
+          "the resync replays the window, not the empty tail after the line's end: "
+              + text.length());
     } finally {
       session.close();
     }

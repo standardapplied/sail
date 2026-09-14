@@ -175,6 +175,16 @@ public final class PtySession implements AutoCloseable {
   private final String hostVersion;
   private final long createdAtMillis;
   private final TermBoundary boundary = new TermBoundary();
+
+  /**
+   * Whether {@link #boundary} reflects the stream exactly. Always for a session born here; for a
+   * resumed one only if its state could be rebuilt from retained history that starts at a recorded
+   * safe boundary (or at the stream's start). Otherwise the ring may end inside an escape sequence
+   * a fresh parser would mistake for text, so no new safe checkpoints are recorded — every later
+   * replay is best-effort, never falsely safe.
+   */
+  private boolean boundaryKnown = true;
+
   private final int queueCapacity;
 
   /** A replayed journal crosses the wire in frames this large — well under the 1 MiB frame cap. */
@@ -446,8 +456,21 @@ public final class PtySession implements AutoCloseable {
     session.writerFde = meta.writerFde();
     session.subscriberIds.set(Math.max(0, meta.writerId()));
     session.everAttached = meta.everAttached();
+    session.rebuildBoundary();
     session.startThreads();
     return session;
+  }
+
+  private void rebuildBoundary() {
+    try {
+      var retained = journal.tail((int) Math.min(Integer.MAX_VALUE, journal.capacity()));
+      boundaryKnown = retained.safe() || retained.startOffset() == 0;
+      if (boundaryKnown) {
+        boundary.feed(retained.bytes(), retained.bytes().length);
+      }
+    } catch (IOException unreadable) {
+      boundaryKnown = false;
+    }
   }
 
   private void startThreads() {
@@ -475,9 +498,11 @@ public final class PtySession implements AutoCloseable {
    * costs the handoff of this one session, which is the loud {@code lost in handoff} at the next
    * start, never a refused resize or attach now. After a handoff the sidecar belongs to the
    * successor; a connection of this host dropping late (its detach releasing the keyboard) must not
-   * overwrite what the successor is about to read.
+   * overwrite what the successor is about to read. Serialized on the session: a resize and a
+   * keyboard transfer persisting at once would race on the same temporary file and could leave the
+   * older snapshot as the one on disk, restoring a stale holder or geometry after a restart.
    */
-  private void persistMeta() {
+  private synchronized void persistMeta() {
     if (handedOff) {
       return;
     }
@@ -545,7 +570,7 @@ public final class PtySession implements AutoCloseable {
         synchronized (fanout) {
           journal.append(buf, n);
           boundary.feed(buf, n);
-          if (boundary.atSafeLineStart()) {
+          if (boundaryKnown && boundary.atSafeLineStart()) {
             journal.markSafe();
           }
           var chunk = new byte[n];

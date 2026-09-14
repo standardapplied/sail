@@ -191,17 +191,23 @@ public final class RingJournal implements Journal {
 
   /**
    * The newest at-most-{@code maxBytes} of history, starting at the oldest safe boundary inside
-   * that window when there is one; otherwise from the window start, flagged unsafe so the client
-   * clears its screen before applying.
+   * that window when there is one that keeps at least half of it; otherwise from the window start,
+   * flagged unsafe so the client clears its screen before applying. The half rule is what keeps a
+   * long line from replaying as nothing: a stream whose only boundary inside the window is its very
+   * end would otherwise hand a resynced subscriber an empty, "safe" screen, the bytes it missed
+   * never shown.
    */
   @Override
   public Journal.Tail tail(int maxBytes) throws IOException {
     var from = Math.max(windowStart(), totalWritten - maxBytes);
+    var available = totalWritten - from;
     var safe = false;
     for (var checkpoint : checkpoints) {
       if (checkpoint >= from) {
-        from = checkpoint;
-        safe = true;
+        if (checkpoint - from <= available / 2) {
+          from = checkpoint;
+          safe = true;
+        }
         break;
       }
     }

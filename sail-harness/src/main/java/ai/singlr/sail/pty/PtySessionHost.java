@@ -634,11 +634,19 @@ public final class PtySessionHost implements AutoCloseable {
         : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
 
+  private static final PtyMessage.Err SHUTTING_DOWN =
+      new PtyMessage.Err("The pty host is shutting down; reconnect and try again.");
+
   /**
    * Serialized: the per-FDE quota check and the registration of the session it admits must be one
-   * step, or concurrent creates each see the same spare slot and all spawn.
+   * step, or concurrent creates each see the same spare slot and all spawn. Refused once shutdown
+   * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
+   * a handed-off session's ring and sidecar under the successor's feet.
    */
   private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     Path cwd;
     try {
       NameValidator.requireValidSessionName(m.session());
@@ -784,7 +792,10 @@ public final class PtySessionHost implements AutoCloseable {
         session.origin().command());
   }
 
-  private PtyMessage kill(String name, PtyIdentity who) {
+  private synchronized PtyMessage kill(String name, PtyIdentity who) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     var session = sessions.get(name);
     if (session == null) {
       return new PtyMessage.Err("No session '" + name + "'.");
@@ -803,7 +814,10 @@ public final class PtySessionHost implements AutoCloseable {
    * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
    * whichever FDE opened it. The ring goes with the session, as it does on a kill.
    */
-  private PtyMessage yieldSession(String name, String reason) {
+  private synchronized PtyMessage yieldSession(String name, String reason) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     var session = sessions.get(name);
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
@@ -830,9 +844,13 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * One reaping pass at {@code nowNanos}: revoked credentials severed, then the mosh grace and
-   * retention rules, nothing else.
+   * retention rules, nothing else. Nothing once shutdown has begun: the sessions belong to the
+   * successor or are ending.
    */
-  public void sweep(long nowNanos) {
+  public synchronized void sweep(long nowNanos) {
+    if (closed) {
+      return;
+    }
     severRevoked();
     sessions.forEach(
         (name, session) -> {
@@ -904,9 +922,11 @@ public final class PtySessionHost implements AutoCloseable {
    * Steps aside for a successor: stops serving, then hands every live session off without ending it
    * — its master stays open for the store's duplicate to be handed on, its ring and sidecar stay on
    * disk. Returns the masters by session name, which is what the successor will be told as {@code
-   * LISTEN_FDNAMES}. Corpses are released here; the successor sweeps their files.
+   * LISTEN_FDNAMES}. Corpses are released here; the successor sweeps their files. Serialized with
+   * every operation that removes a session or its files, and closing the host first, so a request
+   * already in flight on an open connection either completes before the snapshot or is refused.
    */
-  public Map<String, Integer> handoff() {
+  public synchronized Map<String, Integer> handoff() {
     closeServer();
     var masters = new LinkedHashMap<String, Integer>();
     sessions.forEach(
@@ -925,7 +945,7 @@ public final class PtySessionHost implements AutoCloseable {
    * all of them at once, so the last one is told within the same seconds as the first. This is the
    * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
    */
-  public void stop(String reason) {
+  public synchronized void stop(String reason) {
     closeServer();
     var endings =
         sessions.values().stream()
@@ -942,7 +962,7 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   @Override
-  public void close() {
+  public synchronized void close() {
     closeServer();
     sessions.forEach((name, session) -> session.close());
     sessions.clear();

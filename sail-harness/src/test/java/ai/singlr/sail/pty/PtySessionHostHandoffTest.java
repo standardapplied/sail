@@ -277,6 +277,38 @@ class PtySessionHostHandoffTest {
   }
 
   @Test
+  void aConnectionStillOpenAfterTheHandoffCannotTouchWhatWasHandedOff() throws Exception {
+    var a = host(new PtySessionHost.Handoff(SdNotify.NONE, Map.of(), JVM_SHIM));
+    var files = SessionFiles.in(dir.resolve("sessions"), "late");
+    Map<String, Integer> masters;
+    try (var owner = connect("tok-uday");
+        var dispatcher = connect("tok-root")) {
+      create(owner, "late", "read a");
+      var meta = SessionMeta.read(files.meta());
+      masters = a.handoff();
+
+      PtyWire.write(
+          owner,
+          new PtyMessage.Create("late", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(owner), "create after handoff");
+      PtyWire.write(owner, new PtyMessage.Kill("late"));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(owner), "kill after handoff");
+      PtyWire.write(dispatcher, new PtyMessage.Yield("late", "displaced"));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(dispatcher), "yield after handoff");
+      a.sweep(Long.MAX_VALUE);
+
+      assertEquals(meta, SessionMeta.read(files.meta()), "the sidecar is the successor's now");
+      assertTrue(Files.exists(files.ring()), "and so is the ring");
+      assertTrue(alive(meta.childPid()), "the child was never ended");
+    }
+    try (var b = host(new PtySessionHost.Handoff(SdNotify.NONE, masters, JVM_SHIM));
+        var owner = connect("tok-uday")) {
+      assertEquals(a.bootId(), b.bootId());
+      assertTrue(list(owner).get("late").live(), "the successor adopts it intact");
+    }
+  }
+
+  @Test
   void aHostThatInheritsNothingMintsANewBootIdAndSweepsWhatWasLeft() throws Exception {
     var a = host(new PtySessionHost.Handoff(SdNotify.NONE, Map.of(), JVM_SHIM));
     String bootA;

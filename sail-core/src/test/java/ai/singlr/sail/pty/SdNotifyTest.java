@@ -34,8 +34,9 @@ class SdNotifyTest {
 
       store.storeFd("s1", pty.fd());
       var stored = receiver.receive();
-      assertEquals("FDSTORE=1\nFDNAME=s1\n", stored.text());
+      assertEquals("FDSTORE=1\nFDPOLL=0\nFDNAME=s1\n", stored.text());
       assertEquals("1", stored.field("FDSTORE"));
+      assertEquals("0", stored.field("FDPOLL"), "a hangup in the restart gap must not drop it");
       assertEquals("s1", stored.field("FDNAME"));
       assertEquals("", stored.field("FDSTOREREMOVE"), "an absent field is blank");
       assertEquals(1, stored.fds().size(), "one SCM_RIGHTS descriptor rides along");

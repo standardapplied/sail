@@ -116,9 +116,15 @@ public final class SdNotify {
     return !socketPath.isBlank();
   }
 
-  /** Pushes {@code fd} into the store under {@code name}; the manager holds its own duplicate. */
+  /**
+   * Pushes {@code fd} into the store under {@code name}; the manager holds its own duplicate. The
+   * manager is told not to poll it for hangup ({@code FDPOLL=0}): a child exiting between one
+   * host's handoff and its successor's adoption hangs the master up, and the default would drop the
+   * descriptor right then — the successor would inherit nothing and sweep the final output and exit
+   * status as orphans. The host removes the descriptor itself once the ending is read.
+   */
   public void storeFd(String name, int fd) {
-    send("FDSTORE=1\nFDNAME=" + name + "\n", fd);
+    send("FDSTORE=1\nFDPOLL=0\nFDNAME=" + name + "\n", fd);
   }
 
   /** Drops every descriptor stored under {@code name}. */
