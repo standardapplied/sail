@@ -49,12 +49,19 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
         instance = client.list().getFirst().instanceId();
         var channel = client.attach("c1", true);
         prologue(channel);
+        // The marker is computed by the shell: the tty echoes the keystrokes themselves back long
+        // before incus exec and bash are up, and "marker-before" alone would match that echo.
         PtyWire.write(
             channel,
-            new PtyMessage.Input(1, "echo marker-before\n".getBytes(StandardCharsets.UTF_8)));
-        awaitText(channel, "marker-before");
+            new PtyMessage.Input(1, "echo marker-$((40+2))\n".getBytes(StandardCharsets.UTF_8)));
+        awaitText(channel, "marker-42");
         shellPid = bashPids(container);
-        assertTrue(shellPid.matches("\\d+"), "exactly one bash in the container: " + shellPid);
+        assertTrue(
+            shellPid.matches("\\d+"),
+            "exactly one bash in the container, got '"
+                + shellPid
+                + "'; comms: "
+                + comms(container));
       }
 
       fixture.systemctl("restart", fixture.unit);
@@ -64,8 +71,7 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
         assertEquals(shellPid, bashPids(container), "the same shell process is still alive");
         var channel = client.attach("c1", true);
         prologue(channel);
-        assertTrue(
-            awaitText(channel, "marker-before").contains("marker-before"), "continuous ring");
+        assertTrue(awaitText(channel, "marker-42").contains("marker-42"), "continuous ring");
         PtyWire.write(
             channel,
             new PtyMessage.Input(
@@ -83,6 +89,17 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
           "no incus exec client to outlive its session");
     } finally {
       deleteContainerQuietly(container);
+    }
+  }
+
+  private String comms(String container) {
+    try {
+      return exec(container, List.of("sh", "-c", "cat /proc/[0-9]*/comm | sort | uniq -c"))
+          .stdout()
+          .strip()
+          .replace("\n", ", ");
+    } catch (Exception e) {
+      return e.toString();
     }
   }
 
