@@ -175,8 +175,55 @@ class PtySessionTest {
     var pty = Pty.open(80, 24);
     var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
     var meta =
-        new SessionMeta(origin, dir.toString(), 80, 24, "uday", 3, child.pid(), 1L, "t", true);
+        new SessionMeta(
+            origin,
+            dir.toString(),
+            80,
+            24,
+            "uday",
+            3,
+            child.pid(),
+            System.currentTimeMillis(),
+            "t",
+            true);
     return PtySession.resume(meta, PtyEvents.NONE, pty, journal, files, SdNotify.NONE);
+  }
+
+  @Test
+  void aResumedSessionNeverAdoptsAProcessThatBeganAfterItWasCreated() throws Exception {
+    var files = SessionFiles.in(dir, "r");
+    var journal = RingJournal.open(files.ring(), 64 * 1024);
+    var pty = Pty.open(80, 24);
+    var child = pty.spawn(List.of("sh", "-c", "exit 0"), Map.of("TERM", "dumb"), dir);
+    child.waitFor();
+    var stranger = new ProcessBuilder("sleep", "60").start();
+    try {
+      var createdLongBeforeTheStranger = System.currentTimeMillis() - 60_000;
+      var meta =
+          new SessionMeta(
+              origin("r", "uday", ""),
+              dir.toString(),
+              80,
+              24,
+              "uday",
+              3,
+              stranger.pid(),
+              createdLongBeforeTheStranger,
+              "t",
+              true);
+      var session = PtySession.resume(meta, PtyEvents.NONE, pty, journal, files, SdNotify.NONE);
+      try {
+        var client = new Collector();
+        session.attach(client, false, "uday");
+        assertTrue(client.ended.await(30, TimeUnit.SECONDS));
+        assertEquals(PtySession.STATUS_LOST, session.endedReason());
+      } finally {
+        session.close();
+      }
+      assertTrue(stranger.isAlive(), "the recycled pid's owner is neither waited on nor killed");
+    } finally {
+      stranger.destroyForcibly();
+    }
   }
 
   /** A ring at {@code files} holding exactly {@code history}, with no safe boundary recorded. */

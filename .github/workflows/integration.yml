@@ -40,7 +40,9 @@ jobs:
             sleep 1
           done
           systemctl --version
-          systemctl --user is-system-running
+          state="$(systemctl --user is-system-running || true)"
+          echo "user manager: $state"
+          [ "$state" = running ] || [ "$state" = degraded ]
 
       - name: Run multi-node integration tests without incus
         run: mvn -B -Pintegration -Dsail.it.requireIncus=false verify
@@ -74,7 +76,9 @@ jobs:
             sleep 1
           done
           systemctl --version
-          systemctl --user is-system-running
+          state="$(systemctl --user is-system-running || true)"
+          echo "user manager: $state"
+          [ "$state" = running ] || [ "$state" = degraded ]
 
       - name: Install and initialize incus
         # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt

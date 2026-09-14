@@ -261,12 +261,19 @@ public final class PtySessionHost implements AutoCloseable {
    * Adopts every inherited descriptor whose ring and sidecar are sound. Anything else — a name the
    * host does not know, a ring or sidecar missing or garbled, a descriptor that is no pty master —
    * is closed (hanging its child up, so nothing leaks), dropped from the store, and logged as lost
-   * in the handoff.
+   * in the handoff. A number below the store's first descriptor is never a master: it is this
+   * process's own stdin, stdout or stderr, and closing it would take the host's log — or, under a
+   * test runner, its command channel — with it.
    */
   private void adoptInherited() {
     for (var entry : handoff.inheritedFds().entrySet()) {
       var name = entry.getKey();
       var fd = entry.getValue();
+      if (fd < SdNotify.FIRST_LISTEN_FD) {
+        log("lost in handoff", "-", name, "descriptor " + fd + " is this process's own stdio");
+        handoff.store().removeFd(name);
+        continue;
+      }
       var refused = adopt(name, fd);
       if (refused == null) {
         continue;

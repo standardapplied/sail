@@ -73,6 +73,8 @@ public final class PtySession implements AutoCloseable {
   /** What was lost when no exit file survives a handoff: the reason names it, never a silent 0. */
   public static final String STATUS_LOST = "exited (status lost across a host handoff)";
 
+  private static final long PID_REUSE_SLACK_MILLIS = 5_000;
+
   /**
    * The child as this host can reach it: the {@link Process} it spawned, or — after a handoff — an
    * orphan it only knows by pid, whose status is read from the exit file its shim wrote.
@@ -436,7 +438,11 @@ public final class PtySession implements AutoCloseable {
       SessionFiles files,
       SdNotify notify,
       int queueCapacity) {
-    var child = new Adopted(meta.childPid(), ProcessHandle.of(meta.childPid()), files.exit());
+    var child =
+        new Adopted(
+            meta.childPid(),
+            ProcessHandle.of(meta.childPid()).filter(h -> startedBy(h, meta.createdAt())),
+            files.exit());
     var session =
         new PtySession(
             meta.origin(),
@@ -459,6 +465,21 @@ public final class PtySession implements AutoCloseable {
     session.rebuildBoundary();
     session.startThreads();
     return session;
+  }
+
+  /**
+   * A pid can be recycled while no host is watching: the child dies in the restart gap and an
+   * unrelated process takes its number. The session was created after its child started, so a
+   * process that began later than that — beyond the clock slack between {@code /proc} start times
+   * and wall-clock stamps — is someone else's, and must be neither waited on nor signalled. Its
+   * ending then comes from the exit file, or is reported lost.
+   */
+  private static boolean startedBy(ProcessHandle handle, long createdAtMillis) {
+    return handle
+        .info()
+        .startInstant()
+        .map(start -> start.toEpochMilli() <= createdAtMillis + PID_REUSE_SLACK_MILLIS)
+        .orElse(true);
   }
 
   private void rebuildBoundary() {

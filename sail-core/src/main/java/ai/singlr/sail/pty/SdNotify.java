@@ -47,7 +47,9 @@ public final class SdNotify {
   private static final int CMSGHDR_BYTES = 16;
   private static final int MAX_FDS_PER_MESSAGE = 8;
   private static final int MAX_TEXT_BYTES = 4096;
-  private static final int LISTEN_FDS_START = 3;
+
+  /** The first descriptor a manager passes in; anything below it is the process's own stdio. */
+  public static final int FIRST_LISTEN_FD = 3;
 
   /** The store speaks no notify socket at all: every push and removal is a no-op. */
   public static final SdNotify NONE = new SdNotify("");
@@ -170,7 +172,7 @@ public final class SdNotify {
     }
     var names = Objects.toString(env.get("LISTEN_FDNAMES"), "").split(":", -1);
     for (var i = 0; i < count; i++) {
-      var fd = LISTEN_FDS_START + i;
+      var fd = FIRST_LISTEN_FD + i;
       var name = i < names.length && !names[i].isBlank() ? names[i] : "fd" + fd;
       inherited.put(name, fd);
     }

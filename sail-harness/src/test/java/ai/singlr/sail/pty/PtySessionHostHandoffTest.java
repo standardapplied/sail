@@ -358,10 +358,10 @@ class PtySessionHostHandoffTest {
       Files.delete(SessionFiles.in(sessions, "no-ring").ring());
       Files.delete(SessionFiles.in(sessions, "no-meta").meta());
       Files.writeString(SessionFiles.in(sessions, "bad-meta").meta(), "{\"version\": 1}");
-      var decoy = SdNotify.Receiver.bind(dir.resolve("decoy.sock"));
       Pty.closeFd(masters.get("not-a-pty"));
-      masters.put("not-a-pty", decoy.fd());
-      masters.put("../escape", 0);
+      masters.put("not-a-pty", SdNotify.Receiver.bind(dir.resolve("decoy.sock")).fd());
+      masters.put("../escape", SdNotify.Receiver.bind(dir.resolve("escape.sock")).fd());
+      masters.put("stdio", 0);
 
       var stderr = new ByteArrayOutputStream();
       var original = System.err;
@@ -376,12 +376,16 @@ class PtySessionHostHandoffTest {
       try (b;
           var owner = connect("tok-uday")) {
         assertEquals(java.util.Set.of("ok"), list(owner).keySet(), log);
-        for (var lost : List.of("no-ring", "no-meta", "bad-meta", "not-a-pty", "../escape")) {
+        for (var lost :
+            List.of("no-ring", "no-meta", "bad-meta", "not-a-pty", "../escape", "stdio")) {
           assertTrue(log.contains("lost in handoff") && log.contains("session=" + lost), log);
         }
-        var removed = drain(receiver, 5);
+        assertTrue(
+            Files.exists(Path.of("/proc/self/fd/0")),
+            "an inheritance that names stdin is refused without closing it");
+        var removed = drain(receiver, 6);
         assertEquals(
-            java.util.Set.of("no-ring", "no-meta", "bad-meta", "not-a-pty", "../escape"),
+            java.util.Set.of("no-ring", "no-meta", "bad-meta", "not-a-pty", "../escape", "stdio"),
             removed.keySet());
         assertTrue(removed.values().stream().allMatch("remove"::equals), removed.toString());
         for (var name : List.of("no-ring", "no-meta", "bad-meta")) {
@@ -392,7 +396,6 @@ class PtySessionHostHandoffTest {
         assertTrue(alive(pids.get("ok")), "the sound session's child is untouched");
         await(() -> !alive(pids.get("not-a-pty")), "the closed master to hang its child up");
       }
-      decoy.close();
     }
   }
 
