@@ -7,10 +7,13 @@ package ai.singlr.sail.pty;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,6 +42,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * it and an observer knows it is one — and streams from there. When the child exits — or a pty or
  * journal failure ends it — every subscriber hears {@code SessionEnded} and the corpse stays
  * readable until the host reaps it.
+ *
+ * <p>A session outlives its host. At creation the master is pushed into systemd's descriptor store
+ * ({@link SdNotify}) and a {@link SessionMeta} sidecar is kept current beside the ring; a host that
+ * is being replaced {@link #handoff() hands off} — stops reading without closing anything — and its
+ * successor {@link #resume resumes} from the inherited master, the ring and the sidecar. The child
+ * never notices: bytes it writes meanwhile wait in the kernel. Its exit status crosses the gap
+ * through the exit file its {@link PtyChildShim} records, since only a parent can collect it.
  */
 public final class PtySession implements AutoCloseable {
 
@@ -59,6 +69,73 @@ public final class PtySession implements AutoCloseable {
   private record Subscriber(long id, Client client, SubscriberQueue queue) {}
 
   private record Keystroke(long seq, byte[] bytes) {}
+
+  /** What was lost when no exit file survives a handoff: the reason names it, never a silent 0. */
+  public static final String STATUS_LOST = "exited (status lost across a host handoff)";
+
+  /**
+   * The child as this host can reach it: the {@link Process} it spawned, or — after a handoff — an
+   * orphan it only knows by pid, whose status is read from the exit file its shim wrote.
+   */
+  private sealed interface Child {
+    long pid();
+
+    void destroy();
+
+    void destroyForcibly();
+
+    /** Waits for the child to be gone and names how it ended. */
+    String exitReason();
+  }
+
+  private record Spawned(Process process) implements Child {
+    @Override
+    public long pid() {
+      return process.pid();
+    }
+
+    @Override
+    public void destroy() {
+      process.destroy();
+    }
+
+    @Override
+    public void destroyForcibly() {
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
+      process.destroyForcibly();
+    }
+
+    @Override
+    public String exitReason() {
+      return "exited(" + process.onExit().join().exitValue() + ")";
+    }
+  }
+
+  private record Adopted(long pid, Optional<ProcessHandle> handle, Path exitFile) implements Child {
+    @Override
+    public void destroy() {
+      handle.ifPresent(ProcessHandle::destroy);
+    }
+
+    @Override
+    public void destroyForcibly() {
+      handle.ifPresent(
+          h -> {
+            h.descendants().forEach(ProcessHandle::destroyForcibly);
+            h.destroyForcibly();
+          });
+    }
+
+    @Override
+    public String exitReason() {
+      handle.ifPresent(h -> h.onExit().join());
+      try {
+        return "exited(" + Integer.parseInt(Files.readString(exitFile).strip()) + ")";
+      } catch (IOException | NumberFormatException lost) {
+        return STATUS_LOST;
+      }
+    }
+  }
 
   /**
    * What a session was born as: its name, the id of this incarnation of that name, the FDE who
@@ -90,8 +167,13 @@ public final class PtySession implements AutoCloseable {
   private final Origin origin;
   private final PtyEvents events;
   private final Pty pty;
-  private final Process child;
+  private final Child child;
   private final Journal journal;
+  private final SessionFiles files;
+  private final SdNotify notify;
+  private final String cwd;
+  private final String hostVersion;
+  private final long createdAtMillis;
   private final TermBoundary boundary = new TermBoundary();
   private final int queueCapacity;
 
@@ -116,6 +198,7 @@ public final class PtySession implements AutoCloseable {
   private final int replayMax;
 
   private final Map<Long, Subscriber> subscribers = new ConcurrentHashMap<>();
+  private final Set<Thread> senders = ConcurrentHashMap.newKeySet();
   private final BlockingQueue<Keystroke> inputQueue = new ArrayBlockingQueue<>(MAX_INPUT_BACKLOG);
   private final Semaphore inputBudget = new Semaphore(MAX_INPUT_BACKLOG_BYTES);
   private final Object fanout = new Object();
@@ -132,13 +215,19 @@ public final class PtySession implements AutoCloseable {
   private volatile String yieldedReason;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
+  private volatile boolean handedOff;
 
   private PtySession(
       Origin origin,
       PtyEvents events,
       Pty pty,
-      Process child,
+      Child child,
       Journal journal,
+      SessionFiles files,
+      SdNotify notify,
+      String cwd,
+      String hostVersion,
+      long createdAtMillis,
       int queueCapacity,
       int cols,
       int rows) {
@@ -147,6 +236,11 @@ public final class PtySession implements AutoCloseable {
     this.pty = pty;
     this.child = child;
     this.journal = journal;
+    this.files = files;
+    this.notify = notify;
+    this.cwd = cwd;
+    this.hostVersion = hostVersion;
+    this.createdAtMillis = createdAtMillis;
     this.queueCapacity = queueCapacity;
     this.cols = cols;
     this.rows = rows;
@@ -155,8 +249,38 @@ public final class PtySession implements AutoCloseable {
 
   /**
    * Spawns {@code argv} — the process actually executed, which may wrap {@code origin.command()} in
-   * a container exec lane — and starts gathering its output.
+   * a container exec lane — and starts gathering its output. The master goes into the descriptor
+   * store at once, so a host crash from here on preserves the session as well as a restart does.
    */
+  public static PtySession start(
+      Origin origin,
+      PtyEvents events,
+      List<String> argv,
+      Map<String, String> env,
+      Path cwd,
+      SessionFiles files,
+      long journalCapacity,
+      int cols,
+      int rows,
+      String hostVersion,
+      SdNotify notify)
+      throws IOException {
+    return start(
+        origin,
+        events,
+        argv,
+        env,
+        cwd,
+        RingJournal.open(files.ring(), journalCapacity),
+        files,
+        cols,
+        rows,
+        hostVersion,
+        notify,
+        4096);
+  }
+
+  /** A session beside {@code journalPath}, outside any host: no version, no store. */
   public static PtySession start(
       Origin origin,
       PtyEvents events,
@@ -190,8 +314,11 @@ public final class PtySession implements AutoCloseable {
         env,
         cwd,
         RingJournal.open(journalPath, journalCapacity),
+        SessionFiles.beside(journalPath),
         cols,
         rows,
+        "",
+        SdNotify.NONE,
         queueCapacity);
   }
 
@@ -202,8 +329,38 @@ public final class PtySession implements AutoCloseable {
       Map<String, String> env,
       Path cwd,
       Journal journal,
+      SessionFiles files,
       int cols,
       int rows,
+      int queueCapacity)
+      throws IOException {
+    return start(
+        origin,
+        events,
+        argv,
+        env,
+        cwd,
+        journal,
+        files,
+        cols,
+        rows,
+        "",
+        SdNotify.NONE,
+        queueCapacity);
+  }
+
+  private static PtySession start(
+      Origin origin,
+      PtyEvents events,
+      List<String> argv,
+      Map<String, String> env,
+      Path cwd,
+      Journal journal,
+      SessionFiles files,
+      int cols,
+      int rows,
+      String hostVersion,
+      SdNotify notify,
       int queueCapacity)
       throws IOException {
     Pty pty;
@@ -221,12 +378,147 @@ public final class PtySession implements AutoCloseable {
       journal.close();
       throw e;
     }
-    var session = new PtySession(origin, events, pty, child, journal, queueCapacity, cols, rows);
-    Thread.ofPlatform().name("pty-gather-" + origin.name()).start(session::gather);
-    session.writerThread =
-        Thread.ofPlatform().name("pty-write-" + origin.name()).start(session::drainInput);
+    notify.storeFd(origin.name(), pty.fd());
+    var session =
+        new PtySession(
+            origin,
+            events,
+            pty,
+            new Spawned(child),
+            journal,
+            files,
+            notify,
+            cwd.toString(),
+            hostVersion,
+            System.currentTimeMillis(),
+            queueCapacity,
+            cols,
+            rows);
+    session.persistMeta();
+    session.startThreads();
     emitQuietly(() -> events.sessionStarted(origin));
     return session;
+  }
+
+  /**
+   * Continues a session a previous host handed off: the inherited master, the ring it was writing,
+   * and the sidecar that says what it was. The child is an orphan of the old host, reached by pid;
+   * the keyboard's last holder is restored (under an id no new subscriber can be given) so the same
+   * FDE reclaims it on reconnect exactly as from a ghost attachment; the never-attached grace
+   * starts over, since whoever was attached lost the transport with the old host. No start event:
+   * the session is not new.
+   */
+  public static PtySession resume(
+      SessionMeta meta,
+      PtyEvents events,
+      Pty pty,
+      Journal journal,
+      SessionFiles files,
+      SdNotify notify) {
+    return resume(meta, events, pty, journal, files, notify, 4096);
+  }
+
+  static PtySession resume(
+      SessionMeta meta,
+      PtyEvents events,
+      Pty pty,
+      Journal journal,
+      SessionFiles files,
+      SdNotify notify,
+      int queueCapacity) {
+    var child = new Adopted(meta.childPid(), ProcessHandle.of(meta.childPid()), files.exit());
+    var session =
+        new PtySession(
+            meta.origin(),
+            events,
+            pty,
+            child,
+            journal,
+            files,
+            notify,
+            meta.cwd(),
+            meta.hostVersion(),
+            meta.createdAt(),
+            queueCapacity,
+            meta.cols(),
+            meta.rows());
+    session.writerId = meta.writerId();
+    session.writerFde = meta.writerFde();
+    session.subscriberIds.set(Math.max(0, meta.writerId()));
+    session.everAttached = meta.everAttached();
+    session.startThreads();
+    return session;
+  }
+
+  private void startThreads() {
+    Thread.ofPlatform().name("pty-gather-" + origin.name()).start(this::gather);
+    writerThread = Thread.ofPlatform().name("pty-write-" + origin.name()).start(this::drainInput);
+  }
+
+  /** The sidecar as of now — geometry, keyboard and attachment included. */
+  public SessionMeta meta() {
+    return new SessionMeta(
+        origin,
+        cwd,
+        cols,
+        rows,
+        writerFde,
+        writerId,
+        child.pid(),
+        createdAtMillis,
+        hostVersion,
+        everAttached);
+  }
+
+  /**
+   * Rewrites the sidecar. A failure is logged and swallowed: a sidecar the successor cannot read
+   * costs the handoff of this one session, which is the loud {@code lost in handoff} at the next
+   * start, never a refused resize or attach now. After a handoff the sidecar belongs to the
+   * successor; a connection of this host dropping late (its detach releasing the keyboard) must not
+   * overwrite what the successor is about to read.
+   */
+  private void persistMeta() {
+    if (handedOff) {
+      return;
+    }
+    try {
+      meta().write(files.meta());
+    } catch (IOException | RuntimeException e) {
+      System.err.println(
+          "pty-host: sidecar write failed session=" + origin.name() + " reason=" + e);
+    }
+  }
+
+  /**
+   * Stops serving without ending anything: the read loop lets go of the master, the keyboard queue
+   * is dropped, subscribers are released (their transport dies with this host anyway) and the ring
+   * is closed for the successor to reopen. Returns the master descriptor, which stays open — the
+   * store already holds its duplicate, and closing it here would hang the child up. A session that
+   * already ended still hands its descriptor back; the successor reads the ending from the ring's
+   * end and the exit file.
+   */
+  public int handoff() {
+    handedOff = true;
+    pty.release();
+    var writer = writerThread;
+    if (writer != null) {
+      writer.interrupt();
+    }
+    try {
+      var unused = gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    synchronized (this) {
+      subscribers.values().forEach(subscriber -> subscriber.queue().clearAnd(new PtyMessage.Ok()));
+      subscribers.clear();
+    }
+    try {
+      journal.close();
+    } catch (IOException e) {
+      System.err.println("pty-host: ring close failed session=" + origin.name() + " reason=" + e);
+    }
+    return pty.fd();
   }
 
   /**
@@ -263,21 +555,28 @@ public final class PtySession implements AutoCloseable {
         }
       }
     } catch (IOException e) {
-      failure = "io-error: " + e.getMessage();
+      failure = handedOff ? null : "io-error: " + e.getMessage();
     } finally {
       try {
-        var reason = endReason(failure);
-        synchronized (fanout) {
-          endedAtNanos = System.nanoTime();
-          endedReason = reason;
-          var ended = new PtyMessage.SessionEnded(reason);
-          subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
+        if (!handedOff) {
+          publishEnding(failure);
         }
-        emitQuietly(() -> events.sessionEnded(origin, reason));
       } finally {
         gatherDone.countDown();
       }
     }
+  }
+
+  private void publishEnding(String failure) {
+    var reason = endReason(failure);
+    notify.removeFd(origin.name());
+    synchronized (fanout) {
+      endedAtNanos = System.nanoTime();
+      endedReason = reason;
+      var ended = new PtyMessage.SessionEnded(reason);
+      subscribers.values().forEach(subscriber -> subscriber.queue().force(ended));
+    }
+    emitQuietly(() -> events.sessionEnded(origin, reason));
   }
 
   /**
@@ -293,12 +592,11 @@ public final class PtySession implements AutoCloseable {
     if (failure != null) {
       pty.close();
       child.destroyForcibly();
-      child.onExit().join();
+      var unused = child.exitReason();
       return failure;
     }
     pty.close();
-    return Objects.requireNonNullElse(
-        yieldedReason, "exited(" + child.onExit().join().exitValue() + ")");
+    return Objects.requireNonNullElse(yieldedReason, child.exitReason());
   }
 
   private void drainInput() {
@@ -377,6 +675,7 @@ public final class PtySession implements AutoCloseable {
     if (endedReason != null) {
       throw new IOException("Session '" + name() + "' has ended: " + endedReason + ".");
     }
+    var firstAttach = !everAttached;
     everAttached = true;
     var subscriber =
         new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
@@ -393,12 +692,25 @@ public final class PtySession implements AutoCloseable {
         grant(subscriber.id, fde);
       } else {
         subscriber.queue().force(new PtyMessage.WriterChanged(writerFde));
+        if (firstAttach) {
+          persistMeta();
+        }
       }
     }
     emitQuietly(() -> events.sessionAttached(origin, fde));
-    Thread.ofVirtual()
-        .name("pty-send-" + name() + "-" + subscriber.id())
-        .start(() -> send(subscriber));
+    var sender =
+        Thread.ofVirtual()
+            .name("pty-send-" + name() + "-" + subscriber.id())
+            .unstarted(
+                () -> {
+                  try {
+                    send(subscriber);
+                  } finally {
+                    senders.remove(Thread.currentThread());
+                  }
+                });
+    senders.add(sender);
+    sender.start();
     return subscriber.id();
   }
 
@@ -464,6 +776,7 @@ public final class PtySession implements AutoCloseable {
     writerFde = fde;
     var changed = new PtyMessage.WriterChanged(fde);
     subscribers.values().forEach(subscriber -> subscriber.queue().force(changed));
+    persistMeta();
   }
 
   /**
@@ -486,6 +799,7 @@ public final class PtySession implements AutoCloseable {
           .filter(subscriber -> subscriber.id() != subscriberId)
           .forEach(subscriber -> subscriber.queue().force(resized));
     }
+    persistMeta();
     return true;
   }
 
@@ -497,6 +811,7 @@ public final class PtySession implements AutoCloseable {
     if (writerId == subscriberId) {
       writerId = -1;
       writerFde = "";
+      persistMeta();
     }
   }
 
@@ -577,7 +892,9 @@ public final class PtySession implements AutoCloseable {
    * Ends the child (if alive), waits for the gather thread, and releases the journal. By the time
    * the gather thread is done it has forced {@code SessionEnded} into every subscriber's queue, so
    * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
-   * ending, and a detach's queue-clearing poison would race that delivery and lose it.
+   * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
+   * senders are given a moment to deliver it before the caller moves on — a host stopping for good
+   * exits right after, and the ending must be on the wire by then, not in a queue.
    */
   @Override
   public void close() {
@@ -585,6 +902,7 @@ public final class PtySession implements AutoCloseable {
     try {
       if (!gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
         child.destroyForcibly();
+        pty.close();
         gatherDone.await();
       }
     } catch (InterruptedException e) {
@@ -594,6 +912,7 @@ public final class PtySession implements AutoCloseable {
     if (writer != null) {
       writer.interrupt();
     }
+    awaitSenders();
     synchronized (this) {
       subscribers.clear();
       writerId = -1;
@@ -603,6 +922,22 @@ public final class PtySession implements AutoCloseable {
       journal.close();
     } catch (IOException e) {
       throw new IllegalStateException("journal close failed for session '" + name() + "'", e);
+    }
+  }
+
+  private void awaitSenders() {
+    var deadline = System.nanoTime() + 1_000_000_000L;
+    for (var sender : senders) {
+      var remaining = deadline - System.nanoTime();
+      if (remaining <= 0) {
+        return;
+      }
+      try {
+        sender.join(java.time.Duration.ofNanos(remaining));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
     }
   }
 }

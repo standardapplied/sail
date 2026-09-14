@@ -20,10 +20,11 @@ import java.util.Set;
  * header (magic, version, capacity, total bytes ever written, safe watermark) followed by the ring
  * region; the write position is always {@code totalWritten % capacity}.
  *
- * <p>The file is a session's working history, not a durable record: sessions do not survive a host
- * restart (there is no rehydration), so the host sweeps every ring at start and deletes a session's
- * ring when it removes the session. The file is created owner-only (0600) — session bytes are as
- * private as the socket that serves them.
+ * <p>The file is a session's working history and the one piece of it that outlives the host: a
+ * successor reopens it and resumes at the same total, so a handoff loses no byte of replay. The
+ * host deletes a session's ring when it removes the session and sweeps, at start, every ring of a
+ * session it did not adopt. The file is created owner-only (0600) — session bytes are as private as
+ * the socket that serves them.
  *
  * <p>The journal stores bytes and one number; it never inspects the stream. The session host owns
  * safety: it feeds the same bytes to a {@link TermBoundary} and calls {@link #markSafe()} at clean
@@ -35,6 +36,7 @@ public final class RingJournal implements Journal {
   private static final long MAGIC = 0x5341494C52494E47L;
   private static final int VERSION = 1;
   private static final int HEADER_BYTES = 40;
+  private static final int HEADER_FIELDS = 36;
 
   private final FileChannel channel;
   private final long capacity;
@@ -82,10 +84,17 @@ public final class RingJournal implements Journal {
     var header = ByteBuffer.allocate(HEADER_BYTES);
     channel.read(header, 0);
     header.flip();
-    if (header.remaining() < HEADER_BYTES || header.getLong() != MAGIC) {
+    if (header.remaining() < HEADER_FIELDS || header.getLong() != MAGIC) {
+      var onDisk = channel.size();
       channel.close();
       throw new IOException(
-          "Not a sail ring journal: " + path + ". Remove the file to start a fresh history.");
+          "Not a sail ring journal: "
+              + path
+              + " ("
+              + onDisk
+              + " bytes, header "
+              + java.util.HexFormat.of().formatHex(header.array(), 0, Math.min(8, header.limit()))
+              + "). Remove the file to start a fresh history.");
     }
     var version = header.getInt();
     if (version != VERSION) {
@@ -111,7 +120,22 @@ public final class RingJournal implements Journal {
               + capacity
               + ". Remove the file to resize.");
     }
-    return new RingJournal(channel, capacity, header.getLong(), header.getLong());
+    var totalWritten = header.getLong();
+    var safeWatermark = header.getLong();
+    var held = HEADER_BYTES + Math.min(totalWritten, capacity);
+    var onDisk = channel.size();
+    if (onDisk < held) {
+      channel.close();
+      throw new IOException(
+          "Ring journal "
+              + path
+              + " is truncated: "
+              + onDisk
+              + " bytes on disk, "
+              + held
+              + " expected. Remove the file to start a fresh history.");
+    }
+    return new RingJournal(channel, capacity, totalWritten, safeWatermark);
   }
 
   private static FileChannel openOwnerOnly(Path path) throws IOException {
@@ -212,7 +236,7 @@ public final class RingJournal implements Journal {
         .putLong(capacity)
         .putLong(totalWritten)
         .putLong(safeWatermark);
-    header.flip();
+    header.limit(HEADER_BYTES).position(0);
     channel.write(header, 0);
   }
 

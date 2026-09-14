@@ -37,6 +37,42 @@ class PtyHostUnitTest {
   }
 
   @Test
+  void theUnitLetsSessionsOutliveTheHostInBothModes(@TempDir Path home) throws Exception {
+    for (var mode : SystemdServiceInstaller.Mode.values()) {
+      var unit = new PtyHostUnit(new ScriptedShellExecutor(), mode, home, BINARY).renderUnit();
+      assertTrue(unit.contains("NotifyAccess=main\n"), mode + ": " + unit);
+      assertTrue(
+          unit.contains(
+              "FileDescriptorStoreMax="
+                  + ai.singlr.sail.pty.PtySessionHost.Limits.DEFAULTS.sessions()
+                  + "\n"),
+          mode + ": the store is sized to the host's session cap: " + unit);
+      assertTrue(unit.contains("KillMode=process\n"), mode + ": " + unit);
+      assertTrue(unit.contains("TimeoutStopSec=15\n"), mode + ": " + unit);
+      assertTrue(unit.contains("Restart=on-failure\n"), mode + ": " + unit);
+      assertTrue(unit.contains("SuccessExitStatus=143\n"), mode + ": " + unit);
+      assertTrue(unit.contains("Type=simple\n"), mode + ": " + unit);
+    }
+  }
+
+  @Test
+  void aUnitWithoutTheStorePredatesLiveHandoff(@TempDir Path home) throws Exception {
+    var unit =
+        new PtyHostUnit(
+            new ScriptedShellExecutor(), SystemdServiceInstaller.Mode.USER, home, BINARY);
+    assertFalse(
+        PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()), "no unit: nothing to predate");
+
+    Files.createDirectories(unit.serviceFilePath().getParent());
+    Files.writeString(
+        unit.serviceFilePath(), "[Service]\nExecStart=/usr/local/bin/sail _pty-host\n");
+    assertTrue(PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()));
+
+    Files.writeString(unit.serviceFilePath(), unit.renderUnit());
+    assertFalse(PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()));
+  }
+
+  @Test
   void installWritesUnitSymlinkAndEnablesUnderUserSystemd(@TempDir Path home) throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var unit = new PtyHostUnit(shell, SystemdServiceInstaller.Mode.USER, home, BINARY);

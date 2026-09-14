@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DataMigrator;
@@ -125,6 +126,7 @@ public final class MigrateCommand implements Runnable {
         api.mode(),
         Path.of(System.getProperty("user.home")),
         SailPaths.binaryPath(),
+        SailPaths.ptySocketPath(),
         jsonOutput);
   }
 
@@ -134,12 +136,18 @@ public final class MigrateCommand implements Runnable {
       SystemdServiceInstaller.Mode mode,
       Path userHome,
       Path binary,
+      Path ptySocket,
       boolean jsonOutput) {
     if (!apiInstalled) {
       return;
     }
     try {
-      new PtyHostUnit(shell, mode, userHome, binary).install();
+      var unit = new PtyHostUnit(shell, mode, userHome, binary);
+      var lastRestart = PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath());
+      if (lastRestart && !jsonOutput) {
+        firstHandoffNotice(ptySocket).ifPresent(System.out::println);
+      }
+      unit.install();
       if (!jsonOutput) {
         System.out.println(Ansi.AUTO.string("  @|green ✓|@ pty session host service ensured"));
       }
@@ -150,6 +158,37 @@ public final class MigrateCommand implements Runnable {
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * The one restart that still ends sessions: a host installed under a unit without the descriptor
+   * store never pushed a master, so nothing survives its replacement. Says so, naming the live
+   * sessions it asked the host for — or that the host could not be asked. Empty when there is
+   * nothing to lose.
+   */
+  static Optional<String> firstHandoffNotice(Path ptySocket) {
+    try (var client = SessionClient.connect(ptySocket)) {
+      var live = client.list().stream().filter(PtyMessage.SessionInfo::live).count();
+      if (live == 0) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ pty host restarted: "
+                  + live
+                  + " live session"
+                  + (live == 1 ? "" : "s")
+                  + " ended — this host predates live handoff; from the next upgrade on,"
+                  + " sessions survive"));
+    } catch (IOException unreachable) {
+      return Optional.of(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ pty host restarted: the host could not be asked which sessions were"
+                  + " live ("
+                  + unreachable.getMessage()
+                  + "); this host predates live handoff; from the next upgrade on, sessions"
+                  + " survive"));
     }
   }
 

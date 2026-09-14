@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **`sail upgrade` never kills a session.** Every pty master now lives in systemd's file
+  descriptor store from the moment a session is created, so a restart — or a crash — of the pty
+  host hands the session to the next host intact: same `instanceId`, same boot id (kept in
+  `~/.sail/sessions/host.boot`), same keyboard holder, continuous replay from the ring, and the
+  child's exit status recorded by a new `sail _pty-child` shim so `exited(N)` still reaches the
+  pane afterwards. Mast sees a brief reconnect, not "host restarted". A `systemctl stop` ends every
+  session loudly with `pty host stopped`; closing the master is the kill switch, so no `incus exec`
+  client outlives its session. The unit gains `NotifyAccess=main`, `FileDescriptorStoreMax`,
+  `KillMode=process` and `TimeoutStopSec=15`; a session's sidecar (`<name>.meta`) and exit file
+  (`<name>.exit`) sit beside its ring. **The first upgrade to this release still ends sessions** —
+  the host being replaced never pushed anything — and says so, naming the live sessions; from the
+  next upgrade on, sessions survive. `sail _pty-selftest` now proves the store binding in the
+  native binary.
+
 ## 0.41.0
 
 - **A reconnect from the same FDE keeps the keyboard — and its screen.** A laptop that slept left

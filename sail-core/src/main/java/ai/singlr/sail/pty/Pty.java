@@ -9,7 +9,6 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.StructLayout;
 import java.lang.foreign.ValueLayout;
@@ -25,15 +24,25 @@ import java.util.Map;
  * controlling terminal is the slave side. The JVM cannot {@code fork()}, so the classic {@code
  * forkpty} is replaced by first principles: the master is allocated here via {@code posix_openpt}/
  * {@code grantpt}/{@code unlockpt} (libc through the same Panama discipline as the SQLite layer),
- * and the child is spawned with {@link ProcessBuilder} wrapped in util-linux {@code setsid --ctty},
- * its stdio redirected to the slave device — {@code setsid} makes it a session leader and issues
- * {@code TIOCSCTTY} on stdin, which is exactly what {@code forkpty} would have done.
+ * and the child is spawned with {@link ProcessBuilder} as {@code setsid sh -c 'exec 0<>$slave 1>&0
+ * 2>&0 && exec "$@"'}: {@code setsid} makes it a session leader, and a session leader that opens a
+ * terminal it has no controlling terminal for acquires it, which is exactly what {@code forkpty}
+ * would have done. The slave is opened by the child alone, never here: this process is itself a
+ * session leader under systemd, and a {@link ProcessBuilder} redirect to the slave would make it
+ * this process's controlling terminal instead of the child's.
  *
  * <p>Reads block the calling thread (the session host dedicates a platform gather thread per
  * session — the ghostty drain discipline); a read against a dead child reports end of stream
  * ({@code EIO} on Linux) as {@code -1}, never an exception, so the reaper owns the child's ending.
- * Read and write each allocate their own per-call confined arena, so the two halves — which run on
- * different threads (gather vs. the writer's connection) — share no native buffer and cannot race.
+ * A blocked read polls rather than sleeping in {@code read(2)} forever, so {@link #release()} —
+ * which forgets the master without closing it, for a host handing its sessions to its successor —
+ * is observed within a poll interval as end of stream. Read and write each allocate their own
+ * per-call confined arena, so the two halves — which run on different threads (gather vs. the
+ * writer's connection) — share no native buffer and cannot race.
+ *
+ * <p>A master may also be {@link #adopt(int) adopted}: a descriptor inherited from a previous host
+ * (systemd's file descriptor store hands it back as {@code LISTEN_FDS}) becomes a {@code Pty} over
+ * the same kernel terminal, whose child never noticed the host change.
  */
 public final class Pty implements AutoCloseable {
 
@@ -43,6 +52,14 @@ public final class Pty implements AutoCloseable {
   private static final int EINTR = 4;
   private static final int EIO = 5;
   private static final int EBADF = 9;
+  private static final short POLLIN = 1;
+  private static final int READ_POLL_MILLIS = 250;
+
+  private static final StructLayout POLLFD =
+      java.lang.foreign.MemoryLayout.structLayout(
+          ValueLayout.JAVA_INT.withName("fd"),
+          ValueLayout.JAVA_SHORT.withName("events"),
+          ValueLayout.JAVA_SHORT.withName("revents"));
 
   private static final StructLayout WINSIZE =
       java.lang.foreign.MemoryLayout.structLayout(
@@ -64,59 +81,41 @@ public final class Pty implements AutoCloseable {
       MethodHandle read,
       MethodHandle write,
       MethodHandle close,
-      StructLayout capturedState,
-      VarHandle errno) {}
+      MethodHandle poll) {}
 
   private static final Libc LIBC = loadLibc();
 
   private static Libc loadLibc() {
-    var linker = Linker.nativeLinker();
-    var lookup = linker.defaultLookup();
-    var captured = Linker.Option.captureCallState("errno");
-    var capturedLayout = Linker.Option.captureStateLayout();
-    var errnoHandle =
-        capturedLayout.varHandle(java.lang.foreign.MemoryLayout.PathElement.groupElement("errno"));
+    var fdCall = FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT);
+    var transfer =
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_LONG,
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_LONG);
     return new Libc(
-        linker.downcallHandle(
-            lookup.find("posix_openpt").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)),
-        linker.downcallHandle(
-            lookup.find("grantpt").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)),
-        linker.downcallHandle(
-            lookup.find("unlockpt").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)),
-        linker.downcallHandle(
-            lookup.find("ptsname").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
-        linker.downcallHandle(
-            lookup.find("ioctl").orElseThrow(),
+        Native.downcall("posix_openpt", fdCall),
+        Native.downcall("grantpt", fdCall),
+        Native.downcall("unlockpt", fdCall),
+        Native.downcall(
+            "ptsname", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
+        Native.downcall(
+            "ioctl",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_LONG,
                 ValueLayout.ADDRESS)),
-        linker.downcallHandle(
-            lookup.find("read").orElseThrow(),
+        Native.downcallCapturingErrno("read", transfer),
+        Native.downcallCapturingErrno("write", transfer),
+        Native.downcall("close", fdCall),
+        Native.downcallCapturingErrno(
+            "poll",
             FunctionDescriptor.of(
-                ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG),
-            captured),
-        linker.downcallHandle(
-            lookup.find("write").orElseThrow(),
-            FunctionDescriptor.of(
                 ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG),
-            captured),
-        linker.downcallHandle(
-            lookup.find("close").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)),
-        capturedLayout,
-        errnoHandle);
+                ValueLayout.JAVA_INT)));
   }
 
   private static final int MAX_CHUNK = 64 * 1024;
@@ -141,13 +140,13 @@ public final class Pty implements AutoCloseable {
         var unused = (int) LIBC.close().invokeExact(fd);
         throw new IOException("grantpt/unlockpt failed for the new pseudo-terminal.");
       }
-      var name = (MemorySegment) LIBC.ptsname().invokeExact(fd);
-      if (name.equals(MemorySegment.NULL)) {
+      Pty pty;
+      try {
+        pty = adopt(fd);
+      } catch (IOException e) {
         var unused = (int) LIBC.close().invokeExact(fd);
-        throw new IOException("ptsname returned no slave path for fd " + fd + ".");
+        throw e;
       }
-      var slave = name.reinterpret(256).getString(0);
-      var pty = new Pty(fd, slave);
       try {
         pty.resize(cols, rows);
       } catch (IOException e) {
@@ -163,22 +162,57 @@ public final class Pty implements AutoCloseable {
   }
 
   /**
+   * Wraps an already-open master — one this process inherited rather than allocated. The kernel
+   * still knows its slave, its geometry and its child; only the owner changed. A descriptor that is
+   * not a pty master is refused by name, and never closed: the caller decides what an unadoptable
+   * inheritance means.
+   */
+  public static Pty adopt(int fd) throws IOException {
+    MemorySegment name;
+    try {
+      name = (MemorySegment) LIBC.ptsname().invokeExact(fd);
+    } catch (Throwable t) {
+      throw new IOException("ptsname failed for fd " + fd, t);
+    }
+    if (name.equals(MemorySegment.NULL)) {
+      throw new IOException("File descriptor " + fd + " is not a pty master.");
+    }
+    return new Pty(fd, name.reinterpret(256).getString(0));
+  }
+
+  /** Closes a raw descriptor this process holds but never wrapped; errors are the caller's. */
+  public static void closeFd(int fd) throws IOException {
+    try {
+      if ((int) LIBC.close().invokeExact(fd) != 0) {
+        throw new IOException("close failed for fd " + fd + ".");
+      }
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("close failed for fd " + fd, t);
+    }
+  }
+
+  /**
    * Spawns {@code command} as a session leader with this pty as its controlling terminal. The
    * caller owns the returned process's ending: waiting, exit codes, and reaping happen there.
    */
   public Process spawn(List<String> command, Map<String, String> env, Path cwd) throws IOException {
     requireOpen();
-    var full = new ArrayList<String>(command.size() + 2);
+    var full = new ArrayList<String>(command.size() + 5);
     full.add("setsid");
-    full.add("--ctty");
+    full.add("sh");
+    full.add("-c");
+    full.add("exec 0<>\"$0\" 1>&0 2>&0 && exec \"$@\"");
+    full.add(slavePath);
     full.addAll(command);
     var builder = new ProcessBuilder(full);
     builder.environment().putAll(env);
     builder.directory(cwd.toFile());
-    var slave = new File(slavePath);
-    builder.redirectInput(slave);
-    builder.redirectOutput(slave);
-    builder.redirectError(slave);
+    var devNull = new File("/dev/null");
+    builder.redirectInput(devNull);
+    builder.redirectOutput(devNull);
+    builder.redirectError(devNull);
     return builder.start();
   }
 
@@ -191,18 +225,21 @@ public final class Pty implements AutoCloseable {
       if (closed) {
         return -1;
       }
+      if (!readable()) {
+        continue;
+      }
       long n;
       int err;
       try (var arena = Arena.ofConfined()) {
         var cap = Math.min(buf.length, MAX_CHUNK);
         var slot = arena.allocate(cap);
-        var errno = arena.allocate(LIBC.capturedState());
+        var errno = arena.allocate(Native.ERRNO_STATE);
         try {
           n = (long) LIBC.read().invokeExact(errno, masterFd, slot, (long) cap);
         } catch (Throwable t) {
           throw new IOException("pty read failed", t);
         }
-        err = (int) LIBC.errno().get(errno, 0L);
+        err = Native.errno(errno);
         if (n > 0) {
           MemorySegment.ofArray(buf).copyFrom(slot.asSlice(0, n));
           return (int) n;
@@ -221,6 +258,35 @@ public final class Pty implements AutoCloseable {
     }
   }
 
+  /**
+   * Waits up to a poll interval for the master to have something to say — output, a hangup, or an
+   * error; the read that follows tells which. A timeout or a signal is {@code false}: look at
+   * {@link #closed} and come back.
+   */
+  private boolean readable() throws IOException {
+    int rc;
+    int err;
+    try (var arena = Arena.ofConfined()) {
+      var pollfd = arena.allocate(POLLFD);
+      pollfd.set(ValueLayout.JAVA_INT, 0, masterFd);
+      pollfd.set(ValueLayout.JAVA_SHORT, 4, POLLIN);
+      var errno = arena.allocate(Native.ERRNO_STATE);
+      try {
+        rc = (int) LIBC.poll().invokeExact(errno, pollfd, 1L, READ_POLL_MILLIS);
+      } catch (Throwable t) {
+        throw new IOException("pty poll failed", t);
+      }
+      err = Native.errno(errno);
+    }
+    if (rc > 0) {
+      return true;
+    }
+    if (rc == 0 || err == EINTR) {
+      return false;
+    }
+    throw new IOException("pty poll failed with errno " + err + ".");
+  }
+
   /** Writes {@code data} to the master — keystrokes bound for the child. */
   public void write(byte[] data) throws IOException {
     requireOpen();
@@ -231,14 +297,14 @@ public final class Pty implements AutoCloseable {
       int err;
       try (var arena = Arena.ofConfined()) {
         var slot = arena.allocate(chunk);
-        var errno = arena.allocate(LIBC.capturedState());
+        var errno = arena.allocate(Native.ERRNO_STATE);
         slot.copyFrom(MemorySegment.ofArray(data).asSlice(offset, chunk));
         try {
           n = (long) LIBC.write().invokeExact(errno, masterFd, slot, (long) chunk);
         } catch (Throwable t) {
           throw new IOException("pty write failed", t);
         }
-        err = (int) LIBC.errno().get(errno, 0L);
+        err = Native.errno(errno);
       }
       if (n < 0) {
         if (err == EINTR) {
@@ -270,6 +336,20 @@ public final class Pty implements AutoCloseable {
 
   public String slavePath() {
     return slavePath;
+  }
+
+  /** The master descriptor — what a host pushes to the fd store and a successor adopts. */
+  public int fd() {
+    return masterFd;
+  }
+
+  /**
+   * Forgets the master without closing it: every later read reports end of stream and every write
+   * refuses, but the kernel terminal — and the child on its slave — live on for whoever holds the
+   * descriptor next. Idempotent, and a no-op after {@link #close()}.
+   */
+  public void release() {
+    closed = true;
   }
 
   private void requireOpen() throws IOException {

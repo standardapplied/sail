@@ -873,7 +873,7 @@ class PtySessionHostTest {
 
   @Test
   void aCreateThatFailsToSpawnLeavesNoRingBehind() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256));
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256, 64));
         var channel = connect()) {
       for (var i = 0; i < 5; i++) {
         PtyWire.write(
@@ -987,7 +987,7 @@ class PtySessionHostTest {
 
   @Test
   void recreatingAnotherOwnersCorpseCountsAgainstTheRecreatorsSessionCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8))) {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8, 64))) {
       try (var uday = connect("tok-uday")) {
         PtyWire.write(
             uday,
@@ -1029,7 +1029,7 @@ class PtySessionHostTest {
 
   @Test
   void createRefusesBeyondThePerFdeSessionCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(2, 8, 8));
+    try (var ignored = startHost(new PtySessionHost.Limits(2, 8, 8, 64));
         var channel = connect()) {
       for (var i = 0; i < 2; i++) {
         PtyWire.write(
@@ -1047,7 +1047,7 @@ class PtySessionHostTest {
 
   @Test
   void attachRefusesBeyondThePerSessionSubscriberCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(8, 2, 8))) {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 2, 8, 64))) {
       try (var owner = connect()) {
         PtyWire.write(
             owner,
@@ -1077,7 +1077,7 @@ class PtySessionHostTest {
 
   @Test
   void theHostRefusesConnectionsBeyondItsCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1));
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1, 64));
         var first = connect()) {
       assertThrows(IOException.class, this::connect);
     }
@@ -1085,7 +1085,7 @@ class PtySessionHostTest {
 
   @Test
   void aSocketOverTheConnectionCapIsClosedBeforeItSpeaks() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1));
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 8, 1, 64));
         var first = connect();
         var silent = SocketChannel.open(StandardProtocolFamily.UNIX)) {
       silent.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
@@ -1100,7 +1100,7 @@ class PtySessionHostTest {
 
   @Test
   void concurrentCreatesCannotExceedThePerFdeSessionCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8));
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 8, 64));
         var first = connect();
         var second = connect()) {
       startGate = new CountDownLatch(1);
@@ -1131,7 +1131,7 @@ class PtySessionHostTest {
 
   @Test
   void concurrentAttachesCannotExceedTheSubscriberCap() throws Exception {
-    try (var ignored = startHost(new PtySessionHost.Limits(8, 1, 16))) {
+    try (var ignored = startHost(new PtySessionHost.Limits(8, 1, 16, 64))) {
       try (var owner = connect()) {
         PtyWire.write(
             owner,

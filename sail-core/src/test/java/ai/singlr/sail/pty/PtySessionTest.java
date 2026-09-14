@@ -162,6 +162,112 @@ class PtySessionTest {
     public void close() {}
   }
 
+  private PtySession resumed(String script, boolean withShim) throws Exception {
+    var files = SessionFiles.in(dir, "r");
+    var command = List.of("sh", "-c", script);
+    var argv = withShim ? PtyChildShimTest.shim(files.exit(), "sh", "-c", script) : command;
+    var origin = origin("r", "uday", "");
+    var pty = Pty.open(80, 24);
+    var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
+    var meta =
+        new SessionMeta(origin, dir.toString(), 80, 24, "uday", 3, child.pid(), 1L, "t", true);
+    return PtySession.resume(
+        meta, PtyEvents.NONE, pty, RingJournal.open(files.ring(), 64 * 1024), files, SdNotify.NONE);
+  }
+
+  @Test
+  void aResumedSessionReadsTheExitStatusFromTheShimsFileOnEof() throws Exception {
+    var session = resumed("read a; echo got:$a; exit 7", true);
+    try {
+      var client = new Collector();
+      var id = session.attach(client, true, "uday");
+      assertEquals(
+          id, session.writerId(), "the restored holder's FDE reclaims the keyboard on reconnect");
+      assertTrue(session.everAttached(), "attachment history is restored from the sidecar");
+      session.input(id, 1, "hello\n".getBytes(StandardCharsets.UTF_8));
+      client.awaitOutput("got:hello");
+      assertTrue(client.ended.await(30, TimeUnit.SECONDS));
+      assertEquals("exited(7)", session.endedReason());
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aResumedSessionWithoutAnExitFileEndsLoudlyNeverAsASilentZero() throws Exception {
+    var session = resumed("exit 0", false);
+    try {
+      var client = new Collector();
+      session.attach(client, false, "uday");
+      assertTrue(client.ended.await(30, TimeUnit.SECONDS));
+      assertEquals(PtySession.STATUS_LOST, session.endedReason());
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aDifferentFdeDoesNotInheritARestoredKeyboardAndNewIdsNeverCollideWithIt() throws Exception {
+    var session = resumed("read a", false);
+    try {
+      var observer = new Collector();
+      var id = session.attach(observer, true, "mady");
+      assertTrue(id > 3, "subscriber ids start above the restored writer id: " + id);
+      assertEquals("uday", session.writerFde(), "the ghost holder keeps the keyboard");
+      observer.awaitFrame(PtyMessage.WriterChanged.class);
+    } finally {
+      session.close();
+    }
+  }
+
+  @Test
+  void aHandoffStopsReadingWithoutHangingTheChildUpAndTheSidecarSaysWhatItWas() throws Exception {
+    var files = SessionFiles.in(dir, "h");
+    var session =
+        PtySession.start(
+            origin("h", "uday", "acme"),
+            PtyEvents.NONE,
+            List.of("sh", "-c", "echo ready; read a; echo got:$a"),
+            Map.of("TERM", "dumb"),
+            dir,
+            files,
+            64 * 1024,
+            80,
+            24,
+            "0.42.0",
+            SdNotify.NONE);
+    var client = new Collector();
+    var id = session.attach(client, true, "uday");
+    client.awaitOutput("ready");
+    session.resize(id, 100, 30);
+
+    var meta = SessionMeta.read(files.meta());
+    assertEquals(100, meta.cols());
+    assertEquals(30, meta.rows());
+    assertEquals("uday", meta.writerFde());
+    assertEquals(id, meta.writerId());
+    assertEquals("0.42.0", meta.hostVersion());
+    assertEquals(dir.toString(), meta.cwd());
+    assertTrue(meta.everAttached());
+    assertTrue(ProcessHandle.of(meta.childPid()).map(ProcessHandle::isAlive).orElse(false));
+
+    var fd = session.handoff();
+    assertTrue(fd >= 0);
+    assertTrue(session.live(), "a handoff is not an ending");
+    assertTrue(ProcessHandle.of(meta.childPid()).map(ProcessHandle::isAlive).orElse(false));
+
+    try (var adopted = Pty.adopt(fd)) {
+      adopted.write("bye\n".getBytes(StandardCharsets.UTF_8));
+      var buf = new byte[256];
+      var seen = new StringBuilder();
+      for (var n = adopted.read(buf); n > 0 && !seen.toString().contains("got:bye"); ) {
+        seen.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+        n = adopted.read(buf);
+      }
+      assertTrue(seen.toString().contains("got:bye"), "the child converses with the adoptee");
+    }
+  }
+
   @Test
   void anIoErrorEndingReapsAChildThatIgnoresTermination() throws Exception {
     var session =
@@ -176,6 +282,7 @@ class PtySessionTest {
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             new FailingJournal("boom"),
+            SessionFiles.in(dir, "t"),
             80,
             24,
             4096);
@@ -207,6 +314,7 @@ class PtySessionTest {
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             new FailingJournal(),
+            SessionFiles.in(dir, "t"),
             80,
             24,
             4096);

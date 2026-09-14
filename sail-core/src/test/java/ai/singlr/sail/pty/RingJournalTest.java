@@ -115,6 +115,35 @@ class RingJournalTest {
   }
 
   @Test
+  void aRingWithNothingAppendedYetReopensAsEmptyHistory() throws Exception {
+    var path = dir.resolve("s.ring");
+    try (var ring = RingJournal.open(path, 64)) {
+      assertEquals(0, ring.totalWritten());
+    }
+    try (var ring = RingJournal.open(path, 64)) {
+      assertEquals(0, ring.totalWritten(), "a child that has not spoken yet has a readable ring");
+      assertEquals(0, ring.tail(64).bytes().length);
+    }
+  }
+
+  @Test
+  void aTruncatedRingIsRefusedWithTheReasonNeverReadAsEmpty() throws Exception {
+    var path = dir.resolve("s.ring");
+    try (var ring = RingJournal.open(path, 64)) {
+      ring.append(bytes("twelve bytes"), 12);
+    }
+    var whole = Files.readAllBytes(path);
+    Files.write(path, java.util.Arrays.copyOf(whole, whole.length - 4));
+
+    var refused = assertThrows(IOException.class, () -> RingJournal.open(path, 64));
+    assertTrue(refused.getMessage().contains("truncated"), refused.getMessage());
+
+    Files.write(path, java.util.Arrays.copyOf(whole, 20));
+    var header = assertThrows(IOException.class, () -> RingJournal.open(path, 64));
+    assertTrue(header.getMessage().contains("Not a sail ring journal"), header.getMessage());
+  }
+
+  @Test
   void aForeignFileOrMismatchedCapacityRefusesLoudly() throws Exception {
     var path = dir.resolve("s.ring");
     Files.writeString(path, "not a ring journal at all, definitely");

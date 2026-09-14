@@ -24,6 +24,24 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Enable the runner's systemd user manager
+        # The pty host's descriptor-store tests run the real unit under the runner's own
+        # systemd --user. Linger keeps that manager alive without a login session, and the
+        # bus/runtime variables let the test process talk to it. A missing manager fails here,
+        # before maven, with the reason in the log.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for i in $(seq 1 30); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 1
+          done
+          systemctl --version
+          systemctl --user is-system-running
+
       - name: Run multi-node integration tests without incus
         run: mvn -B -Pintegration -Dsail.it.requireIncus=false verify
 
@@ -39,6 +57,24 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable the runner's systemd user manager
+        # The pty host's descriptor-store tests run the real unit under the runner's own
+        # systemd --user. Linger keeps that manager alive without a login session, and the
+        # bus/runtime variables let the test process talk to it. A missing manager fails here,
+        # before maven, with the reason in the log.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for i in $(seq 1 30); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 1
+          done
+          systemctl --version
+          systemctl --user is-system-running
 
       - name: Install and initialize incus
         # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt
