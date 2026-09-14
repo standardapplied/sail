@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +20,14 @@ import java.util.concurrent.TimeoutException;
  * /etc/systemd/system} — with none of the API's bind surface: the host listens only on its unix
  * socket. Deliberately its own small installer; unifying the two service installers is a follow-up
  * refactor, not this brick's job.
+ *
+ * <p>The unit is what lets sessions outlive the host: {@code NotifyAccess=main} lets the host push
+ * every pty master into systemd's file descriptor store, {@code FileDescriptorStoreMax} sizes the
+ * store to the host's session cap, and {@code KillMode=process} makes a stop or restart signal only
+ * the host — the children stay in the cgroup until their master closes. {@code Restart=on-failure}
+ * brings a crashed host back with the store intact, so a crash preserves sessions too; a host that
+ * exits 143 after handling {@code SIGTERM} (the JVM's way of saying so) is a clean stop, not a
+ * failure.
  */
 public final class PtyHostUnit {
 
@@ -64,21 +73,36 @@ public final class PtyHostUnit {
         %sExecStart=%s _pty-host
         Restart=on-failure
         RestartSec=2
+        SuccessExitStatus=143
+        NotifyAccess=main
+        FileDescriptorStoreMax=%d
+        KillMode=process
+        TimeoutStopSec=15
         LimitNOFILE=4096
 
         [Install]
         WantedBy=%s
         """
-        .formatted(userClause, sailBinary, wantedBy);
+        .formatted(userClause, sailBinary, PtySessionHost.Limits.DEFAULTS.sessions(), wantedBy);
+  }
+
+  /** Whether the unit file at {@code path} carries the descriptor store — an older one does not. */
+  public static boolean predatesLiveHandoff(Path path) {
+    try {
+      return Files.isRegularFile(path)
+          && !Files.readString(path).contains("FileDescriptorStoreMax=");
+    } catch (IOException unreadable) {
+      return false;
+    }
   }
 
   /**
    * Writes the unit (and USER-mode symlink), reloads systemd, enables the service, and {@code
    * restart}s it. Restart, not {@code enable --now}: an upgrade rewrites the binary on disk but the
    * running host keeps executing the old process, so it must be restarted to pick up the new code —
-   * {@code restart} also starts a stopped service, so it is correct on a first install too. (Live
-   * sessions do not survive a host restart regardless — there is no rehydration — so this loses
-   * nothing an upgrade wasn't already going to lose.)
+   * {@code restart} also starts a stopped service, so it is correct on a first install too. The
+   * restart is the live path: the running host hands its sessions to the store and the new binary
+   * adopts them.
    */
   public void install() throws IOException, InterruptedException, TimeoutException {
     Files.createDirectories(serviceFilePath.getParent());

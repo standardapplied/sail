@@ -115,6 +115,60 @@ class RingJournalTest {
   }
 
   @Test
+  void aSafeStartThatWouldDiscardMostOfTheWindowYieldsToAnUnsafeReplayOfIt() throws Exception {
+    try (var ring = RingJournal.open(dir.resolve("s.ring"), 1024)) {
+      ring.append(bytes("x".repeat(300) + "\n"), 301);
+      ring.markSafe();
+
+      var tail = ring.tail(100); // the window begins at 201; the only boundary inside is the end
+      assertFalse(tail.safe(), "an empty safe replay is no replay");
+      assertEquals(201, tail.startOffset());
+      assertEquals(100, tail.bytes().length, "the window is replayed, unsafe, not nothing");
+
+      ring.append(bytes("y".repeat(40) + "\n"), 41);
+      ring.markSafe();
+      var costly = ring.tail(100); // the window begins at 242; the boundary at 301 costs 59 of 100
+      assertFalse(costly.safe(), "more than half the window is still too much to discard");
+      var affordable = ring.tail(82); // the window begins at 260; the same boundary costs 41 of 82
+      assertTrue(affordable.safe(), "half the window buys a safe start");
+      assertEquals(301, affordable.startOffset());
+      assertArrayEquals(bytes("y".repeat(40) + "\n"), affordable.bytes());
+      var whole = ring.tail(342); // the whole stream: its start is free
+      assertTrue(whole.safe());
+      assertEquals(0, whole.startOffset());
+    }
+  }
+
+  @Test
+  void aRingWithNothingAppendedYetReopensAsEmptyHistory() throws Exception {
+    var path = dir.resolve("s.ring");
+    try (var ring = RingJournal.open(path, 64)) {
+      assertEquals(0, ring.totalWritten());
+    }
+    try (var ring = RingJournal.open(path, 64)) {
+      assertEquals(0, ring.totalWritten(), "a child that has not spoken yet has a readable ring");
+      assertEquals(0, ring.tail(64).bytes().length);
+    }
+  }
+
+  @Test
+  void aTruncatedRingIsRefusedWithTheReasonNeverReadAsEmpty() throws Exception {
+    var path = dir.resolve("s.ring");
+    try (var ring = RingJournal.open(path, 64)) {
+      ring.append(bytes("twelve bytes"), 12);
+    }
+    var whole = Files.readAllBytes(path);
+    Files.write(path, java.util.Arrays.copyOf(whole, whole.length - 4));
+
+    var refused = assertThrows(IOException.class, () -> RingJournal.open(path, 64));
+    assertTrue(refused.getMessage().contains("truncated"), refused.getMessage());
+
+    Files.write(path, java.util.Arrays.copyOf(whole, 20));
+    var header = assertThrows(IOException.class, () -> RingJournal.open(path, 64));
+    assertTrue(header.getMessage().contains("Not a sail ring journal"), header.getMessage());
+  }
+
+  @Test
   void aForeignFileOrMismatchedCapacityRefusesLoudly() throws Exception {
     var path = dir.resolve("s.ring");
     Files.writeString(path, "not a ring journal at all, definitely");

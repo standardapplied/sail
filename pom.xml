@@ -519,6 +519,7 @@
             <id>integration</id>
             <properties>
                 <sail.it.requireIncus>true</sail.it.requireIncus>
+                <sail.it.requireSystemd>true</sail.it.requireSystemd>
             </properties>
             <build>
                 <plugins>
@@ -534,6 +535,7 @@
                             </argLine>
                             <systemPropertyVariables>
                                 <sail.it.requireIncus>${sail.it.requireIncus}</sail.it.requireIncus>
+                                <sail.it.requireSystemd>${sail.it.requireSystemd}</sail.it.requireSystemd>
                             </systemPropertyVariables>
                         </configuration>
                         <executions>

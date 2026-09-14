@@ -20,14 +20,17 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * The per-container session host: owns every {@link PtySession}, serves the {@link PtyWire}
@@ -48,22 +51,63 @@ import java.util.concurrent.atomic.AtomicInteger;
  * #dispatchCredentialOf}), and admits a {@code Hello} carrying it as {@link PtyIdentity#DISPATCH} —
  * a principal that can yield and do nothing else. Owners and admins keep create, attach, and kill;
  * a user-issued kill never masquerades as a yield.
+ *
+ * <p>The host is replaceable without ending a session. Every master goes into systemd's descriptor
+ * store the moment it is created ({@link Handoff#store()}); a host told to step aside {@link
+ * #handoff() hands off} — stops reading, closes nothing — and its successor, started with the
+ * store's descriptors as {@link Handoff#inheritedFds()}, adopts each one whose ring and sidecar are
+ * sound before it sweeps the directory. An adopted host keeps the previous boot id (kept in {@code
+ * host.boot}), so a client comparing ids reads the handoff as a reconnect; a host that inherits
+ * nothing mints a new one, as before. A descriptor that cannot be adopted is closed, which hangs
+ * its child up: closing the master is the kill switch, so nothing can leak.
  */
 public final class PtySessionHost implements AutoCloseable {
 
   static final Duration NEVER_ATTACHED_GRACE = Duration.ofSeconds(60);
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
+  static final String BOOT_ID_FILE = "host.boot";
+  private static final List<String> SESSION_FILE_SUFFIXES =
+      List.of(
+          SessionFiles.META_SUFFIX + ".tmp",
+          SessionFiles.RING_SUFFIX,
+          SessionFiles.META_SUFFIX,
+          SessionFiles.EXIT_SUFFIX);
+
+  /**
+   * How this host outlives itself: the store it pushes masters to, the descriptors the previous
+   * host left it (by store name), and the shim every child is spawned under — the {@code
+   * _pty-child} wrapper that records the exit status a successor cannot collect. {@link #NONE} is a
+   * host on its own: no store, no inheritance, children spawned bare.
+   */
+  public record Handoff(
+      SdNotify store, Map<String, Integer> inheritedFds, Function<Path, List<String>> shim) {
+    public static final Handoff NONE = new Handoff(SdNotify.NONE, Map.of(), exit -> List.of());
+
+    public Handoff {
+      inheritedFds = Map.copyOf(inheritedFds);
+    }
+
+    /** What systemd gave this process, with {@code shim} wrapping every child. */
+    public static Handoff fromEnvironment(Function<Path, List<String>> shim) {
+      return new Handoff(
+          SdNotify.fromEnvironment(),
+          SdNotify.listenFds(System.getenv(), ProcessHandle.current().pid()),
+          shim);
+    }
+  }
 
   /**
    * The host's resource ceilings: sessions one FDE may own at once and subscribers one session may
-   * fan out to, each refused with an {@code Err} that names the cap; and connections the host
-   * serves at once, an excess socket being closed before a byte of it is read, so a peer that opens
-   * many and never speaks holds no handler, descriptor, or frame past the cap. {@link #DEFAULTS} is
-   * production; tests inject smaller values.
+   * fan out to, each refused with an {@code Err} that names the cap; connections the host serves at
+   * once, an excess socket being closed before a byte of it is read, so a peer that opens many and
+   * never speaks holds no handler, descriptor, or frame past the cap; and sessions the host holds
+   * in all, which is also how many masters its unit's descriptor store is sized for. {@link
+   * #DEFAULTS} is production; tests inject smaller values.
    */
-  public record Limits(int sessionsPerFde, int subscribersPerSession, int connections) {
-    public static final Limits DEFAULTS = new Limits(32, 16, 256);
+  public record Limits(
+      int sessionsPerFde, int subscribersPerSession, int connections, int sessions) {
+    public static final Limits DEFAULTS = new Limits(32, 16, 256, 256);
   }
 
   private final Path socketPath;
@@ -74,9 +118,10 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyEvents events;
   private final String version;
   private final Limits limits;
+  private final Handoff handoff;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final Set<Admitted> admitted = ConcurrentHashMap.newKeySet();
-  private final String bootId = Ids.newId().toString();
+  private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
   private volatile byte[] dispatchCredential = new byte[0];
@@ -100,7 +145,29 @@ public final class PtySessionHost implements AutoCloseable {
         rooms,
         events,
         version,
-        Limits.DEFAULTS);
+        Limits.DEFAULTS,
+        Handoff.NONE);
+  }
+
+  public PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyRooms rooms,
+      PtyEvents events,
+      String version,
+      Handoff handoff) {
+    this(
+        socketPath,
+        sessionsDir,
+        journalCapacity,
+        identity,
+        rooms,
+        events,
+        version,
+        Limits.DEFAULTS,
+        handoff);
   }
 
   PtySessionHost(
@@ -112,6 +179,28 @@ public final class PtySessionHost implements AutoCloseable {
       PtyEvents events,
       String version,
       Limits limits) {
+    this(
+        socketPath,
+        sessionsDir,
+        journalCapacity,
+        identity,
+        rooms,
+        events,
+        version,
+        limits,
+        Handoff.NONE);
+  }
+
+  PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyRooms rooms,
+      PtyEvents events,
+      String version,
+      Limits limits,
+      Handoff handoff) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
@@ -120,13 +209,15 @@ public final class PtySessionHost implements AutoCloseable {
     this.events = events;
     this.version = version;
     this.limits = limits;
+    this.handoff = handoff;
   }
 
   /**
-   * This run of the host, minted once at construction: every {@code Hello} is answered with it, so
-   * a client comparing ids across connections can tell "the host restarted and lost the session"
-   * from "the session ended". Sessions do not survive a restart, so the id changing is the one fact
-   * that explains every session the previous run held.
+   * This run of the host: every {@code Hello} is answered with it, so a client comparing ids across
+   * connections can tell "the host restarted and lost the session" from "the session ended". A host
+   * that adopted at least one session from its predecessor keeps the predecessor's id — the
+   * sessions are the same, so the restart is invisible — and one that inherited nothing mints a new
+   * one, the one fact that explains every session the previous run held.
    */
   public String bootId() {
     return bootId;
@@ -134,7 +225,17 @@ public final class PtySessionHost implements AutoCloseable {
 
   public void start() throws IOException {
     Files.createDirectories(sessionsDir);
-    sweepOrphanRings();
+    if (!handoff.store().enabled()) {
+      log("handoff-off", "-", "-", "no NOTIFY_SOCKET; sessions will not survive a host restart");
+    }
+    adoptInherited();
+    bootId = bootIdFor(!sessions.isEmpty());
+    try {
+      Files.writeString(sessionsDir.resolve(BOOT_ID_FILE), bootId);
+    } catch (IOException e) {
+      log("boot-id-unsaved", "-", "-", e.toString());
+    }
+    sweepOrphanFiles();
     var socketDir = socketPath.getParent();
     if (socketDir != null) {
       Files.createDirectories(socketDir);
@@ -157,17 +258,127 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Deletes every {@code *.ring} left in the sessions directory. Sessions do not survive a host
-   * restart (there is no rehydration — the child is dead anyway), so any ring on disk at start is
-   * an orphan of a previous run; leaving them would leak 4 MB per distinct name forever and let a
-   * fresh create collide with a stranger's history that no {@link #admitted} check guards.
+   * Adopts every inherited descriptor whose ring and sidecar are sound. Anything else — a name the
+   * host does not know, a ring or sidecar missing or garbled, a descriptor that is no pty master —
+   * is closed (hanging its child up, so nothing leaks), dropped from the store, and logged as lost
+   * in the handoff. A number below the store's first descriptor is never a master: it is this
+   * process's own stdin, stdout or stderr, and closing it would take the host's log — or, under a
+   * test runner, its command channel — with it.
    */
-  private void sweepOrphanRings() throws IOException {
-    try (var rings = Files.list(sessionsDir)) {
-      for (var ring : rings.filter(p -> p.getFileName().toString().endsWith(".ring")).toList()) {
-        Files.deleteIfExists(ring);
+  private void adoptInherited() {
+    for (var entry : handoff.inheritedFds().entrySet()) {
+      var name = entry.getKey();
+      var fd = entry.getValue();
+      if (fd < SdNotify.FIRST_LISTEN_FD) {
+        log("lost in handoff", "-", name, "descriptor " + fd + " is this process's own stdio");
+        handoff.store().removeFd(name);
+        continue;
+      }
+      var refused = adopt(name, fd);
+      if (refused == null) {
+        continue;
+      }
+      log("lost in handoff", "-", name, refused);
+      try {
+        Pty.closeFd(fd);
+      } catch (IOException e) {
+        log("lost in handoff", "-", name, "close failed: " + e.getMessage());
+      }
+      handoff.store().removeFd(name);
+    }
+  }
+
+  /** {@code null} once {@code name} is live again under {@code fd}; otherwise why it cannot be. */
+  private String adopt(String name, int fd) {
+    try {
+      NameValidator.requireValidSessionName(name);
+    } catch (IllegalArgumentException bad) {
+      return bad.getMessage();
+    }
+    var files = SessionFiles.in(sessionsDir, name);
+    SessionMeta meta;
+    try {
+      if (!Files.isRegularFile(files.ring()) || Files.size(files.ring()) == 0) {
+        return "no ring on disk";
+      }
+      meta = SessionMeta.read(files.meta());
+    } catch (IOException e) {
+      return e.getMessage();
+    }
+    if (!meta.origin().name().equals(name)) {
+      return "sidecar belongs to session '" + meta.origin().name() + "'";
+    }
+    Journal journal;
+    try {
+      journal = RingJournal.open(files.ring(), journalCapacity);
+    } catch (IOException e) {
+      return e.getMessage();
+    }
+    Pty pty;
+    try {
+      pty = Pty.adopt(fd);
+    } catch (IOException e) {
+      closeQuietly(journal, name);
+      return e.getMessage();
+    }
+    sessions.put(name, PtySession.resume(meta, events, pty, journal, files, handoff.store()));
+    log("adopted", meta.origin().ownerFde(), name, "instance " + meta.origin().instanceId());
+    return null;
+  }
+
+  private static void closeQuietly(Journal journal, String name) {
+    try {
+      journal.close();
+    } catch (IOException e) {
+      log("ring-close-failed", "-", name, e.toString());
+    }
+  }
+
+  /**
+   * The predecessor's boot id when this host adopted any of its sessions and the id can be read;
+   * otherwise a fresh one. An unreadable file with adopted sessions is logged: the sessions are
+   * still live, and a client that reconnects finds them listed under the new id.
+   */
+  private String bootIdFor(boolean adoptedAny) {
+    if (adoptedAny) {
+      try {
+        var stored = Files.readString(sessionsDir.resolve(BOOT_ID_FILE)).strip();
+        if (!stored.isBlank()) {
+          return stored;
+        }
+        log("boot-id-minted", "-", "-", BOOT_ID_FILE + " is empty");
+      } catch (IOException e) {
+        log("boot-id-minted", "-", "-", BOOT_ID_FILE + " unreadable: " + e.getMessage());
       }
     }
+    return Ids.newId().toString();
+  }
+
+  /**
+   * Deletes the ring, sidecar and exit file of every session this host did not adopt. Whatever is
+   * on disk at start and was not handed over is an orphan of a previous run; leaving rings would
+   * leak 4 MB per distinct name forever and let a fresh create collide with a stranger's history
+   * that no {@link #admitted} check guards, and a stale exit file would lend a future life of the
+   * same name a status that was never its own.
+   */
+  private void sweepOrphanFiles() throws IOException {
+    try (var entries = Files.list(sessionsDir)) {
+      for (var file : entries.toList()) {
+        var owner = sessionNameOf(file.getFileName().toString());
+        if (owner != null && !sessions.containsKey(owner)) {
+          Files.deleteIfExists(file);
+        }
+      }
+    }
+  }
+
+  private static String sessionNameOf(String fileName) {
+    for (var suffix : SESSION_FILE_SUFFIXES) {
+      if (fileName.endsWith(suffix)) {
+        return fileName.substring(0, fileName.length() - suffix.length());
+      }
+    }
+    return null;
   }
 
   /**
@@ -430,11 +641,19 @@ public final class PtySessionHost implements AutoCloseable {
         : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
 
+  private static final PtyMessage.Err SHUTTING_DOWN =
+      new PtyMessage.Err("The pty host is shutting down; reconnect and try again.");
+
   /**
    * Serialized: the per-FDE quota check and the registration of the session it admits must be one
-   * step, or concurrent creates each see the same spare slot and all spawn.
+   * step, or concurrent creates each see the same spare slot and all spawn. Refused once shutdown
+   * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
+   * a handed-off session's ring and sidecar under the successor's feet.
    */
   private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     Path cwd;
     try {
       NameValidator.requireValidSessionName(m.session());
@@ -462,6 +681,11 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "You are at your session cap of " + limits.sessionsPerFde() + "; kill one first.");
     }
+    if (existing == null && sessions.size() >= limits.sessions()) {
+      log("refused", who.fde(), m.session(), "host session cap " + limits.sessions());
+      return new PtyMessage.Err(
+          "The host is at its session cap of " + limits.sessions() + "; kill one first.");
+    }
     var commandBytes = PtyWire.wireSize(m.command());
     if (commandBytes > PtyMessage.MAX_COMMAND_BYTES) {
       return new PtyMessage.Err(
@@ -486,9 +710,9 @@ public final class PtySessionHost implements AutoCloseable {
     if (existing != null) {
       remove(m.session(), existing);
     }
-    var ring = sessionsDir.resolve(m.session() + ".ring");
+    var files = SessionFiles.in(sessionsDir, m.session());
     try {
-      Files.deleteIfExists(ring);
+      files.deleteAll();
       var origin =
           new PtySession.Origin(
               m.session(),
@@ -498,21 +722,25 @@ public final class PtySessionHost implements AutoCloseable {
               room,
               requestedOrShell(m.command()));
       var env = childEnv(room, version);
+      var argv = new ArrayList<>(handoff.shim().apply(files.exit()));
+      argv.addAll(childCommand(origin, env));
       var session =
           PtySession.start(
               origin,
               events,
-              childCommand(origin, env),
+              argv,
               env,
               cwd,
-              ring,
+              files,
               journalCapacity,
               m.cols(),
-              m.rows());
+              m.rows(),
+              version,
+              handoff.store());
       sessions.put(m.session(), session);
       return new PtyMessage.Ok();
     } catch (IOException e) {
-      deleteRing(ring, who.fde(), m.session());
+      deleteFiles(files, who.fde(), m.session());
       return new PtyMessage.Err("Could not start session '" + m.session() + "': " + e.getMessage());
     }
   }
@@ -571,7 +799,10 @@ public final class PtySessionHost implements AutoCloseable {
         session.origin().command());
   }
 
-  private PtyMessage kill(String name, PtyIdentity who) {
+  private synchronized PtyMessage kill(String name, PtyIdentity who) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     var session = sessions.get(name);
     if (session == null) {
       return new PtyMessage.Err("No session '" + name + "'.");
@@ -590,26 +821,29 @@ public final class PtySessionHost implements AutoCloseable {
    * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
    * whichever FDE opened it. The ring goes with the session, as it does on a kill.
    */
-  private PtyMessage yieldSession(String name, String reason) {
+  private synchronized PtyMessage yieldSession(String name, String reason) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     var session = sessions.get(name);
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
     }
     sessions.remove(name, session);
     session.end(reason);
-    deleteRing(sessionsDir.resolve(name + ".ring"), session.ownerFde(), name);
+    deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();
   }
 
   private void remove(String name, PtySession session) {
     sessions.remove(name, session);
     session.close();
-    deleteRing(sessionsDir.resolve(name + ".ring"), session.ownerFde(), name);
+    deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
   }
 
-  private void deleteRing(Path ring, String fde, String name) {
+  private void deleteFiles(SessionFiles files, String fde, String name) {
     try {
-      Files.deleteIfExists(ring);
+      files.deleteAll();
     } catch (IOException e) {
       log("ring-delete-failed", fde, name, e.toString());
     }
@@ -617,9 +851,13 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * One reaping pass at {@code nowNanos}: revoked credentials severed, then the mosh grace and
-   * retention rules, nothing else.
+   * retention rules, nothing else. Nothing once shutdown has begun: the sessions belong to the
+   * successor or are ending.
    */
-  public void sweep(long nowNanos) {
+  public synchronized void sweep(long nowNanos) {
+    if (closed) {
+      return;
+    }
     severRevoked();
     sessions.forEach(
         (name, session) -> {
@@ -687,8 +925,57 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
+  /**
+   * Steps aside for a successor: stops serving, then hands every live session off without ending it
+   * — its master stays open for the store's duplicate to be handed on, its ring and sidecar stay on
+   * disk. Returns the masters by session name, which is what the successor will be told as {@code
+   * LISTEN_FDNAMES}. Corpses are released here; the successor sweeps their files. Serialized with
+   * every operation that removes a session or its files, and closing the host first, so a request
+   * already in flight on an open connection either completes before the snapshot or is refused.
+   */
+  public synchronized Map<String, Integer> handoff() {
+    closeServer();
+    var masters = new LinkedHashMap<String, Integer>();
+    sessions.forEach(
+        (name, session) -> {
+          var fd = session.handoff();
+          if (fd >= 0) {
+            masters.put(name, fd);
+          }
+        });
+    sessions.clear();
+    return masters;
+  }
+
+  /**
+   * Stops for good: every live session ends with {@code reason} in its stream and on its ending,
+   * all of them at once, so the last one is told within the same seconds as the first. This is the
+   * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
+   */
+  public synchronized void stop(String reason) {
+    closeServer();
+    var endings =
+        sessions.values().stream()
+            .map(session -> Thread.ofVirtual().start(() -> session.end(reason)))
+            .toList();
+    for (var ending : endings) {
+      try {
+        ending.join();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    sessions.clear();
+  }
+
   @Override
-  public void close() {
+  public synchronized void close() {
+    closeServer();
+    sessions.forEach((name, session) -> session.close());
+    sessions.clear();
+  }
+
+  private void closeServer() {
     closed = true;
     try {
       if (server != null) {
@@ -699,7 +986,5 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException e) {
       throw new IllegalStateException("pty host close failed", e);
     }
-    sessions.forEach((name, session) -> session.close());
-    sessions.clear();
   }
 }

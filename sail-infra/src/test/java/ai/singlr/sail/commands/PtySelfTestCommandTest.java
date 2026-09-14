@@ -21,6 +21,12 @@ class PtySelfTestCommandTest {
   }
 
   @Test
+  @EnabledOnOs(OS.LINUX)
+  void theStoreProbePushesAMasterThroughTheBindingAndReadsThroughTheCopy() {
+    org.junit.jupiter.api.Assertions.assertDoesNotThrow(PtySelfTestCommand::fdStoreProbe);
+  }
+
+  @Test
   void theJsonProbeCoversEveryJsonVerbsRecord() {
     var json = PtySelfTestCommand.jsonProbe();
     for (var key : PtySelfTestCommand.JSON_KEYS) {

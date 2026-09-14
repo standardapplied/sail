@@ -82,12 +82,24 @@ class MigrateCommandTest {
     var binary = Path.of("/usr/local/bin/sail");
 
     MigrateCommand.ensurePtyHostService(
-        false, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
+        false,
+        shell,
+        SystemdServiceInstaller.Mode.USER,
+        home,
+        binary,
+        home.resolve("pty.sock"),
+        true);
     assertTrue(shell.invocations().isEmpty(), "no systemctl where the box has no api service");
     assertFalse(Files.exists(home.resolve(".sail/services/sail-pty-host.service")));
 
     MigrateCommand.ensurePtyHostService(
-        true, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
+        true,
+        shell,
+        SystemdServiceInstaller.Mode.USER,
+        home,
+        binary,
+        home.resolve("pty.sock"),
+        true);
     assertTrue(
         Files.exists(home.resolve(".sail/services/sail-pty-host.service")),
         "a provisioned host gets the pty-host unit");
@@ -95,6 +107,134 @@ class MigrateCommandTest {
         shell.invocations().stream()
             .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")),
         "and it is enabled and (re)started so the upgraded binary takes effect");
+  }
+
+  private static String captureStdout(Runnable action) {
+    var out = new java.io.ByteArrayOutputStream();
+    var original = System.out;
+    System.setOut(new java.io.PrintStream(out, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      action.run();
+    } finally {
+      System.setOut(original);
+    }
+    return out.toString(java.nio.charset.StandardCharsets.UTF_8);
+  }
+
+  private static void writeOldUnit(Path home) throws Exception {
+    var unit = home.resolve(".sail/services/sail-pty-host.service");
+    Files.createDirectories(unit.getParent());
+    Files.writeString(unit, "[Service]\nExecStart=/usr/local/bin/sail _pty-host\n");
+  }
+
+  private static ai.singlr.sail.pty.PtySessionHost liveHost(Path socket, Path sessions)
+      throws Exception {
+    return PtyHostCommand.startHost(
+        socket,
+        sessions,
+        token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+        ai.singlr.sail.pty.PtyRooms.NONE,
+        ai.singlr.sail.pty.PtyEvents.NONE);
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void theFirstUpgradePastAnOldUnitNamesTheLiveSessionsItEnds(@TempDir Path home) throws Exception {
+    var socket = home.resolve("pty.sock");
+    writeOldUnit(home);
+    try (var host = liveHost(socket, home.resolve("sessions"));
+        var client = SessionClient.connect(socket, "")) {
+      client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+      client.create("s2", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+      var out =
+          captureStdout(
+              () ->
+                  MigrateCommand.ensurePtyHostService(
+                      true,
+                      shell,
+                      SystemdServiceInstaller.Mode.USER,
+                      home,
+                      Path.of("/usr/local/bin/sail"),
+                      socket,
+                      false));
+
+      assertTrue(out.contains("2 live sessions ended"), out);
+      assertTrue(out.contains("predates live handoff"), out);
+      assertTrue(
+          shell.invocations().stream()
+              .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")),
+          "the restart still proceeds");
+      assertTrue(
+          Files.readString(home.resolve(".sail/services/sail-pty-host.service"))
+              .contains("FileDescriptorStoreMax="),
+          "the unit now carries the store, so the next upgrade is live");
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void noLiveSessionsMeansNoNoticeAndANewUnitMeansNoNoticeEither(@TempDir Path home)
+      throws Exception {
+    var socket = home.resolve("pty.sock");
+    writeOldUnit(home);
+    try (var host = liveHost(socket, home.resolve("sessions"))) {
+      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+      var out =
+          captureStdout(
+              () ->
+                  MigrateCommand.ensurePtyHostService(
+                      true,
+                      shell,
+                      SystemdServiceInstaller.Mode.USER,
+                      home,
+                      Path.of("/usr/local/bin/sail"),
+                      socket,
+                      false));
+      assertFalse(out.contains("pty host restarted"), out);
+
+      try (var client = SessionClient.connect(socket, "")) {
+        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+      }
+      var again =
+          captureStdout(
+              () ->
+                  MigrateCommand.ensurePtyHostService(
+                      true,
+                      shell,
+                      SystemdServiceInstaller.Mode.USER,
+                      home,
+                      Path.of("/usr/local/bin/sail"),
+                      socket,
+                      false));
+      assertFalse(again.contains("pty host restarted"), "the unit now has the store: " + again);
+    }
+  }
+
+  @Test
+  void anUnreachableHostIsSaidToBeUnaskableAndTheRestartProceeds(@TempDir Path home)
+      throws Exception {
+    writeOldUnit(home);
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    var out =
+        captureStdout(
+            () ->
+                MigrateCommand.ensurePtyHostService(
+                    true,
+                    shell,
+                    SystemdServiceInstaller.Mode.USER,
+                    home,
+                    Path.of("/usr/local/bin/sail"),
+                    home.resolve("nobody.sock"),
+                    false));
+
+    assertTrue(out.contains("could not be asked"), out);
+    assertTrue(out.contains("predates live handoff"), out);
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")));
   }
 
   @Test
