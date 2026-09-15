@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.42.0
 
 - **`sail upgrade` never kills a session.** Every pty master now lives in systemd's file
   descriptor store from the moment a session is created, so a restart — or a crash — of the pty
