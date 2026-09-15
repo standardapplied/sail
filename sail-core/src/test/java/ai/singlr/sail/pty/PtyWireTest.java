@@ -134,6 +134,21 @@ class PtyWireTest {
   }
 
   @Test
+  void aFixedWidthFieldLandingOnTheBufferBoundaryStillEncodes() throws Exception {
+    // The writer starts at 512 bytes and doubles; a session listing whose live flag and attach
+    // count straddle a boundary overflowed and refused the whole listing, for that node, forever.
+    for (var pad = 0; pad < 1_200; pad++) {
+      var info = new PtyMessage.SessionInfo("s".repeat(pad), "i", true, 7, "uday", "", List.of());
+      var listed = (PtyMessage.Sessions) roundTrip(new PtyMessage.Sessions(List.of(info), ""));
+      assertEquals(7, listed.sessions().getFirst().attached(), "pad " + pad);
+      var created =
+          (PtyMessage.Create)
+              roundTrip(new PtyMessage.Create("n", List.of("x".repeat(pad)), "", "", "", 80, 24));
+      assertEquals(24, created.rows(), "pad " + pad);
+    }
+  }
+
+  @Test
   void handshakeAcceptsItselfAndRefusesStrangers() throws Exception {
     var aToB = Pipe.open();
     var bToA = Pipe.open();

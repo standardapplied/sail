@@ -84,43 +84,43 @@ public final class PtyWire {
             .string(m.cwd())
             .string(m.project())
             .string(m.room());
-        out.buffer.putInt(m.cols()).putInt(m.rows());
+        out.i32(m.cols()).i32(m.rows());
       }
       case PtyMessage.Attach m -> {
         out.type(2).string(m.session());
-        out.buffer.put((byte) (m.write() ? 1 : 0));
+        out.bool(m.write());
       }
       case PtyMessage.Input m -> {
         out.type(3);
-        out.buffer.putLong(m.seq());
+        out.i64(m.seq());
         out.bytes(m.bytes());
       }
       case PtyMessage.Resize m -> {
         out.type(4);
-        out.buffer.putInt(m.cols()).putInt(m.rows());
+        out.i32(m.cols()).i32(m.rows());
       }
       case PtyMessage.TakeWrite m -> out.type(5);
       case PtyMessage.Detach m -> out.type(6);
       case PtyMessage.ListSessions m -> {
         out.type(7).string(m.after());
-        out.buffer.putInt(m.limit());
+        out.i32(m.limit());
       }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
       case PtyMessage.Output m -> {
         out.type(20);
-        out.buffer.putLong(m.lastInputSeq());
+        out.i64(m.lastInputSeq());
         out.bytes(m.bytes());
       }
       case PtyMessage.ReplayBegin m -> {
         out.type(21);
-        out.buffer.put((byte) (m.safe() ? 1 : 0));
+        out.bool(m.safe());
       }
       case PtyMessage.ReplayEnd m -> out.type(22);
       case PtyMessage.WriterChanged m -> out.type(23).string(m.fde());
       case PtyMessage.Resized m -> {
         out.type(24);
-        out.buffer.putInt(m.cols()).putInt(m.rows());
+        out.i32(m.cols()).i32(m.rows());
       }
       case PtyMessage.Paused m -> out.type(25);
       case PtyMessage.Continued m -> out.type(26);
@@ -128,7 +128,7 @@ public final class PtyWire {
       case PtyMessage.SessionInfo m -> encodeInfo(out.type(28), m);
       case PtyMessage.Sessions m -> {
         out.type(29);
-        out.buffer.putInt(m.sessions().size());
+        out.i32(m.sessions().size());
         for (var info : m.sessions()) {
           encodeInfo(out, info);
         }
@@ -157,7 +157,7 @@ public final class PtyWire {
 
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
     out.string(info.name()).string(info.instanceId());
-    out.buffer.put((byte) (info.live() ? 1 : 0)).putInt(info.attached());
+    out.bool(info.live()).i32(info.attached());
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
 
@@ -264,6 +264,11 @@ public final class PtyWire {
     }
   }
 
+  /**
+   * A growing buffer: every write reserves its room first, so no field can overflow whatever the
+   * size hint guessed — an overflow here is a RuntimeException the host answers with a generic
+   * refusal, and a listing that overflowed by a few bytes refused the same way on every retry.
+   */
   private static final class Writer {
     private ByteBuffer buffer;
 
@@ -283,9 +288,26 @@ public final class PtyWire {
     }
 
     Writer stringList(List<String> values) {
-      ensure(4);
-      buffer.putInt(values.size());
+      i32(values.size());
       values.forEach(this::string);
+      return this;
+    }
+
+    Writer bool(boolean value) {
+      ensure(1);
+      buffer.put((byte) (value ? 1 : 0));
+      return this;
+    }
+
+    Writer i32(int value) {
+      ensure(4);
+      buffer.putInt(value);
+      return this;
+    }
+
+    Writer i64(long value) {
+      ensure(8);
+      buffer.putLong(value);
       return this;
     }
 
