@@ -61,18 +61,20 @@ class OperationsFactoryTest {
                 SyncScheduler.disabled(),
                 SessionYield.NONE)) {
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
-      var plain = operations.startAdhoc("proj", preview, "node");
+      var plain = operations.dispatching().startAdhoc("proj", preview, "node");
       var prepared =
-          operations.startAdhoc(
-              "proj",
-              preview,
-              "node",
-              () -> {
-                throw new AssertionError("a dry run must not prepare the workspace");
-              });
+          operations
+              .dispatching()
+              .startAdhoc(
+                  "proj",
+                  preview,
+                  "node",
+                  () -> {
+                    throw new AssertionError("a dry run must not prepare the workspace");
+                  });
       assertNotNull(plain.runId());
       assertNotNull(prepared.runId());
-      assertTrue(operations.runningRuns("proj", "node").isEmpty());
+      assertTrue(operations.dispatching().runningRuns("proj", "node").isEmpty());
       assertEquals(0, bus.publishedCount());
       box.specs.create(SyncBox.spec("auth", "Auth", "pending"));
       var runId = DateTimeUtils.newId().toString();
@@ -93,11 +95,13 @@ class OperationsFactoryTest {
           "sail-agent-" + runId);
 
       var outcome =
-          operations.stop(
-              new StopOperations.RunTarget(runId),
-              new Actor("node", Role.ADMIN, Actor.Lane.API),
-              "node",
-              false);
+          operations
+              .dispatching()
+              .stop(
+                  new StopOperations.RunTarget(runId),
+                  new Actor("node", Role.ADMIN, Actor.Lane.API),
+                  "node",
+                  false);
 
       assertTrue(assertInstanceOf(StopOperations.NotRunning.class, outcome).runReleased());
       assertEquals("stopped", runs.findById(runId).orElseThrow().status());
@@ -110,21 +114,22 @@ class OperationsFactoryTest {
     var environment = environment();
     var previous = environment.put("SAIL_DATA_DIR", tempDir.toString());
     try {
-      SailOperations closed;
+      HostOperations closed;
       try (var operations = OperationsFactory.open()) {
         closed = operations;
-        assertEquals(0, operations.schemaVersion(), "ordinary opens preserve bootstrap behavior");
-        var migrated = operations.initialize();
+        assertEquals(
+            0, operations.schema().version(), "ordinary opens preserve bootstrap behavior");
+        var migrated = operations.schema().initialize();
         assertEquals(0, migrated.before());
         assertTrue(migrated.after() > 0);
-        assertEquals(migrated.after(), operations.initialize().before());
+        assertEquals(migrated.after(), operations.schema().initialize().before());
         assertTrue(operations.conflicts().isEmpty());
-        operations.createToken("test", "admin", null, null);
+        operations.identity().createToken("test", "admin", null, null);
       }
-      assertThrows(IllegalStateException.class, closed::schemaVersion);
+      assertThrows(IllegalStateException.class, () -> closed.schema().version());
       assertTrue(Files.isRegularFile(tempDir.resolve("sail.db")));
       try (var operations = OperationsFactory.open(tempDir.resolve("sail.db"))) {
-        assertEquals("test", operations.tokens().getFirst().name());
+        assertEquals("test", operations.identity().tokens().getFirst().name());
       }
       var shell = new ShellExecutor(true);
       var hooks =
@@ -137,7 +142,7 @@ class OperationsFactoryTest {
               StopOperations.Listener.NONE);
       try (var operations =
           OperationsFactory.open(shell, SailPaths.PROJECT_DESCRIPTOR, hooks, SessionYield.NONE)) {
-        assertEquals("test", operations.tokens().getFirst().name());
+        assertEquals("test", operations.identity().tokens().getFirst().name());
         assertNotNull(operations.syncStatus());
       }
       assertThrows(

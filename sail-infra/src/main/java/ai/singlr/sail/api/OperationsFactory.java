@@ -31,11 +31,11 @@ import java.util.function.Function;
 public final class OperationsFactory {
   private OperationsFactory() {}
 
-  public static SailOperations open() {
+  public static HostOperations open() {
     return open(SailPaths.controlPlaneDb());
   }
 
-  public static SailOperations open(Path path) {
+  public static HostOperations open(Path path) {
     return open(
         path,
         db ->
@@ -49,12 +49,12 @@ public final class OperationsFactory {
                 SessionYield.NONE));
   }
 
-  public static SailOperations open(
+  public static HostOperations open(
       ShellExec shell, String file, OperationHooks hooks, SessionYield sessionYield) {
     return open(SailPaths.controlPlaneDb(), db -> create(db, shell, file, hooks, sessionYield));
   }
 
-  private static SailOperations open(Path path, Function<Sqlite, SailOperations> create) {
+  private static HostOperations open(Path path, Function<Sqlite, SailOperations> create) {
     var database = Sqlite.open(path);
     try {
       return create.apply(database).closeWith(database::close);

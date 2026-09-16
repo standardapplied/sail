@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.FdeStore;
@@ -69,7 +69,7 @@ public final class ServerTokenCommand implements Runnable {
             var ttl = resolveTtl(noExpiry, ttlDays);
             try (var operations = OperationsFactory.open()) {
               var fdeId = resolveFdeId(operations);
-              var created = operations.createToken(name, role, fdeId, ttl);
+              var created = operations.identity().createToken(name, role, fdeId, ttl);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
               System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
@@ -103,11 +103,12 @@ public final class ServerTokenCommand implements Runnable {
       return Duration.ofDays(ttlDays);
     }
 
-    private String resolveFdeId(Operations operations) {
+    private String resolveFdeId(HostOperations operations) {
       if (Strings.isBlank(fde)) {
         return null;
       }
       return operations
+          .identity()
           .fde(fde)
           .map(FdeStore.Fde::id)
           .orElseThrow(
@@ -128,7 +129,7 @@ public final class ServerTokenCommand implements Runnable {
           spec,
           () -> {
             try (var operations = OperationsFactory.open()) {
-              var tokens = operations.tokens();
+              var tokens = operations.identity().tokens();
               if (tokens.isEmpty()) {
                 System.out.println("  No tokens. Run 'sail server init' to create one.");
                 return;
@@ -159,7 +160,7 @@ public final class ServerTokenCommand implements Runnable {
           spec,
           () -> {
             try (var operations = OperationsFactory.open()) {
-              var revoked = operations.revokeToken(name);
+              var revoked = operations.identity().revokeToken(name);
               if (revoked) {
                 System.out.println(Ansi.AUTO.string("  @|green ✓|@ Token '" + name + "' revoked."));
               } else {

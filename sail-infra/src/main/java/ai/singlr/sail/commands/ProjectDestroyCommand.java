@@ -135,7 +135,7 @@ public final class ProjectDestroyCommand implements Runnable {
       return false;
     }
     try (var operations = OperationsFactory.open()) {
-      return operations.projectDestroy(name, true).purged();
+      return operations.catalog().destroy(name, true).purged();
     }
   }
 

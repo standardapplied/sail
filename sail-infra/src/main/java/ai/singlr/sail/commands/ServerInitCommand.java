@@ -33,7 +33,7 @@ public final class ServerInitCommand implements Runnable {
     SailPaths.ensureDataDir(dbPath.getParent());
 
     try (var operations = OperationsFactory.open(dbPath)) {
-      var migration = operations.initialize();
+      var migration = operations.schema().initialize();
       var before = migration.before();
       var after = migration.after();
 
@@ -50,23 +50,25 @@ public final class ServerInitCommand implements Runnable {
       }
 
       var configPath = SailPaths.clientConfigPath();
-      var existing = operations.tokens();
+      var existing = operations.identity().tokens();
       var existingAdmin = existing.stream().anyMatch(t -> "admin".equals(t.name()));
       var configMissing = !Files.exists(configPath);
       if (existing.isEmpty()) {
-        var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
+        var created =
+            operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
         ServerConnectionConfig.saveLocalToken(created.token(), configPath);
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
       } else if (configMissing) {
         if (existingAdmin) {
-          operations.revokeToken("admin");
+          operations.identity().revokeToken("admin");
           System.out.println(
               Ansi.AUTO.string(
                   "  @|yellow ↻|@ Config missing — rotating admin token (old plaintext is"
                       + " unrecoverable)."));
         }
-        var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
+        var created =
+            operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
         ServerConnectionConfig.saveLocalToken(created.token(), configPath);
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));

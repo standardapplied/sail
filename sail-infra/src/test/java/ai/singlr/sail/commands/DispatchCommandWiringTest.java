@@ -144,7 +144,8 @@ class DispatchCommandWiringTest {
     var operations = cliOperations(shell(), events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
 
-    var outcome = operations.dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE);
+    var outcome =
+        operations.dispatching().dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertEquals("sail/auth", dispatched.branch());
@@ -191,7 +192,10 @@ class DispatchCommandWiringTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> operations.dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
+            () ->
+                operations
+                    .dispatching()
+                    .dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
 
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("spec id"));
@@ -211,7 +215,8 @@ class DispatchCommandWiringTest {
     specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x");
     var request = new DispatchOperations.Request("auth", "background", false, null, true);
 
-    var outcome = operations.dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE);
+    var outcome =
+        operations.dispatching().dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertTrue(dispatched.restarted());
@@ -230,7 +235,10 @@ class DispatchCommandWiringTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> operations.dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE));
+            () ->
+                operations
+                    .dispatching()
+                    .dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE));
 
     assertTrue(ex.getMessage().contains("roster"));
     assertEquals(

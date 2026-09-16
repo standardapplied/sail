@@ -53,7 +53,8 @@ final class ContainerWorkspace {
   private static String sshUser(String project) {
     try (var operations = OperationsFactory.open()) {
       return operations
-          .catalogProject(project)
+          .catalog()
+          .project(project)
           .map(row -> SailYaml.fromMap(YamlUtil.parseMap(row.definition())).sshUser())
           .orElse("dev");
     } catch (Exception e) {

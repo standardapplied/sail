@@ -385,11 +385,12 @@ public final class UpgradeCommand implements Runnable {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
       try (var operations = OperationsFactory.open(dbPath)) {
-        if (operations.schemaVersion() == 0) {
-          operations.initialize();
+        if (operations.schema().version() == 0) {
+          operations.schema().initialize();
         }
-        if (operations.tokens().isEmpty()) {
-          var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
+        if (operations.identity().tokens().isEmpty()) {
+          var created =
+              operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
           var configPath = SailPaths.clientConfigPath();
           ServerConnectionConfig.saveLocalToken(created.token(), configPath);
           if (!json) {

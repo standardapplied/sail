@@ -19,24 +19,16 @@ import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.DemoSeeder;
-import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.ssh.SshGateway;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
-import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
-import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
@@ -45,14 +37,11 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
-import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,173 +55,62 @@ import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public final class SailOperations implements Operations, AutoCloseable {
-
-  @Override
-  public DispatchOperations.Outcome dispatch(
-      String project, DispatchOperations.Request request, Actor actor, String localHandle) {
-    return dispatchOps.dispatch(project, request, actor, localHandle);
-  }
-
-  @Override
-  public DispatchOperations.AdhocSession startAdhoc(
-      String project, DispatchOperations.AdhocRequest request, String localHandle) {
-    return dispatchOps.startAdhoc(project, request, localHandle);
-  }
-
-  @Override
-  public DispatchOperations.AdhocSession startAdhoc(
-      String project,
-      DispatchOperations.AdhocRequest request,
-      String localHandle,
-      DispatchOperations.AdhocPreparer preparer) {
-    return dispatchOps.startAdhoc(project, request, localHandle, preparer);
-  }
-
-  @Override
-  public StopOperations.Outcome stop(
-      StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) {
-    return stopOps.stop(target, actor, localHandle, dryRun);
-  }
-
-  @Override
-  public List<Spec> projectSpecs(String project) {
-    return specStore.projectSpecs(project);
-  }
-
-  @Override
-  public Optional<SpecStore.SpecContent> specContent(String id) {
-    return specStore.getContent(id);
-  }
-
-  @Override
-  public Optional<ProjectStore.ProjectRow> catalogProject(String project) {
-    return projectStore.findByName(project);
-  }
-
-  @Override
-  public List<ProjectStore.ProjectRow> catalogProjects() {
-    return projectStore.list();
-  }
-
-  @Override
-  public Optional<RunStore.RunRow> latestRun(String project, String node) {
-    return runStore.latestForProjectOnNode(project, node);
-  }
-
-  @Override
-  public Optional<RunStore.RunRow> activeRun(String project, String node) {
-    return runStore.runningForProjectOnNode(project, node);
-  }
-
-  @Override
-  public List<DispatchGate.RunningRun> runningRuns(String project, String node) {
-    return runStore.runningOnNode(project, node);
-  }
-
-  @Override
-  public AgentSession.SessionInfo projectSession(String project, String node) throws Exception {
-    return StopOperations.resolveSession(shell, runStore, project, node);
-  }
-
-  @Override
-  public boolean roomKnown(String room) {
-    return room != null && roomStore.findById(room).isPresent();
-  }
-
-  @Override
-  public String reviewLog(String project, String node) {
-    return runStore.listForProject(project).stream()
-        .filter(RunStore.RunRow::buildRole)
-        .filter(run -> Objects.toString(run.node(), "").equals(Objects.toString(node, "")))
-        .findFirst()
-        .map(RunStore.RunRow::specId)
-        .flatMap(reviewStore::latestReviewForSpec)
-        .map(review -> AgentUnit.forReview(review.id()).logPath())
-        .orElseGet(AgentUnit.REVIEW::logPath);
-  }
-
-  @Override
-  public String demoDefinition() {
-    initialize();
-    DemoSeeder.seedIfAbsent(controlPlane);
-    var project = projectStore.findByName("demo").orElse(null);
-    if (project == null) {
-      throw new IllegalStateException(
-          "Demo project is missing from the catalog. Run 'sudo sail migrate'.");
-    }
-    return project.definition();
-  }
-
-  @Override
-  public List<TokenStore.TokenInfo> tokens() {
-    return new TokenStore(controlPlane).list();
-  }
-
-  @Override
-  public TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl) {
-    return new TokenStore(controlPlane).create(name, role, fdeId, ttl);
-  }
-
-  @Override
-  public boolean revokeToken(String name) {
-    return new TokenStore(controlPlane).revoke(name);
-  }
-
-  @Override
-  public Optional<FdeStore.Fde> fde(String handle) {
-    return fdeStore.byHandle(handle);
-  }
-
-  @Override
-  public int schemaVersion() {
-    return new SchemaManager(controlPlane).currentVersion();
-  }
-
-  @Override
-  public SshGateway.Decision authorizeGateway(String command, String handle) {
-    return SshGateway.authorize(command, handle, fdeStore, new AuthSessionStore(controlPlane));
-  }
-
-  @Override
-  public PtyIdentity ptyIdentity(String token, String boxHandle) throws IOException {
-    return new HostAccess(controlPlane).identity(token, boxHandle);
-  }
-
-  @Override
-  public void admitPtyRoom(String room, String project, PtyIdentity identity) throws IOException {
-    new HostAccess(controlPlane).admit(room, project, identity);
-  }
-
-  @Override
-  public void recordHostEvent(EventStore.EventRow event) {
-    eventStore.insert(event);
-  }
-
-  @Override
-  public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
-    return new FdeSshKeyStore(controlPlane).list();
-  }
-
-  @Override
-  public SchemaMigration initialize() {
-    var schema = new SchemaManager(controlPlane);
-    var before = schema.currentVersion();
-    schema.migrate();
-    return new SchemaMigration(before, schema.currentVersion());
-  }
+public final class SailOperations implements HostOperations {
 
   private Sqlite controlPlane;
   private SyncOperations syncOperations;
   private Path projectsDir;
   private Runnable closeAction = () -> {};
+  private HostCatalog catalog;
+  private HostIdentity identity;
+  private HostPty pty;
+  private HostSchema schema;
 
+  /** The host facets exist once the control-plane database is known; the web lane needs none. */
   public SailOperations useControlPlane(
       Sqlite db, Path projectsDir, SyncOperations syncOperations) {
     this.controlPlane = Objects.requireNonNull(db, "db");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
+    this.schema = new HostLanes.Schema(db, syncOperations);
+    this.catalog = new HostLanes.Catalog(db, projectStore, specStore, roomStore, schema);
+    this.identity = new HostLanes.Identity(db, fdeStore);
+    this.pty = new HostLanes.Pty(db, eventStore);
     return this;
+  }
+
+  @Override
+  public HostDispatching dispatching() {
+    return new HostLanes.Dispatching(dispatchOps, stopOps, runStore, reviewStore, shell);
+  }
+
+  @Override
+  public HostCatalog catalog() {
+    return requireHost(catalog);
+  }
+
+  @Override
+  public HostIdentity identity() {
+    return requireHost(identity);
+  }
+
+  @Override
+  public HostPty pty() {
+    return requireHost(pty);
+  }
+
+  @Override
+  public HostSchema schema() {
+    return requireHost(schema);
+  }
+
+  private static <T> T requireHost(T facet) {
+    if (facet == null) {
+      throw new IllegalStateException(
+          "This operations instance has no control-plane database; open it through"
+              + " OperationsFactory.");
+    }
+    return facet;
   }
 
   SailOperations closeWith(Runnable action) {
@@ -243,11 +121,6 @@ public final class SailOperations implements Operations, AutoCloseable {
   @Override
   public void close() {
     closeAction.run();
-  }
-
-  @Override
-  public void prepareSync() {
-    syncOperations.prepare();
   }
 
   @Override
@@ -278,31 +151,6 @@ public final class SailOperations implements Operations, AutoCloseable {
   @Override
   public ProjectFiles projectFiles(String project) {
     return new SharedProjectFiles(new FileStore(controlPlane), projectsDir, project);
-  }
-
-  @Override
-  public List<String> projectsWithFiles() {
-    return List.copyOf(new FileStore(controlPlane).projectsWithFiles());
-  }
-
-  @Override
-  public ProjectDestroyed projectDestroy(String name, boolean purge) {
-    NameValidator.requireValidProjectName(name);
-    if (!purge) {
-      return new ProjectDestroyed(name, false);
-    }
-    initialize();
-    return new ProjectDestroyed(name, projectStore.delete(name));
-  }
-
-  @Override
-  public ProjectRenamed projectRename(String from, String to) {
-    return ProjectCatalogRename.rename(controlPlane, from, to);
-  }
-
-  @Override
-  public void undoProjectRename(ProjectRenamed renamed) {
-    ProjectCatalogRename.restore(controlPlane, renamed);
   }
 
   private final ShellExec shell;

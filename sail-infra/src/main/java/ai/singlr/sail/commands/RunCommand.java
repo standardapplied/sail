@@ -9,10 +9,10 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
-import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
@@ -176,10 +176,14 @@ public final class RunCommand implements Runnable {
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
       try (var operations = OperationsFactory.open()) {
-        var nextSpec = SpecCatalog.nextReady(operations.projectSpecs(name));
+        var nextSpec = SpecCatalog.nextReady(operations.catalog().projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
-              operations.specContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
+              operations
+                  .catalog()
+                  .specContent(nextSpec.id())
+                  .map(SpecStore.SpecContent::body)
+                  .orElse("");
           task = specTask(name, nextSpec, specBody);
           if (!json) {
             System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
@@ -304,20 +308,22 @@ public final class RunCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            operations.startAdhoc(
-                name,
-                request,
-                handle,
-                () -> {
-                  if (!noRegen) {
-                    regenContext(shell, config);
-                  }
-                  prepareContainer(shell, workDir, snapshotTaken, label, branchName);
-                });
+            operations
+                .dispatching()
+                .startAdhoc(
+                    name,
+                    request,
+                    handle,
+                    () -> {
+                      if (!noRegen) {
+                        regenContext(shell, config);
+                      }
+                      prepareContainer(shell, workDir, snapshotTaken, label, branchName);
+                    });
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null
-            && rollbackSafe(e, operations.activeRun(name, handle).isPresent())) {
+            && rollbackSafe(e, operations.dispatching().activeRun(name, handle).isPresent())) {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
@@ -339,7 +345,7 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private SailOperations operations(
+  private HostOperations operations(
       ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {

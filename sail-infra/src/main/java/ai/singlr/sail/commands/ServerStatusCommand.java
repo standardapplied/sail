@@ -32,11 +32,11 @@ public final class ServerStatusCommand implements Runnable {
     }
 
     try (var operations = OperationsFactory.open(dbPath)) {
-      var tokens = operations.tokens();
+      var tokens = operations.identity().tokens();
 
       System.out.println(Ansi.AUTO.string("  @|bold Sail Server|@"));
       System.out.println("    Database:       " + dbPath);
-      System.out.println("    Schema version: " + operations.schemaVersion());
+      System.out.println("    Schema version: " + operations.schema().version());
       System.out.println("    API tokens:     " + tokens.size());
     }
   }

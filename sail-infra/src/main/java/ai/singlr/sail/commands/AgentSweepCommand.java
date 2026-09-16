@@ -7,9 +7,9 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -105,7 +105,7 @@ public final class AgentSweepCommand implements Runnable {
           new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
       DispatchOperations.AdhocSession session;
       try {
-        session = operations.startAdhoc(name, request, handle);
+        session = operations.dispatching().startAdhoc(name, request, handle);
       } catch (ApiException e) {
         var action = e.failure().action();
         throw new IllegalStateException(
@@ -115,7 +115,7 @@ public final class AgentSweepCommand implements Runnable {
     }
   }
 
-  private SailOperations operations(
+  private HostOperations operations(
       ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {

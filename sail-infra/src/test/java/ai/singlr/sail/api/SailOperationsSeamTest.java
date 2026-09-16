@@ -284,7 +284,7 @@ class SailOperationsSeamTest {
       var bytes = new byte[] {0, 1, 2, -1};
       assertEquals("dir/config", files.put("dir/config", bytes));
       assertArrayEquals(bytes, files.get("dir/config").orElseThrow());
-      assertEquals(List.of("acme"), operations.projectsWithFiles());
+      assertEquals(List.of("acme"), operations.catalog().projectsWithFiles());
       assertEquals("dir/config", files.list().getFirst().path());
       assertEquals(1, files.materialize().written());
       var local = tempDir.resolve("acme/files/dir/config");
@@ -391,7 +391,7 @@ class SailOperationsSeamTest {
                 targets.add(target);
                 return channel(main);
               }));
-      operations.prepareSync();
+      operations.schema().prepareSync();
       assertNull(operations.syncStatus().lastReport());
       var expected = new SyncEngine.Report(2, 0, 0, 0);
       assertEquals(expected, operations.sync(new SyncRequest(null)).report());
@@ -440,16 +440,16 @@ class SailOperationsSeamTest {
       var definition = "name: old\n";
       projects.upsert("old", definition, "owner");
       operations.projectFiles("old").put("config", new byte[] {1});
-      assertFalse(operations.projectDestroy("old", false).purged());
-      var renamed = operations.projectRename("old", "new");
-      assertTrue(operations.catalogProject("old").isEmpty());
-      assertTrue(operations.catalogProject("new").isPresent());
+      assertFalse(operations.catalog().destroy("old", false).purged());
+      var renamed = operations.catalog().rename("old", "new");
+      assertTrue(operations.catalog().project("old").isEmpty());
+      assertTrue(operations.catalog().project("new").isPresent());
       assertEquals("config", operations.projectFiles("new").list().getFirst().path());
-      operations.undoProjectRename(renamed);
-      assertEquals(definition, operations.catalogProject("old").orElseThrow().definition());
-      assertEquals(1, operations.catalogProjects().size());
-      assertTrue(operations.projectDestroy("old", true).purged());
-      assertFalse(operations.projectDestroy("old", true).purged());
+      operations.catalog().undoRename(renamed);
+      assertEquals(definition, operations.catalog().project("old").orElseThrow().definition());
+      assertEquals(1, operations.catalog().projects().size());
+      assertTrue(operations.catalog().destroy("old", true).purged());
+      assertFalse(operations.catalog().destroy("old", true).purged());
     }
   }
 
@@ -459,43 +459,51 @@ class SailOperationsSeamTest {
         var operations = operations(box.db)) {
       box.specs.create(SyncBox.spec("auth", "task", "pending"));
       box.specs.setContent("auth", "body", "plan");
-      assertEquals("auth", operations.projectSpecs("proj").getFirst().id());
-      assertEquals("body", operations.specContent("auth").orElseThrow().body());
-      assertTrue(operations.latestRun("proj", "node").isEmpty());
-      assertTrue(operations.runningRuns("proj", "node").isEmpty());
-      assertNull(operations.projectSession("proj", "node"));
-      assertFalse(operations.roomKnown(null));
-      assertFalse(operations.roomKnown("auth"));
+      assertEquals("auth", operations.catalog().projectSpecs("proj").getFirst().id());
+      assertEquals("body", operations.catalog().specContent("auth").orElseThrow().body());
+      assertTrue(operations.dispatching().latestRun("proj", "node").isEmpty());
+      assertTrue(operations.dispatching().runningRuns("proj", "node").isEmpty());
+      assertNull(operations.dispatching().projectSession("proj", "node"));
+      assertFalse(operations.catalog().roomKnown(null));
+      assertFalse(operations.catalog().roomKnown("auth"));
       new RoomStore(box.db)
           .create(
               new RoomStore.RoomRow(
                   "auth", "proj", "room", "owner", "on", "[]", "owner", null, null, "owner"));
-      assertTrue(operations.roomKnown("auth"));
+      assertTrue(operations.catalog().roomKnown("auth"));
       var owner = new FdeStore(box.db).add("owner", null, null, "admin");
-      assertEquals(owner, operations.fde("owner").orElseThrow());
-      var token = operations.createToken("test", "admin", owner.id(), Duration.ofDays(1));
+      assertEquals(owner, operations.identity().fde("owner").orElseThrow());
+      var token =
+          operations.identity().createToken("test", "admin", owner.id(), Duration.ofDays(1));
       assertNotNull(token.token());
-      assertEquals("test", operations.tokens().getFirst().name());
-      assertTrue(operations.revokeToken("test"));
-      assertFalse(operations.revokeToken("test"));
-      assertTrue(operations.tokens().isEmpty());
-      assertTrue(operations.sshKeys().isEmpty());
-      assertTrue(operations.schemaVersion() > 0);
-      assertEquals(new PtyIdentity("owner", true), operations.ptyIdentity(null, "owner"));
+      assertEquals("test", operations.identity().tokens().getFirst().name());
+      assertTrue(operations.identity().revokeToken("test"));
+      assertFalse(operations.identity().revokeToken("test"));
+      assertTrue(operations.identity().tokens().isEmpty());
+      assertTrue(operations.identity().sshKeys().isEmpty());
+      assertTrue(operations.schema().version() > 0);
+      assertEquals(new PtyIdentity("owner", true), operations.pty().identity(null, "owner"));
       var session = new AuthSessionStore(box.db).create(owner.id(), Duration.ofHours(1));
-      assertEquals("owner", operations.ptyIdentity(session.token(), null).fde());
-      operations.admitPtyRoom("auth", "proj", new PtyIdentity("owner", true));
+      assertEquals("owner", operations.pty().identity(session.token(), null).fde());
+      operations.pty().admitRoom("auth", "proj", new PtyIdentity("owner", true));
       assertThrows(
           IOException.class,
-          () -> operations.admitPtyRoom("auth", "other", new PtyIdentity("owner", true)));
+          () -> operations.pty().admitRoom("auth", "other", new PtyIdentity("owner", true)));
       assertTrue(
-          operations.authorizeGateway("not-allowed", "owner") instanceof SshGateway.Rejected);
-      operations.recordHostEvent(
-          new EventStore.EventRow(
-              0, "now", "pty_session_started", "proj", "auth", "owner", "node", "{}"));
+          operations.identity().authorizeGateway("not-allowed", "owner")
+              instanceof SshGateway.Rejected);
+      operations
+          .pty()
+          .recordEvent(
+              new EventStore.EventRow(
+                  0, "now", "pty_session_started", "proj", "auth", "owner", "node", "{}"));
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
-      assertTrue(operations.demoDefinition().contains("demo"));
+      assertTrue(operations.catalog().demoDefinition().contains("demo"));
+      assertTrue(operations.catalog().destroy("demo", true).purged());
+      var missing =
+          assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
+      assertTrue(missing.getMessage().contains("sail migrate"), "a purged demo is not resurrected");
       operations.useSyncScheduler(SyncScheduler.disabled());
     }
   }
@@ -509,15 +517,17 @@ class SailOperationsSeamTest {
       runs.create(
           id, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null, "/log",
           "unit");
-      assertEquals(id, operations.latestRun("proj", "node").orElseThrow().id());
-      assertEquals(id, operations.activeRun("proj", "node").orElseThrow().id());
-      assertTrue(operations.activeRun("proj", "other").isEmpty());
-      assertTrue(operations.latestRun("proj", "other").isEmpty());
-      assertEquals(1, operations.runningRuns("proj", "node").size());
-      var fallback = operations.reviewLog("proj", "node");
+      assertEquals(id, operations.dispatching().latestRun("proj", "node").orElseThrow().id());
+      assertEquals(id, operations.dispatching().activeRun("proj", "node").orElseThrow().id());
+      assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
+      assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
+      assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
+      var fallback = operations.dispatching().reviewLog("proj", "node");
       var review = new ReviewStore(box.db).createReview("auth", 1);
-      assertEquals(AgentUnit.forReview(review).logPath(), operations.reviewLog("proj", "node"));
-      assertEquals(fallback, operations.reviewLog("proj", "other"));
+      assertEquals(
+          AgentUnit.forReview(review).logPath(),
+          operations.dispatching().reviewLog("proj", "node"));
+      assertEquals(fallback, operations.dispatching().reviewLog("proj", "other"));
     }
   }
 
@@ -526,17 +536,21 @@ class SailOperationsSeamTest {
     try (var box = new SyncBox("node");
         var operations = operations(box.db)) {
       var request = new DispatchOperations.AdhocRequest("task", null, null, true, false);
-      assertThrows(ApiException.class, () -> operations.startAdhoc("absent", request, "node"));
       assertThrows(
-          ApiException.class, () -> operations.startAdhoc("absent", request, "node", () -> {}));
+          ApiException.class, () -> operations.dispatching().startAdhoc("absent", request, "node"));
+      assertThrows(
+          ApiException.class,
+          () -> operations.dispatching().startAdhoc("absent", request, "node", () -> {}));
       assertThrows(
           ApiException.class,
           () ->
-              operations.stop(
-                  new StopOperations.RunTarget("missing"),
-                  Actor.cliOperator("node"),
-                  "node",
-                  false));
+              operations
+                  .dispatching()
+                  .stop(
+                      new StopOperations.RunTarget("missing"),
+                      Actor.cliOperator("node"),
+                      "node",
+                      false));
     }
   }
 

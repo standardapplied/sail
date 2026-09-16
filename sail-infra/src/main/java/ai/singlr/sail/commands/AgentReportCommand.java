@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
@@ -51,13 +51,13 @@ public final class AgentReportCommand implements Runnable {
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
-  private final Supplier<SailOperations> operations;
+  private final Supplier<HostOperations> operations;
 
   public AgentReportCommand() {
     this(OperationsFactory::open);
   }
 
-  AgentReportCommand(Supplier<SailOperations> operations) {
+  AgentReportCommand(Supplier<HostOperations> operations) {
     this.operations = operations;
   }
 
@@ -101,7 +101,7 @@ public final class AgentReportCommand implements Runnable {
 
   List<Spec> projectSpecs(String project) {
     try (var operations = this.operations.get()) {
-      return operations.projectSpecs(project);
+      return operations.catalog().projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
     }
@@ -109,7 +109,7 @@ public final class AgentReportCommand implements Runnable {
 
   RunStore.RunRow latestSession(String project) {
     try (var operations = this.operations.get()) {
-      return operations.latestRun(project, NodeIdentity.handle()).orElse(null);
+      return operations.dispatching().latestRun(project, NodeIdentity.handle()).orElse(null);
     } catch (Exception ignored) {
       return null;
     }

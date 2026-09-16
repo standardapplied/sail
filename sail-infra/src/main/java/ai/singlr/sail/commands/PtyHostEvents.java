@@ -76,16 +76,18 @@ final class PtyHostEvents implements PtyEvents {
   private void insert(
       String type, PtySession.Origin origin, String agent, Map<String, Object> data) {
     try (var operations = OperationsFactory.open(dbPath)) {
-      operations.recordHostEvent(
-          new EventStore.EventRow(
-              0,
-              DateTimeUtils.now().toString(),
-              type,
-              origin.project(),
-              origin.roomBound() ? origin.room() : null,
-              agent,
-              HostInfo.hostname(),
-              YamlUtil.dumpJson(data)));
+      operations
+          .pty()
+          .recordEvent(
+              new EventStore.EventRow(
+                  0,
+                  DateTimeUtils.now().toString(),
+                  type,
+                  origin.project(),
+                  origin.roomBound() ? origin.room() : null,
+                  agent,
+                  HostInfo.hostname(),
+                  YamlUtil.dumpJson(data)));
     } catch (RuntimeException failed) {
       System.err.println(
           "pty-events: dropped "

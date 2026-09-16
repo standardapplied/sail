@@ -588,10 +588,23 @@ support GUI and direct-API clients:
 
 ## The operations seam
 
-Host commands open the control-plane database through `OperationsFactory` and call
-`Operations`; the HTTP and local-socket routers use that same contract. Sync rounds, conflict
-resolution, shared files, and catalog rename/purge live there alongside dispatch and stop.
-Incus provisioning and the container half of rename/destroy remain host operations (gap 1).
+Three doors, three interfaces, each a strict superset of the one below it:
+
+| Door | Interface | Who holds it |
+|---|---|---|
+| in-container socket | `LocalLaneOperations` | `LocalApiRouter`, for agents |
+| HTTP | `Operations` | `ApiRouter`, for Mast and the remote CLI |
+| host, in-process | `HostOperations` | `OperationsFactory.open()`, for commands on the box |
+
+`HostOperations` adds nothing flat; it hands out five facets, each a small role interface a
+command depends on by name: `dispatching()` (run and stop agents, the runs that gate them),
+`catalog()` (projects and spec rows, rename and purge), `identity()` (tokens, FDEs, SSH keys,
+the gateway decision), `pty()` (what the pty host asks: who a session is, which room it may
+join), and `schema()` (version, migration, readiness to sync). The routers never see a facet,
+so a host-privileged verb cannot leak onto a door, and a new host verb goes into the facet
+it belongs to rather than widening a facade. Sync rounds, conflict resolution and shared
+files are web-lane verbs and stay on `Operations`. Incus provisioning and the container half
+of rename/destroy remain host operations (gap 1).
 Opening the factory does not migrate a database: bootstrap and sync explicitly prepare it,
 which preserves the failure behavior of ordinary reads and event writes.
 
@@ -608,6 +621,8 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 - Entity-type switches outside `SyncedEntities`, duplicate replica maps, and nested
   `combine(combine(` calls.
 - Additional `DispatchOperations` or `StopOperations` construction outside `SailOperations`.
+- A method added to `Operations` or `HostOperations` directly instead of to the facet it
+  belongs to; a facet that grows past one role.
 
 ## Design invariants to preserve
 
