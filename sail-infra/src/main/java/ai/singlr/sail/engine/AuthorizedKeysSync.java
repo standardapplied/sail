@@ -64,13 +64,16 @@ public final class AuthorizedKeysSync {
   }
 
   public Outcome sync(Sqlite db) throws Exception {
+    return sync(new FdeSshKeyStore(db).list());
+  }
+
+  public Outcome sync(List<FdeSshKeyStore.SshKeyInfo> keys) throws Exception {
     if (!root) {
       return new NeedsRoot();
     }
     if (!Files.isDirectory(destination.getParent())) {
       return new NotProvisioned();
     }
-    var keys = new FdeSshKeyStore(db).list();
     install(AuthorizedKeysRenderer.render(keys, SailPaths.binaryPath().toString()));
     return new Synced(keys.size(), destination);
   }

@@ -47,7 +47,220 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-public final class SailOperations implements Operations {
+public final class SailOperations implements Operations, AutoCloseable {
+
+
+  @Override
+  public DispatchOperations.Outcome dispatch(String project, DispatchOperations.Request request, Actor actor, String localHandle) {
+    return dispatchOps.dispatch(project, request, actor, localHandle);
+  }
+
+  @Override
+  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle) {
+    return dispatchOps.startAdhoc(project, request, localHandle);
+  }
+
+  @Override
+  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle, DispatchOperations.AdhocPreparer preparer) {
+    return dispatchOps.startAdhoc(project, request, localHandle, preparer);
+  }
+
+  @Override
+  public StopOperations.Outcome stop(StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) {
+    return stopOps.stop(target, actor, localHandle, dryRun);
+  }
+
+  @Override
+  public java.util.List<ai.singlr.sail.config.Spec> projectSpecs(String project) {
+    return specStore.projectSpecs(project);
+  }
+
+  @Override
+  public java.util.Optional<ai.singlr.sail.store.SpecStore.SpecContent> specContent(String id) {
+    return specStore.getContent(id);
+  }
+
+  @Override
+  public java.util.Optional<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProject(String project) {
+    return projectStore.findByName(project);
+  }
+
+  @Override
+  public java.util.List<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProjects() {
+    return projectStore.list();
+  }
+
+  @Override
+  public java.util.Optional<ai.singlr.sail.store.RunStore.RunRow> latestRun(String project, String node) {
+    return runStore.latestForProjectOnNode(project, node);
+  }
+
+  @Override
+  public java.util.List<ai.singlr.sail.store.DispatchGate.RunningRun> runningRuns(String project, String node) {
+    return runStore.runningOnNode(project, node);
+  }
+
+  @Override
+  public ai.singlr.sail.engine.AgentSession.SessionInfo projectSession(String project, String node) throws Exception {
+    return StopOperations.resolveSession(shell, runStore, project, node);
+  }
+
+  @Override
+  public boolean roomKnown(String room) {
+    return room != null && roomStore.findById(room).isPresent();
+  }
+
+  @Override
+  public String reviewLog(String project, String node) {
+    return runStore.listForProject(project).stream().filter(RunStore.RunRow::buildRole)
+        .filter(run -> Objects.toString(run.node(), "").equals(Objects.toString(node, "")))
+        .findFirst().map(RunStore.RunRow::specId).flatMap(reviewStore::latestReviewForSpec)
+        .map(review -> AgentUnit.forReview(review.id()).logPath()).orElseGet(AgentUnit.REVIEW::logPath);
+  }
+
+  @Override
+  public String demoDefinition() {
+    ai.singlr.sail.engine.DemoSeeder.seedIfAbsent(controlPlane);
+    return projectStore.findByName("demo").map(ProjectStore.ProjectRow::definition).orElseThrow(() ->
+        new IllegalStateException("Demo project is missing from the catalog. Run 'sudo sail migrate'."));
+  }
+
+  @Override
+  public java.util.List<ai.singlr.sail.store.TokenStore.TokenInfo> tokens() {
+    return new ai.singlr.sail.store.TokenStore(controlPlane).list();
+  }
+
+  @Override
+  public ai.singlr.sail.store.TokenStore.CreatedToken createToken(String name, String role, String fdeId, java.time.Duration ttl) {
+    return new ai.singlr.sail.store.TokenStore(controlPlane).create(name, role, fdeId, ttl);
+  }
+
+  @Override
+  public boolean revokeToken(String name) {
+    return new ai.singlr.sail.store.TokenStore(controlPlane).revoke(name);
+  }
+
+  @Override
+  public java.util.Optional<ai.singlr.sail.store.FdeStore.Fde> fde(String handle) {
+    return fdeStore.byHandle(handle);
+  }
+
+  @Override
+  public int schemaVersion() {
+    return new ai.singlr.sail.store.SchemaManager(controlPlane).currentVersion();
+  }
+
+  @Override
+  public ai.singlr.sail.ssh.SshGateway.Decision authorizeGateway(String command, String handle) {
+    return ai.singlr.sail.ssh.SshGateway.authorize(command, handle, fdeStore, new ai.singlr.sail.store.AuthSessionStore(controlPlane));
+  }
+
+  @Override
+  public ai.singlr.sail.pty.PtyIdentity ptyIdentity(String token, String boxHandle) throws java.io.IOException {
+    return new ai.singlr.sail.engine.HostAccess(controlPlane).identity(token, boxHandle);
+  }
+
+  @Override
+  public void admitPtyRoom(String room, String project, ai.singlr.sail.pty.PtyIdentity identity) throws java.io.IOException {
+    new ai.singlr.sail.engine.HostAccess(controlPlane).admit(room, project, identity);
+  }
+
+  @Override
+  public void recordHostEvent(ai.singlr.sail.store.EventStore.EventRow event) {
+    eventStore.insert(event);
+  }
+
+  @Override
+  public java.util.List<ai.singlr.sail.store.FdeSshKeyStore.SshKeyInfo> sshKeys() {
+    return new ai.singlr.sail.store.FdeSshKeyStore(controlPlane).list();
+  }
+
+  private int schemaBefore;
+
+  SailOperations openedAtSchema(int schemaBefore) {
+    this.schemaBefore = schemaBefore;
+    return this;
+  }
+
+  @Override
+  public int schemaBeforeOpen() {
+    return schemaBefore;
+  }
+
+  private ai.singlr.sail.store.Sqlite controlPlane;
+  private ai.singlr.sail.engine.SyncOperations syncOperations;
+  private java.nio.file.Path projectsDir;
+  private Runnable closeAction = () -> {};
+
+  public SailOperations useControlPlane(ai.singlr.sail.store.Sqlite db,
+      java.nio.file.Path projectsDir, ai.singlr.sail.engine.SyncOperations syncOperations) {
+    this.controlPlane = Objects.requireNonNull(db, "db");
+    this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
+    this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
+    return this;
+  }
+
+  SailOperations closeWith(Runnable action) {
+    this.closeAction = action;
+    return this;
+  }
+
+  @Override
+  public void close() {
+    closeAction.run();
+  }
+
+  @Override
+  public SyncReport sync(SyncRequest request) throws Exception {
+    return syncOperations.sync(request);
+  }
+
+  @Override
+  public SyncStatus syncStatus() {
+    return syncOperations.status();
+  }
+
+  @Override
+  public List<ai.singlr.sail.store.SyncConflicts.Conflict> conflicts() {
+    return new ai.singlr.sail.engine.ConflictOperations(controlPlane).list();
+  }
+
+  @Override
+  public ai.singlr.sail.store.SyncConflicts.Conflict conflict(String id) {
+    return new ai.singlr.sail.engine.ConflictOperations(controlPlane).find(id);
+  }
+
+  @Override
+  public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+    return new ai.singlr.sail.engine.ConflictOperations(controlPlane).resolve(id, resolution);
+  }
+
+  @Override
+  public ProjectFiles projectFiles(String project) {
+    return new ai.singlr.sail.engine.SharedProjectFiles(
+        new ai.singlr.sail.store.FileStore(controlPlane), projectsDir, project);
+  }
+
+  @Override
+  public List<String> projectsWithFiles() {
+    return List.copyOf(new ai.singlr.sail.store.FileStore(controlPlane).projectsWithFiles());
+  }
+
+  @Override
+  public ProjectDestroyed projectDestroy(String name, boolean purge) {
+    NameValidator.requireValidProjectName(name);
+    return new ProjectDestroyed(name, purge && projectStore.delete(name));
+  }
+
+  @Override
+  public ProjectRenamed projectRename(String from, String to) {
+    return ai.singlr.sail.engine.ProjectCatalogRename.rename(controlPlane, from, to);
+  }
+
+  @Override
+  public void undoProjectRename(ProjectRenamed renamed) {
+    ai.singlr.sail.engine.ProjectCatalogRename.restore(controlPlane, renamed);
+  }
 
   private final ShellExec shell;
   private final String file;
@@ -346,9 +559,31 @@ public final class SailOperations implements Operations {
       SyncScheduler syncScheduler,
       FdeStore fdeStore,
       SessionYield sessionYield) {
+    this(shell, file, watcherFallback, eventBus, auditPersister, specStore, reviewStore, runStore,
+        projectStore, connectEnvironment, syncScheduler, fdeStore, sessionYield,
+        new OperationHooks(event -> { if (eventBus != null) eventBus.publish(event); },
+            new WatcherSpawner(shell, watcherFallback), DispatchOperations.autoSnapshotter(shell),
+            DispatchOperations.shellLauncher(shell), DispatchOperations.Listener.NONE,
+            StopOperations.Listener.NONE));
+  }
+
+  public SailOperations(
+      ShellExec shell,
+      String file,
+      WatcherSpawner.ProcessSpawner watcherFallback,
+      EventBus eventBus,
+      AuditPersister auditPersister,
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      RunStore runStore,
+      ProjectStore projectStore,
+      Supplier<ConnectEnvironment> connectEnvironment,
+      SyncScheduler syncScheduler,
+      FdeStore fdeStore,
+      SessionYield sessionYield, OperationHooks hooks) {
     this.shell = shell;
     this.file = file;
-    this.watcherSpawner = new WatcherSpawner(shell, watcherFallback);
+    this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
     this.auditPersister = auditPersister;
     this.specStore = specStore;
@@ -371,11 +606,11 @@ public final class SailOperations implements Operations {
             reviewStore,
             runStore,
             fdeStore,
-            this::publishOnBus,
+            hooks.events(),
             this.watcherSpawner,
-            DispatchOperations.autoSnapshotter(shell),
-            DispatchOperations.shellLauncher(shell),
-            DispatchOperations.Listener.NONE,
+            hooks.snapshotter(),
+            hooks.launcher(),
+            hooks.dispatchListener(),
             sessionYield);
     this.stopOps =
         specStore != null && runStore != null
@@ -384,9 +619,9 @@ public final class SailOperations implements Operations {
                 file,
                 specStore,
                 runStore,
-                this::publishOnBus,
+                hooks.events(),
                 StopOperations.sessionHalter(shell),
-                StopOperations.Listener.NONE)
+                hooks.stopListener())
             : null;
   }
 

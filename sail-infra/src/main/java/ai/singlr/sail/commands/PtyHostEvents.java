@@ -75,9 +75,8 @@ final class PtyHostEvents implements PtyEvents {
 
   private void insert(
       String type, PtySession.Origin origin, String agent, Map<String, Object> data) {
-    try (var db = Sqlite.open(dbPath)) {
-      new EventStore(db)
-          .insert(
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+      operations.recordHostEvent(
               new EventStore.EventRow(
                   0,
                   DateTimeUtils.now().toString(),

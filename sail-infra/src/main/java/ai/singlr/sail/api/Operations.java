@@ -13,6 +13,77 @@ package ai.singlr.sail.api;
  */
 public interface Operations extends LocalLaneOperations {
 
+
+  DispatchOperations.Outcome dispatch(String project, DispatchOperations.Request request, Actor actor, String localHandle);
+
+  DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle);
+
+  DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle, DispatchOperations.AdhocPreparer preparer);
+
+  StopOperations.Outcome stop(StopOperations.Target target, Actor actor, String localHandle, boolean dryRun);
+
+  java.util.List<ai.singlr.sail.config.Spec> projectSpecs(String project);
+
+  java.util.Optional<ai.singlr.sail.store.SpecStore.SpecContent> specContent(String id);
+
+  java.util.Optional<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProject(String project);
+
+  java.util.List<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProjects();
+
+  java.util.Optional<ai.singlr.sail.store.RunStore.RunRow> latestRun(String project, String node);
+
+  java.util.List<ai.singlr.sail.store.DispatchGate.RunningRun> runningRuns(String project, String node);
+
+  ai.singlr.sail.engine.AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
+
+  boolean roomKnown(String room);
+
+  String reviewLog(String project, String node);
+
+  String demoDefinition();
+
+  java.util.List<ai.singlr.sail.store.TokenStore.TokenInfo> tokens();
+
+  ai.singlr.sail.store.TokenStore.CreatedToken createToken(String name, String role, String fdeId, java.time.Duration ttl);
+
+  boolean revokeToken(String name);
+
+  java.util.Optional<ai.singlr.sail.store.FdeStore.Fde> fde(String handle);
+
+  int schemaVersion();
+
+  int schemaBeforeOpen();
+
+  ai.singlr.sail.ssh.SshGateway.Decision authorizeGateway(String command, String handle);
+
+  ai.singlr.sail.pty.PtyIdentity ptyIdentity(String token, String boxHandle) throws java.io.IOException;
+
+  void admitPtyRoom(String room, String project, ai.singlr.sail.pty.PtyIdentity identity) throws java.io.IOException;
+
+  void recordHostEvent(ai.singlr.sail.store.EventStore.EventRow event);
+
+  java.util.List<ai.singlr.sail.store.FdeSshKeyStore.SshKeyInfo> sshKeys();
+
+  SyncReport sync(SyncRequest request) throws Exception;
+
+  ai.singlr.sail.store.SyncConflicts.Conflict conflict(String id);
+
+  ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(String id, Resolution resolution);
+
+  ProjectFiles projectFiles(String project);
+
+  java.util.List<String> projectsWithFiles();
+
+  ProjectDestroyed projectDestroy(String name, boolean purge);
+
+  ProjectRenamed projectRename(String from, String to);
+
+  record ProjectDestroyed(String name, boolean purged) {}
+
+  record ProjectRenamed(String from, String to, String previousDefinition) {}
+
+  void undoProjectRename(ProjectRenamed renamed);
+
   Result<ReviewListResponse> reviewsForSpec(String specId);
 
   Result<ReviewDetailResponse> reviewDetail(String reviewId);

@@ -51,7 +51,7 @@ class AgentReportCommandTest {
       new SpecStore(db).create(specRow("auth", "acme", "Add auth"));
       new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated"));
     }
-    var command = new AgentReportCommand(() -> Sqlite.open(dbPath));
+    var command = new AgentReportCommand(() -> ai.singlr.sail.api.OperationsFactory.open(dbPath));
 
     var specs = command.projectSpecs("acme");
 

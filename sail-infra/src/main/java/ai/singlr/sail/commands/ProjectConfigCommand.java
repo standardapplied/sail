@@ -160,9 +160,8 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return StopOperations.resolveSession(
-          shell, new RunStore(db), containerName, NodeIdentity.handle());
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return operations.projectSession(containerName, NodeIdentity.handle());
     }
   }
 
@@ -174,8 +173,8 @@ public final class ProjectConfigCommand implements Runnable {
     if (config.agent() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return SpecSnapshot.available(SpecCatalog.summarize(new SpecStore(db).projectSpecs(name)));
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return SpecSnapshot.available(SpecCatalog.summarize(operations.projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");
     }

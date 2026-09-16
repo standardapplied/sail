@@ -94,30 +94,8 @@ public final class SyncServerCommand implements Callable<Integer> {
       SyncTransitionSink transitionSink)
       throws IOException {
     var db = converged.db();
-    var changeLog = new ChangeLog(db);
-    var conflicts = new SyncConflicts(db);
-    var syncState = new SyncState(db);
-    var runStore = new RunStore(db);
-    var replicas =
-        Map.<String, MainReplica>of(
-            "spec", new StoreReplica(mainId, new SpecStore(db), changeLog, conflicts, syncState),
-            "room", new StoreReplica(mainId, new RoomStore(db), changeLog, conflicts, syncState),
-            "file", new StoreReplica(mainId, new FileStore(db), changeLog, conflicts, syncState),
-            "project",
-                new StoreReplica(mainId, new ProjectStore(db), changeLog, conflicts, syncState),
-            "run",
-                new StoreReplica(
-                    mainId,
-                    runStore,
-                    changeLog,
-                    conflicts,
-                    syncState,
-                    id -> runStore.pushableFrom(id, mainId)),
-            "review",
-                new StoreReplica(mainId, new ReviewStore(db), changeLog, conflicts, syncState),
-            "message",
-                new StoreReplica(mainId, new MessageStore(db), changeLog, conflicts, syncState));
-    new SyncRpcServer(replicas, principal(db, token), () -> roster(db), transitionSink)
+    var replicas = ai.singlr.sail.sync.SyncedEntities.replicas(db, mainId, mainId);
+    new SyncRpcServer(new java.util.LinkedHashMap<>(replicas), principal(db, token), () -> roster(db), transitionSink)
         .serve(in, out);
     return 0;
   }

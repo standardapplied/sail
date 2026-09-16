@@ -28,18 +28,14 @@ public final class SyncTransitions {
     if (after == null) {
       return List.of();
     }
-    return switch (entityType) {
-      case "spec", "run" -> statusChange(entityType, entityId, before, after);
-      case "review" -> reviewChanges(entityId, before, after);
-      case "message" ->
-          before == null
-              ? List.of(new SyncTransition("message", entityId, null, "posted", after))
-              : List.of();
-      default -> List.of();
-    };
+    return SyncedEntities.all().stream()
+        .filter(entity -> entity.type().equals(entityType))
+        .findFirst()
+        .map(entity -> entity.transitions().detect(entityId, before, after))
+        .orElse(List.of());
   }
 
-  private static List<SyncTransition> statusChange(
+  static List<SyncTransition> statusChange(
       String entityType, String entityId, Map<String, Object> before, Map<String, Object> after) {
     var from = status(before);
     var to = status(after);
@@ -56,7 +52,7 @@ public final class SyncTransitions {
    * stage transition's snapshot is the stage map plus the review's {@code spec_id}, the key a
    * consumer needs to address the spec the stage belongs to.
    */
-  private static List<SyncTransition> reviewChanges(
+  static List<SyncTransition> reviewChanges(
       String reviewId, Map<String, Object> before, Map<String, Object> after) {
     var transitions = new ArrayList<>(statusChange("review", reviewId, before, after));
     var previous = new LinkedHashMap<String, Map<String, Object>>();

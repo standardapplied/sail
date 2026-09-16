@@ -183,17 +183,8 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   private String loadDemoDefinition(PrintStream out, Ansi ansi) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      new SchemaManager(db).migrate();
-      DemoSeeder.seedIfAbsent(db);
-      var definition =
-          new ProjectStore(db)
-              .findByName(DEMO_PROJECT)
-              .map(ProjectStore.ProjectRow::definition)
-              .orElseThrow(
-                  () ->
-                      new IllegalStateException(
-                          "Demo project is missing from the catalog. Run 'sudo sail migrate'."));
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      var definition = operations.demoDefinition();
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
       }

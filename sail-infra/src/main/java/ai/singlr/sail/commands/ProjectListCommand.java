@@ -84,8 +84,8 @@ public final class ProjectListCommand implements Runnable {
   }
 
   private static List<String> catalogNames() {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return operations.catalogProjects().stream().map(ProjectStore.ProjectRow::name).toList();
     } catch (RuntimeException e) {
       return List.of();
     }

@@ -12,6 +12,66 @@ import java.util.List;
 import java.util.Optional;
 
 class TestOperations implements Operations {
+  public void undoProjectRename(ProjectRenamed renamed) { throw new UnsupportedOperationException(); }
+  public int schemaBeforeOpen() { throw new UnsupportedOperationException(); }
+  public java.util.List<ai.singlr.sail.store.TokenStore.TokenInfo> tokens() { throw new UnsupportedOperationException(); }
+
+  public ai.singlr.sail.store.TokenStore.CreatedToken createToken(String name, String role, String fdeId, java.time.Duration ttl) { throw new UnsupportedOperationException(); }
+
+  public boolean revokeToken(String name) { throw new UnsupportedOperationException(); }
+
+  public java.util.Optional<ai.singlr.sail.store.FdeStore.Fde> fde(String handle) { throw new UnsupportedOperationException(); }
+
+  public int schemaVersion() { throw new UnsupportedOperationException(); }
+
+  public ai.singlr.sail.ssh.SshGateway.Decision authorizeGateway(String command, String handle) { throw new UnsupportedOperationException(); }
+
+  public ai.singlr.sail.pty.PtyIdentity ptyIdentity(String token, String boxHandle) throws java.io.IOException { throw new UnsupportedOperationException(); }
+
+  public void admitPtyRoom(String room, String project, ai.singlr.sail.pty.PtyIdentity identity) throws java.io.IOException { throw new UnsupportedOperationException(); }
+
+  public void recordHostEvent(ai.singlr.sail.store.EventStore.EventRow event) { throw new UnsupportedOperationException(); }
+
+  public java.util.List<ai.singlr.sail.store.FdeSshKeyStore.SshKeyInfo> sshKeys() { throw new UnsupportedOperationException(); }
+
+  public java.util.List<ai.singlr.sail.config.Spec> projectSpecs(String project) { throw new UnsupportedOperationException(); }
+
+  public java.util.Optional<ai.singlr.sail.store.SpecStore.SpecContent> specContent(String id) { throw new UnsupportedOperationException(); }
+
+  public java.util.Optional<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProject(String project) { throw new UnsupportedOperationException(); }
+
+  public java.util.List<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProjects() { throw new UnsupportedOperationException(); }
+
+  public java.util.Optional<ai.singlr.sail.store.RunStore.RunRow> latestRun(String project, String node) { throw new UnsupportedOperationException(); }
+
+  public java.util.List<ai.singlr.sail.store.DispatchGate.RunningRun> runningRuns(String project, String node) { throw new UnsupportedOperationException(); }
+
+  public ai.singlr.sail.engine.AgentSession.SessionInfo projectSession(String project, String node) throws Exception { throw new UnsupportedOperationException(); }
+
+  public boolean roomKnown(String room) { throw new UnsupportedOperationException(); }
+
+  public String reviewLog(String project, String node) { throw new UnsupportedOperationException(); }
+
+  public String demoDefinition() { throw new UnsupportedOperationException(); }
+
+  public DispatchOperations.Outcome dispatch(String project, DispatchOperations.Request request, Actor actor, String localHandle) { throw new UnsupportedOperationException(); }
+
+  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle) { throw new UnsupportedOperationException(); }
+
+  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle, DispatchOperations.AdhocPreparer preparer) { throw new UnsupportedOperationException(); }
+
+  public StopOperations.Outcome stop(StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) { throw new UnsupportedOperationException(); }
+
+  @Override public SyncReport sync(SyncRequest request) throws Exception { throw new UnsupportedOperationException(); }
+  @Override public SyncStatus syncStatus() { throw new UnsupportedOperationException(); }
+  @Override public java.util.List<ai.singlr.sail.store.SyncConflicts.Conflict> conflicts() { throw new UnsupportedOperationException(); }
+  @Override public ai.singlr.sail.store.SyncConflicts.Conflict conflict(String id) { throw new UnsupportedOperationException(); }
+  @Override public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) { throw new UnsupportedOperationException(); }
+  @Override public ProjectFiles projectFiles(String project) { throw new UnsupportedOperationException(); }
+  @Override public java.util.List<String> projectsWithFiles() { throw new UnsupportedOperationException(); }
+  @Override public ProjectDestroyed projectDestroy(String name, boolean purge) { throw new UnsupportedOperationException(); }
+  @Override public ProjectRenamed projectRename(String from, String to) { throw new UnsupportedOperationException(); }
+
 
   static final String RUN_CREDENTIAL = "sailrun_test";
   static final String PRINCIPAL = "claude/abc123";

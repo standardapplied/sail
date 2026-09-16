@@ -207,8 +207,8 @@ public final class AgentStatusCommand implements Runnable {
 
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        taskCounts = SpecCatalog.statusCounts(new SpecStore(db).projectSpecs(name));
+      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+        taskCounts = SpecCatalog.statusCounts(operations.projectSpecs(name));
       } catch (Exception ignored) {
       }
     }
@@ -260,9 +260,8 @@ public final class AgentStatusCommand implements Runnable {
 
   private static AgentSession.SessionInfo resolveSession(ShellExecutor shell, String projectName)
       throws Exception {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return StopOperations.resolveSession(
-          shell, new RunStore(db), projectName, NodeIdentity.handle());
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return operations.projectSession(projectName, NodeIdentity.handle());
     }
   }
 

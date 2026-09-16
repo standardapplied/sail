@@ -51,13 +51,13 @@ public final class HostKeysCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+            try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
               var sync = new AuthorizedKeysSync();
               if (dryRun) {
-                System.out.print(sync.render(db));
+                System.out.print(ai.singlr.sail.engine.AuthorizedKeysRenderer.render(operations.sshKeys(), SailPaths.binaryPath().toString()));
                 return;
               }
-              switch (sync.sync(db)) {
+              switch (sync.sync(operations.sshKeys())) {
                 case AuthorizedKeysSync.Synced synced ->
                     System.out.println(
                         Ansi.AUTO.string(

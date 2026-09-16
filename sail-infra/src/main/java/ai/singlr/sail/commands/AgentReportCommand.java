@@ -50,14 +50,14 @@ public final class AgentReportCommand implements Runnable {
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
-  private final ControlPlaneDb controlPlaneDb;
+  private final java.util.function.Supplier<ai.singlr.sail.api.SailOperations> operations;
 
   public AgentReportCommand() {
-    this(ControlPlaneDb.DEFAULT);
+    this(ai.singlr.sail.api.OperationsFactory::open);
   }
 
-  AgentReportCommand(ControlPlaneDb controlPlaneDb) {
-    this.controlPlaneDb = controlPlaneDb;
+  AgentReportCommand(java.util.function.Supplier<ai.singlr.sail.api.SailOperations> operations) {
+    this.operations = operations;
   }
 
   @Override
@@ -99,16 +99,16 @@ public final class AgentReportCommand implements Runnable {
   }
 
   List<Spec> projectSpecs(String project) {
-    try (var db = controlPlaneDb.open()) {
-      return new SpecStore(db).projectSpecs(project);
+    try (var operations = this.operations.get()) {
+      return operations.projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
     }
   }
 
   RunStore.RunRow latestSession(String project) {
-    try (var db = controlPlaneDb.open()) {
-      return new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle()).orElse(null);
+    try (var operations = this.operations.get()) {
+      return operations.latestRun(project, NodeIdentity.handle()).orElse(null);
     } catch (Exception ignored) {
       return null;
     }

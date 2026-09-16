@@ -107,8 +107,8 @@ public final class HostSshIdentityCommand implements Runnable {
    * instead of letting the operator believe SSH login works.
    */
   private static void syncKeys() throws Exception {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      switch (new AuthorizedKeysSync().sync(db)) {
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      switch (new AuthorizedKeysSync().sync(operations.sshKeys())) {
         case AuthorizedKeysSync.Synced synced ->
             System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
         case AuthorizedKeysSync.NeedsRoot _ ->

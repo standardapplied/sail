@@ -24,9 +24,11 @@ import java.nio.file.Path;
 public final class SyncDatabase implements AutoCloseable {
 
   private final Sqlite db;
+  private final int schemaBefore;
 
-  private SyncDatabase(Sqlite db) {
+  private SyncDatabase(Sqlite db, int schemaBefore) {
     this.db = db;
+    this.schemaBefore = schemaBefore;
   }
 
   /**
@@ -41,7 +43,9 @@ public final class SyncDatabase implements AutoCloseable {
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
+    int schemaBefore;
     try {
+      schemaBefore = new SchemaManager(db).currentVersion();
       new SchemaManager(db).migrate();
       if (DataMigrations.anyPending(db)) {
         MigrationRunner.applyAll(db, DataMigrations.ALL, DataMigration.Prompter.NON_INTERACTIVE);
@@ -61,12 +65,16 @@ public final class SyncDatabase implements AutoCloseable {
               + "', then sync again.",
           e);
     }
-    return new SyncDatabase(db);
+    return new SyncDatabase(db, schemaBefore);
   }
 
   /** The converged handle; valid until {@link #close()}. */
   public Sqlite db() {
     return db;
+  }
+
+  public int schemaBefore() {
+    return schemaBefore;
   }
 
   @Override

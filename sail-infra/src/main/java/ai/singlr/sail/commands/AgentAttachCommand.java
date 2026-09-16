@@ -304,14 +304,13 @@ public final class AgentAttachCommand implements Runnable {
     return orRefuse(
         name,
         () -> {
-          try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-            var runs = new RunStore(db);
+          try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
             var node = NodeIdentity.handle();
-            var run = runs.latestForProjectOnNode(name, node).orElse(null);
+            var run = operations.latestRun(name, node).orElse(null);
             return run == null
                 ? Latest.NONE
                 : new Latest(
-                    run, knownRoom(new RoomStore(db), run), runs.runningOnNode(name, node));
+                    run, operations.roomKnown(run.conversationId()) ? run.conversationId() : "", operations.runningRuns(name, node));
           }
         });
   }

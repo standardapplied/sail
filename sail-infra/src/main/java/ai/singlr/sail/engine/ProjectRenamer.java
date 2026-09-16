@@ -52,12 +52,18 @@ public final class ProjectRenamer {
     }
   }
 
-  private final Sqlite db;
+  private final ai.singlr.sail.api.Operations operations;
   private final ShellExec shell;
   private final Path projectsDir;
 
   public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
-    this.db = Objects.requireNonNull(db, "db");
+    this(ai.singlr.sail.api.OperationsFactory.create(db, shell, SailPaths.PROJECT_DESCRIPTOR,
+        null, null, ai.singlr.sail.api.SyncScheduler.disabled(), ai.singlr.sail.api.SessionYield.NONE),
+        shell, projectsDir);
+  }
+
+  public ProjectRenamer(ai.singlr.sail.api.Operations operations, ShellExec shell, Path projectsDir) {
+    this.operations = Objects.requireNonNull(operations, "operations");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
   }
@@ -69,19 +75,16 @@ public final class ProjectRenamer {
       throw new IllegalArgumentException("'" + renamed + "' is already the project's name.");
     }
 
-    var projects = new ProjectStore(db);
-    var specs = new SpecStore(db);
-    var files = new FileStore(db);
     var containers = new ContainerManager(shell);
 
     var existing =
-        projects
-            .findByName(old)
+        operations
+            .catalogProject(old)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "No project '" + old + "' in the catalog to rename."));
-    if (projects.findByName(renamed).isPresent()) {
+    if (operations.catalogProject(renamed).isPresent()) {
       throw new IllegalStateException("A project named '" + renamed + "' already exists.");
     }
     if (!(containers.queryState(renamed) instanceof ContainerState.NotCreated)) {
@@ -107,12 +110,8 @@ public final class ProjectRenamer {
         containers.rename(old, renamed);
         undo.push(() -> containers.rename(renamed, old));
       }
-      projects.rename(old, renamed, newDefinition);
-      undo.push(() -> projects.rename(renamed, old, existing.definition()));
-      specs.reproject(old, renamed);
-      undo.push(() -> specs.reproject(renamed, old));
-      files.reproject(old, renamed);
-      undo.push(() -> files.reproject(renamed, old));
+      var catalogRename = operations.projectRename(old, renamed);
+      undo.push(() -> operations.undoProjectRename(catalogRename));
       moveProjectDir(old, renamed);
       undo.push(() -> moveProjectDir(renamed, old));
       materialize(renamed, newDefinition);

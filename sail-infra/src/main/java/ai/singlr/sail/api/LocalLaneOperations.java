@@ -20,6 +20,10 @@ import java.util.Optional;
  */
 public interface LocalLaneOperations {
 
+  SyncStatus syncStatus();
+
+  java.util.List<ai.singlr.sail.store.SyncConflicts.Conflict> conflicts();
+
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local
    * socket — to its live run row. Empty for an unknown, revoked, or expired credential, and on

@@ -33,11 +33,9 @@ public final class ServerInitCommand implements Runnable {
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
-    try (var db = Sqlite.open(dbPath)) {
-      var schema = new SchemaManager(db);
-      var before = schema.currentVersion();
-      schema.migrate();
-      var after = schema.currentVersion();
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+      var before = operations.schemaBeforeOpen();
+      var after = operations.schemaVersion();
 
       System.out.println(Ansi.AUTO.string("  @|green ✓|@ Database: " + dbPath));
       if (before == 0) {
@@ -51,25 +49,24 @@ public final class ServerInitCommand implements Runnable {
             Ansi.AUTO.string("    @|faint Schema up to date (version " + after + ")|@"));
       }
 
-      var tokenStore = new TokenStore(db);
       var configPath = SailPaths.clientConfigPath();
-      var existing = tokenStore.list();
+      var existing = operations.tokens();
       var existingAdmin = existing.stream().anyMatch(t -> "admin".equals(t.name()));
       var configMissing = !Files.exists(configPath);
       if (existing.isEmpty()) {
-        var created = tokenStore.create("admin", "admin");
+        var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
         ServerConnectionConfig.saveLocalToken(created.token(), configPath);
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
       } else if (configMissing) {
         if (existingAdmin) {
-          tokenStore.revoke("admin");
+          operations.revokeToken("admin");
           System.out.println(
               Ansi.AUTO.string(
                   "  @|yellow ↻|@ Config missing — rotating admin token (old plaintext is"
                       + " unrecoverable)."));
         }
-        var created = tokenStore.create("admin", "admin");
+        var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
         ServerConnectionConfig.saveLocalToken(created.token(), configPath);
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));

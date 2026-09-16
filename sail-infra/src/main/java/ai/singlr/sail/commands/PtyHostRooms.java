@@ -40,31 +40,8 @@ final class PtyHostRooms implements PtyRooms {
 
   @Override
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
-    try (var db = Sqlite.open(dbPath)) {
-      var room =
-          new RoomStore(db)
-              .findById(roomId)
-              .orElseThrow(() -> new IOException("Room '" + roomId + "' was not found."));
-      if (!Objects.equals(room.project(), project)) {
-        throw new IOException(
-            "Room '"
-                + roomId
-                + "' belongs to project '"
-                + room.project()
-                + "'; open the session with --project "
-                + room.project()
-                + ".");
-      }
-      var role =
-          new FdeStore(db)
-              .byHandle(who.fde())
-              .map(fde -> Role.fromAttribute(fde.role()))
-              .orElse(Role.VIEWER);
-      var actor = new Actor(who.fde(), role, Actor.Lane.API);
-      if (SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy())
-          instanceof AccessDecision.Refused refused) {
-        throw new IOException(refused.message() + " " + refused.fix());
-      }
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+      operations.admitPtyRoom(roomId, project, who);
     }
   }
 }

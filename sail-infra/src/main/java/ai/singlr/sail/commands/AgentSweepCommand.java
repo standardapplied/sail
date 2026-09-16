@@ -102,8 +102,7 @@ public final class AgentSweepCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations = operations(shell, launchCommand, db);
+    try (var operations = operations(shell, launchCommand)) {
       var request =
           new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -118,8 +117,8 @@ public final class AgentSweepCommand implements Runnable {
     }
   }
 
-  private DispatchOperations operations(
-      ShellExecutor shell, AtomicReference<List<String>> launchCommand, Sqlite db) {
+  private ai.singlr.sail.api.SailOperations operations(
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -137,18 +136,10 @@ public final class AgentSweepCommand implements Runnable {
             System.out.println();
           }
         };
-    return new DispatchOperations(
-        shell,
-        file,
-        new SpecStore(db),
-        new ReviewStore(db),
-        new RunStore(db),
-        new FdeStore(db),
-        event -> {},
-        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        (project, config) -> "",
-        DispatchOperations.terminalLauncher(),
-        listener,
+    return ai.singlr.sail.api.OperationsFactory.open(shell, file,
+        new ai.singlr.sail.api.OperationHooks(event -> {},
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess), (project, config) -> "",
+            DispatchOperations.terminalLauncher(), listener, ai.singlr.sail.api.StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

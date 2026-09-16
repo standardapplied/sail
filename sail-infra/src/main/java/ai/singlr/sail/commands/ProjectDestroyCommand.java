@@ -136,9 +136,8 @@ public final class ProjectDestroyCommand implements Runnable {
           "[dry-run] remove '" + name + "' from the catalog (propagates to other boxes on sync)");
       return false;
     }
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      new SchemaManager(db).migrate();
-      return new ProjectStore(db).delete(name);
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return operations.projectDestroy(name, true).purged();
     }
   }
 

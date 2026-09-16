@@ -77,8 +77,8 @@ public final class AgentStopCommand implements Runnable {
     sync.freshenRead();
     var shell = new ShellExecutor(false);
     var handle = Objects.toString(HostSync.handle(), "");
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations = operations(db, shell, this::publishLifecycle, listener());
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open(shell, SailPaths.PROJECT_DESCRIPTOR,
+        hooks(shell, this::publishLifecycle, listener()), ai.singlr.sail.api.SessionYield.NONE)) {
       var outcome =
           operations.stop(
               new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
@@ -93,19 +93,21 @@ public final class AgentStopCommand implements Runnable {
    * The CLI lane's wiring of the shared stop executor: both stores come from the one control-plane
    * database, so an in-process stop records exactly what a server-lane stop would.
    */
-  static StopOperations operations(
+  static ai.singlr.sail.api.SailOperations operations(
       Sqlite db,
       ShellExec shell,
       DispatchOperations.EventSink events,
       StopOperations.Listener listener) {
-    return new StopOperations(
-        shell,
-        SailPaths.PROJECT_DESCRIPTOR,
-        new SpecStore(db),
-        new RunStore(db),
-        events,
-        StopOperations.sessionHalter(shell),
-        listener);
+    return ai.singlr.sail.api.OperationsFactory.create(db, shell, SailPaths.PROJECT_DESCRIPTOR,
+        hooks(shell, events, listener), ai.singlr.sail.api.SessionYield.NONE);
+  }
+
+  private static ai.singlr.sail.api.OperationHooks hooks(ShellExec shell,
+      DispatchOperations.EventSink events, StopOperations.Listener listener) {
+    return new ai.singlr.sail.api.OperationHooks(events,
+        new ai.singlr.sail.engine.WatcherSpawner(shell, ai.singlr.sail.engine.WatcherSpawner::spawnProcess),
+        DispatchOperations.autoSnapshotter(shell), DispatchOperations.shellLauncher(shell),
+        DispatchOperations.Listener.NONE, listener);
   }
 
   private StopOperations.Listener listener() {

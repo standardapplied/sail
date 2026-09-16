@@ -385,14 +385,9 @@ public final class UpgradeCommand implements Runnable {
   private void bootstrapAdminToken(Path dbPath) {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
-      try (var db = Sqlite.open(dbPath)) {
-        var schema = new SchemaManager(db);
-        if (schema.currentVersion() == 0) {
-          schema.migrate();
-        }
-        var tokenStore = new TokenStore(db);
-        if (tokenStore.list().isEmpty()) {
-          var created = tokenStore.create("admin", "admin");
+      try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+        if (operations.tokens().isEmpty()) {
+          var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
           var configPath = SailPaths.clientConfigPath();
           ServerConnectionConfig.saveLocalToken(created.token(), configPath);
           if (!json) {

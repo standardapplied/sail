@@ -175,12 +175,11 @@ public final class RunCommand implements Runnable {
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var store = new SpecStore(db);
-        var nextSpec = SpecCatalog.nextReady(store.projectSpecs(name));
+      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+        var nextSpec = SpecCatalog.nextReady(operations.projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
-              store.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
+              operations.specContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
           task = specTask(name, nextSpec, specBody);
           if (!json) {
             System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
@@ -299,8 +298,7 @@ public final class RunCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations = operations(shell, db, launchCommand);
+    try (var operations = operations(shell, launchCommand)) {
       var request =
           new DispatchOperations.AdhocRequest(task, branchName, path, background, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -320,7 +318,7 @@ public final class RunCommand implements Runnable {
         if (background
             && snapshotLabel != null
             && rollbackSafe(
-                e, new RunStore(db).runningForProjectOnNode(name, handle).isPresent())) {
+                e, !operations.runningRuns(name, handle).isEmpty())) {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
@@ -342,8 +340,8 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private DispatchOperations operations(
-      ShellExecutor shell, Sqlite db, AtomicReference<List<String>> launchCommand) {
+  private ai.singlr.sail.api.SailOperations operations(
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -381,18 +379,10 @@ public final class RunCommand implements Runnable {
             }
           }
         };
-    return new DispatchOperations(
-        shell,
-        file,
-        new SpecStore(db),
-        new ReviewStore(db),
-        new RunStore(db),
-        new FdeStore(db),
-        this::publishLifecycle,
-        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        (project, config) -> "",
-        DispatchOperations.terminalLauncher(),
-        listener,
+    return ai.singlr.sail.api.OperationsFactory.open(shell, file,
+        new ai.singlr.sail.api.OperationHooks(this::publishLifecycle,
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess), (project, config) -> "",
+            DispatchOperations.terminalLauncher(), listener, ai.singlr.sail.api.StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

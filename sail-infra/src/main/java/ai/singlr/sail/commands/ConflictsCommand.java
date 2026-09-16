@@ -56,8 +56,8 @@ public final class ConflictsCommand implements Callable<Integer> {
 
   @Override
   public Integer call() {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var pending = new SyncConflicts(db).pending();
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      var pending = operations.conflicts();
       System.out.println(renderList(pending, json));
       return 0;
     }
@@ -116,13 +116,7 @@ public final class ConflictsCommand implements Callable<Integer> {
   }
 
   static ConflictResolver resolverFor(Sqlite db, String entityType) {
-    return switch (entityType) {
-      case SPEC -> new SpecStore(db);
-      case FILE -> new FileStore(db);
-      case PROJECT -> new ProjectStore(db);
-      case "room" -> new RoomStore(db);
-      default -> throw new IllegalStateException("Unknown conflict entity type: " + entityType);
-    };
+    return ai.singlr.sail.sync.SyncedEntities.require(entityType).resolver(db);
   }
 
   @Command(
@@ -136,8 +130,8 @@ public final class ConflictsCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var conflict = findUnique(new SyncConflicts(db), entity);
+      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+        var conflict = operations.conflict(entity);
         if (conflict == null) {
           System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
           return 1;
@@ -232,9 +226,8 @@ public final class ConflictsCommand implements Callable<Integer> {
             Banner.errorLine("Choose exactly one of --mine, --theirs, or --merge.", Ansi.AUTO));
         return 1;
       }
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var conflicts = new SyncConflicts(db);
-        var conflict = findUnique(conflicts, entity);
+      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+        var conflict = operations.conflict(entity);
         if (conflict == null) {
           System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
           return 1;
@@ -254,8 +247,8 @@ public final class ConflictsCommand implements Callable<Integer> {
             return 1;
           }
         }
-        var chosen = choose(conflict, strategy, edited);
-        apply(resolverFor(db, conflict.entityType()), conflicts, conflict, chosen);
+        operations.resolveConflict(entity, new ai.singlr.sail.api.Resolution(
+            ai.singlr.sail.api.Resolution.Strategy.valueOf(strategy.name()), edited));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Resolved @|yellow "

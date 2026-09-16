@@ -128,18 +128,11 @@ public final class DispatchCommand implements Runnable {
     var request =
         new DispatchOperations.Request(
             specId, background ? "background" : "foreground", dryRun, repoOverrides, restart);
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations =
-          operations(
-              db,
-              shell,
-              file,
-              this::publishLifecycle,
-              new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-              snapshotter(shell),
-              DispatchOperations.terminalLauncher(),
-              renderer(sync),
-              new PtyHostYield());
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open(shell, file,
+        new ai.singlr.sail.api.OperationHooks(this::publishLifecycle,
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess), snapshotter(shell),
+            DispatchOperations.terminalLauncher(), renderer(sync), ai.singlr.sail.api.StopOperations.Listener.NONE),
+        new PtyHostYield())) {
       render(dispatch(operations, request, handle));
     }
   }
@@ -149,7 +142,7 @@ public final class DispatchCommand implements Runnable {
    * control-plane database — spec claims, run rows, and the FDE roster guard included — so an
    * in-process dispatch records exactly what a server-lane dispatch would.
    */
-  static DispatchOperations operations(
+  static ai.singlr.sail.api.SailOperations operations(
       Sqlite db,
       ShellExec shell,
       String file,
@@ -159,24 +152,13 @@ public final class DispatchCommand implements Runnable {
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener,
       SessionYield sessionYield) {
-    return new DispatchOperations(
-            shell,
-            file,
-            new SpecStore(db),
-            new ReviewStore(db),
-            new RunStore(db),
-            new FdeStore(db),
-            events,
-            watcherSpawner,
-            snapshotter,
-            launcher,
-            listener,
-            sessionYield)
-        .useMessages(new MessageStore(db));
+    return ai.singlr.sail.api.OperationsFactory.create(db, shell, file,
+        new ai.singlr.sail.api.OperationHooks(events, watcherSpawner, snapshotter, launcher, listener,
+            ai.singlr.sail.api.StopOperations.Listener.NONE), sessionYield);
   }
 
   private DispatchOperations.Outcome dispatch(
-      DispatchOperations operations, DispatchOperations.Request request, String handle) {
+      ai.singlr.sail.api.Operations operations, DispatchOperations.Request request, String handle) {
     try {
       return operations.dispatch(name, request, Actor.cliOperator(handle), handle);
     } catch (ApiException e) {

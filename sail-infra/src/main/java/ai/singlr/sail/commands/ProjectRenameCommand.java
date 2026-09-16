@@ -71,14 +71,12 @@ public final class ProjectRenameCommand implements Runnable {
           "Root privileges required. Run with: sudo sail project rename " + name + " " + newName);
     }
 
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      new SchemaManager(db).migrate();
-      var projects = new ProjectStore(db);
-      if (projects.findByName(name).isEmpty()) {
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      if (operations.catalogProject(name).isEmpty()) {
         throw new IllegalStateException(
             "No project '" + name + "' in the catalog. Run 'sail project list' to see projects.");
       }
-      if (projects.findByName(newName).isPresent()) {
+      if (operations.catalogProject(newName).isPresent()) {
         throw new IllegalStateException("A project named '" + newName + "' already exists.");
       }
 
@@ -91,7 +89,7 @@ public final class ProjectRenameCommand implements Runnable {
         return;
       }
 
-      var renamer = new ProjectRenamer(db, new ShellExecutor(false), SailPaths.projectsDir());
+      var renamer = new ProjectRenamer(operations, new ShellExecutor(false), SailPaths.projectsDir());
       var result = renamer.rename(name, newName);
       emit(result);
     }

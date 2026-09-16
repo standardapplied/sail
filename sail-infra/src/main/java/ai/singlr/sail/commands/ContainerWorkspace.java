@@ -53,9 +53,8 @@ final class ContainerWorkspace {
   }
 
   private static String sshUser(String project) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new ProjectStore(db)
-          .findByName(project)
+    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      return operations.catalogProject(project)
           .map(row -> SailYaml.fromMap(YamlUtil.parseMap(row.definition())).sshUser())
           .orElse("dev");
     } catch (Exception e) {
