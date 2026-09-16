@@ -31,6 +31,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncPrincipal;
@@ -41,6 +42,10 @@ import java.io.PipedReader;
 import java.io.PipedWriter;
 import java.io.Reader;
 import java.io.Writer;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,9 +54,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SailOperationsSeamTest {
   @TempDir Path tempDir;
@@ -84,6 +93,184 @@ class SailOperationsSeamTest {
                 target -> {
                   throw new IOException("main unavailable");
                 }));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"token", "session"})
+  void onlyAdminsCanChooseTheSyncPeerThroughHttp(String lane) throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db);
+        var server = server(operations, node.db)) {
+      var targets = new ArrayList<String>();
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "trusted-main", "node"),
+              target -> {
+                targets.add(target);
+                return channel(main);
+              }));
+      var member = credential(node.db, "member", "member", lane);
+      var denied = send(server, "POST", "/v1/sync", member, "{\"main\":\"untrusted-peer\"}");
+      assertEquals(403, denied.statusCode(), denied.body());
+      assertTrue(targets.isEmpty());
+      assertEquals("member", new FdeStore(node.db).byHandle("member").orElseThrow().role());
+
+      for (var body : List.of("{}", "{\"main\":null}", "{\"main\":\"\"}", "{\"main\":\" \"}")) {
+        var response = send(server, "POST", "/v1/sync", member, body);
+        assertEquals(200, response.statusCode(), response.body());
+      }
+      assertEquals(
+          List.of("trusted-main", "trusted-main", "trusted-main", "trusted-main"), targets);
+
+      var admin = credential(node.db, "admin", "admin", lane);
+      var allowed = send(server, "POST", "/v1/sync", admin, "{\"main\":\"alternate\"}");
+      assertEquals(200, allowed.statusCode(), allowed.body());
+      assertEquals("alternate", targets.getLast());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "token,mine",
+    "token,theirs",
+    "token,merge",
+    "session,mine",
+    "session,theirs",
+    "session,merge"
+  })
+  void onlyAdminsCanReplaceSpecSnapshotsThroughHttp(String lane, String strategy) throws Exception {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db);
+        var server = server(operations, box.db)) {
+      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      var local = box.specs.comparableSnapshot("auth");
+      var remote = new LinkedHashMap<>(local);
+      remote.put("title", "remote");
+      remote.put("assignee", "someone-else");
+      box.conflicts.record(
+          "spec",
+          "auth",
+          YamlUtil.dumpJson(local),
+          YamlUtil.dumpJson(local),
+          YamlUtil.dumpJson(remote),
+          List.of("title"));
+      var body =
+          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpJson(remote)));
+      for (var handle : List.of("uday", "other")) {
+        var member = credential(box.db, handle, "member", lane);
+        assertEquals(200, send(server, "GET", "/v1/conflicts/auth", member, "").statusCode());
+        var denied = send(server, "POST", "/v1/conflicts/auth/resolve", member, body);
+        assertEquals(403, denied.statusCode(), denied.body());
+        assertEquals(local, box.specs.comparableSnapshot("auth"));
+        assertEquals(1, box.conflicts.pending().size());
+      }
+
+      var admin = credential(box.db, "admin", "admin", lane);
+      var allowed = send(server, "POST", "/v1/conflicts/auth/resolve", admin, body);
+      assertEquals(200, allowed.statusCode(), allowed.body());
+      assertEquals(strategy.equals("mine") ? local : remote, box.specs.comparableSnapshot("auth"));
+      assertTrue(box.conflicts.pending().isEmpty());
+    }
+  }
+
+  @Test
+  void httpUploadsMaterializeNewAndUpdatedFilesWhilePreservingLocalEdits() throws Exception {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db);
+        var server = server(operations, box.db)) {
+      var member = credential(box.db, "member", "member", "token");
+      var path = "/v1/projects/proj/files/dir/config";
+      var local = tempDir.resolve("proj/files/dir/config");
+      assertEquals(200, send(server, "PUT", path, member, "first\u0000bytes").statusCode());
+      assertEquals("first\u0000bytes", Files.readString(local));
+      assertEquals(200, send(server, "PUT", path, member, "updated").statusCode());
+      assertEquals("updated", Files.readString(local));
+      Files.writeString(local, "local edit");
+      assertEquals(200, send(server, "PUT", path, member, "latest").statusCode());
+      assertEquals("local edit", Files.readString(local));
+      assertEquals("latest", send(server, "GET", path, member, "").body());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"GET", "POST"})
+  void httpConflictRoutesPreserveWhitespaceInsteadOfAddressingAnotherFile(String method)
+      throws Exception {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db);
+        var server = server(operations, box.db)) {
+      var files = new FileStore(box.db);
+      for (var path : List.of("dir/ /config", "dir/config")) {
+        files.put(
+            "proj",
+            path,
+            Base64.getEncoder().encodeToString("local".getBytes(StandardCharsets.UTF_8)));
+        var id = "proj/" + path;
+        var local = files.comparableSnapshot(id);
+        var remote = new LinkedHashMap<>(local);
+        remote.put(
+            "content",
+            Base64.getEncoder().encodeToString("remote".getBytes(StandardCharsets.UTF_8)));
+        box.conflicts.record(
+            "file",
+            id,
+            null,
+            YamlUtil.dumpJson(local),
+            YamlUtil.dumpJson(remote),
+            List.of("content"));
+      }
+      var admin = credential(box.db, "admin", "admin", "token");
+      var path = "/v1/conflicts/proj/dir/%20/config" + (method.equals("POST") ? "/resolve" : "");
+      var response = send(server, method, path, admin, "{\"strategy\":\"theirs\"}");
+      assertEquals(200, response.statusCode(), response.body());
+      assertEquals("proj/dir/ /config", YamlUtil.parseMap(response.body()).get("entity_id"));
+      assertNotNull(operations.conflict("proj/dir/config"));
+      assertArrayEquals(
+          "local".getBytes(StandardCharsets.UTF_8),
+          operations.projectFiles("proj").get("dir/config").orElseThrow());
+      if (method.equals("POST")) {
+        assertNull(operations.conflict("proj/dir/ /config"));
+        assertArrayEquals(
+            "remote".getBytes(StandardCharsets.UTF_8),
+            operations.projectFiles("proj").get("dir/ /config").orElseThrow());
+      }
+    }
+  }
+
+  private static SailApiServer server(SailOperations operations, Sqlite db) throws IOException {
+    var auth =
+        new SessionAwareAuth(
+            new AuthSessionStore(db), new FdeStore(db), new TokenAuth(new TokenStore(db)));
+    var server =
+        new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
+    server.start();
+    return server;
+  }
+
+  private static String credential(Sqlite db, String handle, String role, String lane) {
+    var fde = new FdeStore(db).add(handle, null, null, role);
+    return lane.equals("session")
+        ? new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(30)).token()
+        : new TokenStore(db).create(handle, role, fde.id(), null).token();
+  }
+
+  private static HttpResponse<String> send(
+      SailApiServer server, String method, String path, String token, String body)
+      throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+            .header("Authorization", "Bearer " + token)
+            .method(method, HttpRequest.BodyPublishers.ofString(body))
+            .build();
+    try (var client = HttpClient.newHttpClient()) {
+      return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
   }
 
   @Test

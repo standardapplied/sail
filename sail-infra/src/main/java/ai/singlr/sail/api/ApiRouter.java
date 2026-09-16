@@ -245,7 +245,11 @@ public final class ApiRouter implements HttpHandler {
     }
     requireMethod(request, POST);
     var body = JsonBody.readMap(exchange);
-    return ApiResponse.ok(SyncViews.round(operations.sync(new SyncRequest(text(body, "main")))));
+    var main = text(body, "main");
+    if (Strings.isNotBlank(main)) {
+      Authorizer.require(exchange, Capability.ADMIN);
+    }
+    return ApiResponse.ok(SyncViews.round(operations.sync(new SyncRequest(main))));
   }
 
   private ApiResponse routeConflicts(HttpExchange exchange, RouteRequest request)
@@ -254,9 +258,10 @@ public final class ApiRouter implements HttpHandler {
       requireMethod(request, GET);
       return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
     }
-    var segments = request.segments();
-    if (request.is(POST) && segments.getLast().equals("resolve") && request.size() > 3) {
-      var id = String.join("/", segments.subList(2, segments.size() - 1));
+    var path = request.uri().getPath();
+    if (request.is(POST) && path.endsWith("/resolve") && request.size() > 3) {
+      Authorizer.require(exchange, Capability.ADMIN);
+      var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
       var body = JsonBody.readMap(exchange);
       var strategy = text(body, "strategy");
       if (strategy == null) {
@@ -268,7 +273,7 @@ public final class ApiRouter implements HttpHandler {
       return ApiResponse.ok(SyncViews.conflict(operations.resolveConflict(id, resolution)));
     }
     requireMethod(request, GET);
-    var conflict = operations.conflict(String.join("/", segments.subList(2, segments.size())));
+    var conflict = operations.conflict(path.substring("/v1/conflicts/".length()));
     if (conflict == null) {
       throw notFound();
     }
@@ -313,7 +318,9 @@ public final class ApiRouter implements HttpHandler {
             ErrorCode.REQUEST_TOO_LARGE,
             "File exceeds the " + ProjectFiles.MAX_BYTES + "-byte limit.");
       }
-      return ApiResponse.ok(Map.of("path", files.put(path, content)));
+      var storedPath = files.put(path, content);
+      files.materialize();
+      return ApiResponse.ok(Map.of("path", storedPath));
     }
     if (request.is(DELETE)) {
       if (!files.remove(path)) {
