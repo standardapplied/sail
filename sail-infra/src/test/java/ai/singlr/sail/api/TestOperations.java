@@ -201,7 +201,7 @@ class TestOperations implements Operations {
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
     if (!BOX_CREDENTIAL.equals(credential)) {
-      return Optional.empty();
+      return Operations.super.boxActorForCredential(credential);
     }
     return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
   }
@@ -215,7 +215,7 @@ class TestOperations implements Operations {
       return Optional.of(roomRun("run-3", "invite"));
     }
     if (!RUN_CREDENTIAL.equals(credential)) {
-      return Optional.empty();
+      return Operations.super.runForCredential(credential);
     }
     return Optional.of(
         new RunStore.RunRow(
