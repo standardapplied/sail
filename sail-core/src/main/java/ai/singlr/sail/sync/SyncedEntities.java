@@ -49,6 +49,7 @@ public final class SyncedEntities {
   public record Entity(
       String type,
       Function<Sqlite, SyncedStore> factory,
+      Function<Sqlite, ConflictResolver> resolverFactory,
       PushPolicy pushPolicy,
       TransitionDetector transitions,
       Map<String, TransitionKind> transitionKinds) {
@@ -56,8 +57,9 @@ public final class SyncedEntities {
       return factory.apply(db);
     }
 
+    /** Every replicated entity resolves its parked conflicts; the type system says so. */
     public ConflictResolver resolver(Sqlite db) {
-      return (ConflictResolver) store(db);
+      return resolverFactory.apply(db);
     }
   }
 
@@ -68,20 +70,23 @@ public final class SyncedEntities {
           new Entity(
               "spec",
               SpecStore::new,
+              SpecStore::new,
               ALL,
               (id, before, after) -> SyncTransitions.statusChange("spec", id, before, after),
               Map.of("spec", TransitionKind.SPEC_STATUS)),
-          new Entity("room", RoomStore::new, ALL, NONE, Map.of()),
-          new Entity("file", FileStore::new, ALL, NONE, Map.of()),
-          new Entity("project", ProjectStore::new, ALL, NONE, Map.of()),
+          new Entity("room", RoomStore::new, RoomStore::new, ALL, NONE, Map.of()),
+          new Entity("file", FileStore::new, FileStore::new, ALL, NONE, Map.of()),
+          new Entity("project", ProjectStore::new, ProjectStore::new, ALL, NONE, Map.of()),
           new Entity(
               "run",
+              RunStore::new,
               RunStore::new,
               (store, handle) -> id -> ((RunStore) store).pushableFrom(id, handle),
               (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
               Map.of("run", TransitionKind.RUN_STATUS)),
           new Entity(
               "review",
+              ReviewStore::new,
               ReviewStore::new,
               ALL,
               SyncTransitions::reviewChanges,
@@ -92,6 +97,7 @@ public final class SyncedEntities {
                   TransitionKind.REVIEW_STAGE_STATUS)),
           new Entity(
               "message",
+              MessageStore::new,
               MessageStore::new,
               ALL,
               (id, before, after) ->

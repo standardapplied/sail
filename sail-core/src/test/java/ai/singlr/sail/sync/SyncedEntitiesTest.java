@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -71,9 +72,8 @@ class SyncedEntitiesTest {
     }
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  void parkedMessageConflictsResolveEitherSideThroughTheRegistry(boolean mine) {
+  @Test
+  void aParkedMessageConflictResolvesToMainsCopyAndRefusesMine() {
     try (var box = new SyncBox("node")) {
       new RoomStore(box.db)
           .create(
@@ -88,12 +88,21 @@ class SyncedEntitiesTest {
           .get("message")
           .recordConflict(id, local, local, remote, List.of("body"));
       var parked = box.conflicts.pendingFor("message", id).orElseThrow();
-      var chosen = mine ? local : remote;
-      var revision =
-          SyncedEntities.require("message").resolver(box.db).resolveConflict(id, chosen, remote);
+      var resolver = SyncedEntities.require("message").resolver(box.db);
+
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class, () -> resolver.resolveConflict(id, local, remote));
+      assertTrue(refused.getMessage().contains("append-only"), refused.getMessage());
+      assertEquals("local", messages.comparableSnapshot(id).get("body"), "mine changed nothing");
+      assertTrue(box.conflicts.pendingFor("message", id).isPresent(), "still parked");
+
+      var revision = resolver.resolveConflict(id, remote, remote);
       assertNotNull(revision);
       assertTrue(box.conflicts.resolve(parked.id(), revision));
-      assertEquals(chosen, messages.comparableSnapshot(id));
+      assertEquals(remote, messages.comparableSnapshot(id));
+      assertEquals(revision, messages.latestRev(id));
+      assertEquals(revision, messages.baseRevOf(id), "rebased onto main's copy");
       assertTrue(box.conflicts.pending().isEmpty());
     }
   }
