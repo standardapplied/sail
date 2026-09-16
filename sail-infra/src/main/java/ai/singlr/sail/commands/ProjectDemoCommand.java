@@ -181,7 +181,7 @@ public final class ProjectDemoCommand implements Runnable {
 
   private String loadDemoDefinition(PrintStream out, Ansi ansi) {
     try (var operations = OperationsFactory.open()) {
-      var definition = operations.demoDefinition();
+      var definition = operations.catalog().demoDefinition();
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
       }

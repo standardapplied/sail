@@ -36,7 +36,7 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
   @Override
   public PtyIdentity resolve(String token) throws IOException {
     try (var operations = OperationsFactory.open(dbPath)) {
-      return operations.ptyIdentity(token, boxHandle.get());
+      return operations.pty().identity(token, boxHandle.get());
     }
   }
 

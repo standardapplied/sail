@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
@@ -53,7 +53,7 @@ public final class ProjectRenamer {
     }
   }
 
-  private final Operations operations;
+  private final HostOperations operations;
   private final ShellExec shell;
   private final Path projectsDir;
 
@@ -71,7 +71,7 @@ public final class ProjectRenamer {
         projectsDir);
   }
 
-  public ProjectRenamer(Operations operations, ShellExec shell, Path projectsDir) {
+  public ProjectRenamer(HostOperations operations, ShellExec shell, Path projectsDir) {
     this.operations = Objects.requireNonNull(operations, "operations");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
@@ -88,12 +88,13 @@ public final class ProjectRenamer {
 
     var existing =
         operations
-            .catalogProject(old)
+            .catalog()
+            .project(old)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "No project '" + old + "' in the catalog to rename."));
-    if (operations.catalogProject(renamed).isPresent()) {
+    if (operations.catalog().project(renamed).isPresent()) {
       throw new IllegalStateException("A project named '" + renamed + "' already exists.");
     }
     if (!(containers.queryState(renamed) instanceof ContainerState.NotCreated)) {
@@ -119,8 +120,8 @@ public final class ProjectRenamer {
         containers.rename(old, renamed);
         undo.push(() -> containers.rename(renamed, old));
       }
-      var catalogRename = operations.projectRename(old, renamed);
-      undo.push(() -> operations.undoProjectRename(catalogRename));
+      var catalogRename = operations.catalog().rename(old, renamed);
+      undo.push(() -> operations.catalog().undoRename(catalogRename));
       moveProjectDir(old, renamed);
       undo.push(() -> moveProjectDir(renamed, old));
       materialize(renamed, newDefinition);

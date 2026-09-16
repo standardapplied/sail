@@ -86,7 +86,7 @@ public final class SyncCommand implements Callable<Integer> {
     }
     var target = resolution.target();
     try (var operations = OperationsFactory.open()) {
-      operations.prepareSync();
+      operations.schema().prepareSync();
       return watch ? watchLoop(operations, target) : runOnce(operations, target);
     } catch (RuntimeException e) {
       System.err.println(Banner.errorLine(reason(e), Ansi.AUTO));

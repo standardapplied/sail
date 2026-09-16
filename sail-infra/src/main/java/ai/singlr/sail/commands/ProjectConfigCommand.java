@@ -157,7 +157,7 @@ public final class ProjectConfigCommand implements Runnable {
       return null;
     }
     try (var operations = OperationsFactory.open()) {
-      return operations.projectSession(containerName, NodeIdentity.handle());
+      return operations.dispatching().projectSession(containerName, NodeIdentity.handle());
     }
   }
 
@@ -170,7 +170,7 @@ public final class ProjectConfigCommand implements Runnable {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
     try (var operations = OperationsFactory.open()) {
-      return SpecSnapshot.available(SpecCatalog.summarize(operations.projectSpecs(name)));
+      return SpecSnapshot.available(SpecCatalog.summarize(operations.catalog().projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");
     }

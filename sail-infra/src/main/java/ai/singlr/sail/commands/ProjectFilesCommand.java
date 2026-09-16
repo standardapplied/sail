@@ -435,7 +435,9 @@ public final class ProjectFilesCommand implements Runnable {
       }
       try (var operations = OperationsFactory.open()) {
         var targets =
-            all ? operations.projectsWithFiles() : List.of(CurrentProject.require(project));
+            all
+                ? operations.catalog().projectsWithFiles()
+                : List.of(CurrentProject.require(project));
         var written = 0;
         var deleted = 0;
         var skipped = new ArrayList<String>();

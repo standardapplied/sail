@@ -34,7 +34,7 @@ public final class GatewayCommand implements Callable<Integer> {
   public Integer call() throws Exception {
     var original = System.getenv("SSH_ORIGINAL_COMMAND");
     try (var operations = OperationsFactory.open()) {
-      var decision = operations.authorizeGateway(original, fde);
+      var decision = operations.identity().authorizeGateway(original, fde);
       return switch (decision) {
         case SshGateway.Rejected rejected -> {
           System.err.println(Banner.errorLine(rejected.reason(), Ansi.AUTO));

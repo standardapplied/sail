@@ -139,9 +139,9 @@ public final class AgentLogCommand implements Runnable {
   private String resolveLogPath(String project, boolean review) {
     try (var operations = OperationsFactory.open()) {
       if (review) {
-        return operations.reviewLog(project, NodeIdentity.handle());
+        return operations.dispatching().reviewLog(project, NodeIdentity.handle());
       }
-      return logPathFrom(operations.latestRun(project, NodeIdentity.handle()));
+      return logPathFrom(operations.dispatching().latestRun(project, NodeIdentity.handle()));
     } catch (RuntimeException e) {
       return null;
     }

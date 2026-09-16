@@ -87,8 +87,13 @@ public final class AgentStopCommand implements Runnable {
             hooks(shell, this::publishLifecycle, listener()),
             SessionYield.NONE)) {
       var outcome =
-          operations.stop(
-              new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
+          operations
+              .dispatching()
+              .stop(
+                  new StopOperations.ProjectTarget(name),
+                  Actor.cliOperator(handle),
+                  handle,
+                  dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();

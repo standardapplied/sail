@@ -5,23 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.ssh.SshGateway;
-import ai.singlr.sail.store.DispatchGate;
-import ai.singlr.sail.store.EventStore;
-import ai.singlr.sail.store.FdeSshKeyStore;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
-import ai.singlr.sail.store.TokenStore;
-import java.io.IOException;
-import java.time.Duration;
-import java.util.List;
-import java.util.Optional;
 
 /**
  * The full control-plane surface served over the web API by {@link ApiRouter}. Extends {@link
@@ -31,69 +15,6 @@ import java.util.Optional;
  */
 public interface Operations extends LocalLaneOperations {
 
-  DispatchOperations.Outcome dispatch(
-      String project, DispatchOperations.Request request, Actor actor, String localHandle);
-
-  DispatchOperations.AdhocSession startAdhoc(
-      String project, DispatchOperations.AdhocRequest request, String localHandle);
-
-  DispatchOperations.AdhocSession startAdhoc(
-      String project,
-      DispatchOperations.AdhocRequest request,
-      String localHandle,
-      DispatchOperations.AdhocPreparer preparer);
-
-  StopOperations.Outcome stop(
-      StopOperations.Target target, Actor actor, String localHandle, boolean dryRun);
-
-  List<Spec> projectSpecs(String project);
-
-  Optional<SpecStore.SpecContent> specContent(String id);
-
-  Optional<ProjectStore.ProjectRow> catalogProject(String project);
-
-  List<ProjectStore.ProjectRow> catalogProjects();
-
-  Optional<RunStore.RunRow> latestRun(String project, String node);
-
-  Optional<RunStore.RunRow> activeRun(String project, String node);
-
-  List<DispatchGate.RunningRun> runningRuns(String project, String node);
-
-  AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
-
-  boolean roomKnown(String room);
-
-  String reviewLog(String project, String node);
-
-  String demoDefinition();
-
-  List<TokenStore.TokenInfo> tokens();
-
-  TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl);
-
-  boolean revokeToken(String name);
-
-  Optional<FdeStore.Fde> fde(String handle);
-
-  int schemaVersion();
-
-  SchemaMigration initialize();
-
-  record SchemaMigration(int before, int after) {}
-
-  SshGateway.Decision authorizeGateway(String command, String handle);
-
-  PtyIdentity ptyIdentity(String token, String boxHandle) throws IOException;
-
-  void admitPtyRoom(String room, String project, PtyIdentity identity) throws IOException;
-
-  void recordHostEvent(EventStore.EventRow event);
-
-  List<FdeSshKeyStore.SshKeyInfo> sshKeys();
-
-  void prepareSync();
-
   SyncReport sync(SyncRequest request) throws Exception;
 
   SyncConflicts.Conflict conflict(String id);
@@ -101,18 +22,6 @@ public interface Operations extends LocalLaneOperations {
   SyncConflicts.Conflict resolveConflict(String id, Resolution resolution);
 
   ProjectFiles projectFiles(String project);
-
-  List<String> projectsWithFiles();
-
-  ProjectDestroyed projectDestroy(String name, boolean purge);
-
-  ProjectRenamed projectRename(String from, String to);
-
-  record ProjectDestroyed(String name, boolean purged) {}
-
-  record ProjectRenamed(String from, String to, String previousDefinition) {}
-
-  void undoProjectRename(ProjectRenamed renamed);
 
   Result<ReviewListResponse> reviewsForSpec(String specId);
 

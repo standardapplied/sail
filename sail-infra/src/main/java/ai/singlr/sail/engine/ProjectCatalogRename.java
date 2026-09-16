@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.HostCatalog;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
@@ -14,7 +14,7 @@ import ai.singlr.sail.store.Sqlite;
 public final class ProjectCatalogRename {
   private ProjectCatalogRename() {}
 
-  public static Operations.ProjectRenamed rename(Sqlite db, String from, String to) {
+  public static HostCatalog.Renamed rename(Sqlite db, String from, String to) {
     NameValidator.requireValidProjectName(from);
     NameValidator.requireValidProjectName(to);
     if (from.equals(to)) {
@@ -36,11 +36,11 @@ public final class ProjectCatalogRename {
           projects.rename(from, to, ProjectRenamer.withName(existing.definition(), to));
           new SpecStore(db).reproject(from, to);
           new FileStore(db).reproject(from, to);
-          return new Operations.ProjectRenamed(from, to, existing.definition());
+          return new HostCatalog.Renamed(from, to, existing.definition());
         });
   }
 
-  public static void restore(Sqlite db, Operations.ProjectRenamed renamed) {
+  public static void restore(Sqlite db, HostCatalog.Renamed renamed) {
     db.transaction(
         () -> {
           new ProjectStore(db).rename(renamed.to(), renamed.from(), renamed.previousDefinition());

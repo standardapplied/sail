@@ -35,7 +35,7 @@ final class PtyHostRooms implements PtyRooms {
   @Override
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
     try (var operations = OperationsFactory.open(dbPath)) {
-      operations.admitPtyRoom(roomId, project, who);
+      operations.pty().admitRoom(roomId, project, who);
     }
   }
 }

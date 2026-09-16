@@ -70,12 +70,12 @@ public final class ProjectRenameCommand implements Runnable {
     }
 
     try (var operations = OperationsFactory.open()) {
-      operations.initialize();
-      if (operations.catalogProject(name).isEmpty()) {
+      operations.schema().initialize();
+      if (operations.catalog().project(name).isEmpty()) {
         throw new IllegalStateException(
             "No project '" + name + "' in the catalog. Run 'sail project list' to see projects.");
       }
-      if (operations.catalogProject(newName).isPresent()) {
+      if (operations.catalog().project(newName).isPresent()) {
         throw new IllegalStateException("A project named '" + newName + "' already exists.");
       }
 

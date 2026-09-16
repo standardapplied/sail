@@ -205,7 +205,7 @@ public final class AgentStatusCommand implements Runnable {
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
       try (var operations = OperationsFactory.open()) {
-        taskCounts = SpecCatalog.statusCounts(operations.projectSpecs(name));
+        taskCounts = SpecCatalog.statusCounts(operations.catalog().projectSpecs(name));
       } catch (Exception ignored) {
       }
     }
@@ -258,7 +258,7 @@ public final class AgentStatusCommand implements Runnable {
   private static AgentSession.SessionInfo resolveSession(ShellExecutor shell, String projectName)
       throws Exception {
     try (var operations = OperationsFactory.open()) {
-      return operations.projectSession(projectName, NodeIdentity.handle());
+      return operations.dispatching().projectSession(projectName, NodeIdentity.handle());
     }
   }
 

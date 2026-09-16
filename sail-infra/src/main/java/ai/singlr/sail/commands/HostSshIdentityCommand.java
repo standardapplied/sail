@@ -108,7 +108,7 @@ public final class HostSshIdentityCommand implements Runnable {
    */
   private static void syncKeys() throws Exception {
     try (var operations = OperationsFactory.open()) {
-      switch (new AuthorizedKeysSync().sync(operations::sshKeys)) {
+      switch (new AuthorizedKeysSync().sync(operations.identity()::sshKeys)) {
         case AuthorizedKeysSync.Synced synced ->
             System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
         case AuthorizedKeysSync.NeedsRoot _ ->

@@ -9,8 +9,8 @@ import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
-import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SailOperations;
@@ -168,9 +168,9 @@ public final class DispatchCommand implements Runnable {
   }
 
   private DispatchOperations.Outcome dispatch(
-      Operations operations, DispatchOperations.Request request, String handle) {
+      HostOperations operations, DispatchOperations.Request request, String handle) {
     try {
-      return operations.dispatch(name, request, Actor.cliOperator(handle), handle);
+      return operations.dispatching().dispatch(name, request, Actor.cliOperator(handle), handle);
     } catch (ApiException e) {
       throw new IllegalStateException(errorText(e), e);
     }

@@ -306,13 +306,15 @@ public final class AgentAttachCommand implements Runnable {
         () -> {
           try (var operations = OperationsFactory.open()) {
             var node = NodeIdentity.handle();
-            var run = operations.latestRun(name, node).orElse(null);
+            var run = operations.dispatching().latestRun(name, node).orElse(null);
             return run == null
                 ? Latest.NONE
                 : new Latest(
                     run,
-                    operations.roomKnown(run.conversationId()) ? run.conversationId() : "",
-                    operations.runningRuns(name, node));
+                    operations.catalog().roomKnown(run.conversationId())
+                        ? run.conversationId()
+                        : "",
+                    operations.dispatching().runningRuns(name, node));
           }
         });
   }
