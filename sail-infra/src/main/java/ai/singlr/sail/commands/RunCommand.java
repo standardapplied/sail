@@ -9,7 +9,11 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
@@ -30,11 +34,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -175,7 +175,7 @@ public final class RunCommand implements Runnable {
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         var nextSpec = SpecCatalog.nextReady(operations.projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
@@ -317,8 +317,7 @@ public final class RunCommand implements Runnable {
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null
-            && rollbackSafe(
-                e, !operations.runningRuns(name, handle).isEmpty())) {
+            && rollbackSafe(e, operations.activeRun(name, handle).isPresent())) {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
@@ -340,7 +339,7 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private ai.singlr.sail.api.SailOperations operations(
+  private SailOperations operations(
       ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
@@ -379,10 +378,16 @@ public final class RunCommand implements Runnable {
             }
           }
         };
-    return ai.singlr.sail.api.OperationsFactory.open(shell, file,
-        new ai.singlr.sail.api.OperationHooks(this::publishLifecycle,
-            new WatcherSpawner(shell, WatcherSpawner::spawnProcess), (project, config) -> "",
-            DispatchOperations.terminalLauncher(), listener, ai.singlr.sail.api.StopOperations.Listener.NONE),
+    return OperationsFactory.open(
+        shell,
+        file,
+        new OperationHooks(
+            this::publishLifecycle,
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+            (project, config) -> "",
+            DispatchOperations.terminalLauncher(),
+            listener,
+            StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

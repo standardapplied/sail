@@ -5,11 +5,11 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
@@ -107,8 +107,8 @@ public final class HostSshIdentityCommand implements Runnable {
    * instead of letting the operator believe SSH login works.
    */
   private static void syncKeys() throws Exception {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
-      switch (new AuthorizedKeysSync().sync(operations.sshKeys())) {
+    try (var operations = OperationsFactory.open()) {
+      switch (new AuthorizedKeysSync().sync(operations::sshKeys)) {
         case AuthorizedKeysSync.Synced synced ->
             System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
         case AuthorizedKeysSync.NeedsRoot _ ->

@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -16,8 +17,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -385,7 +384,10 @@ public final class UpgradeCommand implements Runnable {
   private void bootstrapAdminToken(Path dbPath) {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+      try (var operations = OperationsFactory.open(dbPath)) {
+        if (operations.schemaVersion() == 0) {
+          operations.initialize();
+        }
         if (operations.tokens().isEmpty()) {
           var created = operations.createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
           var configPath = SailPaths.clientConfigPath();

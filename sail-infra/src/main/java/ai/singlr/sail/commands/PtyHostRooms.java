@@ -5,19 +5,13 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.AccessDecision;
-import ai.singlr.sail.api.Actor;
-import ai.singlr.sail.api.Role;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SpecPolicy;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.RoomStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Objects;
 
 /**
  * The production {@link PtyRooms}: the room is read from the control plane, must sit in the
@@ -40,7 +34,7 @@ final class PtyHostRooms implements PtyRooms {
 
   @Override
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       operations.admitPtyRoom(roomId, project, who);
     }
   }

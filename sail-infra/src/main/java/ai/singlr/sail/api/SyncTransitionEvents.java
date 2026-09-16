@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.sync.SyncTransition;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -38,13 +39,13 @@ public final class SyncTransitionEvents {
       Function<String, String> projectOfSpec,
       Function<String, String> latestReviewStatusOfSpec,
       String host) {
-    return switch (transition.entityType()) {
-      case "spec" -> specEvents(transition, latestReviewStatusOfSpec, host);
-      case "run" -> runEvents(transition, host);
-      case "review" -> reviewEvents(transition, projectOfSpec, host);
-      case "review_stage" -> stageEvents(transition, projectOfSpec, host);
-      case "message" -> messageEvents(transition, projectOfSpec, host);
-      default -> List.of();
+    return switch (SyncedEntities.transitionKind(transition.entityType())) {
+      case SPEC_STATUS -> specEvents(transition, latestReviewStatusOfSpec, host);
+      case RUN_STATUS -> runEvents(transition, host);
+      case REVIEW_STATUS -> reviewEvents(transition, projectOfSpec, host);
+      case REVIEW_STAGE_STATUS -> stageEvents(transition, projectOfSpec, host);
+      case MESSAGE_POSTED -> messageEvents(transition, projectOfSpec, host);
+      case NONE -> List.of();
     };
   }
 

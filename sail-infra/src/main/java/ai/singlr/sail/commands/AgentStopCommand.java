@@ -8,7 +8,11 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,8 +21,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -77,8 +80,12 @@ public final class AgentStopCommand implements Runnable {
     sync.freshenRead();
     var shell = new ShellExecutor(false);
     var handle = Objects.toString(HostSync.handle(), "");
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(shell, SailPaths.PROJECT_DESCRIPTOR,
-        hooks(shell, this::publishLifecycle, listener()), ai.singlr.sail.api.SessionYield.NONE)) {
+    try (var operations =
+        OperationsFactory.open(
+            shell,
+            SailPaths.PROJECT_DESCRIPTOR,
+            hooks(shell, this::publishLifecycle, listener()),
+            SessionYield.NONE)) {
       var outcome =
           operations.stop(
               new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
@@ -93,21 +100,24 @@ public final class AgentStopCommand implements Runnable {
    * The CLI lane's wiring of the shared stop executor: both stores come from the one control-plane
    * database, so an in-process stop records exactly what a server-lane stop would.
    */
-  static ai.singlr.sail.api.SailOperations operations(
+  static SailOperations operations(
       Sqlite db,
       ShellExec shell,
       DispatchOperations.EventSink events,
       StopOperations.Listener listener) {
-    return ai.singlr.sail.api.OperationsFactory.create(db, shell, SailPaths.PROJECT_DESCRIPTOR,
-        hooks(shell, events, listener), ai.singlr.sail.api.SessionYield.NONE);
+    return OperationsFactory.create(
+        db, shell, SailPaths.PROJECT_DESCRIPTOR, hooks(shell, events, listener), SessionYield.NONE);
   }
 
-  private static ai.singlr.sail.api.OperationHooks hooks(ShellExec shell,
-      DispatchOperations.EventSink events, StopOperations.Listener listener) {
-    return new ai.singlr.sail.api.OperationHooks(events,
-        new ai.singlr.sail.engine.WatcherSpawner(shell, ai.singlr.sail.engine.WatcherSpawner::spawnProcess),
-        DispatchOperations.autoSnapshotter(shell), DispatchOperations.shellLauncher(shell),
-        DispatchOperations.Listener.NONE, listener);
+  private static OperationHooks hooks(
+      ShellExec shell, DispatchOperations.EventSink events, StopOperations.Listener listener) {
+    return new OperationHooks(
+        events,
+        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+        DispatchOperations.autoSnapshotter(shell),
+        DispatchOperations.shellLauncher(shell),
+        DispatchOperations.Listener.NONE,
+        listener);
   }
 
   private StopOperations.Listener listener() {

@@ -5,10 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.TokenStore;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -33,7 +31,7 @@ public final class ServerStatusCommand implements Runnable {
       return;
     }
 
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       var tokens = operations.tokens();
 
       System.out.println(Ansi.AUTO.string("  @|bold Sail Server|@"));

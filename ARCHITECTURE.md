@@ -586,6 +586,29 @@ support GUI and direct-API clients:
    change.
 6. **One platform per OS.** Mac arm64 and Linux amd64 only.
 
+## The operations seam
+
+Host commands open the control-plane database through `OperationsFactory` and call
+`Operations`; the HTTP and local-socket routers use that same contract. Sync rounds, conflict
+resolution, shared files, and catalog rename/purge live there alongside dispatch and stop.
+Incus provisioning and the container half of rename/destroy remain host operations (gap 1).
+Opening the factory does not migrate a database: bootstrap and sync explicitly prepare it,
+which preserves the failure behavior of ordinary reads and event writes.
+
+`SyncedEntities` is the ordered registry for spec, room, file, project, run, review, and
+message stores. It owns replica construction, push policies, resolver lookup, and transition
+detection. The node and main server use the same registry and reports reduce in that order.
+Sync status currently reports the configured role/main and the last round in that operations
+instance; durable sync health belongs to the next redesign brick.
+
+Review every control-plane change with `CommandsUseTheSeamTest` and these searches:
+
+- `Sqlite.open` and `new *Store(` in `commands/`: only `MigrateCommand`, `JoinCommand`,
+  `ServerStartCommand`, `SyncServerCommand`, and `FdeCommand` may construct stores.
+- Entity-type switches outside `SyncedEntities`, duplicate replica maps, and nested
+  `combine(combine(` calls.
+- Additional `DispatchOperations` or `StopOperations` construction outside `SailOperations`.
+
 ## Design invariants to preserve
 
 - One binary, zero runtime dependencies, fully declarative. `sail.yaml` is the source of

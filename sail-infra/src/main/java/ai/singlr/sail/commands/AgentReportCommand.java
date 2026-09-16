@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
@@ -12,15 +14,14 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.ControlPlaneDb;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -50,13 +51,13 @@ public final class AgentReportCommand implements Runnable {
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
-  private final java.util.function.Supplier<ai.singlr.sail.api.SailOperations> operations;
+  private final Supplier<SailOperations> operations;
 
   public AgentReportCommand() {
-    this(ai.singlr.sail.api.OperationsFactory::open);
+    this(OperationsFactory::open);
   }
 
-  AgentReportCommand(java.util.function.Supplier<ai.singlr.sail.api.SailOperations> operations) {
+  AgentReportCommand(Supplier<SailOperations> operations) {
     this.operations = operations;
   }
 

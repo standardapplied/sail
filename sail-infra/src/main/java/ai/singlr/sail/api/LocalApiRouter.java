@@ -121,6 +121,16 @@ final class LocalApiRouter implements LocalApiHandler {
               + " this box's ambient box.credential as a bearer token.");
     }
     var path = request.path();
+    if ("/v1/sync".equals(path)) {
+      return "GET".equals(request.method())
+          ? ApiResponse.ok(SyncViews.status(operations.syncStatus()))
+          : problem(405, "Only GET is available.");
+    }
+    if ("/v1/conflicts".equals(path)) {
+      return "GET".equals(request.method())
+          ? ApiResponse.ok(SyncViews.conflicts(operations.conflicts()))
+          : problem(405, "Only GET is available.");
+    }
     if (WHOAMI.equals(path)) {
       return whoami(request, caller);
     }

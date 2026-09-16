@@ -5,11 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,17 +53,25 @@ public final class ProjectRenamer {
     }
   }
 
-  private final ai.singlr.sail.api.Operations operations;
+  private final Operations operations;
   private final ShellExec shell;
   private final Path projectsDir;
 
   public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
-    this(ai.singlr.sail.api.OperationsFactory.create(db, shell, SailPaths.PROJECT_DESCRIPTOR,
-        null, null, ai.singlr.sail.api.SyncScheduler.disabled(), ai.singlr.sail.api.SessionYield.NONE),
-        shell, projectsDir);
+    this(
+        OperationsFactory.create(
+            db,
+            shell,
+            SailPaths.PROJECT_DESCRIPTOR,
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE),
+        shell,
+        projectsDir);
   }
 
-  public ProjectRenamer(ai.singlr.sail.api.Operations operations, ShellExec shell, Path projectsDir) {
+  public ProjectRenamer(Operations operations, ShellExec shell, Path projectsDir) {
     this.operations = Objects.requireNonNull(operations, "operations");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");

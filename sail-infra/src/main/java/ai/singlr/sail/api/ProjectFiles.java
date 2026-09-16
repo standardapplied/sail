@@ -15,8 +15,12 @@ public interface ProjectFiles {
   int MAX_BYTES = 5 * 1024 * 1024;
 
   List<FileStore.FileRow> list();
+
   Optional<byte[]> get(String path);
+
   String put(String path, byte[] bytes);
+
   boolean remove(String path) throws IOException;
+
   FileMaterializer.Report materialize() throws IOException;
 }

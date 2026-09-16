@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
@@ -13,7 +14,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtySession;
 import ai.singlr.sail.store.EventStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -75,17 +75,17 @@ final class PtyHostEvents implements PtyEvents {
 
   private void insert(
       String type, PtySession.Origin origin, String agent, Map<String, Object> data) {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       operations.recordHostEvent(
-              new EventStore.EventRow(
-                  0,
-                  DateTimeUtils.now().toString(),
-                  type,
-                  origin.project(),
-                  origin.roomBound() ? origin.room() : null,
-                  agent,
-                  HostInfo.hostname(),
-                  YamlUtil.dumpJson(data)));
+          new EventStore.EventRow(
+              0,
+              DateTimeUtils.now().toString(),
+              type,
+              origin.project(),
+              origin.roomBound() ? origin.room() : null,
+              agent,
+              HostInfo.hostname(),
+              YamlUtil.dumpJson(data)));
     } catch (RuntimeException failed) {
       System.err.println(
           "pty-events: dropped "

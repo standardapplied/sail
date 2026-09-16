@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -12,9 +13,6 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -136,7 +134,7 @@ public final class ProjectDestroyCommand implements Runnable {
           "[dry-run] remove '" + name + "' from the catalog (propagates to other boxes on sync)");
       return false;
     }
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
       return operations.projectDestroy(name, true).purged();
     }
   }

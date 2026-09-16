@@ -69,11 +69,19 @@ public final class Sqlite implements AutoCloseable {
   }
 
   public static Sqlite open(Path path) {
+    return open(path, path.toAbsolutePath().toString());
+  }
+
+  public static Sqlite openMemory() {
+    return open(Path.of(":memory:"), ":memory:");
+  }
+
+  private static Sqlite open(Path path, String location) {
     var arena = Arena.ofShared();
     try {
       var lib = SqliteLib.load(arena);
       var dbPtr = arena.allocate(ValueLayout.ADDRESS);
-      var pathStr = arena.allocateFrom(path.toAbsolutePath().toString());
+      var pathStr = arena.allocateFrom(location);
       var flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
       var rc = (int) lib.open.invokeExact(pathStr, dbPtr, flags, MemorySegment.NULL);
       if (rc != SQLITE_OK) {

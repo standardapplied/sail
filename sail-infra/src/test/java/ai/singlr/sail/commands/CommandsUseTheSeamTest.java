@@ -21,13 +21,15 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class CommandsUseTheSeamTest {
-  private static final Set<String> ALLOWED = Set.of(
-      "MigrateCommand", "JoinCommand", "ServerStartCommand", "SyncServerCommand", "FdeCommand");
+  private static final Set<String> ALLOWED =
+      Set.of(
+          "MigrateCommand", "JoinCommand", "ServerStartCommand", "SyncServerCommand", "FdeCommand");
 
   @Test
   void commandsUseOperationsInsteadOfOpeningStores() throws Exception {
-    var root = Path.of(SyncCommand.class.getProtectionDomain().getCodeSource().getLocation().toURI())
-        .resolve("ai/singlr/sail/commands");
+    var root =
+        Path.of(SyncCommand.class.getProtectionDomain().getCodeSource().getLocation().toURI())
+            .resolve("ai/singlr/sail/commands");
     var violations = new ArrayList<String>();
     try (var classes = Files.walk(root)) {
       for (var path : classes.filter(p -> p.toString().endsWith(".class")).toList()) {
@@ -42,7 +44,8 @@ class CommandsUseTheSeamTest {
 
   @Test
   void guardRejectsATestCommandThatOpensSqliteOrConstructsAStore() throws IOException {
-    try (var bytes = BypassCommand.class.getResourceAsStream("CommandsUseTheSeamTest$BypassCommand.class")) {
+    try (var bytes =
+        BypassCommand.class.getResourceAsStream("CommandsUseTheSeamTest$BypassCommand.class")) {
       var violations = violations(bytes.readAllBytes());
       assertEquals(2, violations.size());
       assertTrue(violations.stream().anyMatch(v -> v.endsWith("Sqlite.open")));

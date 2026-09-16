@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.SyncEngine;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +52,33 @@ class LocalApiRouterTest {
   private static LocalApiRequest form(String method, String path, String body) {
     return new LocalApiRequest(
         method, path, Map.of(), auth(), body.getBytes(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void agentsCanReadSyncAndConflictsButCannotMutateThem() {
+    var operations =
+        new TestOperations() {
+          @Override
+          public SyncStatus syncStatus() {
+            return new SyncStatus("node", "main", new SyncEngine.Report(1, 2, 3, 4));
+          }
+
+          @Override
+          public List<SyncConflicts.Conflict> conflicts() {
+            return List.of();
+          }
+        };
+    var local = new LocalApiRouter(bus, operations);
+    assertEquals("main", local.handle(get("/v1/sync", Map.of())).body().get("main"));
+    assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
+    assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
+    assertEquals(405, local.handle(form("POST", "/v1/conflicts", "")).status());
+    assertEquals(404, local.handle(form("POST", "/v1/conflicts/spec/resolve", "")).status());
+    assertEquals(
+        401, local.handle(new LocalApiRequest("GET", "/v1/sync", Map.of(), new byte[0])).status());
+    assertEquals(
+        401,
+        local.handle(new LocalApiRequest("GET", "/v1/conflicts", Map.of(), new byte[0])).status());
   }
 
   @Test

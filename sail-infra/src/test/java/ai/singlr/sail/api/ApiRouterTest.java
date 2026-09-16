@@ -12,15 +12,200 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.SyncEngine;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ApiRouterTest {
+
+  @Test
+  void syncAndConflictsAreAvailableThroughTheOperationsRoutes() throws Exception {
+    var operations = new SeamOperations();
+    try (var server = serverWith(operations, true)) {
+      var status = get(server, "/v1/sync", "token");
+      assertEquals(200, status.statusCode());
+      assertTrue(status.body().contains("main@host"));
+      assertEquals(422, post(server, "/v1/sync", "token", "{\"main\":3}").statusCode());
+      var round = post(server, "/v1/sync", "token", "{\"main\":\"alternate\"}");
+      assertEquals(200, round.statusCode());
+      assertEquals("alternate", operations.request.main());
+      assertTrue(round.body().contains("\"pushed\": 2"));
+      var conflicts = get(server, "/v1/conflicts", "token");
+      assertEquals(200, conflicts.statusCode());
+      assertTrue(conflicts.body().contains("acme/config"));
+      assertEquals(200, get(server, "/v1/conflicts/acme/config", "token").statusCode());
+      assertEquals(404, get(server, "/v1/conflicts/missing", "token").statusCode());
+      assertEquals(
+          200,
+          post(server, "/v1/conflicts/acme/config/resolve", "token", "{\"strategy\":\"theirs\"}")
+              .statusCode());
+      assertEquals(Resolution.Strategy.THEIRS, operations.resolution.strategy());
+      assertEquals(
+          422,
+          post(server, "/v1/conflicts/acme/config/resolve", "token", "{\"strategy\":\"invalid\"}")
+              .statusCode());
+      assertEquals(
+          422, post(server, "/v1/conflicts/acme/config/resolve", "token", "{}").statusCode());
+      assertEquals(413, post(server, "/v1/sync", "token", "x".repeat(66 * 1024 + 1)).statusCode());
+      assertEquals(
+          413,
+          post(server, "/v1/conflicts/acme/config/resolve", "token", "x".repeat(66 * 1024 + 1))
+              .statusCode());
+      assertEquals(405, delete(server, "/v1/sync", "token").statusCode());
+      assertEquals(405, post(server, "/v1/conflicts", "token", "{}").statusCode());
+      assertEquals(405, put(server, "/v1/conflicts/acme/config", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
+  void fileRoutesCarryRawBytesAndEnforceTheFiveMiBCap() throws Exception {
+    var operations = new SeamOperations();
+    try (var server = serverWith(operations, true)) {
+      assertEquals(200, get(server, "/v1/projects/acme/files", "token").statusCode());
+      assertEquals(404, get(server, "/v1/projects/acme/files/config", "token").statusCode());
+      var content = "raw\u0000file\n";
+      assertEquals(
+          200, put(server, "/v1/projects/acme/files/dir/config", "token", content).statusCode());
+      var file = get(server, "/v1/projects/acme/files/dir/config", "token");
+      assertEquals(200, file.statusCode());
+      assertEquals(content, file.body());
+      assertEquals(
+          "application/octet-stream", file.headers().firstValue("content-type").orElseThrow());
+      assertEquals(200, put(server, "/v1/projects/acme/files/empty", "token", "").statusCode());
+      assertEquals("", get(server, "/v1/projects/acme/files/empty", "token").body());
+      assertEquals(
+          200,
+          put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(ProjectFiles.MAX_BYTES))
+              .statusCode());
+      assertEquals(
+          413,
+          put(
+                  server,
+                  "/v1/projects/acme/files/large",
+                  "token",
+                  "x".repeat(ProjectFiles.MAX_BYTES + 1))
+              .statusCode());
+      assertTrue(get(server, "/v1/projects/acme/files", "token").body().contains("dir/config"));
+      assertEquals(
+          200,
+          put(server, "/v1/projects/acme/files/dir/%20/config", "token", content).statusCode());
+      assertTrue(operations.files.containsKey("dir/ /config"));
+      assertEquals(content, get(server, "/v1/projects/acme/files/dir/%20/config", "token").body());
+      assertEquals(422, get(server, "/v1//projects/acme/files/config", "token").statusCode());
+      assertFalse(operations.files.containsKey("large"));
+      assertEquals(200, delete(server, "/v1/projects/acme/files/dir/config", "token").statusCode());
+      assertEquals(404, delete(server, "/v1/projects/acme/files/dir/config", "token").statusCode());
+      assertEquals(405, put(server, "/v1/projects/acme/files", "token", content).statusCode());
+      assertEquals(405, post(server, "/v1/projects/acme/files/config", "token", "{}").statusCode());
+      assertEquals(
+          422, put(server, "/v1/projects/acme/files/../outside", "token", content).statusCode());
+    }
+  }
+
+  @Test
+  void viewerCanReadSyncButCannotResolveOrWriteFiles() throws Exception {
+    var operations = new SeamOperations();
+    ApiAuth viewer = exchange -> exchange.setAttribute("token.role", "viewer");
+    try (var server = serverWith(operations, true, viewer)) {
+      assertEquals(200, get(server, "/v1/sync", "token").statusCode());
+      assertEquals(200, get(server, "/v1/conflicts", "token").statusCode());
+      assertEquals(
+          403,
+          post(server, "/v1/conflicts/acme/config/resolve", "token", "{\"strategy\":\"mine\"}")
+              .statusCode());
+      assertNull(operations.resolution);
+      assertEquals(403, post(server, "/v1/sync", "token", "{}").statusCode());
+      assertEquals(
+          403, put(server, "/v1/projects/acme/files/config", "token", "data").statusCode());
+      assertTrue(operations.files.isEmpty());
+    }
+  }
+
+  private static final class SeamOperations extends TestOperations {
+    private SyncRequest request;
+    private Resolution resolution;
+    private final Map<String, byte[]> files = new LinkedHashMap<>();
+    private final SyncConflicts.Conflict conflict =
+        new SyncConflicts.Conflict(
+            1, "file", "acme/config", null, "{}", "{}", List.of("content"), "now", "pending", null);
+
+    @Override
+    public SyncStatus syncStatus() {
+      return new SyncStatus("node", "main@host", null);
+    }
+
+    @Override
+    public SyncReport sync(SyncRequest request) {
+      this.request = request;
+      return new SyncReport(new SyncEngine.Report(1, 2, 3, 4), null);
+    }
+
+    @Override
+    public List<SyncConflicts.Conflict> conflicts() {
+      return List.of(conflict);
+    }
+
+    @Override
+    public SyncConflicts.Conflict conflict(String id) {
+      return id.equals(conflict.entityId()) ? conflict : null;
+    }
+
+    @Override
+    public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+      this.resolution = resolution;
+      return conflict;
+    }
+
+    @Override
+    public ProjectFiles projectFiles(String project) {
+      return new ProjectFiles() {
+        public List<FileStore.FileRow> list() {
+          return files.entrySet().stream()
+              .map(
+                  entry ->
+                      new FileStore.FileRow(
+                          project,
+                          entry.getKey(),
+                          Base64.getEncoder().encodeToString(entry.getValue())))
+              .toList();
+        }
+
+        public Optional<byte[]> get(String path) {
+          return Optional.ofNullable(files.get(path));
+        }
+
+        public String put(String path, byte[] bytes) {
+          files.put(path, bytes);
+          return path;
+        }
+
+        public boolean remove(String path) {
+          return files.remove(path) != null;
+        }
+
+        public FileMaterializer.Report materialize() {
+          return new FileMaterializer.Report(0, 0, List.of());
+        }
+      };
+    }
+  }
 
   @Test
   void healthDoesNotRequireAuth() throws Exception {
@@ -775,27 +960,25 @@ class ApiRouterTest {
   @Test
   void eventModelsCoverConstruction() {
     var pub = new EventPublishResponse(7L, Map.of("k", "v"));
-    var recent = new RecentEventsResponse(10, 2, java.util.List.of(Map.of("a", 1)));
+    var recent = new RecentEventsResponse(10, 2, List.of(Map.of("a", 1)));
     var stat = new SubscriberStatsView("audit", 1024, 0, 0L);
-    var stats = new EventBusStatsResponse(5L, 1L, java.util.List.of(stat));
+    var stats = new EventBusStatsResponse(5L, 1L, List.of(stat));
     assertEquals(7L, pub.id());
     assertEquals(2, recent.returned());
     assertEquals(1L, stats.rejectedSubscribers());
     assertEquals("audit", stats.subscribers().getFirst().name());
-    var scoped = new SpecEventsResponse("auth", 3L, 100, 1, java.util.List.of(Map.of("id", 4)));
+    var scoped = new SpecEventsResponse("auth", 3L, 100, 1, List.of(Map.of("id", 4)));
     assertEquals("auth", scoped.spec());
     assertEquals(3L, scoped.toMap().get("since"));
     assertEquals(1, scoped.toMap().get("returned"));
     assertFalse(
-        new SpecEventsResponse("auth", null, 100, 0, java.util.List.of())
-            .toMap()
-            .containsKey("since"));
+        new SpecEventsResponse("auth", null, 100, 0, List.of()).toMap().containsKey("since"));
   }
 
   @Test
   void reviewModelsCoverConstruction() {
     var stageRow =
-        new ai.singlr.sail.store.ReviewStore.StageRow(
+        new ReviewStore.StageRow(
             "s1", "r1", "security", "agent", "passed", "codex", "t1", "t2", null);
     var stageView = StageView.from(stageRow, 3);
     assertEquals("security", stageView.name());
@@ -804,17 +987,16 @@ class ApiRouterTest {
     assertEquals("codex", map.get("reviewer"));
 
     var reviewRow =
-        new ai.singlr.sail.store.ReviewStore.ReviewRow(
-            "r1", "auth", 1, "passed", "t0", "t1", null, null, null);
-    var reviewView = ReviewView.from(reviewRow, java.util.List.of(stageView));
+        new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null);
+    var reviewView = ReviewView.from(reviewRow, List.of(stageView));
     assertEquals(1, reviewView.iteration());
     var rmap = reviewView.toMap();
     assertEquals("r1", rmap.get("id"));
 
-    var list = new ReviewListResponse("auth", java.util.List.of(reviewView));
+    var list = new ReviewListResponse("auth", List.of(reviewView));
     assertEquals("auth", list.toMap().get("spec_id"));
 
-    var detail = new ReviewDetailResponse(reviewView, java.util.List.of());
+    var detail = new ReviewDetailResponse(reviewView, List.of());
     assertNotNull(detail.toMap().get("review"));
 
     var approve = new ReviewApproveResponse("r1", true);
@@ -1224,7 +1406,7 @@ class ApiRouterTest {
   @Test
   void runViewModelCoversConstruction() {
     var row =
-        new ai.singlr.sail.store.RunStore.RunRow(
+        new RunStore.RunRow(
             "s1",
             "proj",
             "auth",
@@ -1241,7 +1423,7 @@ class ApiRouterTest {
             null,
             "t0",
             "t1",
-            java.util.List.of(),
+            List.of(),
             null,
             "claude/abc123",
             "uday");
@@ -1256,7 +1438,7 @@ class ApiRouterTest {
     assertTrue(map.containsKey("completed_at"));
     assertTrue(map.containsKey("log_path"));
 
-    var list = new RunListResponse("proj", "auth", java.util.List.of(view));
+    var list = new RunListResponse("proj", "auth", List.of(view));
     assertEquals("proj", list.toMap().get("project"));
     assertEquals("auth", list.toMap().get("spec"));
     assertEquals(view.toMap(), new RunDetailResponse(view).toMap());
@@ -1265,8 +1447,7 @@ class ApiRouterTest {
     assertEquals("s1", summary.get("id"));
     assertEquals("node-a", summary.get("node"));
     assertEquals(7, summary.get("exit_code"));
-    assertFalse(
-        new RunListResponse(null, null, java.util.List.of()).toMap().containsKey("project"));
+    assertFalse(new RunListResponse(null, null, List.of()).toMap().containsKey("project"));
   }
 
   @Test
@@ -1366,10 +1547,9 @@ class ApiRouterTest {
     private volatile boolean sawNoSync;
 
     @Override
-    public Result<GlobalSpecsListResponse> globalSpecs(
-        ai.singlr.sail.store.SpecStore.SpecFilter filter) {
+    public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
       sawNoSync = SyncControl.noSync();
-      return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+      return Result.success(new GlobalSpecsListResponse(List.of(), 0));
     }
   }
 
@@ -1470,67 +1650,7 @@ class ApiRouterTest {
     return URI.create("http://127.0.0.1:" + server.port() + path);
   }
 
-  private static class FakeOperations implements Operations {
-  public void undoProjectRename(ProjectRenamed renamed) { throw new UnsupportedOperationException(); }
-  public int schemaBeforeOpen() { throw new UnsupportedOperationException(); }
-  public java.util.List<ai.singlr.sail.store.TokenStore.TokenInfo> tokens() { throw new UnsupportedOperationException(); }
-
-  public ai.singlr.sail.store.TokenStore.CreatedToken createToken(String name, String role, String fdeId, java.time.Duration ttl) { throw new UnsupportedOperationException(); }
-
-  public boolean revokeToken(String name) { throw new UnsupportedOperationException(); }
-
-  public java.util.Optional<ai.singlr.sail.store.FdeStore.Fde> fde(String handle) { throw new UnsupportedOperationException(); }
-
-  public int schemaVersion() { throw new UnsupportedOperationException(); }
-
-  public ai.singlr.sail.ssh.SshGateway.Decision authorizeGateway(String command, String handle) { throw new UnsupportedOperationException(); }
-
-  public ai.singlr.sail.pty.PtyIdentity ptyIdentity(String token, String boxHandle) throws java.io.IOException { throw new UnsupportedOperationException(); }
-
-  public void admitPtyRoom(String room, String project, ai.singlr.sail.pty.PtyIdentity identity) throws java.io.IOException { throw new UnsupportedOperationException(); }
-
-  public void recordHostEvent(ai.singlr.sail.store.EventStore.EventRow event) { throw new UnsupportedOperationException(); }
-
-  public java.util.List<ai.singlr.sail.store.FdeSshKeyStore.SshKeyInfo> sshKeys() { throw new UnsupportedOperationException(); }
-
-  public java.util.List<ai.singlr.sail.config.Spec> projectSpecs(String project) { throw new UnsupportedOperationException(); }
-
-  public java.util.Optional<ai.singlr.sail.store.SpecStore.SpecContent> specContent(String id) { throw new UnsupportedOperationException(); }
-
-  public java.util.Optional<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProject(String project) { throw new UnsupportedOperationException(); }
-
-  public java.util.List<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProjects() { throw new UnsupportedOperationException(); }
-
-  public java.util.Optional<ai.singlr.sail.store.RunStore.RunRow> latestRun(String project, String node) { throw new UnsupportedOperationException(); }
-
-  public java.util.List<ai.singlr.sail.store.DispatchGate.RunningRun> runningRuns(String project, String node) { throw new UnsupportedOperationException(); }
-
-  public ai.singlr.sail.engine.AgentSession.SessionInfo projectSession(String project, String node) throws Exception { throw new UnsupportedOperationException(); }
-
-  public boolean roomKnown(String room) { throw new UnsupportedOperationException(); }
-
-  public String reviewLog(String project, String node) { throw new UnsupportedOperationException(); }
-
-  public String demoDefinition() { throw new UnsupportedOperationException(); }
-
-  public DispatchOperations.Outcome dispatch(String project, DispatchOperations.Request request, Actor actor, String localHandle) { throw new UnsupportedOperationException(); }
-
-  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle) { throw new UnsupportedOperationException(); }
-
-  public DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle, DispatchOperations.AdhocPreparer preparer) { throw new UnsupportedOperationException(); }
-
-  public StopOperations.Outcome stop(StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) { throw new UnsupportedOperationException(); }
-
-  @Override public SyncReport sync(SyncRequest request) throws Exception { throw new UnsupportedOperationException(); }
-  @Override public SyncStatus syncStatus() { throw new UnsupportedOperationException(); }
-  @Override public java.util.List<ai.singlr.sail.store.SyncConflicts.Conflict> conflicts() { throw new UnsupportedOperationException(); }
-  @Override public ai.singlr.sail.store.SyncConflicts.Conflict conflict(String id) { throw new UnsupportedOperationException(); }
-  @Override public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) { throw new UnsupportedOperationException(); }
-  @Override public ProjectFiles projectFiles(String project) { throw new UnsupportedOperationException(); }
-  @Override public java.util.List<String> projectsWithFiles() { throw new UnsupportedOperationException(); }
-  @Override public ProjectDestroyed projectDestroy(String name, boolean purge) { throw new UnsupportedOperationException(); }
-  @Override public ProjectRenamed projectRename(String from, String to) { throw new UnsupportedOperationException(); }
-
+  private static class FakeOperations extends TestOperations {
     @Override
     public Result<HealthResponse> health() {
       return Result.success(new HealthResponse("ok"));
@@ -1540,7 +1660,7 @@ class ApiRouterTest {
     public Result<ProjectListResponse> projects() {
       return Result.success(
           new ProjectListResponse(
-              java.util.List.of(
+              List.of(
                   new ProjectListItemView("acme", "running"),
                   new ProjectListItemView("beta", "not_created"))));
     }
@@ -1549,7 +1669,7 @@ class ApiRouterTest {
     public Result<FdesResponse> fdes() {
       return Result.success(
           new FdesResponse(
-              java.util.List.of(
+              List.of(
                   new FdeSummaryView("ada", "Ada Lovelace", "ada@x.dev", "admin"),
                   new FdeSummaryView("bob", "Bob", "bob@x.dev", "member"))));
     }
@@ -1558,17 +1678,17 @@ class ApiRouterTest {
     public Result<AgentsResponse> agents() {
       return Result.success(
           new AgentsResponse(
-              java.util.List.of(
+              List.of(
                   new AgentView(
                       "claude-code",
                       "Claude Code",
-                      java.util.List.of(
+                      List.of(
                           new AgentModeView("read_only", true, null),
                           new AgentModeView("full", true, null))),
                   new AgentView(
                       "codex",
                       "Codex CLI",
-                      java.util.List.of(
+                      List.of(
                           new AgentModeView("read_only", false, "no harness-enforced sandbox"),
                           new AgentModeView("full", true, null))))));
     }
@@ -1584,9 +1704,7 @@ class ApiRouterTest {
       lastMembersRoom = roomId;
       return Result.success(
           new RoomMembersResponse(
-              java.util.List.of(
-                  ai.singlr.sail.config.Engagement.of(
-                      "claude-code", "full", "opus-x", "2026-08-23T00:00:00Z"))));
+              List.of(Engagement.of("claude-code", "full", "opus-x", "2026-08-23T00:00:00Z"))));
     }
 
     @Override
@@ -1625,8 +1743,8 @@ class ApiRouterTest {
                   request.wake(),
                   "on",
                   null,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   request.createdBy(),
                   "t0",
                   "t0",
@@ -1640,7 +1758,7 @@ class ApiRouterTest {
       lastRoomsProject = project;
       return Result.success(
           new RoomsListResponse(
-              java.util.List.of(
+              List.of(
                   new RoomView(
                       "design-room",
                       "acme",
@@ -1649,14 +1767,14 @@ class ApiRouterTest {
                       "on",
                       "on",
                       null,
-                      java.util.List.of(),
-                      java.util.List.of("attached-spec"),
+                      List.of(),
+                      List.of("attached-spec"),
                       "uday",
                       "t0",
                       "t1",
                       "uday")),
-              java.util.Map.of("design-room", "t9"),
-              java.util.Map.of()));
+              Map.of("design-room", "t9"),
+              Map.of()));
     }
 
     @Override
@@ -1672,8 +1790,8 @@ class ApiRouterTest {
                   "on",
                   "on",
                   null,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   "uday",
                   "t0",
                   "t1",
@@ -1692,7 +1810,7 @@ class ApiRouterTest {
     public Result<SpecMessagesResponse> roomMessages(
         String roomId, String before, String after, int limit) {
       lastRoomMessagesRoom = roomId;
-      return Result.success(new SpecMessagesResponse(roomId, java.util.List.of()));
+      return Result.success(new SpecMessagesResponse(roomId, List.of()));
     }
 
     @Override
@@ -1727,7 +1845,7 @@ class ApiRouterTest {
       return Result.success(
           new SpecsResponse(
               project,
-              java.util.List.of(),
+              List.of(),
               new SpecSummaryView(0, 0, 0, 0, 0),
               new BoardSummaryView(new SpecSummaryView(0, 0, 0, 0, 0), 0, 0, null)));
     }
@@ -1738,19 +1856,8 @@ class ApiRouterTest {
           new SpecResponse(
               project,
               new SpecView(
-                  specId,
-                  "Spec",
-                  "pending",
-                  null,
-                  java.util.List.of(),
-                  java.util.List.of(),
-                  null,
-                  null,
-                  null,
-                  null,
-                  true,
-                  false,
-                  java.util.List.of()),
+                  specId, "Spec", "pending", null, List.of(), List.of(), null, null, null, null,
+                  true, false, List.of()),
               "specs/" + specId + "/spec.md",
               true,
               "content"));
@@ -1776,7 +1883,7 @@ class ApiRouterTest {
     public Result<SnapshotListResponse> snapshots(String project) {
       return Result.success(
           new SnapshotListResponse(
-              java.util.List.of(
+              List.of(
                   new SnapshotView("invite-run-7", "2026-08-17T10:00:00Z", "invite"),
                   new SnapshotView("snap-20260817-100000", "2026-08-17T11:00:00Z", "dispatch"))));
     }
@@ -1795,13 +1902,12 @@ class ApiRouterTest {
     @Override
     public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
       return Result.success(
-          new AgentStatusResponse(
-              project, false, null, null, null, null, null, java.util.List.of()));
+          new AgentStatusResponse(project, false, null, null, null, null, null, List.of()));
     }
 
     @Override
     public Result<RunListResponse> runs(String project, String spec) {
-      return Result.success(new RunListResponse(project, spec, java.util.List.of()));
+      return Result.success(new RunListResponse(project, spec, List.of()));
     }
 
     @Override
@@ -1832,7 +1938,7 @@ class ApiRouterTest {
 
     @Override
     public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
-      return Result.success(new RunLogResponse(runId, java.util.List.of("tail=" + tail), null));
+      return Result.success(new RunLogResponse(runId, List.of("tail=" + tail), null));
     }
 
     @Override
@@ -1850,7 +1956,7 @@ class ApiRouterTest {
               null,
               null,
               null,
-              java.util.List.of(),
+              List.of(),
               0,
               null,
               false,
@@ -1867,23 +1973,22 @@ class ApiRouterTest {
 
     @Override
     public Result<RecentEventsResponse> recentEvents(int limit) {
-      return Result.success(new RecentEventsResponse(limit, 0, java.util.List.of()));
+      return Result.success(new RecentEventsResponse(limit, 0, List.of()));
     }
 
     @Override
     public Result<SpecEventsResponse> specEvents(String specId, Long since, int limit) {
-      return Result.success(new SpecEventsResponse(specId, since, limit, 0, java.util.List.of()));
+      return Result.success(new SpecEventsResponse(specId, since, limit, 0, List.of()));
     }
 
     @Override
     public Result<EventBusStatsResponse> eventBusStats() {
-      return Result.success(new EventBusStatsResponse(0L, 0L, java.util.List.of()));
+      return Result.success(new EventBusStatsResponse(0L, 0L, List.of()));
     }
 
     @Override
-    public Result<GlobalSpecsListResponse> globalSpecs(
-        ai.singlr.sail.store.SpecStore.SpecFilter filter) {
-      return Result.success(new GlobalSpecsListResponse(java.util.List.of(), 0));
+    public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {
+      return Result.success(new GlobalSpecsListResponse(List.of(), 0));
     }
 
     @Override
@@ -1901,8 +2006,8 @@ class ApiRouterTest {
                   null,
                   null,
                   0,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   null,
                   null,
                   null,
@@ -1933,8 +2038,8 @@ class ApiRouterTest {
                   null,
                   null,
                   3,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   null,
                   null,
                   request.createdBy(),
@@ -1963,8 +2068,8 @@ class ApiRouterTest {
                   null,
                   null,
                   0,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   null,
                   null,
                   null,
@@ -1990,8 +2095,8 @@ class ApiRouterTest {
                   null,
                   null,
                   0,
-                  java.util.List.of(),
-                  java.util.List.of(),
+                  List.of(),
+                  List.of(),
                   null,
                   null,
                   null,
@@ -2023,7 +2128,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RunAckResponse> ackRunMessages(String runId, java.util.List<String> delivered) {
+    public Result<RunAckResponse> ackRunMessages(String runId, List<String> delivered) {
       return new TestOperations().ackRunMessages(runId, delivered);
     }
 
@@ -2050,7 +2155,7 @@ class ApiRouterTest {
       return Result.success(
           new GlobalSpecHistoryResponse(
               specId,
-              java.util.List.of(
+              List.of(
                   new SpecRevisionView(
                       "1-abc", "uday", "2026-06-13T00:00:00Z", "local", false, null))));
     }
@@ -2061,11 +2166,11 @@ class ApiRouterTest {
       return Result.success(
           new GlobalSpecRestoredResponse(
               GlobalSpecView.from(
-                  new ai.singlr.sail.store.SpecStore.SpecRow(
+                  new SpecStore.SpecRow(
                       specId,
                       "proj",
                       "t",
-                      ai.singlr.sail.config.SpecStatus.fromWire("pending"),
+                      SpecStatus.fromWire("pending"),
                       null,
                       null,
                       null,
@@ -2076,25 +2181,23 @@ class ApiRouterTest {
                       "",
                       "",
                       null,
-                      java.util.List.of(),
-                      java.util.List.of())),
+                      List.of(),
+                      List.of())),
               request.rev()));
     }
 
     @Override
     public Result<GlobalBoardResponse> globalBoard(String project) {
       return Result.success(
-          new GlobalBoardResponse(
-              new ai.singlr.sail.store.SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, 0, null), 0));
+          new GlobalBoardResponse(new SpecStore.BoardSummary(0, 0, 0, 0, 0, 0, 0, 0, null), 0));
     }
 
     @Override
     public Result<ReviewListResponse> reviewsForSpec(String specId) {
       var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 2, null);
       var review =
-          new ReviewView(
-              "r1", specId, 1, "passed", "t0", "t1", null, null, null, java.util.List.of(stage));
-      return Result.success(new ReviewListResponse(specId, java.util.List.of(review)));
+          new ReviewView("r1", specId, 1, "passed", "t0", "t1", null, null, null, List.of(stage));
+      return Result.success(new ReviewListResponse(specId, List.of(review)));
     }
 
     @Override
@@ -2102,20 +2205,10 @@ class ApiRouterTest {
       var stage = new StageView("s1", "security", "agent", "passed", "codex", "t1", "t2", 1, null);
       var review =
           new ReviewView(
-              reviewId,
-              "spec",
-              1,
-              "passed",
-              "t0",
-              "t1",
-              null,
-              null,
-              null,
-              java.util.List.of(stage));
+              reviewId, "spec", 1, "passed", "t0", "t1", null, null, null, List.of(stage));
       var finding =
-          java.util.Map.<String, Object>of(
-              "id", "f1", "severity", "HIGH", "title", "SQL injection");
-      return Result.success(new ReviewDetailResponse(review, java.util.List.of(finding)));
+          Map.<String, Object>of("id", "f1", "severity", "HIGH", "title", "SQL injection");
+      return Result.success(new ReviewDetailResponse(review, List.of(finding)));
     }
 
     @Override

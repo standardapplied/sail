@@ -13,7 +13,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
-public record SharedProjectFiles(FileStore files, Path projectsDir, String project) implements ProjectFiles {
+public record SharedProjectFiles(FileStore files, Path projectsDir, String project)
+    implements ProjectFiles {
   public SharedProjectFiles {
     NameValidator.requireValidProjectName(project);
   }

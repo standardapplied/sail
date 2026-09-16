@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -15,10 +16,10 @@ import ai.singlr.sail.engine.FileSource;
 import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -138,7 +139,7 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Unsafe share path: '" + path + "'.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         var files = operations.projectFiles(project);
         files.put(path, Files.readAllBytes(source));
         files.materialize();
@@ -234,7 +235,7 @@ public final class ProjectFilesCommand implements Runnable {
       }
       var skipped = new ArrayList<String>();
       var shared = 0;
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         var files = operations.projectFiles(project);
         for (var file : selected) {
           var path = root.relativize(file).toString();
@@ -285,8 +286,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     /** Stores {@code bytes} at {@code path} (no materialization); re-checks the guards. */
     static String store(FileStore files, String project, String path, byte[] bytes) {
-      return new ai.singlr.sail.engine.SharedProjectFiles(files, SailPaths.projectsDir(), project)
-          .put(path, bytes);
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).put(path, bytes);
     }
   }
 
@@ -308,7 +308,7 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         var rows = operations.projectFiles(project).list();
         if (json || rows.isEmpty()) {
           System.out.println(render(rows, project, json));
@@ -356,7 +356,7 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() throws Exception {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         var bytes = operations.projectFiles(project).get(path).orElse(null);
         if (bytes == null) {
           System.err.println(
@@ -370,8 +370,7 @@ public final class ProjectFilesCommand implements Runnable {
     }
 
     static Optional<byte[]> read(FileStore files, String project, String path) {
-      return new ai.singlr.sail.engine.SharedProjectFiles(files, SailPaths.projectsDir(), project)
-          .get(path);
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).get(path);
     }
   }
 
@@ -393,7 +392,7 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() throws Exception {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open()) {
         if (!operations.projectFiles(project).remove(path)) {
           System.err.println(
               Banner.errorLine("No shared file '" + path + "' on " + project + ".", Ansi.AUTO));
@@ -409,7 +408,7 @@ public final class ProjectFilesCommand implements Runnable {
     /** Tombstones the file and removes the local on-disk copy; false if it was not shared. */
     static boolean unshare(FileStore files, Path projectsDir, String project, String path)
         throws IOException {
-      return new ai.singlr.sail.engine.SharedProjectFiles(files, projectsDir, project).remove(path);
+      return new SharedProjectFiles(files, projectsDir, project).remove(path);
     }
   }
 
@@ -434,8 +433,9 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Pass --project OR --all, not both.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
-        var targets = all ? operations.projectsWithFiles() : List.of(CurrentProject.require(project));
+      try (var operations = OperationsFactory.open()) {
+        var targets =
+            all ? operations.projectsWithFiles() : List.of(CurrentProject.require(project));
         var written = 0;
         var deleted = 0;
         var skipped = new ArrayList<String>();

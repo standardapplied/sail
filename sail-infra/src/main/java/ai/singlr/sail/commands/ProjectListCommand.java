@@ -5,15 +5,14 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.Sqlite;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -84,7 +83,7 @@ public final class ProjectListCommand implements Runnable {
   }
 
   private static List<String> catalogNames() {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
       return operations.catalogProjects().stream().map(ProjectStore.ProjectRow::name).toList();
     } catch (RuntimeException e) {
       return List.of();

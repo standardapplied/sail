@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.PtyEventBridge;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RoomWakeReactor;
@@ -16,11 +17,12 @@ import ai.singlr.sail.api.RunActivityStamper;
 import ai.singlr.sail.api.RunPresenceEmitter;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiServer;
-import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.SyncRequest;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TokenAuth;
 import ai.singlr.sail.api.WatcherRearmer;
 import ai.singlr.sail.api.WebauthnAuthHandler;
@@ -67,6 +69,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import picocli.CommandLine.Command;
@@ -188,25 +191,26 @@ public final class ServerStartCommand implements Runnable {
     var projectStore = new ProjectStore(db);
     var boxCredentialStore = new BoxCredentialStore(db);
     provisionBoxCredential(boxCredentialStore);
-    var syncScheduler = NodeSync.scheduler(false);
-    shutdown.register(syncScheduler);
     var operations =
-        new SailOperations(
-                new ShellExecutor(false),
-                SailPaths.PROJECT_DESCRIPTOR,
-                bus,
-                persister,
-                specStore,
-                reviewStore,
-                runStore,
-                projectStore,
-                syncScheduler,
-                new FdeStore(db),
-                new PtyHostYield())
-            .useMessages(messageStore)
-            .useRooms(roomStore)
-            .useBoxCredentials(boxCredentialStore)
-            .useEvents(eventStore);
+        OperationsFactory.create(
+            db,
+            new ShellExecutor(false),
+            SailPaths.PROJECT_DESCRIPTOR,
+            bus,
+            persister,
+            SyncScheduler.disabled(),
+            new PtyHostYield());
+    var syncScheduler =
+        NodeSync.scheduler(
+            HostSync.config(),
+            false,
+            System.getenv(),
+            () -> {
+              var round = operations.sync(new SyncRequest(null));
+              System.out.println(SyncCommand.render(round.report(), false));
+            });
+    operations.useSyncScheduler(syncScheduler);
+    shutdown.register(syncScheduler);
     var orphaned = reviewStore.failOrphanedRunning();
     var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
     if (orphanedRuns > 0) {
@@ -435,7 +439,7 @@ public final class ServerStartCommand implements Runnable {
   /**
    * Surfaces stranded specs as triage signals: a server log line and a {@code spec_stranded} event.
    */
-  private static void surface(EventBus bus, java.util.List<SpecStore.SpecRow> stranded) {
+  private static void surface(EventBus bus, List<SpecStore.SpecRow> stranded) {
     for (var s : stranded) {
       System.err.println(
           "  [reconciler] spec '"
@@ -453,8 +457,7 @@ public final class ServerStartCommand implements Runnable {
               Event.WellKnownTypes.SPEC_STRANDED,
               Event.SAIL_AGENT,
               HostInfo.hostname(),
-              java.util.Map.of(
-                  "status", s.status().wire(), "since", String.valueOf(s.updatedAt()))));
+              Map.of("status", s.status().wire(), "since", String.valueOf(s.updatedAt()))));
     }
   }
 

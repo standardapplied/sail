@@ -33,29 +33,41 @@ public final class ConflictOperations {
   }
 
   public SyncConflicts.Conflict resolve(String entityId, Resolution resolution) {
-    return db.transaction(() -> {
-      var conflict = find(entityId);
-      if (conflict == null) {
-        throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
-      }
-      var chosen = switch (resolution.strategy()) {
-        case MINE -> parse(conflict.localSnapshot());
-        case THEIRS -> parse(conflict.remoteSnapshot());
-        case MERGE -> {
-          if (!mergeable(conflict)) {
-            throw new IllegalArgumentException(
-                "Field-level --merge isn't available for this conflict; use --mine or --theirs.");
+    return db.transaction(
+        () -> {
+          var conflict = find(entityId);
+          if (conflict == null) {
+            throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
           }
-          yield ConflictMerge.parseTemplate(resolution.merged());
-        }
-      };
-      var rev = SyncedEntities.require(conflict.entityType()).resolver(db)
-          .resolveConflict(conflict.entityId(), chosen, parse(conflict.remoteSnapshot()));
-      conflicts.resolve(conflict.id(), rev);
-      return new SyncConflicts.Conflict(conflict.id(), conflict.entityType(), conflict.entityId(),
-          conflict.baseSnapshot(), conflict.localSnapshot(), conflict.remoteSnapshot(), conflict.fields(),
-          conflict.detectedAt(), "resolved", rev);
-    });
+          var chosen =
+              switch (resolution.strategy()) {
+                case MINE -> parse(conflict.localSnapshot());
+                case THEIRS -> parse(conflict.remoteSnapshot());
+                case MERGE -> {
+                  if (!mergeable(conflict)) {
+                    throw new IllegalArgumentException(
+                        "Field-level --merge isn't available for this conflict; use --mine or --theirs.");
+                  }
+                  yield ConflictMerge.parseTemplate(resolution.merged());
+                }
+              };
+          var rev =
+              SyncedEntities.require(conflict.entityType())
+                  .resolver(db)
+                  .resolveConflict(conflict.entityId(), chosen, parse(conflict.remoteSnapshot()));
+          conflicts.resolve(conflict.id(), rev);
+          return new SyncConflicts.Conflict(
+              conflict.id(),
+              conflict.entityType(),
+              conflict.entityId(),
+              conflict.baseSnapshot(),
+              conflict.localSnapshot(),
+              conflict.remoteSnapshot(),
+              conflict.fields(),
+              conflict.detectedAt(),
+              "resolved",
+              rev);
+        });
   }
 
   public static boolean mergeable(SyncConflicts.Conflict conflict) {
@@ -66,7 +78,6 @@ public final class ConflictOperations {
   }
 
   public static Map<String, Object> parse(String snapshot) {
-    return snapshot == null || snapshot.isBlank() || snapshot.equals("null")
-        ? null : YamlUtil.parseMap(snapshot);
+    return snapshot == null || snapshot.isBlank() ? null : YamlUtil.parseMap(snapshot);
   }
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
@@ -14,7 +15,6 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
-import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
@@ -23,9 +23,6 @@ import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -183,7 +180,7 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   private String loadDemoDefinition(PrintStream out, Ansi ansi) {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
       var definition = operations.demoDefinition();
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));

@@ -7,20 +7,18 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -117,7 +115,7 @@ public final class AgentSweepCommand implements Runnable {
     }
   }
 
-  private ai.singlr.sail.api.SailOperations operations(
+  private SailOperations operations(
       ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
@@ -136,10 +134,16 @@ public final class AgentSweepCommand implements Runnable {
             System.out.println();
           }
         };
-    return ai.singlr.sail.api.OperationsFactory.open(shell, file,
-        new ai.singlr.sail.api.OperationHooks(event -> {},
-            new WatcherSpawner(shell, WatcherSpawner::spawnProcess), (project, config) -> "",
-            DispatchOperations.terminalLauncher(), listener, ai.singlr.sail.api.StopOperations.Listener.NONE),
+    return OperationsFactory.open(
+        shell,
+        file,
+        new OperationHooks(
+            event -> {},
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+            (project, config) -> "",
+            DispatchOperations.terminalLauncher(),
+            listener,
+            StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

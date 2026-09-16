@@ -5,36 +5,62 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.ssh.SshGateway;
+import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeSshKeyStore;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TokenStore;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
+
 /**
  * The full control-plane surface served over the web API by {@link ApiRouter}. Extends {@link
  * LocalLaneOperations} so the in-container local-socket surface is one shared contract, and adds
- * the web-only lanes: project lifecycle, dispatch, snapshots, agent status, run control, events,
- * and reviews.
+ * the host and web lanes: project lifecycle, dispatch, snapshots, agent status, run control,
+ * events, reviews, and sync administration.
  */
 public interface Operations extends LocalLaneOperations {
 
+  DispatchOperations.Outcome dispatch(
+      String project, DispatchOperations.Request request, Actor actor, String localHandle);
 
-  DispatchOperations.Outcome dispatch(String project, DispatchOperations.Request request, Actor actor, String localHandle);
+  DispatchOperations.AdhocSession startAdhoc(
+      String project, DispatchOperations.AdhocRequest request, String localHandle);
 
-  DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle);
+  DispatchOperations.AdhocSession startAdhoc(
+      String project,
+      DispatchOperations.AdhocRequest request,
+      String localHandle,
+      DispatchOperations.AdhocPreparer preparer);
 
-  DispatchOperations.AdhocSession startAdhoc(String project, DispatchOperations.AdhocRequest request, String localHandle, DispatchOperations.AdhocPreparer preparer);
+  StopOperations.Outcome stop(
+      StopOperations.Target target, Actor actor, String localHandle, boolean dryRun);
 
-  StopOperations.Outcome stop(StopOperations.Target target, Actor actor, String localHandle, boolean dryRun);
+  List<Spec> projectSpecs(String project);
 
-  java.util.List<ai.singlr.sail.config.Spec> projectSpecs(String project);
+  Optional<SpecStore.SpecContent> specContent(String id);
 
-  java.util.Optional<ai.singlr.sail.store.SpecStore.SpecContent> specContent(String id);
+  Optional<ProjectStore.ProjectRow> catalogProject(String project);
 
-  java.util.Optional<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProject(String project);
+  List<ProjectStore.ProjectRow> catalogProjects();
 
-  java.util.List<ai.singlr.sail.store.ProjectStore.ProjectRow> catalogProjects();
+  Optional<RunStore.RunRow> latestRun(String project, String node);
 
-  java.util.Optional<ai.singlr.sail.store.RunStore.RunRow> latestRun(String project, String node);
+  Optional<RunStore.RunRow> activeRun(String project, String node);
 
-  java.util.List<ai.singlr.sail.store.DispatchGate.RunningRun> runningRuns(String project, String node);
+  List<DispatchGate.RunningRun> runningRuns(String project, String node);
 
-  ai.singlr.sail.engine.AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
+  AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
 
   boolean roomKnown(String room);
 
@@ -42,37 +68,41 @@ public interface Operations extends LocalLaneOperations {
 
   String demoDefinition();
 
-  java.util.List<ai.singlr.sail.store.TokenStore.TokenInfo> tokens();
+  List<TokenStore.TokenInfo> tokens();
 
-  ai.singlr.sail.store.TokenStore.CreatedToken createToken(String name, String role, String fdeId, java.time.Duration ttl);
+  TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl);
 
   boolean revokeToken(String name);
 
-  java.util.Optional<ai.singlr.sail.store.FdeStore.Fde> fde(String handle);
+  Optional<FdeStore.Fde> fde(String handle);
 
   int schemaVersion();
 
-  int schemaBeforeOpen();
+  SchemaMigration initialize();
 
-  ai.singlr.sail.ssh.SshGateway.Decision authorizeGateway(String command, String handle);
+  record SchemaMigration(int before, int after) {}
 
-  ai.singlr.sail.pty.PtyIdentity ptyIdentity(String token, String boxHandle) throws java.io.IOException;
+  SshGateway.Decision authorizeGateway(String command, String handle);
 
-  void admitPtyRoom(String room, String project, ai.singlr.sail.pty.PtyIdentity identity) throws java.io.IOException;
+  PtyIdentity ptyIdentity(String token, String boxHandle) throws IOException;
 
-  void recordHostEvent(ai.singlr.sail.store.EventStore.EventRow event);
+  void admitPtyRoom(String room, String project, PtyIdentity identity) throws IOException;
 
-  java.util.List<ai.singlr.sail.store.FdeSshKeyStore.SshKeyInfo> sshKeys();
+  void recordHostEvent(EventStore.EventRow event);
+
+  List<FdeSshKeyStore.SshKeyInfo> sshKeys();
+
+  void prepareSync();
 
   SyncReport sync(SyncRequest request) throws Exception;
 
-  ai.singlr.sail.store.SyncConflicts.Conflict conflict(String id);
+  SyncConflicts.Conflict conflict(String id);
 
-  ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(String id, Resolution resolution);
+  SyncConflicts.Conflict resolveConflict(String id, Resolution resolution);
 
   ProjectFiles projectFiles(String project);
 
-  java.util.List<String> projectsWithFiles();
+  List<String> projectsWithFiles();
 
   ProjectDestroyed projectDestroy(String name, boolean purge);
 

@@ -6,43 +6,21 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
-import ai.singlr.sail.api.SailEventPublisher;
-import ai.singlr.sail.api.SyncTransitionEvents;
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.FileMaterializer;
-import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.ProjectResourceReconciler;
-import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SshSyncChannel;
-import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RoomStore;
-import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.SyncConflicts;
-import ai.singlr.sail.store.SyncPeer;
-import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
-import ai.singlr.sail.sync.SyncSession;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
@@ -93,7 +71,6 @@ public final class SyncCommand implements Callable<Integer> {
   @Option(names = "--json", description = "Output the sync report as JSON.")
   private boolean json;
 
-
   @Override
   public Integer call() throws Exception {
     if (watch && intervalSeconds <= 0) {
@@ -108,7 +85,8 @@ public final class SyncCommand implements Callable<Integer> {
       return 0;
     }
     var target = resolution.target();
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
+      operations.prepareSync();
       return watch ? watchLoop(operations, target) : runOnce(operations, target);
     } catch (RuntimeException e) {
       System.err.println(Banner.errorLine(reason(e), Ansi.AUTO));
@@ -124,13 +102,13 @@ public final class SyncCommand implements Callable<Integer> {
   record MainTarget(String target, String message) {}
 
   static MainTarget resolveMain(String flag, SyncConfig sync) {
-    var target = ai.singlr.sail.engine.SyncOperations.resolveMain(flag, sync);
+    var target = SyncOperations.resolveMain(flag, sync);
     return new MainTarget(target.target(), target.message());
   }
 
-  private int runOnce(ai.singlr.sail.api.Operations operations, String target) {
+  private int runOnce(Operations operations, String target) {
     try {
-      var round = operations.sync(new ai.singlr.sail.api.SyncRequest(target));
+      var round = operations.sync(new SyncRequest(target));
       System.out.println(render(round.report(), json));
       return 0;
     } catch (Exception e) {
@@ -149,12 +127,12 @@ public final class SyncCommand implements Callable<Integer> {
     return message;
   }
 
-  private int watchLoop(ai.singlr.sail.api.Operations operations, String target) throws InterruptedException {
+  private int watchLoop(Operations operations, String target) throws InterruptedException {
     while (true) {
       try {
-        var round = operations.sync(new ai.singlr.sail.api.SyncRequest(target));
+        var round = operations.sync(new SyncRequest(target));
         System.out.println(render(round.report(), json));
-        } catch (InterruptedException e) {
+      } catch (InterruptedException e) {
         throw e;
       } catch (Exception e) {
         System.err.println(
@@ -168,23 +146,23 @@ public final class SyncCommand implements Callable<Integer> {
 
   static List<Event> pulledMessageEvents(
       MessageStore messages, SpecStore specs, Set<String> known, String host) {
-    return ai.singlr.sail.engine.SyncOperations.pulledMessageEvents(messages, specs, known, host);
+    return SyncOperations.pulledMessageEvents(messages, specs, known, host);
   }
 
   static SyncEngine.Report combine(SyncEngine.Report a, SyncEngine.Report b) {
-    return ai.singlr.sail.engine.SyncOperations.combine(a, b);
+    return SyncOperations.combine(a, b);
   }
 
   static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
-    return ai.singlr.sail.engine.SyncOperations.applyFdes(fdes, roster);
+    return SyncOperations.applyFdes(fdes, roster);
   }
 
   static boolean shouldNotify(SyncEngine.Report report) {
-    return ai.singlr.sail.engine.SyncOperations.shouldNotify(report);
+    return SyncOperations.shouldNotify(report);
   }
 
   static Event boardUpdatedEvent(String host, SyncEngine.Report report) {
-    return ai.singlr.sail.engine.SyncOperations.boardUpdatedEvent(host, report);
+    return SyncOperations.boardUpdatedEvent(host, report);
   }
 
   static String render(SyncEngine.Report report, boolean json) {

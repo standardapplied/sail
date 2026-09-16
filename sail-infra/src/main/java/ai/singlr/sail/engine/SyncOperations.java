@@ -7,36 +7,28 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SyncReport;
+import ai.singlr.sail.api.SyncRequest;
+import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.FileMaterializer;
-import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.ProjectResourceReconciler;
-import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SshSyncChannel;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RoomStore;
-import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncPeer;
-import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,26 +36,18 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import picocli.CommandLine.Command;
-import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Option;
-
-import ai.singlr.sail.api.SyncRequest;
-import ai.singlr.sail.api.SyncReport;
-import ai.singlr.sail.api.SyncStatus;
-import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.sync.SyncedEntities;
-import java.nio.file.Path;
-import java.io.Reader;
-import java.io.Writer;
 import java.util.function.Supplier;
+import picocli.CommandLine.Help.Ansi;
+
 /** Runs the shared node-to-main round and its existing local projections. */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
     Reader reader();
+
     Writer writer();
-    @Override void close() throws IOException;
+
+    @Override
+    void close() throws IOException;
   }
 
   @FunctionalInterface
@@ -79,8 +63,12 @@ public final class SyncOperations {
   private SailEventPublisher publisher;
   private volatile SyncEngine.Report lastReport;
 
-  public SyncOperations(Sqlite db, String host, Path projectsDir,
-      Supplier<SyncConfig> configuration, Channels channels) {
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
@@ -93,12 +81,17 @@ public final class SyncOperations {
     return new SyncStatus(config.role(), config.main(), lastReport);
   }
 
+  public void prepare() {
+    SyncDatabase.prepare(db, host);
+  }
+
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
     var config = configuration.get();
     var target = resolveMain(request.main(), config);
     if (target.target() == null) {
       return new SyncReport(new SyncEngine.Report(0, 0, 0, 0), target.message());
     }
+    prepare();
     var round = SyncPeer.withChecked("main", () -> reconcileSession(target.target(), config));
     lastReport = round.report();
     notify(round);
@@ -118,22 +111,29 @@ public final class SyncOperations {
       var reports = new LinkedHashMap<String, SyncEngine.Report>();
       var knownMessages = messages.syncEntityIds();
       for (var entity : SyncedEntities.all()) {
-        reports.put(entity.type(),
-            new SyncEngine().reconcile(replicas.get(entity.type()), session.replica(entity.type())));
+        reports.put(
+            entity.type(),
+            new SyncEngine()
+                .reconcile(replicas.get(entity.type()), session.replica(entity.type())));
       }
       var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
       var rejected = applyFdes(new FdeStore(db), session.fetchFdes());
       if (!rejected.isEmpty()) {
         System.err.println(
             Banner.errorLine(
-                "Skipped " + rejected.size() + " malformed identity entry(ies) from main: "
-                    + String.join(", ", rejected), Ansi.AUTO));
+                "Skipped "
+                    + rejected.size()
+                    + " malformed identity entry(ies) from main: "
+                    + String.join(", ", rejected),
+                Ansi.AUTO));
       }
       materialize(files);
       materializeProjects(projects);
       reconcileLiveResources(projects, reports.get("project"));
-      return new Round(reports.values().stream()
-          .reduce(new SyncEngine.Report(0, 0, 0, 0), SyncOperations::combine), pulledMessages);
+      return new Round(
+          reports.values().stream()
+              .reduce(new SyncEngine.Report(0, 0, 0, 0), SyncOperations::combine),
+          pulledMessages);
     }
   }
 
@@ -342,5 +342,4 @@ public final class SyncOperations {
     return Event.of(
         Event.SAIL_AGENT, null, Event.WellKnownTypes.BOARD_UPDATED, Event.SAIL_AGENT, host, data);
   }
-
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
@@ -20,7 +21,6 @@ import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -304,13 +304,15 @@ public final class AgentAttachCommand implements Runnable {
     return orRefuse(
         name,
         () -> {
-          try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+          try (var operations = OperationsFactory.open()) {
             var node = NodeIdentity.handle();
             var run = operations.latestRun(name, node).orElse(null);
             return run == null
                 ? Latest.NONE
                 : new Latest(
-                    run, operations.roomKnown(run.conversationId()) ? run.conversationId() : "", operations.runningRuns(name, node));
+                    run,
+                    operations.roomKnown(run.conversationId()) ? run.conversationId() : "",
+                    operations.runningRuns(name, node));
           }
         });
   }

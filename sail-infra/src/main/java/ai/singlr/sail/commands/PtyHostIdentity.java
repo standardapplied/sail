@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.function.Supplier;
@@ -37,7 +35,7 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
 
   @Override
   public PtyIdentity resolve(String token) throws IOException {
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       return operations.ptyIdentity(token, boxHandle.get());
     }
   }

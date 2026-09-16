@@ -5,10 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
@@ -33,9 +32,10 @@ public final class ServerInitCommand implements Runnable {
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open(dbPath)) {
-      var before = operations.schemaBeforeOpen();
-      var after = operations.schemaVersion();
+    try (var operations = OperationsFactory.open(dbPath)) {
+      var migration = operations.initialize();
+      var before = migration.before();
+      var after = migration.after();
 
       System.out.println(Ansi.AUTO.string("  @|green ✓|@ Database: " + dbPath));
       if (before == 0) {

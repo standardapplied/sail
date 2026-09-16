@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.StopOperations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,11 +17,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ProjectDefinitions;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
@@ -160,7 +156,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
       return operations.projectSession(containerName, NodeIdentity.handle());
     }
   }
@@ -173,7 +169,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (config.agent() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
-    try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open()) {
       return SpecSnapshot.available(SpecCatalog.summarize(operations.projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");

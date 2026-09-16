@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.AuthorizedKeysRenderer;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.store.Sqlite;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -51,13 +52,15 @@ public final class HostKeysCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            try (var operations = ai.singlr.sail.api.OperationsFactory.open()) {
+            try (var operations = OperationsFactory.open()) {
               var sync = new AuthorizedKeysSync();
               if (dryRun) {
-                System.out.print(ai.singlr.sail.engine.AuthorizedKeysRenderer.render(operations.sshKeys(), SailPaths.binaryPath().toString()));
+                System.out.print(
+                    AuthorizedKeysRenderer.render(
+                        operations.sshKeys(), SailPaths.binaryPath().toString()));
                 return;
               }
-              switch (sync.sync(operations.sshKeys())) {
+              switch (sync.sync(operations::sshKeys)) {
                 case AuthorizedKeysSync.Synced synced ->
                     System.out.println(
                         Ansi.AUTO.string(
