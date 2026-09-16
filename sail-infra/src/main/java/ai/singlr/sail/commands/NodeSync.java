@@ -36,11 +36,16 @@ final class NodeSync {
   }
 
   static SyncScheduler scheduler(SyncConfig sync, boolean noSync, Map<String, String> env) {
+    return scheduler(sync, noSync, env, NodeSync::syncOnce);
+  }
+
+  static SyncScheduler scheduler(
+      SyncConfig sync, boolean noSync, Map<String, String> env, SyncScheduler.Reconcile reconcile) {
     if (!shouldSync(sync, noSync)) {
       return SyncScheduler.disabled();
     }
     return new SyncScheduler(
-        NodeSync::syncOnce,
+        reconcile,
         millis(env, DEBOUNCE_ENV, SyncScheduler.DEFAULT_DEBOUNCE),
         millis(env, FRESHEN_TTL_ENV, SyncScheduler.DEFAULT_FRESHEN_TTL));
   }

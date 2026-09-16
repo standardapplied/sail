@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.time.Duration;
 import picocli.CommandLine.Command;
@@ -67,9 +67,9 @@ public final class ServerTokenCommand implements Runnable {
           spec,
           () -> {
             var ttl = resolveTtl(noExpiry, ttlDays);
-            try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-              var fdeId = resolveFdeId(db);
-              var created = new TokenStore(db).create(name, role, fdeId, ttl);
+            try (var operations = OperationsFactory.open()) {
+              var fdeId = resolveFdeId(operations);
+              var created = operations.createToken(name, role, fdeId, ttl);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
               System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
@@ -103,12 +103,12 @@ public final class ServerTokenCommand implements Runnable {
       return Duration.ofDays(ttlDays);
     }
 
-    private String resolveFdeId(Sqlite db) {
+    private String resolveFdeId(Operations operations) {
       if (Strings.isBlank(fde)) {
         return null;
       }
-      return new FdeStore(db)
-          .byHandle(fde)
+      return operations
+          .fde(fde)
           .map(FdeStore.Fde::id)
           .orElseThrow(
               () ->
@@ -127,8 +127,8 @@ public final class ServerTokenCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-              var tokens = new TokenStore(db).list();
+            try (var operations = OperationsFactory.open()) {
+              var tokens = operations.tokens();
               if (tokens.isEmpty()) {
                 System.out.println("  No tokens. Run 'sail server init' to create one.");
                 return;
@@ -158,8 +158,8 @@ public final class ServerTokenCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-              var revoked = new TokenStore(db).revoke(name);
+            try (var operations = OperationsFactory.open()) {
+              var revoked = operations.revokeToken(name);
               if (revoked) {
                 System.out.println(Ansi.AUTO.string("  @|green ✓|@ Token '" + name + "' revoked."));
               } else {

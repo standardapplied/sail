@@ -21,7 +21,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /** Append-only messages attached to rooms and journaled as independently synced records. */
-public final class MessageStore implements SyncedStore {
+public final class MessageStore implements ConflictResolver, SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
@@ -382,6 +382,58 @@ public final class MessageStore implements SyncedStore {
             peer,
             peer)
         .orElse(false);
+  }
+
+  /**
+   * Messages are append-only, so the only resolution that can stand is main's: {@code chosen} must
+   * be {@code remote}. The local row is replaced by main's content and rebased onto it, and the
+   * revision is content-addressed so the next round links it to main's without a push. Keeping mine
+   * would need main to rewrite a message, which the wire refuses.
+   */
+  @Override
+  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
+    if (remote == null || !remote.equals(chosen)) {
+      throw new IllegalArgumentException(
+          "message '" + id + "' is append-only: main's copy stands; resolve it with --theirs");
+    }
+    return db.transaction(
+        () -> {
+          var row = fromSnapshot(id, remote);
+          requireReplyTarget(row);
+          var json = YamlUtil.dumpJson(remote);
+          var rev = Revisions.next(latestRev(id), json);
+          replace(row, rev);
+          changeLog.append(
+              ENTITY,
+              id,
+              rev,
+              Objects.toString(remote.get("author"), null),
+              "resolve",
+              false,
+              json);
+          return rev;
+        });
+  }
+
+  private void replace(MessageRow row, String rev) {
+    db.execute(
+        """
+        INSERT INTO room_messages
+            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            room_id = excluded.room_id, author = excluded.author, body = excluded.body,
+            reply_to = excluded.reply_to, created_at = excluded.created_at,
+            rev = excluded.rev, base_rev = excluded.base_rev, question = excluded.question""",
+        row.id(),
+        row.roomId(),
+        row.author(),
+        row.body(),
+        row.replyTo(),
+        row.createdAt(),
+        rev,
+        rev,
+        row.question() ? 1 : 0);
   }
 
   private void write(MessageRow row, String rev, String baseRev) {

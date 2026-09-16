@@ -13,13 +13,12 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 
 /**
- * The only database handle a sync path may run on: constructing one converges the schema and
- * verifies the v1 data floor, so a sync that skips either requirement is unrepresentable. Exists
- * because of the in-sync self-update incident where a freshly-replaced binary kept syncing against
- * the previous release's schema and aborted on a stale CHECK constraint — both sync entry points
- * (the node's local-replica open and main's RPC-serving open) go through {@link #converge}. Schema
- * migration is idempotent and cheap when already current; data migration on a pre-existing database
- * remains the explicit responsibility of {@code sail migrate}.
+ * Converges the schema and verifies the v1 data floor before a sync path touches replicated data.
+ * Exists because of the in-sync self-update incident where a freshly-replaced binary kept syncing
+ * against the previous release's schema and aborted on a stale CHECK constraint — both sync entry
+ * points go through {@link #prepare}; {@link #converge} also owns the RPC server's database handle.
+ * Schema migration is idempotent and cheap when already current; data migration on a pre-existing
+ * database remains the explicit responsibility of {@code sail migrate}.
  */
 public final class SyncDatabase implements AutoCloseable {
 
@@ -42,15 +41,23 @@ public final class SyncDatabase implements AutoCloseable {
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
+      prepare(db, box);
+      return new SyncDatabase(db);
+    } catch (RuntimeException e) {
+      db.close();
+      throw e;
+    }
+  }
+
+  public static void prepare(Sqlite db, String box) {
+    try {
       new SchemaManager(db).migrate();
       if (DataMigrations.anyPending(db)) {
         MigrationRunner.applyAll(db, DataMigrations.ALL, DataMigration.Prompter.NON_INTERACTIVE);
       }
     } catch (SchemaManager.PreFloorException e) {
-      db.close();
       throw e;
     } catch (RuntimeException e) {
-      db.close();
       throw new IllegalStateException(
           "Sync aborted before touching data: could not converge the database schema on '"
               + box
@@ -61,7 +68,6 @@ public final class SyncDatabase implements AutoCloseable {
               + "', then sync again.",
           e);
     }
-    return new SyncDatabase(db);
   }
 
   /** The converged handle; valid until {@link #close()}. */

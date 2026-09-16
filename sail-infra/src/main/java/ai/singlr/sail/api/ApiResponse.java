@@ -8,14 +8,24 @@ package ai.singlr.sail.api;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public record ApiResponse(int status, Map<String, Object> body, Map<String, String> headers) {
+public record ApiResponse(
+    int status, Map<String, Object> body, Map<String, String> headers, byte[] content) {
 
   public ApiResponse {
     headers = Map.copyOf(headers);
   }
 
   public ApiResponse(int status, Map<String, Object> body) {
-    this(status, body, Map.of());
+    this(status, body, Map.of(), null);
+  }
+
+  public ApiResponse(int status, Map<String, Object> body, Map<String, String> headers) {
+    this(status, body, headers, null);
+  }
+
+  public static ApiResponse file(byte[] content) {
+    return new ApiResponse(
+        200, Map.of(), Map.of("Content-Type", "application/octet-stream"), content);
   }
 
   public ApiResponse withHeader(String name, String value) {
@@ -24,7 +34,7 @@ public record ApiResponse(int status, Map<String, Object> body, Map<String, Stri
     }
     var next = new LinkedHashMap<>(headers);
     next.put(name, value);
-    return new ApiResponse(status, body, next);
+    return new ApiResponse(status, body, next, content);
   }
 
   public static ApiResponse from(Result<?> result) {

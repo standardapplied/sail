@@ -9,7 +9,11 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
@@ -30,11 +34,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -175,12 +175,11 @@ public final class RunCommand implements Runnable {
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var store = new SpecStore(db);
-        var nextSpec = SpecCatalog.nextReady(store.projectSpecs(name));
+      try (var operations = OperationsFactory.open()) {
+        var nextSpec = SpecCatalog.nextReady(operations.projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
-              store.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
+              operations.specContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
           task = specTask(name, nextSpec, specBody);
           if (!json) {
             System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
@@ -299,8 +298,7 @@ public final class RunCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations = operations(shell, db, launchCommand);
+    try (var operations = operations(shell, launchCommand)) {
       var request =
           new DispatchOperations.AdhocRequest(task, branchName, path, background, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -319,8 +317,7 @@ public final class RunCommand implements Runnable {
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null
-            && rollbackSafe(
-                e, new RunStore(db).runningForProjectOnNode(name, handle).isPresent())) {
+            && rollbackSafe(e, operations.activeRun(name, handle).isPresent())) {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
@@ -342,8 +339,8 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private DispatchOperations operations(
-      ShellExecutor shell, Sqlite db, AtomicReference<List<String>> launchCommand) {
+  private SailOperations operations(
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -381,18 +378,16 @@ public final class RunCommand implements Runnable {
             }
           }
         };
-    return new DispatchOperations(
+    return OperationsFactory.open(
         shell,
         file,
-        new SpecStore(db),
-        new ReviewStore(db),
-        new RunStore(db),
-        new FdeStore(db),
-        this::publishLifecycle,
-        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        (project, config) -> "",
-        DispatchOperations.terminalLauncher(),
-        listener,
+        new OperationHooks(
+            this::publishLifecycle,
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+            (project, config) -> "",
+            DispatchOperations.terminalLauncher(),
+            listener,
+            StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

@@ -5,11 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,12 +53,26 @@ public final class ProjectRenamer {
     }
   }
 
-  private final Sqlite db;
+  private final Operations operations;
   private final ShellExec shell;
   private final Path projectsDir;
 
   public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
-    this.db = Objects.requireNonNull(db, "db");
+    this(
+        OperationsFactory.create(
+            db,
+            shell,
+            SailPaths.PROJECT_DESCRIPTOR,
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE),
+        shell,
+        projectsDir);
+  }
+
+  public ProjectRenamer(Operations operations, ShellExec shell, Path projectsDir) {
+    this.operations = Objects.requireNonNull(operations, "operations");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
   }
@@ -69,19 +84,16 @@ public final class ProjectRenamer {
       throw new IllegalArgumentException("'" + renamed + "' is already the project's name.");
     }
 
-    var projects = new ProjectStore(db);
-    var specs = new SpecStore(db);
-    var files = new FileStore(db);
     var containers = new ContainerManager(shell);
 
     var existing =
-        projects
-            .findByName(old)
+        operations
+            .catalogProject(old)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "No project '" + old + "' in the catalog to rename."));
-    if (projects.findByName(renamed).isPresent()) {
+    if (operations.catalogProject(renamed).isPresent()) {
       throw new IllegalStateException("A project named '" + renamed + "' already exists.");
     }
     if (!(containers.queryState(renamed) instanceof ContainerState.NotCreated)) {
@@ -107,12 +119,8 @@ public final class ProjectRenamer {
         containers.rename(old, renamed);
         undo.push(() -> containers.rename(renamed, old));
       }
-      projects.rename(old, renamed, newDefinition);
-      undo.push(() -> projects.rename(renamed, old, existing.definition()));
-      specs.reproject(old, renamed);
-      undo.push(() -> specs.reproject(renamed, old));
-      files.reproject(old, renamed);
-      undo.push(() -> files.reproject(renamed, old));
+      var catalogRename = operations.projectRename(old, renamed);
+      undo.push(() -> operations.undoProjectRename(catalogRename));
       moveProjectDir(old, renamed);
       undo.push(() -> moveProjectDir(renamed, old));
       materialize(renamed, newDefinition);

@@ -20,18 +20,26 @@ import java.util.List;
  * StoreReplica}. Shared by the in-process, over-the-wire, and conflict-resolution harnesses so the
  * fixture is defined once.
  */
-final class SyncBox implements AutoCloseable {
+public final class SyncBox implements AutoCloseable {
 
-  final String id;
-  final Sqlite db;
-  final SpecStore specs;
-  final SyncConflicts conflicts;
-  final SyncState syncState;
-  final StoreReplica replica;
+  public final String id;
+  public final Sqlite db;
+  public final SpecStore specs;
+  public final SyncConflicts conflicts;
+  public final SyncState syncState;
+  public final StoreReplica replica;
 
-  SyncBox(Path dir, String id) {
+  public SyncBox(Path dir, String id) {
+    this(id, Sqlite.open(dir.resolve(id + ".db")));
+  }
+
+  public SyncBox(String id) {
+    this(id, Sqlite.openMemory());
+  }
+
+  private SyncBox(String id, Sqlite db) {
     this.id = id;
-    this.db = Sqlite.open(dir.resolve(id + ".db"));
+    this.db = db;
     new SchemaManager(db).migrate();
     this.specs = new SpecStore(db);
     this.conflicts = new SyncConflicts(db);
@@ -39,7 +47,7 @@ final class SyncBox implements AutoCloseable {
     this.replica = new StoreReplica(id, specs, new ChangeLog(db), conflicts, syncState);
   }
 
-  static SpecStore.SpecRow spec(String id, String title, String status) {
+  public static SpecStore.SpecRow spec(String id, String title, String status) {
     return new SpecStore.SpecRow(
         id,
         "proj",

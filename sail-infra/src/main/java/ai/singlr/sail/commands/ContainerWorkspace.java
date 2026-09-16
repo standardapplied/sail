@@ -5,15 +5,13 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.Optional;
 import picocli.CommandLine.Help.Ansi;
@@ -53,9 +51,9 @@ final class ContainerWorkspace {
   }
 
   private static String sshUser(String project) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new ProjectStore(db)
-          .findByName(project)
+    try (var operations = OperationsFactory.open()) {
+      return operations
+          .catalogProject(project)
           .map(row -> SailYaml.fromMap(YamlUtil.parseMap(row.definition())).sshUser())
           .orElse("dev");
     } catch (Exception e) {

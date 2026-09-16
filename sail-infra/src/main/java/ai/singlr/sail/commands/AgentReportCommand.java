@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
@@ -12,15 +14,14 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.ControlPlaneDb;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -50,14 +51,14 @@ public final class AgentReportCommand implements Runnable {
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
-  private final ControlPlaneDb controlPlaneDb;
+  private final Supplier<SailOperations> operations;
 
   public AgentReportCommand() {
-    this(ControlPlaneDb.DEFAULT);
+    this(OperationsFactory::open);
   }
 
-  AgentReportCommand(ControlPlaneDb controlPlaneDb) {
-    this.controlPlaneDb = controlPlaneDb;
+  AgentReportCommand(Supplier<SailOperations> operations) {
+    this.operations = operations;
   }
 
   @Override
@@ -99,16 +100,16 @@ public final class AgentReportCommand implements Runnable {
   }
 
   List<Spec> projectSpecs(String project) {
-    try (var db = controlPlaneDb.open()) {
-      return new SpecStore(db).projectSpecs(project);
+    try (var operations = this.operations.get()) {
+      return operations.projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
     }
   }
 
   RunStore.RunRow latestSession(String project) {
-    try (var db = controlPlaneDb.open()) {
-      return new RunStore(db).latestForProjectOnNode(project, NodeIdentity.handle()).orElse(null);
+    try (var operations = this.operations.get()) {
+      return operations.latestRun(project, NodeIdentity.handle()).orElse(null);
     } catch (Exception ignored) {
       return null;
     }

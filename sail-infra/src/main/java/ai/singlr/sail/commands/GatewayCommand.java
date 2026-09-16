@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshGateway;
-import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.Sqlite;
 import java.util.ArrayList;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
@@ -35,9 +33,8 @@ public final class GatewayCommand implements Callable<Integer> {
   @Override
   public Integer call() throws Exception {
     var original = System.getenv("SSH_ORIGINAL_COMMAND");
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var decision =
-          SshGateway.authorize(original, fde, new FdeStore(db), new AuthSessionStore(db));
+    try (var operations = OperationsFactory.open()) {
+      var decision = operations.authorizeGateway(original, fde);
       return switch (decision) {
         case SshGateway.Rejected rejected -> {
           System.err.println(Banner.errorLine(rejected.reason(), Ansi.AUTO));

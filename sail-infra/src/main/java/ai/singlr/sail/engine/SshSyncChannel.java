@@ -22,7 +22,7 @@ import java.util.List;
  * both ends. Like the rest of the gateway lane, password and keyboard-interactive auth are disabled
  * so a missing key fails fast instead of dangling a prompt for the locked {@code sail} account.
  */
-public final class SshSyncChannel implements AutoCloseable {
+public final class SshSyncChannel implements SyncOperations.Channel {
 
   private final Process process;
   private final BufferedReader reader;

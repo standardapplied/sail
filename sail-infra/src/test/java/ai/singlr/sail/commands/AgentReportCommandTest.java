@@ -9,10 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -37,7 +40,7 @@ class AgentReportCommandTest {
   @Test
   void requiresProjectName() {
     var cmd = new CommandLine(new AgentReportCommand());
-    cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
+    cmd.setErr(new PrintWriter(new StringWriter()));
     var exitCode = cmd.execute();
 
     assertNotEquals(0, exitCode);
@@ -51,7 +54,7 @@ class AgentReportCommandTest {
       new SpecStore(db).create(specRow("auth", "acme", "Add auth"));
       new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated"));
     }
-    var command = new AgentReportCommand(() -> Sqlite.open(dbPath));
+    var command = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
 
     var specs = command.projectSpecs("acme");
 

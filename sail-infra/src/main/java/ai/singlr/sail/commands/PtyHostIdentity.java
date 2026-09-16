@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.function.Supplier;
@@ -37,25 +35,8 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
 
   @Override
   public PtyIdentity resolve(String token) throws IOException {
-    try (var db = Sqlite.open(dbPath)) {
-      var fdes = new FdeStore(db);
-      if (Strings.isBlank(token)) {
-        var handle = boxHandle.get();
-        if (Strings.isBlank(handle)) {
-          throw new IOException(
-              "This box has no FDE identity. Set one with 'sail host config set sync-handle' or"
-                  + " connect through the gateway.");
-        }
-        return new PtyIdentity(handle, isAdmin(fdes, handle));
-      }
-      var session =
-          new AuthSessionStore(db)
-              .validate(token)
-              .orElseThrow(() -> new IOException("Session token is not valid or has expired."));
-      var fde =
-          fdes.byId(session.fdeId())
-              .orElseThrow(() -> new IOException("The session's FDE no longer exists."));
-      return new PtyIdentity(fde.handle(), "admin".equals(fde.role()));
+    try (var operations = OperationsFactory.open(dbPath)) {
+      return operations.ptyIdentity(token, boxHandle.get());
     }
   }
 

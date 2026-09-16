@@ -9,24 +9,23 @@ import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.Operations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Objects;
@@ -128,18 +127,18 @@ public final class DispatchCommand implements Runnable {
     var request =
         new DispatchOperations.Request(
             specId, background ? "background" : "foreground", dryRun, repoOverrides, restart);
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations =
-          operations(
-              db,
-              shell,
-              file,
-              this::publishLifecycle,
-              new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-              snapshotter(shell),
-              DispatchOperations.terminalLauncher(),
-              renderer(sync),
-              new PtyHostYield());
+    try (var operations =
+        OperationsFactory.open(
+            shell,
+            file,
+            new OperationHooks(
+                this::publishLifecycle,
+                new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+                snapshotter(shell),
+                DispatchOperations.terminalLauncher(),
+                renderer(sync),
+                StopOperations.Listener.NONE),
+            new PtyHostYield())) {
       render(dispatch(operations, request, handle));
     }
   }
@@ -149,7 +148,7 @@ public final class DispatchCommand implements Runnable {
    * control-plane database — spec claims, run rows, and the FDE roster guard included — so an
    * in-process dispatch records exactly what a server-lane dispatch would.
    */
-  static DispatchOperations operations(
+  static SailOperations operations(
       Sqlite db,
       ShellExec shell,
       String file,
@@ -159,24 +158,17 @@ public final class DispatchCommand implements Runnable {
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener,
       SessionYield sessionYield) {
-    return new DispatchOperations(
-            shell,
-            file,
-            new SpecStore(db),
-            new ReviewStore(db),
-            new RunStore(db),
-            new FdeStore(db),
-            events,
-            watcherSpawner,
-            snapshotter,
-            launcher,
-            listener,
-            sessionYield)
-        .useMessages(new MessageStore(db));
+    return OperationsFactory.create(
+        db,
+        shell,
+        file,
+        new OperationHooks(
+            events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
+        sessionYield);
   }
 
   private DispatchOperations.Outcome dispatch(
-      DispatchOperations operations, DispatchOperations.Request request, String handle) {
+      Operations operations, DispatchOperations.Request request, String handle) {
     try {
       return operations.dispatch(name, request, Actor.cliOperator(handle), handle);
     } catch (ApiException e) {

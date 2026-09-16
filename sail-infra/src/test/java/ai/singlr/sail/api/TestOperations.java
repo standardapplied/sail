@@ -5,13 +5,190 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.ssh.SshGateway;
+import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeSshKeyStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TokenStore;
+import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
 class TestOperations implements Operations {
+  public void prepareSync() {
+    throw new UnsupportedOperationException();
+  }
+
+  public void undoProjectRename(ProjectRenamed renamed) {
+    throw new UnsupportedOperationException();
+  }
+
+  public SchemaMigration initialize() {
+    throw new UnsupportedOperationException();
+  }
+
+  public List<TokenStore.TokenInfo> tokens() {
+    throw new UnsupportedOperationException();
+  }
+
+  public TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl) {
+    throw new UnsupportedOperationException();
+  }
+
+  public boolean revokeToken(String name) {
+    throw new UnsupportedOperationException();
+  }
+
+  public Optional<FdeStore.Fde> fde(String handle) {
+    throw new UnsupportedOperationException();
+  }
+
+  public int schemaVersion() {
+    throw new UnsupportedOperationException();
+  }
+
+  public SshGateway.Decision authorizeGateway(String command, String handle) {
+    throw new UnsupportedOperationException();
+  }
+
+  public PtyIdentity ptyIdentity(String token, String boxHandle) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  public void admitPtyRoom(String room, String project, PtyIdentity identity) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  public void recordHostEvent(EventStore.EventRow event) {
+    throw new UnsupportedOperationException();
+  }
+
+  public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
+    throw new UnsupportedOperationException();
+  }
+
+  public List<Spec> projectSpecs(String project) {
+    throw new UnsupportedOperationException();
+  }
+
+  public Optional<SpecStore.SpecContent> specContent(String id) {
+    throw new UnsupportedOperationException();
+  }
+
+  public Optional<ProjectStore.ProjectRow> catalogProject(String project) {
+    throw new UnsupportedOperationException();
+  }
+
+  public List<ProjectStore.ProjectRow> catalogProjects() {
+    throw new UnsupportedOperationException();
+  }
+
+  public Optional<RunStore.RunRow> latestRun(String project, String node) {
+    throw new UnsupportedOperationException();
+  }
+
+  public Optional<RunStore.RunRow> activeRun(String project, String node) {
+    throw new UnsupportedOperationException();
+  }
+
+  public List<DispatchGate.RunningRun> runningRuns(String project, String node) {
+    throw new UnsupportedOperationException();
+  }
+
+  public AgentSession.SessionInfo projectSession(String project, String node) throws Exception {
+    throw new UnsupportedOperationException();
+  }
+
+  public boolean roomKnown(String room) {
+    throw new UnsupportedOperationException();
+  }
+
+  public String reviewLog(String project, String node) {
+    throw new UnsupportedOperationException();
+  }
+
+  public String demoDefinition() {
+    throw new UnsupportedOperationException();
+  }
+
+  public DispatchOperations.Outcome dispatch(
+      String project, DispatchOperations.Request request, Actor actor, String localHandle) {
+    throw new UnsupportedOperationException();
+  }
+
+  public DispatchOperations.AdhocSession startAdhoc(
+      String project, DispatchOperations.AdhocRequest request, String localHandle) {
+    throw new UnsupportedOperationException();
+  }
+
+  public DispatchOperations.AdhocSession startAdhoc(
+      String project,
+      DispatchOperations.AdhocRequest request,
+      String localHandle,
+      DispatchOperations.AdhocPreparer preparer) {
+    throw new UnsupportedOperationException();
+  }
+
+  public StopOperations.Outcome stop(
+      StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SyncReport sync(SyncRequest request) throws Exception {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SyncStatus syncStatus() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public List<SyncConflicts.Conflict> conflicts() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SyncConflicts.Conflict conflict(String id) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public ProjectFiles projectFiles(String project) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public List<String> projectsWithFiles() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public ProjectDestroyed projectDestroy(String name, boolean purge) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public ProjectRenamed projectRename(String from, String to) {
+    throw new UnsupportedOperationException();
+  }
 
   static final String RUN_CREDENTIAL = "sailrun_test";
   static final String PRINCIPAL = "claude/abc123";
@@ -24,7 +201,7 @@ class TestOperations implements Operations {
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
     if (!BOX_CREDENTIAL.equals(credential)) {
-      return Optional.empty();
+      return Operations.super.boxActorForCredential(credential);
     }
     return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
   }
@@ -38,7 +215,7 @@ class TestOperations implements Operations {
       return Optional.of(roomRun("run-3", "invite"));
     }
     if (!RUN_CREDENTIAL.equals(credential)) {
-      return Optional.empty();
+      return Operations.super.runForCredential(credential);
     }
     return Optional.of(
         new RunStore.RunRow(
@@ -116,7 +293,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<RoomMembersResponse> roomMembers(String roomId) {
-    return Result.success(new RoomMembersResponse(java.util.List.of()));
+    return Result.success(new RoomMembersResponse(List.of()));
   }
 
   @Override
@@ -126,7 +303,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<RoomsListResponse> rooms(String project, Actor actor) {
-    return Result.success(new RoomsListResponse(java.util.List.of(), null, null));
+    return Result.success(new RoomsListResponse(List.of(), null, null));
   }
 
   @Override
@@ -259,7 +436,7 @@ class TestOperations implements Operations {
   @Override
   public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
     return Result.success(
-        new AgentStatusResponse(project, false, null, null, null, null, null, java.util.List.of()));
+        new AgentStatusResponse(project, false, null, null, null, null, null, List.of()));
   }
 
   @Override
@@ -520,7 +697,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
-    return Result.success(new GlobalSpecHistoryResponse(specId, java.util.List.of()));
+    return Result.success(new GlobalSpecHistoryResponse(specId, List.of()));
   }
 
   @Override
@@ -533,7 +710,7 @@ class TestOperations implements Operations {
                     specId,
                     "proj",
                     "t",
-                    ai.singlr.sail.config.SpecStatus.fromWire("pending"),
+                    SpecStatus.fromWire("pending"),
                     null,
                     null,
                     null,
@@ -544,8 +721,8 @@ class TestOperations implements Operations {
                     "",
                     "",
                     null,
-                    java.util.List.of(),
-                    java.util.List.of())),
+                    List.of(),
+                    List.of())),
             request.rev()));
   }
 

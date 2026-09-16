@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -15,10 +16,10 @@ import ai.singlr.sail.engine.FileSource;
 import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -138,10 +139,10 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Unsafe share path: '" + path + "'.", Ansi.AUTO));
         return 1;
       }
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var files = new FileStore(db);
-        store(files, project, path, Files.readAllBytes(source));
-        new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
+      try (var operations = OperationsFactory.open()) {
+        var files = operations.projectFiles(project);
+        files.put(path, Files.readAllBytes(source));
+        files.materialize();
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Shared @|bold "
@@ -234,8 +235,8 @@ public final class ProjectFilesCommand implements Runnable {
       }
       var skipped = new ArrayList<String>();
       var shared = 0;
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var files = new FileStore(db);
+      try (var operations = OperationsFactory.open()) {
+        var files = operations.projectFiles(project);
         for (var file : selected) {
           var path = root.relativize(file).toString();
           var problem = shareProblem(fileSource, file, path);
@@ -243,11 +244,11 @@ public final class ProjectFilesCommand implements Runnable {
             skipped.add(path + " (" + problem + ")");
             continue;
           }
-          store(files, project, path, fileSource.read(file));
+          files.put(path, fileSource.read(file));
           shared++;
         }
         if (shared > 0) {
-          new FileMaterializer(files, SailPaths.projectsDir()).materialize(project);
+          files.materialize();
         }
       }
       for (var skip : skipped) {
@@ -285,14 +286,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     /** Stores {@code bytes} at {@code path} (no materialization); re-checks the guards. */
     static String store(FileStore files, String project, String path, byte[] bytes) {
-      if (!FilePicker.isShareablePath(path)) {
-        throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
-      }
-      if (bytes.length > MAX_SHARE_BYTES) {
-        throw new IllegalArgumentException("File exceeds the " + MAX_SHARE_BYTES + "-byte limit.");
-      }
-      files.put(project, path, Base64.getEncoder().encodeToString(bytes));
-      return path;
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).put(path, bytes);
     }
   }
 
@@ -314,8 +308,8 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var rows = new FileStore(db).list(project);
+      try (var operations = OperationsFactory.open()) {
+        var rows = operations.projectFiles(project).list();
         if (json || rows.isEmpty()) {
           System.out.println(render(rows, project, json));
         } else {
@@ -362,8 +356,8 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() throws Exception {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var bytes = read(new FileStore(db), project, path).orElse(null);
+      try (var operations = OperationsFactory.open()) {
+        var bytes = operations.projectFiles(project).get(path).orElse(null);
         if (bytes == null) {
           System.err.println(
               Banner.errorLine("No shared file '" + path + "' on " + project + ".", Ansi.AUTO));
@@ -376,7 +370,7 @@ public final class ProjectFilesCommand implements Runnable {
     }
 
     static Optional<byte[]> read(FileStore files, String project, String path) {
-      return files.find(project, path).map(row -> Base64.getDecoder().decode(row.content()));
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).get(path);
     }
   }
 
@@ -398,8 +392,8 @@ public final class ProjectFilesCommand implements Runnable {
     public Integer call() throws Exception {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        if (!unshare(new FileStore(db), SailPaths.projectsDir(), project, path)) {
+      try (var operations = OperationsFactory.open()) {
+        if (!operations.projectFiles(project).remove(path)) {
           System.err.println(
               Banner.errorLine("No shared file '" + path + "' on " + project + ".", Ansi.AUTO));
           return 1;
@@ -414,11 +408,7 @@ public final class ProjectFilesCommand implements Runnable {
     /** Tombstones the file and removes the local on-disk copy; false if it was not shared. */
     static boolean unshare(FileStore files, Path projectsDir, String project, String path)
         throws IOException {
-      if (!files.delete(project, path)) {
-        return false;
-      }
-      new FileMaterializer(files, projectsDir).materialize(project);
-      return true;
+      return new SharedProjectFiles(files, projectsDir, project).remove(path);
     }
   }
 
@@ -443,10 +433,21 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Pass --project OR --all, not both.", Ansi.AUTO));
         return 1;
       }
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        var files = new FileStore(db);
-        var targets = all ? files.projectsWithFiles() : List.of(CurrentProject.require(project));
-        var report = export(files, SailPaths.projectsDir(), targets);
+      try (var operations = OperationsFactory.open()) {
+        var targets =
+            all ? operations.projectsWithFiles() : List.of(CurrentProject.require(project));
+        var written = 0;
+        var deleted = 0;
+        var skipped = new ArrayList<String>();
+        for (var target : targets) {
+          var materialized = operations.projectFiles(target).materialize();
+          written += materialized.written();
+          deleted += materialized.deleted();
+          for (var skip : materialized.skipped()) {
+            skipped.add(target + "/" + skip);
+          }
+        }
+        var report = new ExportReport(written, deleted, List.copyOf(skipped));
         for (var skip : report.skipped()) {
           System.err.println(
               Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));

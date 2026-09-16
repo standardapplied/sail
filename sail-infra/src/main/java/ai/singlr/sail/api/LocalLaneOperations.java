@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,6 +20,10 @@ import java.util.Optional;
  * this role with the full web surface.
  */
 public interface LocalLaneOperations {
+
+  SyncStatus syncStatus();
+
+  List<SyncConflicts.Conflict> conflicts();
 
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local

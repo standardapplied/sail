@@ -51,6 +51,14 @@ class AuthorizedKeysSyncTest {
   }
 
   @Test
+  void checksHostPreconditionsBeforeReadingTheRegistry() throws Exception {
+    try (var empty = Sqlite.openMemory()) {
+      assertInstanceOf(AuthorizedKeysSync.NeedsRoot.class, sync(false).sync(empty));
+      assertInstanceOf(AuthorizedKeysSync.NotProvisioned.class, sync(true).sync(empty));
+    }
+  }
+
+  @Test
   void needsRootWithoutPrivileges() throws Exception {
     var outcome = sync(false).sync(db);
     assertInstanceOf(AuthorizedKeysSync.NeedsRoot.class, outcome);

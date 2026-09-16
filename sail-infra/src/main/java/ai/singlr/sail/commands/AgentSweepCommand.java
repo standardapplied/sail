@@ -7,20 +7,18 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -102,8 +100,7 @@ public final class AgentSweepCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var operations = operations(shell, launchCommand, db);
+    try (var operations = operations(shell, launchCommand)) {
       var request =
           new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -118,8 +115,8 @@ public final class AgentSweepCommand implements Runnable {
     }
   }
 
-  private DispatchOperations operations(
-      ShellExecutor shell, AtomicReference<List<String>> launchCommand, Sqlite db) {
+  private SailOperations operations(
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -137,18 +134,16 @@ public final class AgentSweepCommand implements Runnable {
             System.out.println();
           }
         };
-    return new DispatchOperations(
+    return OperationsFactory.open(
         shell,
         file,
-        new SpecStore(db),
-        new ReviewStore(db),
-        new RunStore(db),
-        new FdeStore(db),
-        event -> {},
-        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        (project, config) -> "",
-        DispatchOperations.terminalLauncher(),
-        listener,
+        new OperationHooks(
+            event -> {},
+            new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+            (project, config) -> "",
+            DispatchOperations.terminalLauncher(),
+            listener,
+            StopOperations.Listener.NONE),
         new PtyHostYield());
   }
 

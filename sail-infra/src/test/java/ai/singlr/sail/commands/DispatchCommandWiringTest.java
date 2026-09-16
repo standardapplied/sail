@@ -87,7 +87,7 @@ class DispatchCommandWiringTest {
   private Sqlite db;
   private String yaml;
 
-  private DispatchOperations cliOperations(ShellExec shell, List<Event> events) throws Exception {
+  private SailOperations cliOperations(ShellExec shell, List<Event> events) throws Exception {
     var yamlPath = tempDir.resolve("sail.yaml");
     Files.writeString(yamlPath, YAML);
     yaml = yamlPath.toString();

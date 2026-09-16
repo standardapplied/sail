@@ -10,6 +10,7 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Installs the {@code sail} user's {@code authorized_keys} from the SSH-key registry — the single
@@ -64,13 +65,17 @@ public final class AuthorizedKeysSync {
   }
 
   public Outcome sync(Sqlite db) throws Exception {
+    return sync(() -> new FdeSshKeyStore(db).list());
+  }
+
+  public Outcome sync(Supplier<List<FdeSshKeyStore.SshKeyInfo>> registry) throws Exception {
     if (!root) {
       return new NeedsRoot();
     }
     if (!Files.isDirectory(destination.getParent())) {
       return new NotProvisioned();
     }
-    var keys = new FdeSshKeyStore(db).list();
+    var keys = registry.get();
     install(AuthorizedKeysRenderer.render(keys, SailPaths.binaryPath().toString()));
     return new Synced(keys.size(), destination);
   }

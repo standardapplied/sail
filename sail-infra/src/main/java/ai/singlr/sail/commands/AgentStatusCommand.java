@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.StopOperations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecCatalog;
@@ -20,9 +20,6 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
@@ -207,8 +204,8 @@ public final class AgentStatusCommand implements Runnable {
 
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        taskCounts = SpecCatalog.statusCounts(new SpecStore(db).projectSpecs(name));
+      try (var operations = OperationsFactory.open()) {
+        taskCounts = SpecCatalog.statusCounts(operations.projectSpecs(name));
       } catch (Exception ignored) {
       }
     }
@@ -260,9 +257,8 @@ public final class AgentStatusCommand implements Runnable {
 
   private static AgentSession.SessionInfo resolveSession(ShellExecutor shell, String projectName)
       throws Exception {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return StopOperations.resolveSession(
-          shell, new RunStore(db), projectName, NodeIdentity.handle());
+    try (var operations = OperationsFactory.open()) {
+      return operations.projectSession(projectName, NodeIdentity.handle());
     }
   }
 

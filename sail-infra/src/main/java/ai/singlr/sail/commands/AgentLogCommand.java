@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentLogRenderer;
@@ -14,11 +15,9 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -138,12 +137,11 @@ public final class AgentLogCommand implements Runnable {
    * every agent session is a run, so no run row means no log.
    */
   private String resolveLogPath(String project, boolean review) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      var runs = new RunStore(db);
+    try (var operations = OperationsFactory.open()) {
       if (review) {
-        return reviewLogPathFrom(latestBuildRun(runs, project), new ReviewStore(db));
+        return operations.reviewLog(project, NodeIdentity.handle());
       }
-      return logPathFrom(runs.latestForProjectOnNode(project, NodeIdentity.handle()));
+      return logPathFrom(operations.latestRun(project, NodeIdentity.handle()));
     } catch (RuntimeException e) {
       return null;
     }

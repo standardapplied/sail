@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.store.SpecStore;
@@ -17,8 +18,10 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -161,7 +164,7 @@ public final class ApiRouter implements HttpHandler {
     agentStreamer.handle(exchange);
   }
 
-  ApiResponse route(HttpExchange exchange) throws IOException {
+  ApiResponse route(HttpExchange exchange) throws Exception {
     var request = RouteRequest.from(exchange);
     if (request.matches(GET, V1, HEALTH)) {
       return ApiResponse.from(operations.health());
@@ -181,6 +184,13 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.matches(GET, V1, AGENTS)) {
       return ApiResponse.from(operations.agents());
+    }
+
+    if (request.segments().equals(List.of(V1, "sync"))) {
+      return routeSync(exchange, request);
+    }
+    if (request.size() >= 2 && request.segments().subList(0, 2).equals(List.of(V1, "conflicts"))) {
+      return routeConflicts(exchange, request);
     }
 
     if (request.hasEventsPrefix()) {
@@ -224,8 +234,109 @@ public final class ApiRouter implements HttpHandler {
       case AGENT -> routeAgent(request, project);
       case CONNECT -> routeConnect(request, project);
       case SNAPSHOTS -> routeSnapshots(request, project);
+      case "files" -> routeFiles(exchange, request, project);
       default -> throw notFound();
     };
+  }
+
+  private ApiResponse routeSync(HttpExchange exchange, RouteRequest request) throws Exception {
+    if (request.is(GET)) {
+      return ApiResponse.ok(SyncViews.status(operations.syncStatus()));
+    }
+    requireMethod(request, POST);
+    var body = JsonBody.readMap(exchange);
+    var main = text(body, "main");
+    if (Strings.isNotBlank(main)) {
+      Authorizer.require(exchange, Capability.ADMIN);
+    }
+    return ApiResponse.ok(SyncViews.round(operations.sync(new SyncRequest(main))));
+  }
+
+  private ApiResponse routeConflicts(HttpExchange exchange, RouteRequest request)
+      throws IOException {
+    if (request.size() == 2) {
+      requireMethod(request, GET);
+      return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
+    }
+    var path = request.uri().getPath();
+    if (request.is(POST) && path.endsWith("/resolve") && request.size() > 3) {
+      Authorizer.require(exchange, Capability.ADMIN);
+      var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
+      var body = JsonBody.readMap(exchange);
+      var strategy = text(body, "strategy");
+      if (strategy == null) {
+        throw new IllegalArgumentException("resolution strategy is required");
+      }
+      var resolution =
+          new Resolution(
+              Resolution.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT)), text(body, "merged"));
+      return ApiResponse.ok(SyncViews.conflict(operations.resolveConflict(id, resolution)));
+    }
+    requireMethod(request, GET);
+    var conflict = operations.conflict(path.substring("/v1/conflicts/".length()));
+    if (conflict == null) {
+      throw notFound();
+    }
+    return ApiResponse.ok(SyncViews.conflict(conflict));
+  }
+
+  private ApiResponse routeFiles(HttpExchange exchange, RouteRequest request, String project)
+      throws IOException {
+    var files = operations.projectFiles(project);
+    var prefix = "/v1/projects/" + project + "/files";
+    var fullPath = request.uri().getPath();
+    if (!fullPath.startsWith(prefix)) {
+      throw new IllegalArgumentException("Invalid shared file URL.");
+    }
+    var suffix = fullPath.substring(prefix.length());
+    if (suffix.isEmpty() || suffix.equals("/")) {
+      requireMethod(request, GET);
+      return ApiResponse.ok(
+          Map.of(
+              "files",
+              files.list().stream()
+                  .map(
+                      row ->
+                          Map.of(
+                              "path",
+                              row.path(),
+                              "bytes",
+                              Base64.getDecoder().decode(row.content()).length))
+                  .toList()));
+    }
+    var path = suffix.substring(1);
+    if (!FilePicker.isShareablePath(path)) {
+      throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
+    }
+    if (request.is(GET)) {
+      return ApiResponse.file(files.get(path).orElseThrow(ApiRouter::notFound));
+    }
+    if (request.is(PUT)) {
+      var content = exchange.getRequestBody().readNBytes(ProjectFiles.MAX_BYTES + 1);
+      if (content.length > ProjectFiles.MAX_BYTES) {
+        throw new ApiException(
+            ErrorCode.REQUEST_TOO_LARGE,
+            "File exceeds the " + ProjectFiles.MAX_BYTES + "-byte limit.");
+      }
+      var storedPath = files.put(path, content);
+      files.materialize();
+      return ApiResponse.ok(Map.of("path", storedPath));
+    }
+    if (request.is(DELETE)) {
+      if (!files.remove(path)) {
+        throw notFound();
+      }
+      return ApiResponse.ok(Map.of("path", path, "removed", true));
+    }
+    throw methodNotAllowed();
+  }
+
+  private static String text(Map<String, Object> body, String field) {
+    var value = body.get(field);
+    if (value == null || value instanceof String) {
+      return (String) value;
+    }
+    throw new IllegalArgumentException(field + " must be a string");
   }
 
   /**
@@ -778,13 +889,16 @@ public final class ApiRouter implements HttpHandler {
 
   private static void write(HttpExchange exchange, ApiResponse response) throws IOException {
     var body =
-        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
+        response.content() != null
+            ? response.content()
+            : YamlUtil.dumpJson(new LinkedHashMap<>(response.body()))
+                .getBytes(StandardCharsets.UTF_8);
     var headers = exchange.getResponseHeaders();
     headers.set("Content-Type", "application/json; charset=utf-8");
     for (var entry : response.headers().entrySet()) {
       headers.set(entry.getKey(), entry.getValue());
     }
-    exchange.sendResponseHeaders(response.status(), body.length);
+    exchange.sendResponseHeaders(response.status(), body.length == 0 ? -1 : body.length);
     try (var output = exchange.getResponseBody()) {
       output.write(body);
     }

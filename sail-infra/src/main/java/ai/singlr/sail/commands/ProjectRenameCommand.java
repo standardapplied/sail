@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -13,9 +14,6 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectRenamer;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -71,14 +69,13 @@ public final class ProjectRenameCommand implements Runnable {
           "Root privileges required. Run with: sudo sail project rename " + name + " " + newName);
     }
 
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      new SchemaManager(db).migrate();
-      var projects = new ProjectStore(db);
-      if (projects.findByName(name).isEmpty()) {
+    try (var operations = OperationsFactory.open()) {
+      operations.initialize();
+      if (operations.catalogProject(name).isEmpty()) {
         throw new IllegalStateException(
             "No project '" + name + "' in the catalog. Run 'sail project list' to see projects.");
       }
-      if (projects.findByName(newName).isPresent()) {
+      if (operations.catalogProject(newName).isPresent()) {
         throw new IllegalStateException("A project named '" + newName + "' already exists.");
       }
 
@@ -91,7 +88,8 @@ public final class ProjectRenameCommand implements Runnable {
         return;
       }
 
-      var renamer = new ProjectRenamer(db, new ShellExecutor(false), SailPaths.projectsDir());
+      var renamer =
+          new ProjectRenamer(operations, new ShellExecutor(false), SailPaths.projectsDir());
       var result = renamer.rename(name, newName);
       emit(result);
     }
