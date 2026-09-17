@@ -236,18 +236,21 @@ public final class SyncScheduler implements AutoCloseable {
       scheduled = false;
       running = true;
     }
-    runWhenReady();
-    boolean rerun;
-    synchronized (state) {
-      running = false;
-      rerun = followUp;
-      followUp = false;
-      if (rerun) {
-        scheduled = true;
+    try {
+      runWhenReady();
+    } finally {
+      boolean rerun;
+      synchronized (state) {
+        running = false;
+        rerun = followUp;
+        followUp = false;
+        if (rerun) {
+          scheduled = true;
+        }
       }
-    }
-    if (rerun) {
-      executor.execute(this::drain);
+      if (rerun) {
+        executor.execute(this::drain);
+      }
     }
   }
 

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -19,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SyncSchedulerTest {
@@ -125,6 +127,40 @@ class SyncSchedulerTest {
       assertTrue(recovered.await(5, TimeUnit.SECONDS), "the timer must survive a failed tick");
       assertTrue(reads.get() >= 2);
     }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"1, false", "1, true", "2, false", "2, true"})
+  void writesResumeAfterAHealthReadFailureAndPreserveFollowUps(int failedRead, boolean followUp) {
+    var executor = new QueueExecutor();
+    var scheduler = scheduler(executor, rounds::incrementAndGet);
+    var reads = new AtomicInteger();
+    scheduler.useHealth(
+        () -> {
+          if (reads.incrementAndGet() == failedRead) {
+            if (followUp) {
+              scheduler.afterWrite();
+              scheduler.afterWrite();
+            }
+            throw new IllegalStateException("health store temporarily unavailable");
+          }
+          return new SyncStatus("node", "main", null);
+        });
+
+    scheduler.afterWrite();
+    assertThrows(IllegalStateException.class, executor::runOne);
+    assertEquals(failedRead - 1, rounds.get());
+    assertEquals(followUp ? 1 : 0, executor.pending());
+    executor.runAll();
+    assertEquals(failedRead - 1 + (followUp ? 1 : 0), rounds.get());
+
+    scheduler.tick();
+    var beforeWrite = rounds.get();
+    scheduler.afterWrite();
+    assertEquals(1, executor.pending());
+    executor.runAll();
+    assertEquals(beforeWrite + 1, rounds.get());
+    assertEquals(0, executor.pending());
   }
 
   @Test
