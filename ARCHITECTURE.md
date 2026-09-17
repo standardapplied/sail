@@ -611,8 +611,22 @@ which preserves the failure behavior of ordinary reads and event writes.
 `SyncedEntities` is the ordered registry for spec, room, file, project, run, review, and
 message stores. It owns replica construction, push policies, resolver lookup, and transition
 detection. The node and main server use the same registry and reports reduce in that order.
-Sync status currently reports the configured role/main and the last round in that operations
-instance; durable sync health belongs to the next redesign brick.
+`SailOperations.sync` records each round in the local `sync_health` table. CLI (`sail sync
+status`), HTTP (`GET /v1/sync`), and Mast read the same persisted attempt, success, failure,
+and report. `last_attempt_at` is stamped when a round starts and again when it finishes, so
+retry delays start after a failed connection finishes timing out. `state` makes in-flight rounds visible; `stale_since` preserves the first failure
+when a node has never reached main. Health is local and is not another replicated entity.
+
+`SyncScheduler` combines debounced writes with periodic/read freshness and the pure `Backoff`
+policy: 15/30/60/120 seconds with ±20% jitter, then an open circuit at five failures. Reads
+never probe an open circuit; a write, manual sync, or five-minute timer does. The scheduler
+reads stored outcomes, including manual rounds, so a successful manual sync resets its circuit.
+Failure and recovery emit one record event per transition. Slack remains main-only; this brick
+does not introduce a separate transport to report a disconnected node's events to main.
+
+Conflict resolution uses the registry for all seven entity types. Web and local credential
+lanes require the node's own FDE (`SyncConfig.handle`) with write access, or an admin. Agents
+act for their run's owner; a read-only room principal cannot resolve conflicts.
 
 Review every control-plane change with `CommandsUseTheSeamTest` and these searches:
 

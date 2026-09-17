@@ -12,7 +12,22 @@ package ai.singlr.sail.sync;
  */
 public final class SyncTransportException extends RuntimeException {
 
+  private final String kind;
+
   public SyncTransportException(String message) {
-    super(message);
+    this("protocol", message, null);
+  }
+
+  public SyncTransportException(String kind, String message, Throwable cause) {
+    super(message, cause);
+    this.kind =
+        switch (kind) {
+          case "unreachable", "refused", "protocol", "store" -> kind;
+          case null, default -> "protocol";
+        };
+  }
+
+  public String kind() {
+    return kind;
   }
 }

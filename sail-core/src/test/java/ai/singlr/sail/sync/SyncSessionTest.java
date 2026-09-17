@@ -20,6 +20,22 @@ import org.junit.jupiter.api.Test;
 
 /** The session that wraps a channel: typed replicas, the roster pull, and the closing bye. */
 class SyncSessionTest {
+  @Test
+  void closeFailureIsSuppressedOnTheOriginalRoundFailure() {
+    var original = new IllegalStateException("message: refused");
+    var thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () -> {
+              try (var session = new SyncSession(new StringReader(""), brokenWriter())) {
+                throw original;
+              }
+            });
+    org.junit.jupiter.api.Assertions.assertSame(original, thrown);
+    assertEquals(1, thrown.getSuppressed().length);
+    org.junit.jupiter.api.Assertions.assertInstanceOf(
+        UncheckedIOException.class, thrown.getSuppressed()[0]);
+  }
 
   @Test
   void fetchFdesReturnsMainsRoster() {

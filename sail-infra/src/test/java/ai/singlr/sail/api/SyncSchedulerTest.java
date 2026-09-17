@@ -39,6 +39,112 @@ class SyncSchedulerTest {
   }
 
   @Test
+  void manualRoundsRefreshTheFreshnessWindowAndAnInFlightRoundIsNotProbedAgain() {
+    var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    var status =
+        new java.util.concurrent.atomic.AtomicReference<>(
+            new SyncStatus(
+                "node",
+                "main",
+                null,
+                "in_sync",
+                java.time.Instant.EPOCH,
+                java.time.Instant.EPOCH,
+                0,
+                null,
+                null,
+                null));
+    scheduler.useHealth(status::get);
+    scheduler.tick();
+    assertEquals(0, rounds.get());
+    advanceBy(TTL);
+    scheduler.tick();
+    assertEquals(1, rounds.get());
+    status.set(
+        new SyncStatus(
+            "node",
+            "main",
+            null,
+            "syncing",
+            java.time.Instant.EPOCH.plusSeconds(15),
+            java.time.Instant.EPOCH,
+            0,
+            null,
+            null,
+            null));
+    advanceBy(TTL);
+    scheduler.tick();
+    assertEquals(1, rounds.get());
+    advanceBy(Backoff.HALF_OPEN_DELAY);
+    scheduler.tick();
+    assertEquals(
+        2, rounds.get(), "an abandoned round does not leave the node stuck syncing forever");
+  }
+
+  @Test
+  void theTimerChecksFreshnessOnAnIdleNode() {
+    var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    scheduler.tick();
+    assertEquals(1, rounds.get());
+    scheduler.tick();
+    assertEquals(1, rounds.get());
+    advanceBy(TTL);
+    scheduler.tick();
+    assertEquals(2, rounds.get());
+    SyncScheduler.disabled().tick();
+  }
+
+  @Test
+  void aWriteDuringAnOpenCircuitProbesOnceAndAStoredManualSuccessClosesIt() {
+    var executor = new QueueExecutor();
+    var scheduler = scheduler(executor, rounds::incrementAndGet);
+    var current =
+        new java.util.concurrent.atomic.AtomicReference<>(
+            new SyncStatus(
+                "node",
+                "main",
+                null,
+                "stale",
+                java.time.Instant.EPOCH,
+                null,
+                5,
+                "unreachable",
+                "offline",
+                java.time.Instant.EPOCH));
+    scheduler.useHealth(current::get);
+    scheduler.freshenRead();
+    assertEquals(0, rounds.get());
+    scheduler.afterWrite();
+    scheduler.afterWrite();
+    executor.runAll();
+    assertEquals(1, rounds.get());
+    current.set(new SyncStatus("node", "main", null));
+    advanceBy(TTL);
+    scheduler.freshenRead();
+    assertEquals(2, rounds.get());
+  }
+
+  @Test
+  void anInterruptedBackoffStillFlushesThePendingWrite() {
+    var executor = new QueueExecutor();
+    var scheduler =
+        scheduler(
+            executor,
+            () -> {
+              rounds.incrementAndGet();
+              throw new IllegalStateException("offline");
+            },
+            duration -> {
+              throw new InterruptedException("shutdown");
+            });
+    scheduler.syncNow();
+    scheduler.afterWrite();
+    executor.runAll();
+    assertEquals(2, rounds.get());
+    assertTrue(Thread.interrupted());
+  }
+
+  @Test
   void aWriteTriggersExactlyOneReconcileAfterTheDebounce() {
     var executor = new QueueExecutor();
     var scheduler = scheduler(executor, rounds::incrementAndGet);

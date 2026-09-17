@@ -38,7 +38,10 @@ public final class SyncSession implements AutoCloseable {
     if (response instanceof SyncWire.Fdes roster) {
       return roster.fdes();
     }
-    throw new SyncTransportException("Expected an fde roster, got: " + response);
+    if (response instanceof SyncWire.Failed failed) {
+      throw new SyncTransportException(failed.kind(), "fde: " + failed.message(), null);
+    }
+    throw new SyncTransportException("fde: Expected an fde roster, got: " + response);
   }
 
   @Override

@@ -6,11 +6,13 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -58,6 +60,8 @@ final class LocalApiRouter implements LocalApiHandler {
   public ApiResponse handle(LocalApiRequest request) {
     try {
       return route(request);
+    } catch (ApiException denied) {
+      return problem(denied.status(), denied.getMessage());
     } catch (IllegalArgumentException bad) {
       return problem(400, bad.getMessage());
     } catch (RuntimeException unexpected) {
@@ -130,6 +134,27 @@ final class LocalApiRouter implements LocalApiHandler {
       return "GET".equals(request.method())
           ? ApiResponse.ok(SyncViews.conflicts(operations.conflicts()))
           : problem(405, "Only GET is available.");
+    }
+    if (path.startsWith("/v1/conflicts/")
+        && path.endsWith("/resolve")
+        && path.length() > "/v1/conflicts//resolve".length()) {
+      if (!"POST".equals(request.method())) return problem(405, "Conflict resolution accepts POST");
+      var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
+      var body =
+          request.headers().getOrDefault("content-type", "").startsWith("application/json")
+              ? YamlUtil.parseMapStrict(request.bodyText())
+              : request.form();
+      var strategy = body.get("strategy");
+      if (!(strategy instanceof String text) || text.isBlank()) {
+        return problem(400, "resolution strategy is required");
+      }
+      var merged = body.get("merged");
+      if (merged != null && !(merged instanceof String)) return problem(400, "merged must be text");
+      var resolution =
+          new Resolution(
+              Resolution.Strategy.valueOf(text.toUpperCase(Locale.ROOT)), (String) merged);
+      return ApiResponse.ok(
+          SyncViews.conflict(operations.resolveConflict(id, resolution, caller.actor())));
     }
     if (WHOAMI.equals(path)) {
       return whoami(request, caller);

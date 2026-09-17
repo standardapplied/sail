@@ -454,7 +454,19 @@ public final class SchemaManager {
               + " updated_by, rev, base_rev, room_id FROM specs",
           "DROP TABLE specs",
           "ALTER TABLE specs_v2 RENAME TO specs",
-          "CREATE INDEX idx_specs_project ON specs(project)");
+          "CREATE INDEX idx_specs_project ON specs(project)",
+          """
+          CREATE TABLE sync_health (
+              peer TEXT PRIMARY KEY,
+              last_attempt_at TEXT,
+              last_success_at TEXT,
+              consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+              last_error_kind TEXT CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
+              last_error TEXT,
+              last_report TEXT,
+              state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
+              stale_since TEXT
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

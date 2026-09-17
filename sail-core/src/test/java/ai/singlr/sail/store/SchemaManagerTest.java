@@ -34,6 +34,27 @@ class SchemaManagerTest {
   }
 
   @Test
+  void syncHealthMigratesFromThePriorReleaseWithoutChangingTheReplica() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE sync_health");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('keep', 'Keep', 'draft', 't0', 't0')");
+    new SchemaManager(db).migrate();
+    var health = new SyncHealth(db);
+    assertTrue(health.find("main").isEmpty());
+    assertTrue(new SpecStore(db).findById("keep").isPresent());
+    health.begin("main", java.time.Instant.EPOCH);
+    new SchemaManager(db).migrate();
+    assertEquals("syncing", health.find("main").orElseThrow().state());
+  }
+
+  @Test
   void backfillClosesOnlyTheResidueOfADoneSpecsPassedReview() {
     new SchemaManager(db).migrate();
     var specs = new SpecStore(db);
@@ -306,7 +327,7 @@ class SchemaManagerTest {
 
   @Test
   void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
-    var staged = SchemaManager.CURRENT_VERSION - 15;
+    var staged = SchemaManager.V1_VERSION + migrationIndex("CREATE TABLE room_messages");
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
@@ -350,7 +371,7 @@ class SchemaManagerTest {
 
   @Test
   void specsGainRoomIdBackfilledToTheirOwnIdOnUpgrade() {
-    var staged = SchemaManager.CURRENT_VERSION - 7;
+    var staged = SchemaManager.V1_VERSION + migrationIndex("ALTER TABLE specs ADD COLUMN room_id");
     stageAtBaseline();
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
       db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));

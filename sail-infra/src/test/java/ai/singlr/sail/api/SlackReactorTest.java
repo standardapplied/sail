@@ -77,6 +77,27 @@ class SlackReactorTest {
   }
 
   @Test
+  void syncHealthTransitionsPostOneLineWithoutASpecThread() {
+    var poster = new RecordingPoster();
+    var reactor = reactor(poster);
+    var degraded =
+        SyncTransitionEvents.health("main", false, "protocol", "message: too large", "node");
+    var recovered = SyncTransitionEvents.health("main", true, null, null, "node");
+    assertTrue(reactor.filter().test(degraded));
+    assertTrue(reactor.filter().test(recovered));
+    assertEquals(Event.RetentionClass.RECORD, Event.WellKnownTypes.retentionClass(degraded.type()));
+    assertEquals(
+        Event.RetentionClass.RECORD, Event.WellKnownTypes.retentionClass(recovered.type()));
+    assertEquals(
+        "Sync on node is stale: message: too large.", SlackMessage.forEvent(degraded, null));
+    assertEquals("Sync on node recovered.", SlackMessage.forEvent(recovered, null));
+    reactor.onEvent(degraded);
+    reactor.onEvent(recovered);
+    assertEquals(2, poster.posts.size());
+    assertNull(poster.posts.getFirst().threadTs());
+  }
+
+  @Test
   void constructorRejectsNullResolver() {
     assertThrows(
         NullPointerException.class, () -> new SlackReactor(null, threads, id -> null, null));

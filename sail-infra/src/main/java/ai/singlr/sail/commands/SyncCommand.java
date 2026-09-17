@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -21,10 +22,12 @@ import ai.singlr.sail.sync.SyncEngine;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 /**
@@ -46,8 +49,39 @@ import picocli.CommandLine.Option;
 @Command(
     name = "sync",
     description = "Reconcile this box's specs with the main devbox.",
-    mixinStandardHelpOptions = true)
+    mixinStandardHelpOptions = true,
+    subcommands = SyncCommand.Status.class)
 public final class SyncCommand implements Callable<Integer> {
+
+  @Command(
+      name = "status",
+      description = "Show this node's stored sync health.",
+      mixinStandardHelpOptions = true)
+  static final class Status implements Callable<Integer> {
+    @Mixin private ConnectionOptions connection;
+
+    @Option(names = "--json", description = "Output sync health as JSON.")
+    private boolean json;
+
+    @Override
+    public Integer call() throws Exception {
+      var config = connection.resolve();
+      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+        var status = client.get("/v1/sync");
+        System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status));
+      }
+      return 0;
+    }
+  }
+
+  static String renderStatus(Map<String, Object> status) {
+    var state = Objects.toString(status.get("state"), "in_sync");
+    return switch (state) {
+      case "syncing" -> "Syncing with " + status.get("main");
+      case "stale" -> "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
+      default -> "In sync" + (status.get("main") == null ? "" : " with " + status.get("main"));
+    };
+  }
 
   @Option(
       names = "--main",

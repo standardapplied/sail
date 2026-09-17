@@ -260,7 +260,6 @@ public final class ApiRouter implements HttpHandler {
     }
     var path = request.uri().getPath();
     if (request.is(POST) && path.endsWith("/resolve") && request.size() > 3) {
-      Authorizer.require(exchange, Capability.ADMIN);
       var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
       var body = JsonBody.readMap(exchange);
       var strategy = text(body, "strategy");
@@ -270,7 +269,8 @@ public final class ApiRouter implements HttpHandler {
       var resolution =
           new Resolution(
               Resolution.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT)), text(body, "merged"));
-      return ApiResponse.ok(SyncViews.conflict(operations.resolveConflict(id, resolution)));
+      return ApiResponse.ok(
+          SyncViews.conflict(operations.resolveConflict(id, resolution, actorOf(exchange))));
     }
     requireMethod(request, GET);
     var conflict = operations.conflict(path.substring("/v1/conflicts/".length()));

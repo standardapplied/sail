@@ -40,6 +40,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor) {
+    return resolveConflict(id, resolution);
+  }
+
+  @Override
   public ProjectFiles projectFiles(String project) {
     throw new UnsupportedOperationException();
   }

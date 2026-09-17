@@ -30,6 +30,74 @@ import org.junit.jupiter.api.io.TempDir;
 class SyncCommandTest {
 
   @Test
+  void syncStatusJsonUsesTheApiAndPinsTheHealthShape() throws Exception {
+    var body =
+        """
+        {"schema_version":1,"role":"node","main":"sail@main","state":"stale",
+         "last_attempt_at":"2026-09-17T00:00:00Z",
+         "consecutive_failures":5,"last_error_kind":"protocol",
+         "last_error":"message: page exceeded 4 MiB","stale_since":"2026-09-14T00:00:00Z"}
+        """;
+    var server =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/v1/sync",
+        exchange -> {
+          assertEquals("GET", exchange.getRequestMethod());
+          assertEquals("Bearer test-token", exchange.getRequestHeaders().getFirst("Authorization"));
+          var bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          try (var out = exchange.getResponseBody()) {
+            out.write(bytes);
+          }
+        });
+    server.start();
+    var output = new java.io.ByteArrayOutputStream();
+    var original = System.out;
+    try (var capture =
+        new java.io.PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)) {
+      System.setOut(capture);
+      assertEquals(
+          0,
+          new picocli.CommandLine(new SyncCommand())
+              .execute(
+                  "status",
+                  "--json",
+                  "--server",
+                  "http://127.0.0.1:" + server.getAddress().getPort(),
+                  "--token",
+                  "test-token"));
+    } finally {
+      System.setOut(original);
+      server.stop(0);
+    }
+    var parsed =
+        ai.singlr.sail.config.YamlUtil.parseMap(
+            output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    assertEquals(ai.singlr.sail.config.YamlUtil.parseMap(body), parsed);
+    assertEquals(
+        Set.of(
+            "schema_version",
+            "role",
+            "main",
+            "state",
+            "last_attempt_at",
+            "consecutive_failures",
+            "last_error_kind",
+            "last_error",
+            "stale_since"),
+        parsed.keySet());
+    assertEquals(
+        "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
+        SyncCommand.renderStatus(parsed));
+    assertEquals(
+        "Syncing with main", SyncCommand.renderStatus(Map.of("state", "syncing", "main", "main")));
+    assertEquals(
+        "In sync with main", SyncCommand.renderStatus(Map.of("state", "in_sync", "main", "main")));
+    assertEquals("In sync", SyncCommand.renderStatus(Map.of()));
+  }
+
+  @Test
   void resolveMainPrefersTheExplicitFlag() {
     var resolved =
         SyncCommand.resolveMain(

@@ -15,6 +15,16 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class YamlUtilTest {
+  @org.junit.jupiter.api.Test
+  void jsonLineAcceptsExactlyTheBoundAndRejectsOneCharacterMore() {
+    var line = "{\"value\":\"abc\"}";
+    org.junit.jupiter.api.Assertions.assertEquals(
+        "abc", YamlUtil.parseJsonLine(line, line.length()).get("value"));
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> YamlUtil.parseJsonLine(line, line.length() - 1));
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> YamlUtil.parseJsonLine("{}", 0));
+  }
 
   @Test
   void parseMapReturnsEmptyForNull() {

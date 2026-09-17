@@ -16,6 +16,16 @@ import org.junit.jupiter.api.Test;
 class SshSyncChannelTest {
 
   @Test
+  void anUnreachableMainAndABrokenConnectionFailWithinTheHealthWindow() {
+    var command = SshSyncChannel.sshCommand("sail@main", null);
+    assertTrue(command.contains("BatchMode=yes"));
+    assertTrue(command.contains("ConnectTimeout=10"));
+    assertTrue(command.contains("ConnectionAttempts=1"));
+    assertTrue(command.contains("ServerAliveInterval=10"));
+    assertTrue(command.contains("ServerAliveCountMax=2"));
+  }
+
+  @Test
   void sshCommandTargetsTheGatewayAndRunsTheSyncServer() {
     var command = SshSyncChannel.sshCommand("sail@maindevbox", null);
 

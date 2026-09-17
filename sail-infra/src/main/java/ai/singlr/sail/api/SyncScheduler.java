@@ -6,9 +6,14 @@
 package ai.singlr.sail.api;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * The sync-on-write trigger and read-freshness gate for a node's replica, shared by every lane that
@@ -21,8 +26,8 @@ import java.util.function.LongSupplier;
  * flight queues exactly one follow-up round. {@link #freshenRead()} reconciles before a read only
  * when the last attempt is older than the freshen TTL, so board polling costs at most one round per
  * TTL window. {@link #syncNow()} runs one round synchronously for short-lived processes that cannot
- * wait for a debounce. All of it is best-effort: a failed round logs a warning and the write or
- * read proceeds on the local replica — local-first is never blocked by sync.
+ * wait for a debounce. All of it is best-effort: a failed round records health and backs off and
+ * the write or read proceeds on the local replica — local-first is never blocked by sync.
  *
  * <p>On main and on a standalone box there is no peer to reconcile with, so the wiring installs
  * {@link #disabled()} and every method is a no-op. Time is injected ({@code nanoTime} for elapsed,
@@ -52,6 +57,11 @@ public final class SyncScheduler implements AutoCloseable {
   private final ExecutorService executor;
   private final LongSupplier nanoTime;
   private final Sleeper sleeper;
+  private final Supplier<Instant> now;
+  private final Backoff backoff;
+  private Supplier<SyncStatus> health;
+  private ScheduledExecutorService timer;
+  private int failures;
 
   private final Object state = new Object();
   private final Object freshenLock = new Object();
@@ -69,7 +79,10 @@ public final class SyncScheduler implements AutoCloseable {
         freshenTtl,
         Executors.newVirtualThreadPerTaskExecutor(),
         System::nanoTime,
-        Thread::sleep);
+        Thread::sleep,
+        Instant::now);
+    timer = Executors.newSingleThreadScheduledExecutor();
+    timer.scheduleWithFixedDelay(this::tick, 1, 1, TimeUnit.SECONDS);
   }
 
   SyncScheduler(
@@ -79,6 +92,24 @@ public final class SyncScheduler implements AutoCloseable {
       ExecutorService executor,
       LongSupplier nanoTime,
       Sleeper sleeper) {
+    this(
+        reconcile,
+        debounce,
+        freshenTtl,
+        executor,
+        nanoTime,
+        sleeper,
+        () -> Instant.EPOCH.plusNanos(nanoTime.getAsLong()));
+  }
+
+  SyncScheduler(
+      Reconcile reconcile,
+      Duration debounce,
+      Duration freshenTtl,
+      ExecutorService executor,
+      LongSupplier nanoTime,
+      Sleeper sleeper,
+      Supplier<Instant> now) {
     this.enabled = reconcile != null;
     this.reconcile = reconcile;
     this.debounce = debounce;
@@ -86,6 +117,30 @@ public final class SyncScheduler implements AutoCloseable {
     this.executor = executor;
     this.nanoTime = nanoTime;
     this.sleeper = sleeper;
+    this.now = now;
+    this.backoff = new Backoff(now, () -> ThreadLocalRandom.current().nextDouble());
+  }
+
+  public void useHealth(Supplier<SyncStatus> health) {
+    synchronized (freshenLock) {
+      this.health = health;
+    }
+  }
+
+  void tick() {
+    if (!enabled) return;
+    synchronized (freshenLock) {
+      refreshBackoff();
+      if (backoff.probeDue()) runRound();
+      else freshenRead();
+    }
+  }
+
+  private void refreshBackoff() {
+    if (health == null) return;
+    var status = health.get();
+    failures = status.consecutiveFailures();
+    backoff.observe(status.lastAttemptAt(), failures);
   }
 
   /** The no-op scheduler for main and standalone boxes — no peer, nothing to reconcile. */
@@ -126,7 +181,8 @@ public final class SyncScheduler implements AutoCloseable {
       return;
     }
     synchronized (freshenLock) {
-      if (withinFreshenTtl()) {
+      refreshBackoff();
+      if (withinFreshenTtl() || !backoff.ready(false)) {
         return;
       }
       runRound();
@@ -138,17 +194,25 @@ public final class SyncScheduler implements AutoCloseable {
     if (!enabled) {
       return;
     }
-    runRound();
+    synchronized (freshenLock) {
+      runRound();
+    }
   }
 
   @Override
   public void close() {
+    if (timer != null) timer.shutdownNow();
     if (executor != null) {
       executor.close();
     }
   }
 
   private boolean withinFreshenTtl() {
+    if (health != null) {
+      var status = health.get();
+      var ttl = "syncing".equals(status.state()) ? Backoff.HALF_OPEN_DELAY : freshenTtl;
+      return status.lastAttemptAt() != null && now.get().isBefore(status.lastAttemptAt().plus(ttl));
+    }
     synchronized (state) {
       return attempted && nanoTime.getAsLong() - attemptedAtNanos < freshenTtl.toNanos();
     }
@@ -160,7 +224,7 @@ public final class SyncScheduler implements AutoCloseable {
       scheduled = false;
       running = true;
     }
-    runRound();
+    runWhenReady();
     boolean rerun;
     synchronized (state) {
       running = false;
@@ -172,6 +236,29 @@ public final class SyncScheduler implements AutoCloseable {
     }
     if (rerun) {
       executor.execute(this::drain);
+    }
+  }
+
+  private void runWhenReady() {
+    while (true) {
+      Duration wait;
+      synchronized (freshenLock) {
+        refreshBackoff();
+        if (backoff.ready(true)) {
+          runRound();
+          return;
+        }
+        wait = backoff.remaining();
+      }
+      try {
+        sleeper.sleep(wait);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        synchronized (freshenLock) {
+          runRound();
+        }
+        return;
+      }
     }
   }
 
@@ -194,26 +281,35 @@ public final class SyncScheduler implements AutoCloseable {
   }
 
   private void runRound() {
+    Exception failure = null;
     try {
       reconcile.run();
+      failures = 0;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      warn(e);
+      failures++;
+      failure = e;
     } catch (Exception e) {
-      warn(e);
+      failures++;
+      failure = e;
     } finally {
+      if (health == null) backoff.observe(now.get(), failures);
+      else refreshBackoff();
       synchronized (state) {
         attempted = true;
         attemptedAtNanos = nanoTime.getAsLong();
       }
     }
-  }
-
-  private static void warn(Exception cause) {
-    System.err.println(
-        "  [sync] Reconcile with main failed ("
-            + cause.getMessage()
-            + "); continuing on the local replica. The next write, stale read, or manual"
-            + " 'sail sync' retries.");
+    if (failure != null) {
+      System.getLogger(SyncScheduler.class.getName())
+          .log(
+              System.Logger.Level.WARNING,
+              "Sync failed: "
+                  + failure.getMessage()
+                  + "; "
+                  + (backoff.open() ? "circuit open; next probe in " : "retry in ")
+                  + backoff.remaining().toSeconds()
+                  + "s");
+    }
   }
 }

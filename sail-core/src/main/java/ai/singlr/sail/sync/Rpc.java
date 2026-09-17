@@ -21,15 +21,22 @@ final class Rpc {
   private Rpc() {}
 
   static SyncWire.Response exchange(Reader in, Writer out, SyncWire.Request request) {
-    send(out, request);
     try {
+      send(out, request);
       var line = SyncWire.readFramed(in);
       if (line == null) {
-        throw new SyncTransportException("Sync channel closed before main replied.");
+        throw new SyncTransportException(
+            "unreachable", "Sync channel closed before main replied.", null);
       }
       return SyncWire.decodeResponse(line);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
+    } catch (IOException | UncheckedIOException e) {
+      throw new UncheckedIOException(
+          new IOException(SyncWire.context(request) + ": " + e.getMessage(), e));
+    } catch (RuntimeException e) {
+      throw new SyncTransportException(
+          e instanceof SyncTransportException transport ? transport.kind() : "protocol",
+          SyncWire.context(request) + ": " + e.getMessage(),
+          e);
     }
   }
 

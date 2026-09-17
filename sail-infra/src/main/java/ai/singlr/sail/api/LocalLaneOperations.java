@@ -25,6 +25,8 @@ public interface LocalLaneOperations {
 
   List<SyncConflicts.Conflict> conflicts();
 
+  SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor);
+
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local
    * socket — to its live run row. Empty for an unknown, revoked, or expired credential, and on

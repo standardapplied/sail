@@ -21,6 +21,63 @@ import org.junit.jupiter.api.Test;
 
 /** The server loop in isolation over a fake authority: framing, the write gate, and clean EOF. */
 class SyncRpcServerTest {
+  @Test
+  void everyHandshakeAndAuthorizationRefusalNamesItsEntity() throws Exception {
+    for (var request :
+        List.of(
+            new SyncWire.Fetch("message", "old"),
+            new SyncWire.Commit("file", "acme/config", Map.of(), null),
+            new SyncWire.FetchFdes())) {
+      var out = new StringWriter();
+      new SyncRpcServer(new FakeMain(), true)
+          .serve(new StringReader(SyncWire.encode(request) + "\n"), out);
+      var failed = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
+      assertTrue(failed.message().startsWith(SyncWire.context(request) + ":"), failed.message());
+    }
+    var unknown =
+        assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("unknown")));
+    assertTrue(unknown.message().startsWith("unknown:"));
+  }
+
+  @Test
+  void malformedAndOversizedFramesNameTheLastEntityAndLeaveTheSessionUsable() throws Exception {
+    var fetch = SyncWire.encode(new SyncWire.Fetch("message")) + "\n";
+    for (var bad : List.of("{", "x".repeat(257))) {
+      var out = new StringWriter();
+      new SyncRpcServer(
+              Map.of("message", new FakeMain()), new SyncPrincipal("node", true), FdeRoster.EMPTY)
+          .serve(new StringReader(fetch + bad + "\n" + fetch), out, 256);
+      var replies = out.toString().lines().map(SyncWire::decodeResponse).toList();
+      assertEquals(3, replies.size());
+      assertTrue(
+          assertInstanceOf(SyncWire.Failed.class, replies.get(1)).message().startsWith("message:"));
+      assertInstanceOf(SyncWire.Fetched.class, replies.get(2));
+    }
+  }
+
+  @Test
+  void storeFailuresAndReadOnlyRefusalsNameTheEntityAndId() throws Exception {
+    var failing =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
+            throw new IllegalStateException("disk full");
+          }
+        };
+    for (var writable : List.of(true, false)) {
+      var out = new StringWriter();
+      new SyncRpcServer(
+              Map.of("file", failing), new SyncPrincipal("node", writable), FdeRoster.EMPTY)
+          .serve(
+              new StringReader(
+                  verifiedRequest(
+                      "file", new SyncWire.Commit("file", "acme/data.bin", Map.of(), null))),
+              out);
+      var failure = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
+      assertTrue(failure.message().startsWith("file acme/data.bin:"));
+      if (writable) assertTrue(failure.message().contains("disk full"));
+    }
+  }
 
   private static class FakeMain implements MainReplica {
     @Override
