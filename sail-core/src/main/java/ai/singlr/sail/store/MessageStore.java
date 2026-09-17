@@ -290,7 +290,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var currentRev = latestRev(id);
           if (!Objects.equals(currentRev, expectedRev)) {

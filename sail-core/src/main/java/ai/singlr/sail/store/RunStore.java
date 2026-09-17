@@ -354,7 +354,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Integer watcherPid,
       String logPath,
       String unit) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var lease = activeLease(project, node);
           if (lease.isPresent()) {
@@ -520,7 +520,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * running} row, and any running row refuses the lease.
    */
   public ContainerLease acquireContainerLease(String project, String localHandle, String action) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var held = activeLease(project, localHandle);
           if (held.isPresent()) {
@@ -668,7 +668,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String unit,
       Duration maxDuration) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var lease = activeLease(project, node);
           if (lease.isPresent()) {
@@ -1078,7 +1078,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * so a partial terminal state is never exposed.
    */
   public void complete(String id, String status, Integer exitCode, Runnable alongside) {
-    db.immediateTransaction(
+    db.transaction(
         () -> {
           alongside.run();
           complete(id, status, exitCode);
@@ -1114,7 +1114,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   private boolean transition(
       String id, String expected, String status, Integer exitCode, Runnable alongside) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
@@ -1149,7 +1149,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * whether {@code work} ran; {@code work} throwing rolls the whole transaction back.
    */
   public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var latest =
               db.queryOne(
@@ -1195,7 +1195,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * the stop's own claim transaction.
    */
   public boolean updateProcess(String id, Integer pid, Long pidTicks, Integer watcherPid) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           db.execute(
               "UPDATE runs SET pid = ?, pid_ticks = ?, watcher_pid = ? WHERE id = ?"

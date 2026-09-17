@@ -71,7 +71,7 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
           betweenReadAndWrite.run();
@@ -98,7 +98,7 @@ public final class SyncHealth {
   }
 
   public int failed(String peer, Instant at, String kind, String error) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           db.execute(
               """

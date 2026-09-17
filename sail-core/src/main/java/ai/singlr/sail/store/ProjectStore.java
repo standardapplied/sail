@@ -218,7 +218,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.immediateTransaction(
+    return db.transaction(
         () -> {
           if (!Objects.equals(latestRev(id), expectedRev)) {
             var current = comparableSnapshot(id);
