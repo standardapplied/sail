@@ -9,12 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayOutputStream;
@@ -22,6 +25,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import picocli.CommandLine;
 
 class SyncCliTest {
 
@@ -46,6 +51,12 @@ class SyncCliTest {
     runIsolated(Integer.toString(failures));
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"upgrade-freshen", "upgrade-agent-stop"})
+  void cliFreshnessMigratesThePreHealthSchemaAndContinuesLocally(String scenario) throws Exception {
+    runIsolated(scenario);
+  }
+
   private void runIsolated(String scenario) throws Exception {
     var data = Files.createDirectories(home.resolve(".sail"));
     Files.writeString(
@@ -56,6 +67,19 @@ class SyncCliTest {
           main: sail@main
           handle: node
         """);
+    var bin = Files.createDirectories(home.resolve("bin"));
+    var ssh = bin.resolve("ssh");
+    Files.writeString(ssh, "#!/bin/sh\nread -r request\nexit 255\n");
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwxr-xr-x"));
+    var incus = bin.resolve("incus");
+    Files.writeString(
+        incus,
+        """
+        #!/bin/sh
+        if [ "$1" != "list" ]; then exit 1; fi
+        printf '%s\\n' '[{"name":"acme","status":"Stopped"}]'
+        """);
+    Files.setPosixFilePermissions(incus, PosixFilePermissions.fromString("rwxr-xr-x"));
     var output = home.resolve("output.txt");
     var builder =
         new ProcessBuilder(
@@ -69,6 +93,8 @@ class SyncCliTest {
             .redirectErrorStream(true)
             .redirectOutput(output.toFile());
     builder.environment().put("SAIL_DATA_DIR", data.toString());
+    builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
+    builder.environment().remove("SAIL_NO_SYNC");
     var process = builder.start();
     try {
       assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated sync check timed out");
@@ -83,6 +109,10 @@ class SyncCliTest {
         var operations = OperationsFactory.open()) {
       var schema = new SchemaManager(db);
       schema.migrate();
+      if (args[0].startsWith("upgrade-")) {
+        verifyPreHealthUpgrade(args[0], db, operations);
+        return;
+      }
       var health = new SyncHealth(db);
       var peer = "sail@main";
       assertEquals(peer, HostSync.config().main());
@@ -131,5 +161,48 @@ class SyncCliTest {
         }
       }
     }
+  }
+
+  private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
+      throws Exception {
+    db.execute("DROP TABLE sync_health");
+    db.execute("UPDATE schema_version SET version = 193");
+    assertEquals(193, operations.schema().version());
+    assertTrue(
+        assertThrows(SqliteException.class, operations::syncStatus)
+            .getMessage()
+            .contains("no such table: sync_health"));
+
+    if ("upgrade-agent-stop".equals(scenario)) {
+      Files.writeString(
+          Files.createDirectories(SailPaths.projectDir("acme")).resolve("sail.yaml"),
+          "name: acme\n");
+      var output = new ByteArrayOutputStream();
+      var original = System.out;
+      try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
+        System.setOut(capture);
+        assertEquals(0, new CommandLine(new Sail()).execute("agent", "stop", "acme", "--dry-run"));
+      } finally {
+        System.setOut(original);
+      }
+      assertTrue(output.toString(StandardCharsets.UTF_8).contains("No running agent session"));
+    } else {
+      try (var scheduler = NodeSync.scheduler(false)) {
+        scheduler.freshenRead();
+      }
+    }
+
+    assertEquals(194, operations.schema().version());
+    var status = operations.syncStatus();
+    assertEquals("stale", status.state());
+    assertEquals(1, status.consecutiveFailures());
+    assertEquals("unreachable", status.lastErrorKind());
+    assertEquals(
+        List.of(Event.WellKnownTypes.SYNC_DEGRADED),
+        new EventStore(db).recent(10).stream().map(EventStore.EventRow::type).toList());
+    try (var scheduler = NodeSync.scheduler(false)) {
+      scheduler.freshenRead();
+    }
+    assertEquals(status, operations.syncStatus());
   }
 }
