@@ -36,6 +36,8 @@ public final class SlackReactor implements EventSubscriber {
   /** Event types mirrored into Slack. */
   static final Set<String> NOTIFIABLE_TYPES =
       Set.of(
+          Event.WellKnownTypes.SYNC_DEGRADED,
+          Event.WellKnownTypes.SYNC_RECOVERED,
           Event.WellKnownTypes.SPEC_DISPATCHED,
           Event.WellKnownTypes.SPEC_RESTARTED,
           Event.WellKnownTypes.AGENT_SESSION_STOPPED,
@@ -96,7 +98,11 @@ public final class SlackReactor implements EventSubscriber {
 
   @Override
   public Predicate<Event> filter() {
-    return e -> NOTIFIABLE_TYPES.contains(e.type()) && Strings.isNotBlank(e.spec());
+    return e ->
+        NOTIFIABLE_TYPES.contains(e.type())
+            && (Strings.isNotBlank(e.spec())
+                || Event.WellKnownTypes.SYNC_DEGRADED.equals(e.type())
+                || Event.WellKnownTypes.SYNC_RECOVERED.equals(e.type()));
   }
 
   @Override

@@ -34,6 +34,21 @@ public final class SyncTransitionEvents {
 
   private SyncTransitionEvents() {}
 
+  public static Event health(
+      String peer, boolean recovered, String kind, String error, String host) {
+    var data = new LinkedHashMap<String, Object>();
+    data.put("peer", peer);
+    if (kind != null) data.put("error_kind", kind);
+    if (error != null) data.put("detail", error);
+    return event(
+        Event.SAIL_AGENT,
+        null,
+        recovered ? Event.WellKnownTypes.SYNC_RECOVERED : Event.WellKnownTypes.SYNC_DEGRADED,
+        Event.SAIL_AGENT,
+        host,
+        data);
+  }
+
   public static List<Event> eventsFor(
       SyncTransition transition,
       Function<String, String> projectOfSpec,

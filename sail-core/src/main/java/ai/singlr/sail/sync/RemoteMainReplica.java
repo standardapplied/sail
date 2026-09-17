@@ -78,8 +78,12 @@ public final class RemoteMainReplica implements MainReplica {
       }
       case SyncWire.Rejected rejected ->
           new CommitOutcome.Rejected(rejected.currentRev(), rejected.currentSnapshot());
-      case SyncWire.Failed failed -> throw new SyncTransportException(failed.message());
-      default -> throw new SyncTransportException("Unexpected response to commit: " + response);
+      case SyncWire.Failed failed ->
+          throw new SyncTransportException(
+              failed.kind(), entityType + " " + entityId + ": " + failed.message(), null);
+      default ->
+          throw new SyncTransportException(
+              entityType + " " + entityId + ": Unexpected response to commit: " + response);
     };
   }
 
@@ -87,15 +91,16 @@ public final class RemoteMainReplica implements MainReplica {
     if (fetched == null) {
       var response = Rpc.exchange(in, out, new SyncWire.Fetch(entityType));
       if (response instanceof SyncWire.Failed failed) {
-        throw new SyncTransportException(
-            "Main refused entity type '" + entityType + "': " + failed.message());
+        throw new SyncTransportException(failed.kind(), entityType + ": " + failed.message(), null);
       }
       if (!(response instanceof SyncWire.Fetched f)) {
-        throw new SyncTransportException("Expected a fetch response, got: " + response);
+        throw new SyncTransportException(
+            entityType + ": Expected a fetch response, got: " + response);
       }
       if (!SyncWire.V1_UPGRADE_FLOOR.equals(f.upgradeFloor())) {
         throw new SyncTransportException(
-            "Sync requires Sail "
+            entityType
+                + ": Sync requires Sail "
                 + SyncWire.V1_UPGRADE_FLOOR
                 + " or newer on every box. Run 'sail upgrade' on main, then sync again.");
       }

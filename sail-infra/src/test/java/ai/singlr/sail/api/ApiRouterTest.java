@@ -148,7 +148,7 @@ class ApiRouterTest {
 
     @Override
     public SyncStatus syncStatus() {
-      return new SyncStatus("node", "main@host", null);
+      return SyncStatus.unattempted("node", "main@host");
     }
 
     @Override

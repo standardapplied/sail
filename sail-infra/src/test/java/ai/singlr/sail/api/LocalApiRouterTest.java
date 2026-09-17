@@ -55,12 +55,22 @@ class LocalApiRouterTest {
   }
 
   @Test
-  void agentsCanReadSyncAndConflictsButCannotMutateThem() {
+  void agentsCanReadSyncAndConflictsButCannotTriggerSync() {
     var operations =
         new TestOperations() {
           @Override
           public SyncStatus syncStatus() {
-            return new SyncStatus("node", "main", new SyncEngine.Report(1, 2, 3, 4));
+            return new SyncStatus(
+                "node",
+                "main",
+                new SyncEngine.Report(1, 2, 3, 4),
+                "in_sync",
+                null,
+                null,
+                0,
+                null,
+                null,
+                null);
           }
 
           @Override
@@ -73,7 +83,11 @@ class LocalApiRouterTest {
     assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
     assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
     assertEquals(405, local.handle(form("POST", "/v1/conflicts", "")).status());
-    assertEquals(404, local.handle(form("POST", "/v1/conflicts/spec/resolve", "")).status());
+    assertEquals(400, local.handle(form("POST", "/v1/conflicts/spec/resolve", "")).status());
+    assertEquals(
+        404, local.handle(form("POST", "/v1/conflicts/resolve", "strategy=mine")).status());
+    assertEquals(
+        404, local.handle(form("POST", "/v1/conflicts//resolve", "strategy=mine")).status());
     assertEquals(
         401, local.handle(new LocalApiRequest("GET", "/v1/sync", Map.of(), new byte[0])).status());
     assertEquals(

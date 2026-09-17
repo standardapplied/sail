@@ -59,12 +59,24 @@ public final class SyncRpcServer {
   }
 
   public void serve(Reader in, Writer out) throws IOException {
+    serve(in, out, SyncWire.MAX_MESSAGE_CHARS);
+  }
+
+  void serve(Reader in, Writer out, int maxChars) throws IOException {
     upgradeFloorVerified = false;
-    for (var line = SyncWire.readFramed(in); line != null; line = SyncWire.readFramed(in)) {
-      var request = SyncWire.decodeRequest(line);
-      if (request instanceof SyncWire.Bye) {
-        return;
+    var context = "session";
+    while (true) {
+      SyncWire.Request request;
+      try {
+        var line = SyncWire.readFramed(in, maxChars);
+        if (line == null) return;
+        request = SyncWire.decodeRequest(line);
+        context = SyncWire.context(request);
+      } catch (RuntimeException e) {
+        reply(out, new SyncWire.Failed(context + ": " + rootMessage(e), "protocol"));
+        continue;
       }
+      if (request instanceof SyncWire.Bye) return;
       reply(out, respondTo(request));
     }
   }
@@ -77,24 +89,29 @@ public final class SyncRpcServer {
    */
   private SyncWire.Response respondTo(SyncWire.Request request) {
     try {
-      return switch (request) {
-        case SyncWire.Fetch fetch -> {
-          if (!SyncWire.V1_UPGRADE_FLOOR.equals(fetch.upgradeFloor())) {
-            yield incompatiblePeer();
-          }
-          upgradeFloorVerified = true;
-          yield fetched(fetch.entityType());
-        }
-        case SyncWire.FetchFdes ignored ->
-            upgradeFloorVerified ? new SyncWire.Fdes(fdeRoster.entries()) : incompatiblePeer();
-        case SyncWire.Commit commit -> upgradeFloorVerified ? onCommit(commit) : incompatiblePeer();
-        case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session loop");
-      };
+      var response =
+          switch (request) {
+            case SyncWire.Fetch fetch -> {
+              if (!SyncWire.V1_UPGRADE_FLOOR.equals(fetch.upgradeFloor())) {
+                yield incompatiblePeer();
+              }
+              upgradeFloorVerified = true;
+              yield fetched(fetch.entityType());
+            }
+            case SyncWire.FetchFdes ignored ->
+                upgradeFloorVerified ? new SyncWire.Fdes(fdeRoster.entries()) : incompatiblePeer();
+            case SyncWire.Commit commit ->
+                upgradeFloorVerified ? onCommit(commit) : incompatiblePeer();
+            case SyncWire.Bye ignored ->
+                throw new IllegalStateException("Bye ends the session loop");
+          };
+      return response instanceof SyncWire.Failed failure
+          ? new SyncWire.Failed(
+              SyncWire.context(request) + ": " + failure.message(), failure.kind())
+          : response;
     } catch (RuntimeException e) {
-      System.err.println("  [sync] request failed, returning Failed to client: " + e);
-      return new SyncWire.Failed(
-          "Main could not apply the request and made no change; retry the sync. Cause: "
-              + rootMessage(e));
+      System.err.println("  [sync] " + SyncWire.context(request) + ": " + rootMessage(e));
+      return new SyncWire.Failed(SyncWire.context(request) + ": " + rootMessage(e), "store");
     }
   }
 

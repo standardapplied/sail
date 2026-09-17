@@ -57,6 +57,28 @@ public final class YamlUtil {
     return result instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
   }
 
+  /** Parses one bounded protocol object with the same character ceiling as its frame. */
+  @SuppressWarnings("unchecked")
+  public static Map<String, Object> parseJsonLine(String text, int maxChars) {
+    if (maxChars <= 0) {
+      throw new IllegalArgumentException("maxChars must be positive");
+    }
+    if (text == null || text.length() > maxChars) {
+      throw new IllegalArgumentException("message exceeded " + maxChars + " characters");
+    }
+    try {
+      var settings =
+          LoadSettings.builder().setCodePointLimit(maxChars).setAllowDuplicateKeys(false).build();
+      var value = new Load(settings).loadFromString(text);
+      if (!(value instanceof Map<?, ?> map)) {
+        throw new IllegalArgumentException("Expected a JSON object");
+      }
+      return (Map<String, Object>) map;
+    } catch (org.snakeyaml.engine.v2.exceptions.YamlEngineException e) {
+      throw new IllegalArgumentException("Malformed message: " + e.getMessage(), e);
+    }
+  }
+
   /** Parse a YAML file into a Map. */
   public static Map<String, Object> parseFile(Path path) throws IOException {
     try (var in = Files.newInputStream(path)) {

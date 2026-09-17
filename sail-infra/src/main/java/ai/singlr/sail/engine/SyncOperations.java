@@ -9,7 +9,6 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
-import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
@@ -23,9 +22,11 @@ import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,7 +62,6 @@ public final class SyncOperations {
   private final Supplier<SyncConfig> configuration;
   private final Channels channels;
   private SailEventPublisher publisher;
-  private volatile SyncEngine.Report lastReport;
 
   public SyncOperations(
       Sqlite db,
@@ -76,9 +76,8 @@ public final class SyncOperations {
     this.channels = channels;
   }
 
-  public SyncStatus status() {
-    var config = configuration.get();
-    return new SyncStatus(config.role(), config.main(), lastReport);
+  public SyncConfig configuration() {
+    return configuration.get();
   }
 
   public void prepare() {
@@ -91,9 +90,7 @@ public final class SyncOperations {
     if (target.target() == null) {
       return new SyncReport(new SyncEngine.Report(0, 0, 0, 0), target.message());
     }
-    prepare();
     var round = SyncPeer.withChecked("main", () -> reconcileSession(target.target(), config));
-    lastReport = round.report();
     notify(round);
     return new SyncReport(round.report(), null);
   }
@@ -111,10 +108,19 @@ public final class SyncOperations {
       var reports = new LinkedHashMap<String, SyncEngine.Report>();
       var knownMessages = messages.syncEntityIds();
       for (var entity : SyncedEntities.all()) {
-        reports.put(
-            entity.type(),
-            new SyncEngine()
-                .reconcile(replicas.get(entity.type()), session.replica(entity.type())));
+        try {
+          reports.put(
+              entity.type(),
+              new SyncEngine()
+                  .reconcile(replicas.get(entity.type()), session.replica(entity.type())));
+        } catch (SyncTransportException e) {
+          throw e;
+        } catch (RuntimeException e) {
+          throw new SyncTransportException(
+              e instanceof UncheckedIOException ? "unreachable" : "store",
+              entity.type() + ": " + e.getMessage(),
+              e);
+        }
       }
       var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
       var rejected = applyFdes(new FdeStore(db), session.fetchFdes());

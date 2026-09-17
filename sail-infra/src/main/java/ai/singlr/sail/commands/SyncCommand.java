@@ -6,9 +6,11 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SyncRequest;
+import ai.singlr.sail.api.SyncViews;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -21,8 +23,10 @@ import ai.singlr.sail.sync.SyncEngine;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -46,8 +50,48 @@ import picocli.CommandLine.Option;
 @Command(
     name = "sync",
     description = "Reconcile this box's specs with the main devbox.",
-    mixinStandardHelpOptions = true)
+    mixinStandardHelpOptions = true,
+    subcommands = SyncCommand.Status.class)
 public final class SyncCommand implements Callable<Integer> {
+
+  @Command(
+      name = "status",
+      description = "Show this node's stored sync health.",
+      mixinStandardHelpOptions = true)
+  static final class Status implements Callable<Integer> {
+    @Option(names = "--json", description = "Output sync health as JSON.")
+    private boolean json;
+
+    private final Supplier<HostOperations> operations;
+
+    Status() {
+      this(OperationsFactory::open);
+    }
+
+    Status(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
+
+    @Override
+    public Integer call() throws Exception {
+      try (var ops = operations.get()) {
+        var status = SyncViews.status(ops.syncStatus());
+        System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status));
+      }
+      return 0;
+    }
+  }
+
+  static String renderStatus(Map<String, Object> status) {
+    var main = status.get("main");
+    return switch (Objects.toString(status.get("state"), "")) {
+      case "syncing" -> "Syncing with " + main;
+      case "stale" -> "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
+      case "in_sync" -> "In sync with " + main;
+      default ->
+          main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
+    };
+  }
 
   @Option(
       names = "--main",
@@ -86,7 +130,6 @@ public final class SyncCommand implements Callable<Integer> {
     }
     var target = resolution.target();
     try (var operations = OperationsFactory.open()) {
-      operations.schema().prepareSync();
       return watch ? watchLoop(operations, target) : runOnce(operations, target);
     } catch (RuntimeException e) {
       System.err.println(Banner.errorLine(reason(e), Ansi.AUTO));

@@ -37,11 +37,16 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.SyncHealth;
+import ai.singlr.sail.sync.SyncTransportException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +64,7 @@ public final class SailOperations implements HostOperations {
 
   private Sqlite controlPlane;
   private SyncOperations syncOperations;
+  private Clock syncClock = Clock.systemUTC();
   private Path projectsDir;
   private Runnable closeAction = () -> {};
   private HostCatalog catalog;
@@ -124,13 +130,87 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public SyncReport sync(SyncRequest request) throws Exception {
-    return syncOperations.sync(request);
+  public synchronized SyncReport sync(SyncRequest request) throws Exception {
+    var config = syncOperations.configuration();
+    var target = SyncOperations.resolveMain(request.main(), config).target();
+    if (target == null) return syncOperations.sync(request);
+    var health = new SyncHealth(controlPlane);
+    var attemptedAt = syncClock.instant();
+    SyncReport round;
+    try {
+      syncOperations.prepare();
+      health.begin(target, attemptedAt);
+      round = syncOperations.sync(request);
+    } catch (Exception e) {
+      var kind =
+          e instanceof SyncTransportException transport
+              ? transport.kind()
+              : e instanceof IOException || e instanceof UncheckedIOException
+                  ? "unreachable"
+                  : "store";
+      var error = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
+      try {
+        if (health.find(target).isEmpty()) health.begin(target, attemptedAt);
+        if (health.failed(target, syncClock.instant(), kind, error) == 1) {
+          publishSyncTransition(target, false, kind, error);
+        }
+      } catch (RuntimeException recordingFailure) {
+        e.addSuppressed(recordingFailure);
+      }
+      throw e;
+    }
+    if (health.succeeded(target, syncClock.instant(), round.report())) {
+      publishSyncTransition(target, true, null, null);
+    }
+    return round;
+  }
+
+  SailOperations useSyncClock(Clock clock) {
+    this.syncClock = Objects.requireNonNull(clock, "clock");
+    return this;
+  }
+
+  private void publishSyncTransition(String peer, boolean recovered, String kind, String error) {
+    var config = syncOperations.configuration();
+    var host = Objects.toString(config.handle(), HostInfo.hostname());
+    var event = SyncTransitionEvents.health(peer, recovered, kind, error, host);
+    if (eventBus != null) {
+      publishOnBus(event);
+    } else {
+      new EventStore(controlPlane)
+          .insert(
+              new EventStore.EventRow(
+                  0,
+                  event.ts().toString(),
+                  event.type(),
+                  event.project(),
+                  null,
+                  event.agent(),
+                  event.host(),
+                  YamlUtil.dumpJson(event.data())));
+    }
   }
 
   @Override
   public SyncStatus syncStatus() {
-    return syncOperations.status();
+    var config = syncOperations.configuration();
+    var health =
+        new SchemaManager(controlPlane).currentVersion() < SchemaManager.SYNC_HEALTH_VERSION
+            ? null
+            : new SyncHealth(controlPlane).find(config.main()).orElse(null);
+    return health == null
+        ? SyncStatus.unattempted(config.role(), config.main())
+        : new SyncStatus(
+            config.role(),
+            config.main(),
+            health.lastReport(),
+            health.state(),
+            health.lastAttemptAt(),
+            health.lastSuccessAt(),
+            health.consecutiveFailures(),
+            health.lastErrorKind(),
+            health.lastError(),
+            health.staleSince());
   }
 
   @Override
@@ -145,7 +225,21 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
-    return new ConflictOperations(controlPlane).resolve(id, resolution);
+    return resolveConflict(
+        id, resolution, Actor.cliOperator(syncOperations.configuration().handle()));
+  }
+
+  @Override
+  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor) {
+    var owner = syncOperations.configuration().handle();
+    if (!actor.isAdmin()
+        && !(actor.canWrite() && Strings.isNotBlank(owner) && actor.actsFor(owner))) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN, "Only this node's owner or an admin can resolve its conflicts.");
+    }
+    var resolved = new ConflictOperations(controlPlane).resolve(id, resolution);
+    triggerSyncAfterWrite();
+    return resolved;
   }
 
   @Override
@@ -285,6 +379,7 @@ public final class SailOperations implements HostOperations {
 
   public SailOperations useSyncScheduler(SyncScheduler scheduler) {
     this.syncScheduler = Objects.requireNonNull(scheduler, "scheduler");
+    if (controlPlane != null) scheduler.useHealth(this::syncStatus);
     return this;
   }
 

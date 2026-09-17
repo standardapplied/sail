@@ -30,6 +30,84 @@ import org.junit.jupiter.api.io.TempDir;
 class SyncCommandTest {
 
   @Test
+  void syncStatusReadsThisBoxesStoredHealthInProcess(@TempDir Path home) throws Exception {
+    try (var db = ai.singlr.sail.store.Sqlite.open(home.resolve("sail.db"))) {
+      new ai.singlr.sail.store.SchemaManager(db).migrate();
+      var config = new ai.singlr.sail.config.SyncConfig("node", "sail@main", "node");
+      var operations =
+          ai.singlr.sail.api.OperationsFactory.create(
+                  db,
+                  new ai.singlr.sail.engine.ShellExecutor(true),
+                  "sail.yaml",
+                  null,
+                  null,
+                  ai.singlr.sail.api.SyncScheduler.disabled(),
+                  ai.singlr.sail.api.SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  home,
+                  new ai.singlr.sail.engine.SyncOperations(
+                      db,
+                      "node",
+                      home,
+                      () -> config,
+                      target -> {
+                        throw new java.io.IOException("main unavailable");
+                      }));
+      java.util.function.Supplier<SyncCommand.Status> status =
+          () -> new SyncCommand.Status(() -> operations);
+      assertEquals(
+          Map.of("role", "node", "main", "sail@main", "consecutive_failures", 0),
+          nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
+          "nothing attempted yet: no state, no timestamps");
+
+      var health = new ai.singlr.sail.store.SyncHealth(db);
+      health.begin("sail@main", java.time.Instant.parse("2026-09-14T00:00:00Z"));
+      health.failed(
+          "sail@main",
+          java.time.Instant.parse("2026-09-14T00:00:00Z"),
+          "protocol",
+          "message: page exceeded 4 MiB");
+      var stale = nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
+      assertEquals("stale", stale.get("state"));
+      assertEquals("protocol", stale.get("last_error_kind"));
+      assertEquals(1, stale.get("consecutive_failures"));
+      assertEquals(
+          "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
+          SyncCommand.renderStatus(stale));
+    }
+    assertEquals(
+        "Syncing with main", SyncCommand.renderStatus(Map.of("state", "syncing", "main", "main")));
+    assertEquals(
+        "In sync with main", SyncCommand.renderStatus(Map.of("state", "in_sync", "main", "main")));
+    assertEquals("No sync round yet with main", SyncCommand.renderStatus(Map.of("main", "main")));
+    assertEquals("Not a node: nothing to sync with.", SyncCommand.renderStatus(Map.of()));
+  }
+
+  private static Map<String, Object> capture(Runnable command) {
+    var output = new java.io.ByteArrayOutputStream();
+    var original = System.out;
+    try (var stream =
+        new java.io.PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)) {
+      System.setOut(stream);
+      command.run();
+    } finally {
+      System.setOut(original);
+    }
+    return ai.singlr.sail.config.YamlUtil.parseMap(
+        output.toString(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
+  private static Map<String, Object> nonNull(Map<String, Object> map) {
+    var kept = new java.util.LinkedHashMap<String, Object>();
+    map.forEach(
+        (k, v) -> {
+          if (v != null) kept.put(k, v);
+        });
+    return kept;
+  }
+
+  @Test
   void resolveMainPrefersTheExplicitFlag() {
     var resolved =
         SyncCommand.resolveMain(

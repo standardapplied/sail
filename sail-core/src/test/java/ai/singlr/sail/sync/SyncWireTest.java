@@ -32,6 +32,20 @@ class SyncWireTest {
   }
 
   @Test
+  void aFrameLargerThanTheLibraryDefaultParsesOnBothEnds() {
+    var content = "x".repeat(4 * 1024 * 1024);
+    var request = new SyncWire.Commit("message", "m1", java.util.Map.of("body", content), null);
+    assertEquals(request, SyncWire.decodeRequest(SyncWire.encode(request)));
+    var response =
+        new SyncWire.Fetched(
+            "main",
+            1,
+            java.util.Map.of(
+                "m1", new SyncWire.Snapshot("1-main", java.util.Map.of("body", content))));
+    assertEquals(response, SyncWire.decodeResponse(SyncWire.encode(response)));
+  }
+
+  @Test
   void fetchRequestRoundTripsWithItsEntityType() {
     var line = SyncWire.encode(new SyncWire.Fetch("file"));
     assertEquals(new SyncWire.Fetch("file"), SyncWire.decodeRequest(line));

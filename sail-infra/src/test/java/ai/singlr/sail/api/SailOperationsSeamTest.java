@@ -55,6 +55,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -93,6 +95,466 @@ class SailOperationsSeamTest {
                 target -> {
                   throw new IOException("main unavailable");
                 }));
+  }
+
+  @Test
+  void healthIsStoredAcrossOperationsInstancesAndVisibleWhileARoundRuns() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var offline = new java.util.concurrent.atomic.AtomicBoolean(true);
+      var clock = new BackoffTest.TestClock();
+      operations.useSyncClock(clock);
+      var sync =
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node"),
+              target -> {
+                assertEquals("syncing", operations.syncStatus().state());
+                if (offline.get()) {
+                  clock.advance(Duration.ofSeconds(10));
+                  throw new IOException("connection refused");
+                }
+                return channel(main);
+              });
+      operations.useControlPlane(node.db, tempDir, sync);
+      assertThrows(IOException.class, () -> operations.sync(new SyncRequest(null)));
+      var first = operations.syncStatus();
+      assertEquals("stale", first.state());
+      assertEquals("unreachable", first.lastErrorKind());
+      assertEquals("connection refused", first.lastError());
+      assertEquals(1, first.consecutiveFailures());
+      assertEquals(
+          clock.instant(), first.lastAttemptAt(), "backoff starts after the failure completes");
+      clock.advance(Duration.ofDays(3));
+      assertThrows(IOException.class, () -> operations.sync(new SyncRequest(null)));
+      assertEquals(first.staleSince(), operations.syncStatus().staleSince());
+      assertEquals(2, operations.syncStatus().consecutiveFailures());
+      try (var reopened = operations(node.db)) {
+        reopened.useControlPlane(node.db, tempDir, sync);
+        assertEquals(operations.syncStatus(), reopened.syncStatus());
+      }
+      offline.set(false);
+      operations.sync(new SyncRequest(null));
+      assertEquals("in_sync", operations.syncStatus().state());
+      assertEquals(0, operations.syncStatus().consecutiveFailures());
+      assertNull(operations.syncStatus().lastError());
+      assertEquals(clock.instant(), operations.syncStatus().lastSuccessAt());
+      assertNotNull(operations.syncStatus().lastReport());
+    }
+  }
+
+  @Test
+  void automaticRoundsBackOffExposeStaleThroughHttpAndRecoverOnceWithoutAWrite() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var bus = new EventBus();
+        var operations =
+            OperationsFactory.create(
+                node.db,
+                shell,
+                "sail.yaml",
+                bus,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE);
+        var server = server(operations, node.db)) {
+      var clock = new BackoffTest.TestClock();
+      var nanos = new java.util.concurrent.atomic.AtomicLong();
+      var attempts = new java.util.concurrent.atomic.AtomicInteger();
+      var offline = new java.util.concurrent.atomic.AtomicBoolean(true);
+      var events = new java.util.concurrent.LinkedBlockingQueue<Event>();
+      bus.subscribe(
+          new EventSubscriber() {
+            public String name() {
+              return "health-test";
+            }
+
+            public java.util.function.Predicate<Event> filter() {
+              return e -> e.type().startsWith("sync_");
+            }
+
+            public void onEvent(Event event) {
+              events.add(event);
+            }
+          });
+      operations
+          .useSyncClock(clock)
+          .useControlPlane(
+              node.db,
+              tempDir,
+              new SyncOperations(
+                  node.db,
+                  "node",
+                  tempDir,
+                  () -> new SyncConfig("node", "main", "owner"),
+                  target -> {
+                    attempts.incrementAndGet();
+                    if (offline.get()) throw new IOException("main port blocked");
+                    return channel(main);
+                  }));
+      java.util.function.Consumer<Duration> advance =
+          duration -> {
+            clock.advance(duration);
+            nanos.addAndGet(duration.toNanos());
+          };
+      var scheduler =
+          new SyncScheduler(
+              () -> operations.sync(new SyncRequest(null)),
+              Duration.ZERO,
+              Duration.ofSeconds(15),
+              new DirectExecutorService(),
+              nanos::get,
+              advance::accept,
+              clock::instant);
+      operations.useSyncScheduler(scheduler);
+      var token = credential(node.db, "owner", "member", "token");
+      scheduler.freshenRead();
+      assertEquals(1, attempts.get());
+      var stale = send(server, "GET", "/v1/sync", token, "");
+      assertEquals("stale", YamlUtil.parseMap(stale.body()).get("state"));
+      assertTrue(stale.body().contains("main port blocked"));
+      assertEquals(
+          java.util.Set.of(
+              "schema_version",
+              "role",
+              "main",
+              "state",
+              "last_attempt_at",
+              "consecutive_failures",
+              "last_error_kind",
+              "last_error",
+              "stale_since"),
+          YamlUtil.parseMap(stale.body()).keySet());
+      scheduler.freshenRead();
+      assertEquals(1, attempts.get());
+      for (var count = 2; count <= 5; count++) {
+        advance.accept(Duration.ofSeconds(145));
+        scheduler.tick();
+        assertEquals(count, attempts.get());
+      }
+      advance.accept(Duration.ofMinutes(5));
+      scheduler.freshenRead();
+      assertEquals(5, attempts.get(), "freshen never probes an open circuit");
+      scheduler.tick();
+      scheduler.tick();
+      assertEquals(6, attempts.get(), "half-open probes once");
+      offline.set(false);
+      advance.accept(Duration.ofMinutes(5));
+      scheduler.tick();
+      assertEquals(7, attempts.get());
+      assertEquals(
+          "in_sync",
+          YamlUtil.parseMap(send(server, "GET", "/v1/sync", token, "").body()).get("state"));
+      scheduler.syncNow();
+      assertEquals(
+          Event.WellKnownTypes.SYNC_DEGRADED,
+          events.poll(5, java.util.concurrent.TimeUnit.SECONDS).type());
+      assertEquals(
+          Event.WellKnownTypes.SYNC_RECOVERED,
+          events.poll(5, java.util.concurrent.TimeUnit.SECONDS).type());
+      assertTrue(events.isEmpty());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void preparationFailuresMarkHealthStaleBackOffAndRecover(boolean previouslySynced)
+      throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var clock = new BackoffTest.TestClock();
+      operations
+          .useSyncClock(clock)
+          .useControlPlane(
+              node.db,
+              tempDir,
+              new SyncOperations(
+                  node.db,
+                  "node",
+                  tempDir,
+                  () -> new SyncConfig("node", "main", "node"),
+                  target -> channel(main)));
+      if (previouslySynced) operations.sync(new SyncRequest(null));
+      var lastSuccess = operations.syncStatus().lastSuccessAt();
+      var newerVersion = new SchemaManager(node.db).currentVersion() + 1;
+      node.db.execute(
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
+          newerVersion);
+      clock.advance(Duration.ofMinutes(1));
+      var attempts = new AtomicInteger();
+      try (var scheduler =
+          new SyncScheduler(
+              () -> {
+                attempts.incrementAndGet();
+                operations.sync(new SyncRequest(null));
+              },
+              Duration.ZERO,
+              SyncScheduler.DEFAULT_FRESHEN_TTL,
+              new DirectExecutorService(),
+              () -> TimeUnit.MILLISECONDS.toNanos(clock.millis()),
+              clock::advance,
+              clock::instant)) {
+        operations.useSyncScheduler(scheduler);
+        for (var count = 1; count <= 5; count++) {
+          scheduler.tick();
+          var status = operations.syncStatus();
+          assertEquals("stale", status.state());
+          assertEquals("store", status.lastErrorKind());
+          assertTrue(status.lastError().contains("newer than this Sail binary supports"));
+          assertEquals(lastSuccess, status.lastSuccessAt());
+          assertEquals(clock.instant(), status.lastAttemptAt());
+          assertEquals(count, status.consecutiveFailures());
+          scheduler.tick();
+          assertEquals(count, attempts.get());
+          var minimumDelay = Duration.ofSeconds(count == 5 ? 300 : 12L << (count - 1));
+          clock.advance(minimumDelay.minusSeconds(1));
+          scheduler.tick();
+          assertEquals(count, attempts.get(), "retries must wait beyond the freshness window");
+          clock.advance(Duration.ofSeconds(145));
+        }
+        assertEquals(
+            List.of(Event.WellKnownTypes.SYNC_DEGRADED),
+            new EventStore(node.db).recent(10).stream().map(EventStore.EventRow::type).toList());
+        node.db.execute("DELETE FROM schema_version WHERE version = ?", newerVersion);
+        scheduler.freshenRead();
+        assertEquals(5, attempts.get(), "freshen must not probe the open circuit");
+        scheduler.tick();
+        assertEquals(6, attempts.get());
+        assertEquals("in_sync", operations.syncStatus().state());
+        assertEquals(0, operations.syncStatus().consecutiveFailures());
+        assertEquals(
+            List.of(Event.WellKnownTypes.SYNC_RECOVERED, Event.WellKnownTypes.SYNC_DEGRADED),
+            new EventStore(node.db).recent(10).stream().map(EventStore.EventRow::type).toList());
+      }
+    }
+  }
+
+  @Test
+  void anUnavailableHealthStoreDoesNotMaskThePreparationFailure() {
+    try (var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      node.db.execute("UPDATE schema_version SET version = version + 1");
+      node.db.execute("DROP TABLE sync_health");
+
+      var failure =
+          assertThrows(IllegalStateException.class, () -> operations.sync(new SyncRequest("main")));
+
+      assertTrue(failure.getMessage().contains("newer than this Sail binary supports"));
+      assertEquals(1, failure.getSuppressed().length);
+      assertTrue(failure.getSuppressed()[0].getMessage().contains("sync_health"));
+    }
+  }
+
+  @Test
+  void aFreshDatabaseIsPreparedBeforeRecordingHealth() throws Exception {
+    try (var main = new SyncBox("main");
+        var db = Sqlite.openMemory();
+        var operations = operations(db)) {
+      operations.useControlPlane(
+          db,
+          tempDir,
+          new SyncOperations(
+              db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node"),
+              target -> channel(main)));
+
+      operations.sync(new SyncRequest(null));
+
+      assertEquals("in_sync", operations.syncStatus().state());
+      assertNotNull(operations.syncStatus().lastSuccessAt());
+      assertEquals(0, operations.syncStatus().consecutiveFailures());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"refused", "protocol", "store"})
+  void healthKeepsTheFailureKindAndEntityContext(String kind) {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db)) {
+      operations.useControlPlane(
+          box.db,
+          tempDir,
+          new SyncOperations(
+              box.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node"),
+              target -> {
+                throw new ai.singlr.sail.sync.SyncTransportException(
+                    kind, "message m1: failure cause", null);
+              }));
+      assertThrows(
+          ai.singlr.sail.sync.SyncTransportException.class,
+          () -> operations.sync(new SyncRequest(null)));
+      assertEquals(kind, operations.syncStatus().lastErrorKind());
+      assertEquals("message m1: failure cause", operations.syncStatus().lastError());
+    }
+  }
+
+  @Test
+  void lifecycleAndMessageConflictsResolveThroughTheOperationsRegistry() {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db)) {
+      var runs = new RunStore(box.db);
+      var run = DateTimeUtils.newId().toString();
+      runs.create(
+          run, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null, "/log",
+          "unit");
+      var review = new ReviewStore(box.db).createReview("auth", 1);
+      new RoomStore(box.db)
+          .create(
+              new RoomStore.RoomRow(
+                  "room", "proj", "Room", "node", "on", "[]", "node", null, null, "node"));
+      var message =
+          new ai.singlr.sail.store.MessageStore(box.db).append("room", "node", "local", null).id();
+      for (var entry : Map.of("run", run, "review", review, "message", message).entrySet()) {
+        var store = SyncedEntities.require(entry.getKey()).store(box.db);
+        var local = store.comparableSnapshot(entry.getValue());
+        var remote = new LinkedHashMap<>(local);
+        var field = entry.getKey().equals("message") ? "body" : "status";
+        var value = entry.getKey().equals("message") ? "remote" : "failed";
+        remote.put(field, value);
+        box.conflicts.record(
+            entry.getKey(),
+            entry.getValue(),
+            null,
+            YamlUtil.dumpJson(local),
+            YamlUtil.dumpJson(remote),
+            List.of(field));
+        operations.resolveConflict(
+            entry.getValue(), new Resolution(Resolution.Strategy.THEIRS, null));
+        assertEquals(value, store.comparableSnapshot(entry.getValue()).get(field));
+      }
+      assertTrue(operations.conflicts().isEmpty());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"owner,member,200", "other,member,403", "other,admin,200", "owner,viewer,403"})
+  void localBoxCredentialsUseTheSameConflictOwnerPolicy(String handle, String role, int expected) {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db);
+        var bus = new EventBus()) {
+      operations.useControlPlane(
+          box.db,
+          tempDir,
+          new SyncOperations(
+              box.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "owner"),
+              target -> {
+                throw new IOException("unused");
+              }));
+      new FdeStore(box.db).add(handle, null, null, role);
+      var token = new ai.singlr.sail.store.BoxCredentialStore(box.db).replace(handle);
+      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
+      box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
+      var response =
+          new LocalApiRouter(bus, operations)
+              .handle(
+                  new LocalApiRequest(
+                      "POST",
+                      "/v1/conflicts/auth/resolve",
+                      Map.of(),
+                      Map.of("authorization", "Bearer " + token),
+                      "strategy=mine".getBytes(StandardCharsets.UTF_8)));
+      assertEquals(expected, response.status(), response.body().toString());
+      assertEquals(expected == 200, box.conflicts.pending().isEmpty());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"uday,sailrun_test,200", "other,sailrun_test,403", "uday,sailroom_test,403"})
+  void localRunCredentialsResolveOnlyForTheirOwnerAndWriteLane(
+      String nodeOwner, String credential, int expected) {
+    try (var box = new SyncBox("node");
+        var operations = operations(box.db);
+        var bus = new EventBus()) {
+      operations.useControlPlane(
+          box.db,
+          tempDir,
+          new SyncOperations(
+              box.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", nodeOwner),
+              target -> {
+                throw new IOException("unused");
+              }));
+      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
+      box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
+      var lane =
+          new TestOperations() {
+            @Override
+            public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(
+                String id, Resolution resolution, Actor actor) {
+              return operations.resolveConflict(id, resolution, actor);
+            }
+          };
+      var response =
+          new LocalApiRouter(bus, lane)
+              .handle(
+                  new LocalApiRequest(
+                      "POST",
+                      "/v1/conflicts/auth/resolve",
+                      Map.of(),
+                      Map.of(
+                          "authorization",
+                          "Bearer " + credential,
+                          "content-type",
+                          "application/json"),
+                      "{\"strategy\":\"mine\"}".getBytes(StandardCharsets.UTF_8)));
+      assertEquals(expected, response.status(), response.body().toString());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"owner,member,200", "other,member,403", "other,admin,200", "owner,viewer,403"})
+  void conflictResolutionBelongsToTheBoxOwnerOrAnAdminInBothWebCredentialLanes(
+      String handle, String role, int expected) throws Exception {
+    for (var lane : List.of("token", "session")) {
+      try (var box = new SyncBox("node");
+          var operations = operations(box.db);
+          var server = server(operations, box.db)) {
+        operations.useControlPlane(
+            box.db,
+            tempDir,
+            new SyncOperations(
+                box.db,
+                "node",
+                tempDir,
+                () -> new SyncConfig("node", "main", "owner"),
+                target -> {
+                  throw new IOException("unused");
+                }));
+        box.specs.create(SyncBox.spec("auth", "local", "pending"));
+        var local = box.specs.comparableSnapshot("auth");
+        var remote = new LinkedHashMap<>(local);
+        remote.put("title", "remote");
+        box.conflicts.record(
+            "spec",
+            "auth",
+            null,
+            YamlUtil.dumpJson(local),
+            YamlUtil.dumpJson(remote),
+            List.of("title"));
+        var token = credential(box.db, handle, role, lane);
+        var result =
+            send(server, "POST", "/v1/conflicts/auth/resolve", token, "{\"strategy\":\"theirs\"}");
+        assertEquals(expected, result.statusCode(), result.body());
+        assertEquals(
+            expected == 200 ? "remote" : "local", box.specs.findById("auth").orElseThrow().title());
+      }
+    }
   }
 
   @ParameterizedTest

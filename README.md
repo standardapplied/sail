@@ -61,6 +61,7 @@ Join a node:
 sudo sail init --main <main-ip>   # provision, install sail-api, generate this box's sync
                                   # key, and print the fde add line to run on main
 sail sync                         # pull specs, projects, and shared files from main
+sail sync status --json           # stored health, last success, and any failure reason
 ```
 
 On a Mac or other thin client, run `sail client <host>` to point your local CLI at a box.

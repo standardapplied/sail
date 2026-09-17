@@ -11,7 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-final class SyncViews {
+public final class SyncViews {
   private SyncViews() {}
 
   static Map<String, Object> report(SyncEngine.Report report) {
@@ -32,10 +32,17 @@ final class SyncViews {
     return map;
   }
 
-  static Map<String, Object> status(SyncStatus status) {
+  public static Map<String, Object> status(SyncStatus status) {
     var map = new LinkedHashMap<String, Object>();
     map.put("role", status.role());
     map.put("main", status.main());
+    map.put("state", status.state());
+    map.put("last_attempt_at", status.lastAttemptAt());
+    map.put("last_success_at", status.lastSuccessAt());
+    map.put("consecutive_failures", status.consecutiveFailures());
+    map.put("last_error_kind", status.lastErrorKind());
+    map.put("last_error", status.lastError());
+    map.put("stale_since", status.staleSince());
     map.put("last_report", status.lastReport() == null ? null : report(status.lastReport()));
     return map;
   }

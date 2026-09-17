@@ -26,6 +26,9 @@ final class SlackMessage {
    */
   static String forEvent(Event event, SpecStore.SpecRow spec) {
     return switch (event.type()) {
+      case Event.WellKnownTypes.SYNC_DEGRADED ->
+          "Sync on " + event.host() + " is stale: " + detailOr(event, "sync failed") + ".";
+      case Event.WellKnownTypes.SYNC_RECOVERED -> "Sync on " + event.host() + " recovered.";
       case Event.WellKnownTypes.SPEC_DISPATCHED -> root(event, spec, "dispatched");
       case Event.WellKnownTypes.SPEC_RESTARTED -> root(event, spec, "re-dispatched");
       case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> stopped(event);

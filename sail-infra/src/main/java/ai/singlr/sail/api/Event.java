@@ -62,6 +62,8 @@ public record Event(
    * releases; subscribers ignore types they do not recognize.
    */
   public static final class WellKnownTypes {
+    public static final String SYNC_DEGRADED = "sync_degraded";
+    public static final String SYNC_RECOVERED = "sync_recovered";
     public static final String SPEC_DISPATCHED = "spec_dispatched";
     public static final String SPEC_RESTARTED = "spec_restarted";
     public static final String SPEC_STATUS_CHANGED = "spec_status_changed";

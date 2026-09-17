@@ -53,7 +53,21 @@ public final class SshSyncChannel implements SyncOperations.Channel {
     var command =
         new ArrayList<>(
             List.of(
-                "ssh", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no"));
+                "ssh",
+                "-o",
+                "PasswordAuthentication=no",
+                "-o",
+                "KbdInteractiveAuthentication=no",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ConnectionAttempts=1",
+                "-o",
+                "ServerAliveInterval=10",
+                "-o",
+                "ServerAliveCountMax=2"));
     if (identity != null) {
       command.add("-o");
       command.add("IdentitiesOnly=yes");

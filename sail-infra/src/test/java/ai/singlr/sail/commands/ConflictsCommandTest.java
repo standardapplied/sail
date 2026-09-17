@@ -223,6 +223,11 @@ class ConflictsCommandTest {
     assertInstanceOf(SpecStore.class, ConflictsCommand.resolverFor(db, "spec"));
     assertInstanceOf(ProjectStore.class, ConflictsCommand.resolverFor(db, "project"));
     assertInstanceOf(RoomStore.class, ConflictsCommand.resolverFor(db, "room"));
+    assertInstanceOf(ai.singlr.sail.store.RunStore.class, ConflictsCommand.resolverFor(db, "run"));
+    assertInstanceOf(
+        ai.singlr.sail.store.ReviewStore.class, ConflictsCommand.resolverFor(db, "review"));
+    assertInstanceOf(
+        ai.singlr.sail.store.MessageStore.class, ConflictsCommand.resolverFor(db, "message"));
   }
 
   @Test

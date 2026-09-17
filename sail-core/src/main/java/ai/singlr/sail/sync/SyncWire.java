@@ -78,6 +78,9 @@ public final class SyncWire {
         return message.toString();
       }
       if (message.length() >= maxChars) {
+        while (c != -1 && c != '\n') {
+          c = in.read();
+        }
         throw new SyncTransportException("Sync message exceeded " + maxChars + " characters.");
       }
       message.append((char) c);
@@ -135,7 +138,20 @@ public final class SyncWire {
       implements Response {}
 
   /** Main refused a request — e.g. a read-only FDE attempting to push. */
-  public record Failed(String message) implements Response {}
+  public record Failed(String message, String kind) implements Response {
+    public Failed(String message) {
+      this(message, "refused");
+    }
+  }
+
+  public static String context(Request request) {
+    return switch (request) {
+      case Fetch fetch -> String.valueOf(fetch.entityType());
+      case Commit commit -> commit.entityType() + " " + commit.entityId();
+      case FetchFdes ignored -> "fde";
+      case Bye ignored -> "session";
+    };
+  }
 
   public static String encode(Request request) {
     var map = new LinkedHashMap<String, Object>();
@@ -186,14 +202,17 @@ public final class SyncWire {
         map.put(REV, rejected.currentRev());
         map.put(SNAPSHOT, rejected.currentSnapshot());
       }
-      case Failed failed -> map.put(ERROR, failed.message());
+      case Failed failed -> {
+        map.put(ERROR, failed.message());
+        map.put("error_kind", failed.kind());
+      }
       case Fdes roster -> map.put(FDES, roster.fdes());
     }
     return YamlUtil.dumpJson(map);
   }
 
   public static Request decodeRequest(String line) {
-    var map = YamlUtil.parseMap(line);
+    var map = YamlUtil.parseJsonLine(line, MAX_MESSAGE_CHARS);
     var op = string(map, OP);
     return switch (op) {
       case OP_FETCH -> new Fetch(string(map, ENTITY_TYPE), string(map, UPGRADE_FLOOR));
@@ -210,9 +229,11 @@ public final class SyncWire {
   }
 
   public static Response decodeResponse(String line) {
-    var map = YamlUtil.parseMap(line);
+    var map = YamlUtil.parseJsonLine(line, MAX_MESSAGE_CHARS);
     if (map.containsKey(ERROR)) {
-      return new Failed(string(map, ERROR));
+      return new Failed(
+          string(map, ERROR),
+          map.containsKey("error_kind") ? string(map, "error_kind") : "refused");
     }
     if (map.containsKey(STALE)) {
       return new Rejected(string(map, REV), snapshot(map, SNAPSHOT));
