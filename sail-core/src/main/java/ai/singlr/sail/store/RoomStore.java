@@ -165,7 +165,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    */
   public RoomRow ensureFor(
       String id, String project, String title, String assignee, String wake, String actor) {
-    return db.immediateTransaction(
+    return db.transaction(
         () ->
             findById(id)
                 .orElseGet(
@@ -188,11 +188,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
 
   /**
    * Composes a check-then-create across the stores sharing this database into one write-locked
-   * transaction (see {@link Sqlite#immediateTransaction}): the spec-id collision check a room
-   * create runs and the insert it guards cannot be split by a spec being born on the same id.
+   * transaction (see {@link Sqlite#transaction}): the spec-id collision check a room create runs
+   * and the insert it guards cannot be split by a spec being born on the same id.
    */
   public <T> T atomically(Supplier<T> work) {
-    return db.immediateTransaction(work);
+    return db.transaction(work);
   }
 
   /** Every room with at least one member — the rooms the engagement sweeper walks. */

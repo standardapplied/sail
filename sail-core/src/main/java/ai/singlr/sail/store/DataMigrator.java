@@ -43,7 +43,7 @@ public final class DataMigrator {
     var runs = new ArrayList<Run>();
     for (var migration : migrations) {
       runs.add(
-          db.immediateTransaction(
+          db.transaction(
               () -> {
                 if (isApplied(migration.name())) {
                   return new Run(migration.name(), true, DataMigration.Report.empty());

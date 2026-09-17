@@ -179,18 +179,17 @@ public final class Sqlite implements AutoCloseable {
         });
   }
 
-  public <T> T transaction(Supplier<T> work) {
-    return transaction("BEGIN", work);
-  }
-
   /**
-   * Runs {@code work} under {@code BEGIN IMMEDIATE}, taking the write lock at the start of the
-   * transaction instead of on first write. A compare-and-set that reads then writes needs this:
-   * deferred {@code BEGIN} lets two writers both read the same revision before either writes, so
-   * the second's write fails on the now-stale snapshot rather than seeing the first and rejecting
-   * cleanly. Taking the lock up front serializes them, closing that read-then-write window.
+   * Runs {@code work} as a write transaction: {@code BEGIN IMMEDIATE}, the write lock taken at the
+   * start rather than on the first write. Every transaction in this codebase reads and then writes,
+   * and a node's database is shared by several processes (the server, the pty host, a CLI). Under a
+   * deferred {@code BEGIN} a commit from any of them between the read and the write leaves this
+   * connection unable to upgrade its snapshot, and the work fails with "database is locked" instead
+   * of waiting its turn. Declaring the write up front makes the other writer the one that waits,
+   * within the busy timeout, and a compare-and-set sees the first writer's result instead of a
+   * stale snapshot. Readers are never blocked: WAL serves them the last commit.
    */
-  public <T> T immediateTransaction(Supplier<T> work) {
+  public <T> T transaction(Supplier<T> work) {
     return transaction("BEGIN IMMEDIATE", work);
   }
 

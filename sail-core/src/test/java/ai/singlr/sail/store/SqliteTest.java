@@ -103,6 +103,34 @@ class SqliteTest {
   }
 
   @Test
+  void aTransactionHoldsTheWriteLockBeforeItsFirstRead(@TempDir Path dir) {
+    // A second process committing between a transaction's read and its write must wait for it,
+    // never invalidate it: with the lock taken up front the other writer is the one refused.
+    try (var db = Sqlite.open(dir.resolve("shared.db"));
+        var other = Sqlite.open(dir.resolve("shared.db"))) {
+      db.execute("CREATE TABLE counter (n INTEGER NOT NULL)");
+      db.execute("INSERT INTO counter (n) VALUES (0)");
+      other.execute("PRAGMA busy_timeout = 0");
+      var refused = new java.util.concurrent.atomic.AtomicBoolean();
+      db.transaction(
+          () -> {
+            var seen = db.queryOne("SELECT n FROM counter", row -> row.integer(0)).orElseThrow();
+            try {
+              other.execute("UPDATE counter SET n = n + 10");
+            } catch (SqliteException busy) {
+              refused.set(true);
+            }
+            db.execute("UPDATE counter SET n = ?", seen + 1);
+            return null;
+          });
+      assertTrue(refused.get(), "the other writer found the lock already taken");
+      assertEquals(1L, db.queryOne("SELECT n FROM counter", row -> row.integer(0)).orElseThrow());
+      other.execute("UPDATE counter SET n = n + 10");
+      assertEquals(11L, db.queryOne("SELECT n FROM counter", row -> row.integer(0)).orElseThrow());
+    }
+  }
+
+  @Test
   void transactionRollbackOnException() {
     db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
 
@@ -127,7 +155,7 @@ class SqliteTest {
         () -> {
           db.execute("INSERT INTO t VALUES (?)", 1);
           db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2));
-          db.immediateTransaction(
+          db.transaction(
               () -> {
                 db.execute("INSERT INTO t VALUES (?)", 3);
                 return null;
@@ -145,7 +173,7 @@ class SqliteTest {
     assertThrows(
         RuntimeException.class,
         () ->
-            db.immediateTransaction(
+            db.transaction(
                 () -> {
                   db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 1));
                   throw new RuntimeException("boom");
@@ -291,7 +319,7 @@ class SqliteTest {
                 () -> {
                   start.await();
                   for (var i = 0; i < iterations; i++) {
-                    db.immediateTransaction(
+                    db.transaction(
                         () -> {
                           var n =
                               db.queryOne(
