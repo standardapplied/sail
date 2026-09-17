@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +18,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayOutputStream;
@@ -168,10 +168,9 @@ class SyncCliTest {
     db.execute("DROP TABLE sync_health");
     db.execute("UPDATE schema_version SET version = 193");
     assertEquals(193, operations.schema().version());
-    assertTrue(
-        assertThrows(SqliteException.class, operations::syncStatus)
-            .getMessage()
-            .contains("no such table: sync_health"));
+    assertNull(
+        operations.syncStatus().state(),
+        "a database from before health reports nothing attempted, not a missing table");
 
     if ("upgrade-agent-stop".equals(scenario)) {
       Files.writeString(
@@ -192,7 +191,7 @@ class SyncCliTest {
       }
     }
 
-    assertEquals(194, operations.schema().version());
+    assertEquals(SchemaManager.SYNC_HEALTH_VERSION, operations.schema().version());
     var status = operations.syncStatus();
     assertEquals("stale", status.state());
     assertEquals(1, status.consecutiveFailures());

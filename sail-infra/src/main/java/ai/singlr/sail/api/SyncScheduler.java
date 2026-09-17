@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -50,6 +51,13 @@ public final class SyncScheduler implements AutoCloseable {
   public static final Duration DEFAULT_DEBOUNCE = Duration.ofSeconds(2);
   public static final Duration DEFAULT_FRESHEN_TTL = Duration.ofSeconds(15);
 
+  /**
+   * How often an idle node (no reads, no writes) still checks in with main: often enough that a
+   * stale node shows within a minute, seldom enough that a fleet of idle nodes is not a load on
+   * main — the read-driven freshen window is a tolerance, not a poll.
+   */
+  public static final Duration IDLE_POLL = Duration.ofMinutes(1);
+
   private final boolean enabled;
   private final Reconcile reconcile;
   private final Duration debounce;
@@ -60,6 +68,7 @@ public final class SyncScheduler implements AutoCloseable {
   private final Supplier<Instant> now;
   private final Backoff backoff;
   private Supplier<SyncStatus> health;
+  private AutoCloseable healthSource = () -> {};
   private ScheduledExecutorService timer;
   private int failures;
 
@@ -139,12 +148,24 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
+  /** As {@link #useHealth(Supplier)}, owning {@code source}: it closes when the scheduler does. */
+  public void useHealth(Supplier<SyncStatus> health, AutoCloseable source) {
+    synchronized (freshenLock) {
+      this.health = health;
+      this.healthSource = Objects.requireNonNull(source, "source");
+    }
+  }
+
+  /** The timer's beat: a due half-open probe, else an idle node's once-a-minute check-in. */
   void tick() {
     if (!enabled) return;
     synchronized (freshenLock) {
       refreshBackoff();
-      if (backoff.probeDue()) runRound();
-      else freshenRead();
+      if (backoff.probeDue()) {
+        runRound();
+      } else if (!attemptedWithin(IDLE_POLL) && backoff.ready(false)) {
+        runRound();
+      }
     }
   }
 
@@ -217,16 +238,26 @@ public final class SyncScheduler implements AutoCloseable {
     if (executor != null) {
       executor.close();
     }
+    try {
+      healthSource.close();
+    } catch (Exception e) {
+      throw new IllegalStateException("Closing the sync health source failed", e);
+    }
   }
 
   private boolean withinFreshenTtl() {
+    return attemptedWithin(freshenTtl);
+  }
+
+  /** Whether a round was attempted within {@code window}; a round still marked in flight counts. */
+  private boolean attemptedWithin(Duration window) {
     if (health != null) {
       var status = health.get();
-      var ttl = "syncing".equals(status.state()) ? Backoff.HALF_OPEN_DELAY : freshenTtl;
+      var ttl = "syncing".equals(status.state()) ? Backoff.HALF_OPEN_DELAY : window;
       return status.lastAttemptAt() != null && now.get().isBefore(status.lastAttemptAt().plus(ttl));
     }
     synchronized (state) {
-      return attempted && nanoTime.getAsLong() - attemptedAtNanos < freshenTtl.toNanos();
+      return attempted && nanoTime.getAsLong() - attemptedAtNanos < window.toNanos();
     }
   }
 

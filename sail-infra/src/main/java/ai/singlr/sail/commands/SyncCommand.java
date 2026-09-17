@@ -6,10 +6,11 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.SyncRequest;
+import ai.singlr.sail.api.SyncViews;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -25,9 +26,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
 /**
@@ -58,16 +59,23 @@ public final class SyncCommand implements Callable<Integer> {
       description = "Show this node's stored sync health.",
       mixinStandardHelpOptions = true)
   static final class Status implements Callable<Integer> {
-    @Mixin private ConnectionOptions connection;
-
     @Option(names = "--json", description = "Output sync health as JSON.")
     private boolean json;
 
+    private final Supplier<HostOperations> operations;
+
+    Status() {
+      this(OperationsFactory::open);
+    }
+
+    Status(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
+
     @Override
     public Integer call() throws Exception {
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var status = client.get("/v1/sync");
+      try (var ops = operations.get()) {
+        var status = SyncViews.status(ops.syncStatus());
         System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status));
       }
       return 0;
@@ -75,11 +83,13 @@ public final class SyncCommand implements Callable<Integer> {
   }
 
   static String renderStatus(Map<String, Object> status) {
-    var state = Objects.toString(status.get("state"), "in_sync");
-    return switch (state) {
-      case "syncing" -> "Syncing with " + status.get("main");
+    var main = status.get("main");
+    return switch (Objects.toString(status.get("state"), "")) {
+      case "syncing" -> "Syncing with " + main;
       case "stale" -> "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
-      default -> "In sync" + (status.get("main") == null ? "" : " with " + status.get("main"));
+      case "in_sync" -> "In sync with " + main;
+      default ->
+          main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
     };
   }
 

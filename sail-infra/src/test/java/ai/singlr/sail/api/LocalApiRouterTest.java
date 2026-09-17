@@ -60,7 +60,17 @@ class LocalApiRouterTest {
         new TestOperations() {
           @Override
           public SyncStatus syncStatus() {
-            return new SyncStatus("node", "main", new SyncEngine.Report(1, 2, 3, 4));
+            return new SyncStatus(
+                "node",
+                "main",
+                new SyncEngine.Report(1, 2, 3, 4),
+                "in_sync",
+                null,
+                null,
+                0,
+                null,
+                null,
+                null);
           }
 
           @Override

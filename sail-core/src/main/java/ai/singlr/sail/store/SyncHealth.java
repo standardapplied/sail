@@ -13,9 +13,16 @@ import java.util.Optional;
 /** The local, durable outcome of rounds against each configured peer. */
 public final class SyncHealth {
   private final Sqlite db;
+  private final Runnable betweenReadAndWrite;
 
   public SyncHealth(Sqlite db) {
+    this(db, () -> {});
+  }
+
+  /** Test seam: runs between a transition's read and its write, where a concurrent commit lands. */
+  SyncHealth(Sqlite db, Runnable betweenReadAndWrite) {
     this.db = db;
+    this.betweenReadAndWrite = betweenReadAndWrite;
   }
 
   public record Health(
@@ -58,10 +65,16 @@ public final class SyncHealth {
         at.toString());
   }
 
+  /**
+   * Both transitions read the row and then write it, so they take the write lock up front: a
+   * deferred transaction that another connection commits under cannot upgrade to a writer, and a
+   * finished round would be recorded as still syncing.
+   */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return db.transaction(
+    return db.immediateTransaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
+          betweenReadAndWrite.run();
           db.execute(
               """
         UPDATE sync_health SET last_attempt_at = ?, last_success_at = ?, consecutive_failures = 0,
@@ -85,7 +98,7 @@ public final class SyncHealth {
   }
 
   public int failed(String peer, Instant at, String kind, String error) {
-    return db.transaction(
+    return db.immediateTransaction(
         () -> {
           db.execute(
               """

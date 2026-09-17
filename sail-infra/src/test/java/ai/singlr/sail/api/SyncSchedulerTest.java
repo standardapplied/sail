@@ -63,7 +63,7 @@ class SyncSchedulerTest {
     scheduler.useHealth(status::get);
     scheduler.tick();
     assertEquals(0, rounds.get());
-    advanceBy(TTL);
+    advanceBy(SyncScheduler.IDLE_POLL);
     scheduler.tick();
     assertEquals(1, rounds.get());
     status.set(
@@ -72,7 +72,7 @@ class SyncSchedulerTest {
             "main",
             null,
             "syncing",
-            java.time.Instant.EPOCH.plusSeconds(15),
+            java.time.Instant.EPOCH.plus(SyncScheduler.IDLE_POLL),
             java.time.Instant.EPOCH,
             0,
             null,
@@ -88,15 +88,18 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void theTimerChecksFreshnessOnAnIdleNode() {
+  void theTimerChecksInOnAnIdleNodeOnceAMinuteNotEveryReadWindow() {
     var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
     scheduler.tick();
-    assertEquals(1, rounds.get());
+    assertEquals(1, rounds.get(), "a node that never synced checks in at once");
     scheduler.tick();
     assertEquals(1, rounds.get());
     advanceBy(TTL);
     scheduler.tick();
-    assertEquals(2, rounds.get());
+    assertEquals(1, rounds.get(), "the read window is a tolerance, not a poll");
+    advanceBy(SyncScheduler.IDLE_POLL.minus(TTL));
+    scheduler.tick();
+    assertEquals(2, rounds.get(), "idle for a minute: check in");
     SyncScheduler.disabled().tick();
   }
 
@@ -144,7 +147,7 @@ class SyncSchedulerTest {
             }
             throw new IllegalStateException("health store temporarily unavailable");
           }
-          return new SyncStatus("node", "main", null);
+          return SyncStatus.unattempted("node", "main");
         });
 
     scheduler.afterWrite();
@@ -187,7 +190,7 @@ class SyncSchedulerTest {
     scheduler.afterWrite();
     executor.runAll();
     assertEquals(1, rounds.get());
-    current.set(new SyncStatus("node", "main", null));
+    current.set(SyncStatus.unattempted("node", "main"));
     advanceBy(TTL);
     scheduler.freshenRead();
     assertEquals(2, rounds.get());
@@ -394,6 +397,24 @@ class SyncSchedulerTest {
     scheduler.syncNow();
 
     assertEquals(2, rounds.get());
+  }
+
+  @Test
+  void anOwnedHealthSourceClosesWithTheSchedulerAndItsFailureIsLoud() {
+    var closed = new java.util.concurrent.atomic.AtomicBoolean();
+    var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"), () -> closed.set(true));
+    scheduler.close();
+    assertTrue(closed.get(), "the source the scheduler owns closes with it");
+
+    var broken = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    broken.useHealth(
+        () -> SyncStatus.unattempted("node", "main"),
+        () -> {
+          throw new java.io.IOException("store already gone");
+        });
+    var failure = assertThrows(IllegalStateException.class, broken::close);
+    assertEquals("store already gone", failure.getCause().getMessage());
   }
 
   @Test

@@ -471,6 +471,18 @@ public final class SchemaManager {
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
 
+  /** The version that introduced {@code sync_health}; a database below it has no health to read. */
+  public static final int SYNC_HEALTH_VERSION = versionIntroducing("CREATE TABLE sync_health");
+
+  private static int versionIntroducing(String statementPrefix) {
+    for (var i = 0; i < MIGRATIONS.size(); i++) {
+      if (MIGRATIONS.get(i).strip().startsWith(statementPrefix)) {
+        return V1_VERSION + i + 1;
+      }
+    }
+    throw new IllegalStateException("No migration introduces " + statementPrefix);
+  }
+
   private static final String SCHEMA_VERSION_TABLE =
       """
       CREATE TABLE IF NOT EXISTS schema_version (

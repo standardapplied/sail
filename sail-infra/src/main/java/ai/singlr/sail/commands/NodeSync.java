@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.Banner;
@@ -40,15 +39,8 @@ final class NodeSync {
   static SyncScheduler scheduler(SyncConfig sync, boolean noSync, Map<String, String> env) {
     var scheduler = scheduler(sync, noSync, env, NodeSync::syncOnce);
     if (shouldSync(sync, noSync)) {
-      scheduler.useHealth(
-          () -> {
-            try (var operations = OperationsFactory.open()) {
-              if (operations.schema().version() < 194) {
-                return new SyncStatus(sync.role(), sync.main(), null);
-              }
-              return operations.syncStatus();
-            }
-          });
+      var operations = OperationsFactory.open();
+      scheduler.useHealth(operations::syncStatus, operations);
     }
     return scheduler;
   }

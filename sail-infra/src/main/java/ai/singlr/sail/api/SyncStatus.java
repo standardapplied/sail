@@ -18,17 +18,8 @@ public record SyncStatus(
     String lastErrorKind,
     String lastError,
     Instant staleSince) {
-  public SyncStatus(String role, String main, SyncEngine.Report lastReport) {
-    this(
-        role,
-        main,
-        lastReport,
-        main == null ? "in_sync" : "syncing",
-        null,
-        null,
-        0,
-        null,
-        null,
-        null);
+  /** A node that has never completed a round, or a box with no main: nothing to report yet. */
+  public static SyncStatus unattempted(String role, String main) {
+    return new SyncStatus(role, main, null, null, null, null, 0, null, null, null);
   }
 }
