@@ -82,7 +82,19 @@ public final class SyncScheduler implements AutoCloseable {
         Thread::sleep,
         Instant::now);
     timer = Executors.newSingleThreadScheduledExecutor();
-    timer.scheduleWithFixedDelay(this::tick, 1, 1, TimeUnit.SECONDS);
+    timer.scheduleWithFixedDelay(
+        () -> {
+          try {
+            tick();
+          } catch (RuntimeException e) {
+            System.getLogger(SyncScheduler.class.getName())
+                .log(
+                    System.Logger.Level.WARNING, "Sync timer failed; retrying on the next tick", e);
+          }
+        },
+        1,
+        1,
+        TimeUnit.SECONDS);
   }
 
   SyncScheduler(

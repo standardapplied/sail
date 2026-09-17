@@ -9,13 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SyncSchedulerTest {
 
@@ -92,6 +96,35 @@ class SyncSchedulerTest {
     scheduler.tick();
     assertEquals(2, rounds.get());
     SyncScheduler.disabled().tick();
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 5})
+  void automaticProbesResumeAfterATransientHealthReadFailure(int failures) throws Exception {
+    var recovered = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    try (var scheduler = new SyncScheduler(recovered::countDown, DEBOUNCE, TTL)) {
+      scheduler.useHealth(
+          () -> {
+            if (reads.getAndIncrement() == 0) {
+              throw new IllegalStateException("health store temporarily unavailable");
+            }
+            return new SyncStatus(
+                "node",
+                "main",
+                null,
+                failures == 0 ? "in_sync" : "stale",
+                Instant.EPOCH,
+                Instant.EPOCH,
+                failures,
+                null,
+                null,
+                null);
+          });
+
+      assertTrue(recovered.await(5, TimeUnit.SECONDS), "the timer must survive a failed tick");
+      assertTrue(reads.get() >= 2);
+    }
   }
 
   @Test

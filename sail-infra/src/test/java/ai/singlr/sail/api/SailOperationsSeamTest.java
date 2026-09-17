@@ -55,6 +55,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -254,6 +256,119 @@ class SailOperationsSeamTest {
           Event.WellKnownTypes.SYNC_RECOVERED,
           events.poll(5, java.util.concurrent.TimeUnit.SECONDS).type());
       assertTrue(events.isEmpty());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void preparationFailuresMarkHealthStaleBackOffAndRecover(boolean previouslySynced)
+      throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var clock = new BackoffTest.TestClock();
+      operations
+          .useSyncClock(clock)
+          .useControlPlane(
+              node.db,
+              tempDir,
+              new SyncOperations(
+                  node.db,
+                  "node",
+                  tempDir,
+                  () -> new SyncConfig("node", "main", "node"),
+                  target -> channel(main)));
+      if (previouslySynced) operations.sync(new SyncRequest(null));
+      var lastSuccess = operations.syncStatus().lastSuccessAt();
+      var newerVersion = new SchemaManager(node.db).currentVersion() + 1;
+      node.db.execute(
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
+          newerVersion);
+      clock.advance(Duration.ofMinutes(1));
+      var attempts = new AtomicInteger();
+      try (var scheduler =
+          new SyncScheduler(
+              () -> {
+                attempts.incrementAndGet();
+                operations.sync(new SyncRequest(null));
+              },
+              Duration.ZERO,
+              SyncScheduler.DEFAULT_FRESHEN_TTL,
+              new DirectExecutorService(),
+              () -> TimeUnit.MILLISECONDS.toNanos(clock.millis()),
+              clock::advance,
+              clock::instant)) {
+        operations.useSyncScheduler(scheduler);
+        for (var count = 1; count <= 5; count++) {
+          scheduler.tick();
+          var status = operations.syncStatus();
+          assertEquals("stale", status.state());
+          assertEquals("store", status.lastErrorKind());
+          assertTrue(status.lastError().contains("newer than this Sail binary supports"));
+          assertEquals(lastSuccess, status.lastSuccessAt());
+          assertEquals(clock.instant(), status.lastAttemptAt());
+          assertEquals(count, status.consecutiveFailures());
+          scheduler.tick();
+          assertEquals(count, attempts.get());
+          var minimumDelay = Duration.ofSeconds(count == 5 ? 300 : 12L << (count - 1));
+          clock.advance(minimumDelay.minusSeconds(1));
+          scheduler.tick();
+          assertEquals(count, attempts.get(), "retries must wait beyond the freshness window");
+          clock.advance(Duration.ofSeconds(145));
+        }
+        assertEquals(
+            List.of(Event.WellKnownTypes.SYNC_DEGRADED),
+            new EventStore(node.db).recent(10).stream().map(EventStore.EventRow::type).toList());
+        node.db.execute("DELETE FROM schema_version WHERE version = ?", newerVersion);
+        scheduler.freshenRead();
+        assertEquals(5, attempts.get(), "freshen must not probe the open circuit");
+        scheduler.tick();
+        assertEquals(6, attempts.get());
+        assertEquals("in_sync", operations.syncStatus().state());
+        assertEquals(0, operations.syncStatus().consecutiveFailures());
+        assertEquals(
+            List.of(Event.WellKnownTypes.SYNC_RECOVERED, Event.WellKnownTypes.SYNC_DEGRADED),
+            new EventStore(node.db).recent(10).stream().map(EventStore.EventRow::type).toList());
+      }
+    }
+  }
+
+  @Test
+  void anUnavailableHealthStoreDoesNotMaskThePreparationFailure() {
+    try (var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      node.db.execute("UPDATE schema_version SET version = version + 1");
+      node.db.execute("DROP TABLE sync_health");
+
+      var failure =
+          assertThrows(IllegalStateException.class, () -> operations.sync(new SyncRequest("main")));
+
+      assertTrue(failure.getMessage().contains("newer than this Sail binary supports"));
+      assertEquals(1, failure.getSuppressed().length);
+      assertTrue(failure.getSuppressed()[0].getMessage().contains("sync_health"));
+    }
+  }
+
+  @Test
+  void aFreshDatabaseIsPreparedBeforeRecordingHealth() throws Exception {
+    try (var main = new SyncBox("main");
+        var db = Sqlite.openMemory();
+        var operations = operations(db)) {
+      operations.useControlPlane(
+          db,
+          tempDir,
+          new SyncOperations(
+              db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node"),
+              target -> channel(main)));
+
+      operations.sync(new SyncRequest(null));
+
+      assertEquals("in_sync", operations.syncStatus().state());
+      assertNotNull(operations.syncStatus().lastSuccessAt());
+      assertEquals(0, operations.syncStatus().consecutiveFailures());
     }
   }
 

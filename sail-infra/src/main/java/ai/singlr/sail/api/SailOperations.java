@@ -133,12 +133,12 @@ public final class SailOperations implements HostOperations {
     var config = syncOperations.configuration();
     var target = SyncOperations.resolveMain(request.main(), config).target();
     if (target == null) return syncOperations.sync(request);
-    syncOperations.prepare();
     var health = new SyncHealth(controlPlane);
     var attemptedAt = syncClock.instant();
-    health.begin(target, attemptedAt);
     SyncReport round;
     try {
+      syncOperations.prepare();
+      health.begin(target, attemptedAt);
       round = syncOperations.sync(request);
     } catch (Exception e) {
       var kind =
@@ -148,8 +148,13 @@ public final class SailOperations implements HostOperations {
                   ? "unreachable"
                   : "store";
       var error = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
-      if (health.failed(target, syncClock.instant(), kind, error) == 1) {
-        publishSyncTransition(target, false, kind, error);
+      try {
+        if (health.find(target).isEmpty()) health.begin(target, attemptedAt);
+        if (health.failed(target, syncClock.instant(), kind, error) == 1) {
+          publishSyncTransition(target, false, kind, error);
+        }
+      } catch (RuntimeException recordingFailure) {
+        e.addSuppressed(recordingFailure);
       }
       throw e;
     }
