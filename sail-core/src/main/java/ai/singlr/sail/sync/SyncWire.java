@@ -69,10 +69,8 @@ public final class SyncWire {
   private static final String MAX_SEQ = "maxSeq";
   private static final String RESULTS = "results";
   private static final String ACCEPTED = "accepted";
-  private static final String REJECTED = "rejected";
+  private static final String STALE = "stale";
   private static final String REFUSED = "refused";
-  private static final String CURRENT_REV = "currentRev";
-  private static final String CURRENT_SNAPSHOT = "currentSnapshot";
   private static final String REASON = "reason";
   private static final String PROTOCOL_KEY = "protocol";
   private static final String VERSION = "version";
@@ -185,16 +183,20 @@ public final class SyncWire {
       implements Response {}
 
   /** Main's verdict on one pushed offer. */
-  public sealed interface Result permits Accepted, Rejected, Refused {
+  public sealed interface Result permits Accepted, Stale, Refused {
     String id();
   }
 
   /** Main minted {@code rev} for the offer. */
   public record Accepted(String id, String rev) implements Result {}
 
-  /** Main moved since the node fetched; its present state, left untouched. */
-  public record Rejected(String id, String currentRev, Map<String, Object> currentSnapshot)
-      implements Result {}
+  /**
+   * Main moved since the node fetched, or the offer is not the node's to make; the offer was left
+   * untouched. Main's present state is deliberately not carried here: a batch of results must fit
+   * one frame no matter how large the concurrent versions are, so the node fetches them through the
+   * bounded {@link Need} path instead.
+   */
+  public record Stale(String id) implements Result {}
 
   /** Main would not take the offer at all — a read-only role, an unattributable run. */
   public record Refused(String id, String reason) implements Result {}
@@ -433,12 +435,7 @@ public final class SyncWire {
     map.put(ID, result.id());
     switch (result) {
       case Accepted accepted -> map.put(ACCEPTED, Map.of(REV, accepted.rev()));
-      case Rejected rejected -> {
-        var state = new LinkedHashMap<String, Object>();
-        state.put(CURRENT_REV, rejected.currentRev());
-        state.put(CURRENT_SNAPSHOT, rejected.currentSnapshot());
-        map.put(REJECTED, state);
-      }
+      case Stale _ -> map.put(STALE, true);
       case Refused refused -> map.put(REFUSED, Map.of(REASON, refused.reason()));
     }
     return map;
@@ -450,9 +447,8 @@ public final class SyncWire {
     if (accepted != null) {
       return new Accepted(id, string(accepted, REV));
     }
-    var rejected = snapshot(map, REJECTED);
-    if (rejected != null) {
-      return new Rejected(id, string(rejected, CURRENT_REV), snapshot(rejected, CURRENT_SNAPSHOT));
+    if (Boolean.TRUE.equals(map.get(STALE))) {
+      return new Stale(id);
     }
     var refused = snapshot(map, REFUSED);
     if (refused != null) {

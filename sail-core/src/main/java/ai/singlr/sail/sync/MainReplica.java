@@ -33,6 +33,18 @@ public interface MainReplica {
   /** Main's latest revision for an entity (including a tombstone); {@code null} if unknown. */
   String currentRev(String id);
 
+  /** One entity's current state and its revision, read together. */
+  record State(Map<String, Object> snapshot, String rev) {}
+
+  /**
+   * Samples {@link #current} and {@link #currentRev} as one atomic read. A writer landing between
+   * two separate reads would pair an old snapshot with the newer rev; a node handed that pair
+   * merges against stale content yet offers the fresh rev as its expectation, and the CAS lets it
+   * overwrite the concurrent change. A store-backed main reads both inside one transaction; a
+   * cached view answers from the one entry it holds.
+   */
+  State state(String id);
+
   /**
    * Compare-and-set push of an authoritative state ({@code null} = delete). Accepts and mints a new
    * rev only if {@code expectedRev} still matches main's current rev for the entity (a brand-new

@@ -178,6 +178,23 @@ class SyncSessionTest {
   }
 
   @Test
+  void aPageThatAdvancesNothingYetIsNotDoneIsAProtocolFailureNotALoop() {
+    var stuck =
+        WELCOME
+            + SyncWire.encode(new SyncWire.Tips(Map.of("spec", 5L)))
+            + "\n"
+            + SyncWire.encode(new SyncWire.Page(List.of(), 0, false, 5))
+            + "\n";
+    try (var node = new SyncBox("node");
+        var session = open(stuck, new StringWriter(), new ArrayList<>())) {
+      var failure =
+          assertThrows(SyncTransportException.class, () -> session.reconcile("spec", node.replica));
+      assertEquals("protocol", failure.kind());
+      assertTrue(failure.getMessage().contains("seq 0"), failure.getMessage());
+    }
+  }
+
+  @Test
   void aTypeMainDoesNotServeIsRefusedNamingIt() {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");

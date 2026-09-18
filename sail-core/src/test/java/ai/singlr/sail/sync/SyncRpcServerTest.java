@@ -53,6 +53,11 @@ class SyncRpcServerTest {
     }
 
     @Override
+    public State state(String entityId) {
+      return new State(current(entityId), currentRev(entityId));
+    }
+
+    @Override
     public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
       return new CommitOutcome.Accepted("1-x");
     }
@@ -619,37 +624,104 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aForeignOrUnstampedRunIsRejectedWithMainsVersionNotFailed() throws Exception {
+  void aForeignOrUnstampedRunIsStaleNotFailed() throws Exception {
     assertInstanceOf(
-        SyncWire.Rejected.class,
+        SyncWire.Stale.class,
         serveRun("ada", null, new MainReplica.Offer("r1", Map.of("node", "grace"), null)),
-        "an un-owned run push is rejected, not failed, so one bad run cannot abort the whole sync");
-    var overwrite =
-        assertInstanceOf(
-            SyncWire.Rejected.class,
-            serveRun(
-                "ada",
-                Map.of("node", "grace"),
-                new MainReplica.Offer("r1", Map.of("node", "ada"), "1-x")));
-    assertEquals("1-x", overwrite.currentRev());
-    assertEquals(
-        "grace",
-        overwrite.currentSnapshot().get("node"),
-        "the node is handed main's authoritative version to adopt, converging instead of clobbering");
-    assertEquals(
-        "grace",
-        assertInstanceOf(
-                SyncWire.Rejected.class,
-                serveRun("ada", Map.of("node", "grace"), new MainReplica.Offer("r1", null, "1-x")))
-            .currentSnapshot()
-            .get("node"));
+        "an un-owned run push is stale, not failed, so one bad run cannot abort the whole sync");
     assertInstanceOf(
-        SyncWire.Rejected.class,
+        SyncWire.Stale.class,
+        serveRun(
+            "ada",
+            Map.of("node", "grace"),
+            new MainReplica.Offer("r1", Map.of("node", "ada"), "1-x")),
+        "the node then fetches main's authoritative version to adopt, converging instead of"
+            + " clobbering");
+    assertInstanceOf(
+        SyncWire.Stale.class,
+        serveRun("ada", Map.of("node", "grace"), new MainReplica.Offer("r1", null, "1-x")));
+    assertInstanceOf(
+        SyncWire.Stale.class,
         serveRun("ada", null, "2-x", new MainReplica.Offer("r1", Map.of("node", "ada"), "2-x")),
-        "recreating a tombstoned run id is rejected so the node adopts the deletion");
+        "recreating a tombstoned run id is stale so the node adopts the deletion");
     assertInstanceOf(
-        SyncWire.Rejected.class,
+        SyncWire.Stale.class,
         serveRun("ada", null, new MainReplica.Offer("r1", Map.of("status", "running"), null)));
+  }
+
+  @Test
+  void aPageEntryIsOneAtomicReadOfSnapshotAndRev() throws Exception {
+    var torn =
+        new FakeMain() {
+          private int reads;
+
+          @Override
+          public Set<String> entityIds() {
+            return Set.of("auth");
+          }
+
+          @Override
+          public Map<String, Object> current(String entityId) {
+            reads++;
+            return Map.of("status", "pending");
+          }
+
+          @Override
+          public String currentRev(String entityId) {
+            return reads == 0 ? "1-x" : "2-y";
+          }
+
+          @Override
+          public State state(String entityId) {
+            return new State(Map.of("status", "pending"), "1-x");
+          }
+        };
+    var page =
+        assertInstanceOf(
+            SyncWire.Page.class,
+            after(
+                server(torn, "spec", new SyncPrincipal(null, true)),
+                new SyncWire.Need("spec", List.of("auth"))));
+    var entry = page.entries().getFirst();
+    assertEquals("1-x", entry.rev(), "the rev must belong to the snapshot beside it");
+    assertEquals(Map.of("status", "pending"), entry.snapshot());
+  }
+
+  @Test
+  void aBatchOfStaleResultsFitsTheFrameWhateverMainsVersionsWeigh() throws Exception {
+    var huge = Map.<String, Object>of("body", "x".repeat(6 << 20));
+    var moved =
+        new FakeMain() {
+          @Override
+          public Map<String, Object> current(String entityId) {
+            return huge;
+          }
+
+          @Override
+          public String currentRev(String entityId) {
+            return "9-z";
+          }
+
+          @Override
+          public CommitOutcome commit(
+              String entityId, Map<String, Object> snapshot, String expectedRev) {
+            return new CommitOutcome.Rejected("9-z", huge);
+          }
+        };
+    var response =
+        after(
+            server(moved, "spec", new SyncPrincipal(null, true)),
+            push(
+                "spec",
+                new MainReplica.Offer("a", null, "1-x"),
+                new MainReplica.Offer("b", null, "1-x"),
+                new MainReplica.Offer("c", null, "1-x")));
+    var results = assertInstanceOf(SyncWire.Results.class, response).results();
+    assertEquals(3, results.size());
+    results.forEach(result -> assertInstanceOf(SyncWire.Stale.class, result));
+    assertTrue(
+        SyncWire.encode(response).length() < 1024,
+        "three 6 MiB versions must not ride the results frame");
   }
 
   @Test
@@ -712,7 +784,7 @@ class SyncRpcServerTest {
                 FdeRoster.EMPTY,
                 quiet::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), "1-x")));
-    assertInstanceOf(SyncWire.Rejected.class, only(rejected));
+    assertInstanceOf(SyncWire.Stale.class, only(rejected));
     assertTrue(quiet.isEmpty());
   }
 

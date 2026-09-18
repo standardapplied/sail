@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
@@ -69,6 +70,7 @@ public final class SyncOperations {
   private final Path projectsDir;
   private final Supplier<SyncConfig> configuration;
   private final Channels channels;
+  private final Consumer<Event> events;
   private SailEventPublisher publisher;
 
   public SyncOperations(
@@ -77,11 +79,23 @@ public final class SyncOperations {
       Path projectsDir,
       Supplier<SyncConfig> configuration,
       Channels channels) {
+    this(db, host, projectsDir, configuration, channels, null);
+  }
+
+  /** {@code events} receives every event a round publishes; {@code null} means the local API. */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels,
+      Consumer<Event> events) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
     this.configuration = configuration;
     this.channels = channels;
+    this.events = events == null ? this::publishQuietly : events;
   }
 
   public SyncConfig configuration() {
@@ -99,7 +113,6 @@ public final class SyncOperations {
       return new SyncReport(SyncEngine.Report.NONE, target.message());
     }
     var round = SyncPeer.withChecked("main", () -> reconcileSession(target.target(), config));
-    notify(round);
     return new SyncReport(round.report(), null, round.types());
   }
 
@@ -151,16 +164,18 @@ public final class SyncOperations {
       materialize(files);
       materializeProjects(projects);
       reconcileLiveResources(projects, reportFor(types, "project"));
+      var summed =
+          types.stream()
+              .map(SyncSession.TypeReport::report)
+              .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+      var round = new Round(summed, List.copyOf(types), pulledMessages);
+      notify(round);
       if (!failures.isEmpty()) {
         var first = failures.getFirst();
         failures.stream().skip(1).forEach(first::addSuppressed);
         throw first;
       }
-      var summed =
-          types.stream()
-              .map(SyncSession.TypeReport::report)
-              .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
-      return new Round(summed, List.copyOf(types), pulledMessages);
+      return round;
     }
   }
 
@@ -368,12 +383,17 @@ public final class SyncOperations {
     return value == null ? null : value.toString();
   }
 
+  /**
+   * Publishes what the round committed. Runs before a partial failure is thrown: the pulled
+   * messages are already checkpointed, so a round that never reached this point would leave them
+   * known-but-unannounced forever.
+   */
   private void notify(Round round) {
     for (var event : round.pulledMessages()) {
-      publishQuietly(event);
+      events.accept(event);
     }
     if (shouldNotify(round.report())) {
-      publishQuietly(boardUpdatedEvent(host, round.report()));
+      events.accept(boardUpdatedEvent(host, round.report()));
     }
   }
 

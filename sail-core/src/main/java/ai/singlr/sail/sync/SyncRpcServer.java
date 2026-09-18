@@ -162,7 +162,7 @@ public final class SyncRpcServer {
    * Computes one response, converting any store-side failure into a {@link SyncWire.Failed} the
    * client can read, rather than letting it propagate and drop the session with no reply — the
    * client must always be able to tell a refused offer from a broken connection. The clean {@link
-   * SyncWire.Rejected} staleness path is unaffected; only thrown failures land here.
+   * SyncWire.Stale} staleness path is unaffected; only thrown failures land here.
    */
   private SyncWire.Response respondTo(SyncWire.Request request, int frame) {
     var context = SyncWire.context(request);
@@ -339,8 +339,8 @@ public final class SyncRpcServer {
   }
 
   private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
-    var current = main.current(id);
-    return new SyncWire.Entry(seq, id, main.currentRev(id), current == null, current);
+    var state = main.state(id);
+    return new SyncWire.Entry(seq, id, state.rev(), state.snapshot() == null, state.snapshot());
   }
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {
@@ -374,8 +374,7 @@ public final class SyncRpcServer {
                 + "set the node's sync handle before pushing runs.");
       }
       if (!ownsRun(offer, main)) {
-        return new SyncWire.Rejected(
-            offer.id(), main.currentRev(offer.id()), main.current(offer.id()));
+        return new SyncWire.Stale(offer.id());
       }
     }
     var before = main.current(offer.id());
@@ -388,8 +387,7 @@ public final class SyncRpcServer {
         emitTransitions(type, offer.id(), before, main);
         yield new SyncWire.Accepted(offer.id(), accepted.rev());
       }
-      case CommitOutcome.Rejected rejected ->
-          new SyncWire.Rejected(offer.id(), rejected.currentRev(), rejected.currentSnapshot());
+      case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
     };
   }
 

@@ -219,6 +219,21 @@ class RunSyncTest {
   }
 
   @Test
+  void theOwningBoxKeepsItsProcessBookkeepingAcrossItsOwnPushesAndPulls() {
+    var id = startRun(node, "node");
+    sync(node);
+    node.runs.updateProcess(id, 4242, 99L, 4343);
+    sync(node);
+
+    var owned = node.runs.findById(id).orElseThrow();
+    assertEquals(4242, owned.pid());
+    assertEquals(4343, owned.watcherPid());
+    assertEquals(99L, owned.pidTicks());
+    assertEquals("/home/dev/.sail/runs/" + id + "/agent.log", owned.logPath());
+    assertEquals("running", main.runs.findById(id).orElseThrow().status());
+  }
+
+  @Test
   void theOwningBoxBumpingItsProcessBookkeepingIsNoChangeAndNoConflictAnywhere() {
     var id = startRun(node, "node");
     sync(node);

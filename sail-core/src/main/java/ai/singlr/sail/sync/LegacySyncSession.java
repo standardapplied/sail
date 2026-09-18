@@ -266,6 +266,11 @@ public final class LegacySyncSession implements SyncSession {
     }
 
     @Override
+    public State state(String entityId) {
+      return new State(current(entityId), currentRev(entityId));
+    }
+
+    @Override
     public long maxSeq() {
       return fetched().maxSeq();
     }

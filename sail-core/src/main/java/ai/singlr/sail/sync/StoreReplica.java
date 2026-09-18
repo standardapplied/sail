@@ -104,6 +104,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public MainReplica.State state(String entityId) {
+    return atomically(() -> new MainReplica.State(current(entityId), currentRev(entityId)));
+  }
+
+  @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
     store.adoptForSync(entityId, snapshot, rev);
   }

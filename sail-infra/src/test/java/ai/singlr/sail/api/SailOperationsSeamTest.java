@@ -22,16 +22,20 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncBoxes;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncPrincipal;
@@ -870,6 +874,62 @@ class SailOperationsSeamTest {
   }
 
   @Test
+  void aPartiallyFailedRoundStillAnnouncesTheMessagesItPulledExactlyOnce() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      main.specs.create(SyncBox.spec("auth", "main spec", "pending"));
+      new MessageStore(main.db).append("auth", "raj", "hello from main", null);
+      var replicas =
+          new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", "node"));
+      replicas.remove("file");
+      var events = new ArrayList<Event>();
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node", "node-box"),
+              target ->
+                  channel(
+                      new SyncRpcServer(
+                          replicas,
+                          new SyncPrincipal("node", true),
+                          List::of,
+                          SyncTransitionSink.NONE,
+                          new ChangeLog(main.db)::headsAfter,
+                          new SyncBoxes(main.db)::bind,
+                          SyncWire.UPGRADE_FLOOR)),
+              events::add));
+      operations.schema().prepareSync();
+      java.util.function.Supplier<List<String>> posted =
+          () ->
+              events.stream()
+                  .map(Event::type)
+                  .filter(Event.WellKnownTypes.SPEC_MESSAGE_POSTED::equals)
+                  .toList();
+
+      var failure = assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+      assertTrue(failure.getMessage().contains("file"), failure.getMessage());
+      assertEquals("hello from main", body(node, "auth"));
+      assertEquals(
+          List.of(Event.WellKnownTypes.SPEC_MESSAGE_POSTED),
+          posted.get(),
+          "a message the failed round still pulled is announced");
+
+      events.clear();
+      assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+      assertEquals(List.of(), posted.get(), "the next round never announces it again");
+    }
+  }
+
+  private static String body(SyncBox box, String room) {
+    return new MessageStore(box.db).list(room, null, 10).getFirst().body();
+  }
+
+  @Test
   void standaloneAndMainAreNoOpsAndTransportFailuresRemainFailures() throws Exception {
     try (var db = Sqlite.openMemory();
         var operations = operations(db)) {
@@ -1019,6 +1079,17 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncBox main) throws IOException {
+    return channel(
+        SyncRpcServer.over(
+            main.db,
+            "main",
+            new SyncPrincipal("node", true),
+            List::of,
+            SyncTransitionSink.NONE,
+            SyncWire.UPGRADE_FLOOR));
+  }
+
+  private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {
     var toServer = new PipedWriter();
     var serverIn = new PipedReader(toServer);
     var serverOut = new PipedWriter();
@@ -1030,14 +1101,7 @@ class SailOperationsSeamTest {
                 () -> {
                   try (serverIn;
                       serverOut) {
-                    SyncRpcServer.over(
-                            main.db,
-                            "main",
-                            new SyncPrincipal("node", true),
-                            List::of,
-                            SyncTransitionSink.NONE,
-                            SyncWire.UPGRADE_FLOOR)
-                        .serve(serverIn, serverOut);
+                    server.serve(serverIn, serverOut);
                   } catch (Throwable e) {
                     error.set(e);
                   }

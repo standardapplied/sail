@@ -337,6 +337,7 @@ class SyncTransportTest {
       var round = link.reconcile("spec", nodeA.replica);
       assertEquals(1, round.report().merged());
       assertEquals(2, link.count("push"), "the stale push is rejected and the merge pushed again");
+      assertEquals(1, link.count("need"), "main's version arrives through the bounded need path");
     }
     var merged = main.specs.findById("auth").orElseThrow();
     assertEquals("Title from A", merged.title());

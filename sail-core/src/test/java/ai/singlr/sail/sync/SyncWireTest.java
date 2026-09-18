@@ -61,8 +61,7 @@ class SyncWireTest {
           new SyncWire.Results(
               List.of(
                   new SyncWire.Accepted("auth", "7-feed"),
-                  new SyncWire.Rejected("b", "9-feed", snapshot()),
-                  new SyncWire.Rejected("c", "9-gone", null),
+                  new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "read-only")),
               99),
           new SyncWire.Fdes(

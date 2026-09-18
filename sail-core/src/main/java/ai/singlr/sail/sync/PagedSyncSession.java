@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -116,6 +117,12 @@ public final class PagedSyncSession implements SyncSession {
       SyncWire.Page page;
       do {
         page = page(new SyncWire.Pull(type, since, PAGE_LIMIT), type);
+        if (!page.done() && page.next() <= since) {
+          throw new SyncTransportException(
+              "protocol",
+              type + ": main paged nothing past seq " + since + " yet is not done",
+              null);
+        }
         var ids = ids(page);
         seen.addAll(ids);
         report =
@@ -141,7 +148,26 @@ public final class PagedSyncSession implements SyncSession {
    */
   private SyncEngine.Report reconcileDirty(
       String type, LocalReplica local, List<String> ids, long checkpoint) {
-    var report = SyncEngine.Report.NONE;
+    var reports = new ArrayList<SyncEngine.Report>();
+    need(
+        type,
+        ids,
+        (consumed, entries) ->
+            reports.add(
+                reconcile(
+                    local,
+                    new LinkedHashSet<>(consumed),
+                    new PageView(type, entries, checkpoint))));
+    return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+  }
+
+  /**
+   * Asks main for its rows of {@code ids}, as many per request as the frame admits, continuing from
+   * wherever main stopped consuming, and hands each answer on with the ids it covers — an id main
+   * omitted from its answer is one it has never seen.
+   */
+  private void need(
+      String type, List<String> ids, BiConsumer<List<String>, List<SyncWire.Entry>> onAnswer) {
     var offset = 0;
     while (offset < ids.size()) {
       var asked = askable(ids, offset);
@@ -151,15 +177,9 @@ public final class PagedSyncSession implements SyncSession {
             "protocol", type + ": main consumed none of " + asked.size() + " needed ids", null);
       }
       var consumed = asked.subList(0, (int) Math.min(answer.next(), asked.size()));
-      report =
-          report.plus(
-              reconcile(
-                  local,
-                  new LinkedHashSet<>(consumed),
-                  new PageView(type, answer.entries(), checkpoint)));
+      onAnswer.accept(consumed, answer.entries());
       offset += consumed.size();
     }
-    return report;
   }
 
   private List<String> askable(List<String> ids, int offset) {
@@ -274,6 +294,11 @@ public final class PagedSyncSession implements SyncSession {
     }
 
     @Override
+    public State state(String entityId) {
+      return new State(current(entityId), currentRev(entityId));
+    }
+
+    @Override
     public long maxSeq() {
       return high;
     }
@@ -333,6 +358,20 @@ public final class PagedSyncSession implements SyncSession {
                 + " offers",
             null);
       }
+      var stale = new ArrayList<String>();
+      for (var i = 0; i < batch.size(); i++) {
+        var result = results.results().get(i);
+        if (!Objects.equals(result.id(), batch.get(i).id())) {
+          throw new SyncTransportException(
+              "protocol",
+              type + ": main answered " + result.id() + " for " + batch.get(i).id(),
+              null);
+        }
+        if (result instanceof SyncWire.Stale) {
+          stale.add(result.id());
+        }
+      }
+      refresh(stale);
       var outcomes = new ArrayList<CommitOutcome>(batch.size());
       for (var i = 0; i < batch.size(); i++) {
         outcomes.add(settle(batch.get(i), results.results().get(i)));
@@ -340,11 +379,24 @@ public final class PagedSyncSession implements SyncSession {
       return outcomes;
     }
 
-    private CommitOutcome settle(Offer offer, SyncWire.Result result) {
-      if (!Objects.equals(result.id(), offer.id())) {
-        throw new SyncTransportException(
-            "protocol", type + ": main answered " + result.id() + " for " + offer.id(), null);
+    /**
+     * Replaces the view's entries for the ids main called stale with main's present rows, fetched
+     * through the frame-bounded need path; an id main no longer knows leaves the view.
+     */
+    private void refresh(List<String> ids) {
+      if (ids.isEmpty()) {
+        return;
       }
+      need(
+          type,
+          ids,
+          (consumed, fetched) -> {
+            consumed.forEach(entries::remove);
+            fetched.forEach(entry -> entries.put(entry.id(), entry));
+          });
+    }
+
+    private CommitOutcome settle(Offer offer, SyncWire.Result result) {
       return switch (result) {
         case SyncWire.Accepted accepted -> {
           entries.put(
@@ -353,17 +405,8 @@ public final class PagedSyncSession implements SyncSession {
                   0, offer.id(), accepted.rev(), offer.snapshot() == null, offer.snapshot()));
           yield new CommitOutcome.Accepted(accepted.rev());
         }
-        case SyncWire.Rejected rejected -> {
-          entries.put(
-              offer.id(),
-              new SyncWire.Entry(
-                  0,
-                  offer.id(),
-                  rejected.currentRev(),
-                  rejected.currentSnapshot() == null,
-                  rejected.currentSnapshot()));
-          yield new CommitOutcome.Rejected(rejected.currentRev(), rejected.currentSnapshot());
-        }
+        case SyncWire.Stale _ ->
+            new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));
         case SyncWire.Refused refused ->
             throw new SyncTransportException(
                 "refused", type + " " + offer.id() + ": " + refused.reason(), null);

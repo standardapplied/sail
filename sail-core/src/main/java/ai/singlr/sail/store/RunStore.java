@@ -1373,6 +1373,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return map;
   }
 
+  /**
+   * The executing box's process bookkeeping: only that box can act on it, and it rewrites it while
+   * the run lives. It never crosses the wire, and an adoption never touches the local values.
+   */
+  private static final Set<String> LOCAL_FIELDS =
+      Set.of("pid", "watcher_pid", "pid_ticks", "log_path", "transcript_path");
+
   private static final Set<String> SYNC_FIELDS =
       Set.of(
           "project",
@@ -1398,10 +1405,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /**
    * The subset of a snapshot that carries the run's meaning across boxes. The surrogate id is out
-   * because every replica keys on it independently, and so is the executing box's process
-   * bookkeeping — {@code pid}, {@code watcher_pid}, {@code pid_ticks}, {@code log_path}, {@code
-   * transcript_path} — which only that box can act on and which it rewrites while the run lives:
-   * carrying it would make a liveness bump a spurious change to push, or a conflict to park.
+   * because every replica keys on it independently, and so is {@link #LOCAL_FIELDS}: carrying it
+   * would make a liveness bump a spurious change to push, or a conflict to park.
    */
   private static Map<String, Object> comparable(Map<String, Object> full) {
     if (full == null) {
@@ -1482,8 +1487,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      writeRow(rowFrom(id, snapshot));
-      recordPrincipals(id, snapshot);
+      var applied = new LinkedHashMap<>(snapshot);
+      findById(id)
+          .map(RunStore::snapshotMap)
+          .ifPresent(local -> LOCAL_FIELDS.forEach(field -> applied.put(field, local.get(field))));
+      writeRow(rowFrom(id, applied));
+      recordPrincipals(id, applied);
     }
 
     @Override
