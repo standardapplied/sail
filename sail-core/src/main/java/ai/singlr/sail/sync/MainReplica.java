@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The authoritative (main devbox) side of a sync round, as the {@link SyncEngine} sees it. Narrow
@@ -84,4 +85,13 @@ public interface MainReplica {
 
   /** Main's highest change sequence — the node advances its checkpoint to this after a round. */
   long maxSeq();
+
+  /**
+   * Runs {@code work} against one consistent state of main, so a page reads main as it was at one
+   * instant whatever lands meanwhile. A store-backed main takes a read snapshot that never makes a
+   * writer wait; a cached view already is one.
+   */
+  default <T> T snapshot(Supplier<T> work) {
+    return work.get();
+  }
 }

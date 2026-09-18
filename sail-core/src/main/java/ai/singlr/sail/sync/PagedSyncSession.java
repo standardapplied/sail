@@ -14,7 +14,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -23,12 +22,14 @@ import java.util.function.Consumer;
  * The protocol-4 session: main's change log arrives one bounded page at a time and each page is its
  * own engine round, so a round costs O(what changed) and a node can be seeded from any history
  * size. For one type the session reads {@link SyncWire.Tips} once, pulls pages after the local
- * checkpoint only when main's tip has moved past it, and reconciles each page inside one local
- * transaction — adoptions, conflicts and the checkpoint advance land together or not at all, so a
- * round that dies resumes at the next page with nothing re-adopted. It then asks main for the rows
- * of everything this node changed that no page covered ({@link SyncWire.Need}), so the engine sees
- * main's real state for a local edit rather than guessing, and pushes in batches bounded by the
- * frame.
+ * checkpoint only when main's tip has moved past it, and reconciles each page as its own engine
+ * round. Every adoption is one atomic store operation and the checkpoint advances only after the
+ * page, so a round that dies mid-page re-pulls that page and re-adopts nothing: an entity already
+ * at main's rev converges without a write. No transaction spans the wire — the node's database
+ * stays open to its API and CLI while pages and pushes cross the channel. It then asks main for the
+ * rows of everything this node changed that no page covered ({@link SyncWire.Need}), so the engine
+ * sees main's real state for a local edit rather than guessing, and pushes in batches bounded by
+ * the frame.
  *
  * <p>A page's view of main answers the engine from the page alone; a checkpoint only ever advances
  * to a seq whose entries this node has actually seen, never to main's high-water after its own
@@ -81,8 +82,8 @@ public final class PagedSyncSession implements SyncSession {
     if (welcome.mainId() == null || welcome.mainId().isBlank()) {
       throw new SyncTransportException("hello: welcome names no main box id");
     }
-    var mainVersion = parse(welcome.version());
-    var nodeVersion = parse(hello.version());
+    var mainVersion = SemVer.tryParse(welcome.version());
+    var nodeVersion = SemVer.tryParse(hello.version());
     if (mainVersion.isPresent()
         && nodeVersion.isPresent()
         && mainVersion.get().compareTo(nodeVersion.get()) < 0) {
@@ -94,14 +95,6 @@ public final class PagedSyncSession implements SyncSession {
               + "; upgrade main first, then nodes.");
     }
     return new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
-  }
-
-  private static Optional<SemVer> parse(String version) {
-    try {
-      return Optional.of(SemVer.parse(Objects.requireNonNull(version)));
-    } catch (RuntimeException malformed) {
-      return Optional.empty();
-    }
   }
 
   @Override
@@ -199,7 +192,7 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   private SyncEngine.Report reconcile(LocalReplica local, Set<String> ids, PageView view) {
-    return local.atomically(() -> engine.reconcile(local.scopedTo(ids), view));
+    return engine.reconcile(local.scopedTo(ids), view);
   }
 
   private static Set<String> ids(SyncWire.Page page) {

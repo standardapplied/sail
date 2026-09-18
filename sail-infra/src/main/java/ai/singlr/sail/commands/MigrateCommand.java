@@ -327,19 +327,7 @@ public final class MigrateCommand implements Runnable {
     if (host.sync().role() == null || host.sync().boxId() != null) {
       return Optional.empty();
     }
-    return Optional.of(
-        new HostYaml(
-            host.storageBackend(),
-            host.pool(),
-            host.poolDisk(),
-            host.bridge(),
-            host.baseProfile(),
-            host.image(),
-            host.incusVersion(),
-            host.serverIp(),
-            host.initializedAt(),
-            host.webauthn(),
-            host.sync().withBoxId(boxId)));
+    return Optional.of(host.withSync(host.sync().withBoxId(boxId)));
   }
 
   /**

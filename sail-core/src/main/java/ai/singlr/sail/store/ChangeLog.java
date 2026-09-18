@@ -60,6 +60,11 @@ public final class ChangeLog {
     return db.transaction(work);
   }
 
+  /** Runs {@code work} as one read snapshot of the journal's database; see {@link Sqlite#read}. */
+  public <T> T read(Supplier<T> work) {
+    return db.read(work);
+  }
+
   /**
    * Appends a revision and moves the entity's head to it, as one transaction. {@code snapshot} is
    * the entity's full state as JSON at this revision.
@@ -87,9 +92,10 @@ public final class ChangeLog {
               snapshot,
               SyncPeer.current());
           db.execute(
-              "INSERT INTO change_heads (entity_type, entity_id, seq) VALUES (?, ?,"
-                  + " last_insert_rowid()) ON CONFLICT(entity_type, entity_id) DO UPDATE SET seq ="
-                  + " excluded.seq",
+              """
+              INSERT INTO change_heads (entity_type, entity_id, seq)
+              VALUES (?, ?, last_insert_rowid())
+              ON CONFLICT(entity_type, entity_id) DO UPDATE SET seq = excluded.seq""",
               entityType,
               entityId);
         });
@@ -120,8 +126,10 @@ public final class ChangeLog {
    */
   public List<Head> headsAfter(String entityType, long since, int limit) {
     return db.query(
-        "SELECT seq, entity_id FROM change_heads WHERE entity_type = ? AND seq > ? ORDER BY seq"
-            + " LIMIT ?",
+        """
+        SELECT seq, entity_id FROM change_heads
+        WHERE entity_type = ? AND seq > ?
+        ORDER BY seq LIMIT ?""",
         row -> new Head(row.integer(0), row.text(1)),
         entityType,
         since,
@@ -130,12 +138,15 @@ public final class ChangeLog {
 
   /**
    * Entities of {@code entityType} whose latest entry is a deletion this box decided itself — a
-   * tombstone not adopted from main — and so still has to reach main.
+   * tombstone not adopted from main — and so still has to reach main, in the order they were
+   * decided.
    */
   public Set<String> localTombstones(String entityType) {
     return db
         .query(
-            SELECT_HEAD + " WHERE h.entity_type = ? AND l.deleted = 1 AND l.origin <> 'sync'",
+            SELECT_HEAD
+                + " WHERE h.entity_type = ? AND l.deleted = 1 AND l.origin <> 'sync'"
+                + " ORDER BY l.seq",
             row -> row.text(2),
             entityType)
         .stream()

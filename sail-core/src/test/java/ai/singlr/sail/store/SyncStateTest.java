@@ -62,7 +62,7 @@ class SyncStateTest {
   }
 
   @Test
-  void theMigrationFromOnePeerOnlyRowLeavesEveryRegisteredTypeAtTheOldValue() {
+  void theMigrationStartsEveryTypeFromZeroSoAnOverAdvancedProtocol3CheckpointHidesNothing() {
     try (var staged = Sqlite.open(tempDir.resolve("staged.db"))) {
       FloorSchema.stage(staged);
       staged.execute("PRAGMA foreign_keys = OFF");
@@ -80,9 +80,11 @@ class SyncStateTest {
 
       var migrated = new SyncState(staged);
       for (var entity : SyncedEntities.all()) {
-        assertEquals(314L, migrated.checkpoint("maindevbox", entity.type()), entity.type());
+        assertEquals(0L, migrated.checkpoint("maindevbox", entity.type()), entity.type());
       }
-      assertEquals(0L, migrated.checkpoint("other", "spec"));
+      migrated.advance("maindevbox", "spec", 7);
+      assertEquals(7L, migrated.checkpoint("maindevbox", "spec"));
+      assertEquals(0L, migrated.checkpoint("maindevbox", "run"));
     }
   }
 

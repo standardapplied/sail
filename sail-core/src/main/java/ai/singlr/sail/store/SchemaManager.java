@@ -475,8 +475,10 @@ public final class SchemaManager {
               PRIMARY KEY (entity_type, entity_id)
           )""",
           "CREATE INDEX idx_change_heads_seq ON change_heads(entity_type, seq)",
-          "INSERT INTO change_heads (entity_type, entity_id, seq) SELECT entity_type, entity_id,"
-              + " MAX(seq) FROM change_log GROUP BY entity_type, entity_id",
+          """
+          INSERT INTO change_heads (entity_type, entity_id, seq)
+          SELECT entity_type, entity_id, MAX(seq) FROM change_log
+          GROUP BY entity_type, entity_id""",
           """
           CREATE TABLE sync_state_v2 (
               peer TEXT NOT NULL,
@@ -485,11 +487,6 @@ public final class SchemaManager {
               updated_at TEXT NOT NULL,
               PRIMARY KEY (peer, entity_type)
           )""",
-          "INSERT INTO sync_state_v2 (peer, entity_type, checkpoint, updated_at) SELECT s.peer,"
-              + " t.entity_type, s.checkpoint, s.updated_at FROM sync_state s, (SELECT 'spec' AS"
-              + " entity_type UNION ALL SELECT 'room' UNION ALL SELECT 'file' UNION ALL SELECT"
-              + " 'project' UNION ALL SELECT 'run' UNION ALL SELECT 'review' UNION ALL SELECT"
-              + " 'message') t",
           "DROP TABLE sync_state",
           "ALTER TABLE sync_state_v2 RENAME TO sync_state");
 

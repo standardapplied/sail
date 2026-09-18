@@ -18,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -208,7 +207,7 @@ public final class SyncRpcServer {
               + ": "
               + upgradeRemedy());
     }
-    var nodeFloor = parse(hello.floor());
+    var nodeFloor = SemVer.tryParse(hello.floor());
     if (nodeFloor.isEmpty()) {
       return new SyncWire.Refuse("malformed floor '" + hello.floor() + "': " + upgradeRemedy());
     }
@@ -227,14 +226,6 @@ public final class SyncRpcServer {
     return new SyncWire.Welcome(SyncWire.PROTOCOL, version, mainId());
   }
 
-  private static Optional<SemVer> parse(String version) {
-    try {
-      return Optional.of(SemVer.parse(Objects.requireNonNull(version)));
-    } catch (RuntimeException malformed) {
-      return Optional.empty();
-    }
-  }
-
   private String mainId() {
     return replicas.values().stream().findFirst().map(MainReplica::id).orElse("");
   }
@@ -248,7 +239,8 @@ public final class SyncRpcServer {
   /**
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
-   * next} is the last seq included, so the node checkpoints exactly what it has seen.
+   * next} is the last seq included, so the node checkpoints exactly what it has seen. The whole
+   * page is read as one snapshot of main, so it is internally consistent and no writer waits on it.
    */
   private SyncWire.Response page(SyncWire.Pull pull, int frame) {
     var main = replicas.get(pull.type());
@@ -258,6 +250,10 @@ public final class SyncRpcServer {
     if (pull.limit() <= 0) {
       return new SyncWire.Failed("limit must be positive, not " + pull.limit(), "protocol");
     }
+    return main.snapshot(() -> pageOf(main, pull, frame));
+  }
+
+  private SyncWire.Response pageOf(MainReplica main, SyncWire.Pull pull, int frame) {
     var maxSeq = main.maxSeq();
     var budget = new SyncWire.Frame(frame);
     var entries = new ArrayList<SyncWire.Entry>();
@@ -288,6 +284,10 @@ public final class SyncRpcServer {
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + need.type());
     }
+    return main.snapshot(() -> currentOf(main, need, frame));
+  }
+
+  private static SyncWire.Response currentOf(MainReplica main, SyncWire.Need need, int frame) {
     var budget = new SyncWire.Frame(frame);
     var entries = new ArrayList<SyncWire.Entry>();
     var consumed = 0;

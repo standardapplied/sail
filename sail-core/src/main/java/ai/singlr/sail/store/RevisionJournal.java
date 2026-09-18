@@ -78,15 +78,19 @@ public final class RevisionJournal implements ConflictResolver {
 
   /**
    * Every id with a change of this box's own that main has not acknowledged: a live row whose rev
-   * is not its synced base, plus every entity whose head entry is a locally decided deletion.
+   * is not its synced base, plus every entity whose head entry is a locally decided deletion. In
+   * the order the rows were written, because a round offers them in this order and a child row must
+   * reach main after its parent.
    */
   public Set<String> dirtyIds() {
     var dirty =
         new LinkedHashSet<>(
             db.query(
-                "SELECT id FROM "
-                    + schema.table()
-                    + " WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev",
+                """
+                SELECT id FROM %s
+                WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev
+                ORDER BY rowid"""
+                    .formatted(schema.table()),
                 row -> row.text(0)));
     dirty.addAll(changeLog.localTombstones(schema.entityType()));
     return dirty;

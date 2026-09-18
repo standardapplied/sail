@@ -13,6 +13,7 @@ import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.BoxIdentity;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -71,7 +72,7 @@ public final class SyncServerCommand implements Callable<Integer> {
           System.getenv("SAIL_TOKEN"),
           in,
           out,
-          transitionBridge(mainDb.db(), boxId));
+          transitionBridge(mainDb.db(), HostInfo.hostname()));
     }
   }
 

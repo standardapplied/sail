@@ -459,11 +459,11 @@ public final class HostConfigSetCommand implements Runnable {
                   webauthn.origins(),
                   parseSessionTtlHours(value)));
       case "sync-role" ->
-          withSync(current, new SyncConfig(value, sync.main(), sync.handle(), sync.boxId()));
+          current.withSync(new SyncConfig(value, sync.main(), sync.handle(), sync.boxId()));
       case "sync-main" ->
-          withSync(current, new SyncConfig(sync.role(), value, sync.handle(), sync.boxId()));
+          current.withSync(new SyncConfig(sync.role(), value, sync.handle(), sync.boxId()));
       case "sync-handle" ->
-          withSync(current, new SyncConfig(sync.role(), sync.main(), value, sync.boxId()));
+          current.withSync(new SyncConfig(sync.role(), sync.main(), value, sync.boxId()));
       default -> throw new IllegalArgumentException("Unhandled key: " + key);
     };
   }
@@ -522,20 +522,5 @@ public final class HostConfigSetCommand implements Runnable {
         current.initializedAt(),
         webauthn,
         current.sync());
-  }
-
-  private static HostYaml withSync(HostYaml current, SyncConfig sync) {
-    return new HostYaml(
-        current.storageBackend(),
-        current.pool(),
-        current.poolDisk(),
-        current.bridge(),
-        current.baseProfile(),
-        current.image(),
-        current.incusVersion(),
-        current.serverIp(),
-        current.initializedAt(),
-        current.webauthn(),
-        sync);
   }
 }

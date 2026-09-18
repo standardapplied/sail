@@ -125,6 +125,22 @@ public record HostYaml(
         SyncConfig.fromMap((Map<String, Object>) map.get("sync")));
   }
 
+  /** This host with its sync block replaced and everything else kept. */
+  public HostYaml withSync(SyncConfig sync) {
+    return new HostYaml(
+        storageBackend,
+        pool,
+        poolDisk,
+        bridge,
+        baseProfile,
+        image,
+        incusVersion,
+        serverIp,
+        initializedAt,
+        webauthn,
+        sync);
+  }
+
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("storage_backend", storageBackend);

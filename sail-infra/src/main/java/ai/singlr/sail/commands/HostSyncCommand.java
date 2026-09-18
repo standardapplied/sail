@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -71,7 +72,7 @@ public final class HostSyncCommand implements Runnable {
               + (asMain ? "--as-main" : "--main " + mainTarget));
     }
 
-    var updated = configure(host, asMain, mainTarget);
+    var updated = configure(host, asMain, mainTarget, HostInfo.hostname());
     YamlUtil.dumpToFile(updated.toMap(), path);
     printRole(updated.sync());
   }
@@ -79,8 +80,8 @@ public final class HostSyncCommand implements Runnable {
   /**
    * Applies the chosen role to {@code host}, reusing the validated {@code config set} primitives.
    */
-  static HostYaml configure(HostYaml host, boolean asMain, String mainTarget) {
-    var identified = withBoxId(host);
+  static HostYaml configure(HostYaml host, boolean asMain, String mainTarget, String hostname) {
+    var identified = withBoxId(host, hostname);
     if (asMain) {
       return HostConfigSetCommand.applyChange(identified, "sync-role", SyncConfig.ROLE_MAIN);
     }
@@ -90,25 +91,19 @@ public final class HostSyncCommand implements Runnable {
   }
 
   /**
-   * Mints this box's stable sync identity the first time it takes a role. A box that already has
-   * one keeps it: every checkpoint a peer holds is keyed by it.
+   * This box's stable sync identity. A box that already has one keeps it: every checkpoint a peer
+   * holds is keyed by it. A box that took its role before ids existed has been known to its peers
+   * by its hostname all along — the value {@code sail migrate} persists and the runtime falls back
+   * to — so re-declaring its role adopts the hostname rather than minting an id that would orphan
+   * every checkpoint. Only a box taking its first role mints a fresh id.
    */
-  static HostYaml withBoxId(HostYaml host) {
-    if (host.sync().boxId() != null) {
+  static HostYaml withBoxId(HostYaml host, String hostname) {
+    var sync = host.sync();
+    if (sync.boxId() != null) {
       return host;
     }
-    return new HostYaml(
-        host.storageBackend(),
-        host.pool(),
-        host.poolDisk(),
-        host.bridge(),
-        host.baseProfile(),
-        host.image(),
-        host.incusVersion(),
-        host.serverIp(),
-        host.initializedAt(),
-        host.webauthn(),
-        host.sync().withBoxId(Ids.newId().toString()));
+    var boxId = sync.role() != null ? hostname : Ids.newId().toString();
+    return host.withSync(sync.withBoxId(boxId));
   }
 
   private void printRole(SyncConfig sync) {

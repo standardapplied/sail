@@ -105,7 +105,12 @@ public final class StoreReplica implements LocalReplica, MainReplica {
 
   @Override
   public MainReplica.State state(String entityId) {
-    return atomically(() -> new MainReplica.State(current(entityId), currentRev(entityId)));
+    return snapshot(() -> new MainReplica.State(current(entityId), currentRev(entityId)));
+  }
+
+  @Override
+  public <T> T snapshot(Supplier<T> work) {
+    return changeLog.read(work);
   }
 
   @Override

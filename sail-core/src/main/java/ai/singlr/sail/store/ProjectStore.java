@@ -175,8 +175,10 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var dirty =
         new LinkedHashSet<>(
             db.query(
-                "SELECT name FROM projects WHERE rev IS NULL OR base_rev IS NULL OR base_rev = ''"
-                    + " OR rev <> base_rev",
+                """
+                SELECT name FROM projects
+                WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev
+                ORDER BY rowid""",
                 row -> row.text(0)));
     dirty.addAll(changeLog.localTombstones(ENTITY));
     return dirty;

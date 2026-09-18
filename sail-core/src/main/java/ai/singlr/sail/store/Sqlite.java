@@ -193,6 +193,15 @@ public final class Sqlite implements AutoCloseable {
     return transaction("BEGIN IMMEDIATE", work);
   }
 
+  /**
+   * Runs {@code work} as one read snapshot: a deferred {@code BEGIN} that WAL serves from the last
+   * commit, so every read inside sees the same state and no writer, in this process or another, is
+   * ever made to wait for it. For work that reads and then writes, use {@link #transaction}.
+   */
+  public <T> T read(Supplier<T> work) {
+    return transaction("BEGIN", work);
+  }
+
   private <T> T transaction(String begin, Supplier<T> work) {
     lock.lock();
     try {
