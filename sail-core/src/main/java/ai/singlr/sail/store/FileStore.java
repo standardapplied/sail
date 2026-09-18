@@ -72,25 +72,21 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Re-keys every shared file and its change-log history from project {@code old} to {@code
-   * renamed} when a project is renamed locally, keeping each file's relative path. Idempotent.
+   * Moves every shared file from project {@code old} to {@code renamed} when a project is renamed
+   * locally, keeping each file's relative path. A file's change-log identity is its project and
+   * path, so the move is journaled as a tombstone under the old id and a fresh revision under the
+   * new one: both reach every peer as ordinary changes. Idempotent.
    */
   public void reproject(String old, String renamed) {
+    if (old.equals(renamed)) {
+      return;
+    }
     db.transaction(
         () -> {
-          db.execute(
-              "UPDATE project_files SET id = ? || substr(id, ?), project = ? WHERE project = ?",
-              renamed,
-              old.length() + 1,
-              renamed,
-              old);
-          db.execute(
-              "UPDATE change_log SET entity_id = ? || substr(entity_id, ?)"
-                  + " WHERE entity_type = ? AND entity_id LIKE ?",
-              renamed,
-              old.length() + 1,
-              ENTITY,
-              old + "/%");
+          for (var file : list(old)) {
+            delete(old, file.path());
+            put(renamed, file.path(), file.content());
+          }
         });
   }
 

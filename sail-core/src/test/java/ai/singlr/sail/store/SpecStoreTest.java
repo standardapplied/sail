@@ -602,16 +602,38 @@ class SpecStoreTest {
   }
 
   @Test
-  void reprojectMovesEverySpecToTheNewProjectAndLeavesOthers() {
+  void reprojectMovesEverySpecToTheNewProjectAndJournalsEachSoPeersPullTheMove() {
     store.create(spec("a", "old", "A", "pending"));
     store.create(spec("b", "old", "B", "done"));
     store.create(spec("c", "other", "C", "pending"));
+    var log = new ChangeLog(db);
+    var checkpoint = log.maxSeq("spec");
+    var revOfC = store.revOf("c");
 
     store.reproject("old", "renamed");
 
     assertEquals(2, store.projectSpecs("renamed").size());
     assertTrue(store.projectSpecs("old").isEmpty());
     assertEquals(1, store.projectSpecs("other").size(), "other projects are untouched");
+    assertEquals(revOfC, store.revOf("c"), "untouched specs mint no revision");
+    assertEquals(
+        List.of("a", "b"),
+        log.headsAfter("spec", checkpoint, 10).stream()
+            .map(ChangeLog.Head::entityId)
+            .sorted()
+            .toList(),
+        "a peer checkpointed before the rename pages exactly the moved specs");
+    assertEquals("renamed", store.comparableSnapshot("a").get("project"));
+  }
+
+  @Test
+  void reprojectToTheSameNameJournalsNothing() {
+    store.create(spec("a", "old", "A", "pending"));
+    var rev = store.revOf("a");
+
+    store.reproject("old", "old");
+
+    assertEquals(rev, store.revOf("a"));
   }
 
   @Test

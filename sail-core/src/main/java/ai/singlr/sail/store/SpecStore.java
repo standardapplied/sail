@@ -291,12 +291,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Re-keys every spec from project {@code old} to {@code renamed} when a project is renamed
-   * locally. A spec's change-log identity is its own id, not the project, so only the {@code
-   * project} column moves. Idempotent.
+   * Moves every spec from project {@code old} to {@code renamed} when a project is renamed locally.
+   * A spec's change-log identity is its own id, so only the {@code project} column moves, and each
+   * spec is journaled so the new project reaches every peer. Idempotent.
    */
   public void reproject(String old, String renamed) {
-    db.execute("UPDATE specs SET project = ? WHERE project = ?", renamed, old);
+    if (old.equals(renamed)) {
+      return;
+    }
+    db.transaction(
+        () -> {
+          var ids = db.query("SELECT id FROM specs WHERE project = ?", row -> row.text(0), old);
+          db.execute("UPDATE specs SET project = ? WHERE project = ?", renamed, old);
+          ids.forEach(id -> recordRevision(id, "local", false));
+        });
   }
 
   public void update(SpecRow spec) {

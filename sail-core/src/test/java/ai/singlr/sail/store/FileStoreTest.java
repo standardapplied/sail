@@ -45,20 +45,36 @@ class FileStoreTest {
   }
 
   @Test
-  void reprojectRekeysFilesAndHistoryKeepingPaths() {
+  void reprojectJournalsATombstoneAndAFreshRevisionSoCheckpointedPeersSeeTheMove() {
     files.put("old", "a.txt", "AAA");
     files.put("old", "dir/b.txt", "BBB");
+    var log = new ChangeLog(db);
+    var checkpoint = log.maxSeq("file");
 
     files.reproject("old", "renamed");
 
     assertTrue(files.find("old", "a.txt").isEmpty(), "nothing left under the old project");
     assertEquals("AAA", files.find("renamed", "a.txt").orElseThrow().content());
     assertEquals("BBB", files.find("renamed", "dir/b.txt").orElseThrow().content());
+    assertTrue(log.head("file", "old/a.txt").orElseThrow().deleted(), "old id tombstoned");
+    assertFalse(log.head("file", "renamed/a.txt").orElseThrow().deleted(), "new id live");
     assertEquals(
-        List.of("renamed/a.txt", "renamed/dir/b.txt"),
-        files.idsForProject("renamed").stream().sorted().toList(),
-        "change-log ids re-keyed to the new project, paths intact");
-    assertTrue(files.idsForProject("old").isEmpty());
+        List.of("old/a.txt", "old/dir/b.txt", "renamed/a.txt", "renamed/dir/b.txt"),
+        log.headsAfter("file", checkpoint, 10).stream()
+            .map(ChangeLog.Head::entityId)
+            .sorted()
+            .toList(),
+        "a peer checkpointed before the rename pages both the deletion and the creation");
+  }
+
+  @Test
+  void reprojectToTheSameNameJournalsNothing() {
+    files.put("old", "a.txt", "AAA");
+    var before = new ChangeLog(db).maxSeq("file");
+
+    files.reproject("old", "old");
+
+    assertEquals(before, new ChangeLog(db).maxSeq("file"));
   }
 
   @Test
