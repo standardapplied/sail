@@ -128,7 +128,8 @@ public final class SyncedEntities {
         .orElseThrow(() -> new IllegalStateException("Unknown conflict entity type: " + type));
   }
 
-  public static Map<String, StoreReplica> replicas(Sqlite db, String host, String handle) {
+  /** One replica per registered type over {@code db}, identified as {@code boxId}. */
+  public static Map<String, StoreReplica> replicas(Sqlite db, String boxId, String handle) {
     var changes = new ChangeLog(db);
     var conflicts = new SyncConflicts(db);
     var state = new SyncState(db);
@@ -138,7 +139,12 @@ public final class SyncedEntities {
       replicas.put(
           entity.type(),
           new StoreReplica(
-              host, store, changes, conflicts, state, entity.pushPolicy().forStore(store, handle)));
+              boxId,
+              store,
+              changes,
+              conflicts,
+              state,
+              entity.pushPolicy().forStore(store, handle)));
     }
     return Collections.unmodifiableMap(replicas);
   }

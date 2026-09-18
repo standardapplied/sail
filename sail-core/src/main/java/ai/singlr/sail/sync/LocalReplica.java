@@ -23,6 +23,13 @@ public interface LocalReplica {
   Set<String> entityIds();
 
   /**
+   * Every id carrying a change this node made that main has not acknowledged: a row whose revision
+   * is not the one last synced from main, or a deletion this node decided. What a round still has
+   * to reconcile after main's change log has been read.
+   */
+  Set<String> dirtyIds();
+
+  /**
    * Whether this node may push its own change to {@code id} up to main, or may only pull main's
    * version. Multi-writer entities (specs, files, projects) always may — the default. A
    * single-writer entity like a run overrides this so a reader box never pushes a run it did not
@@ -90,6 +97,18 @@ public interface LocalReplica {
       Map<String, Object> remote,
       List<String> fields);
 
+  /** The highest of {@code peerId}'s sequences this node has applied for this type; 0 if none. */
+  long checkpoint(String peerId);
+
   /** Advances the checkpoint for {@code peerId} to main's high-water sequence. */
   void advanceCheckpoint(String peerId, long seq);
+
+  /**
+   * This replica narrowed to {@code ids}: {@link #entityIds} answers exactly them and every other
+   * operation reaches through to this replica. How one page of main's change log is reconciled as
+   * its own round without scanning the whole local table.
+   */
+  default LocalReplica scopedTo(Set<String> ids) {
+    return new ScopedLocalReplica(this, ids);
+  }
 }

@@ -207,7 +207,7 @@ public final class ServerStartCommand implements Runnable {
             System.getenv(),
             () -> {
               var round = operations.sync(new SyncRequest(null));
-              System.out.println(SyncCommand.render(round.report(), false));
+              System.out.println(SyncCommand.render(round, false));
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);

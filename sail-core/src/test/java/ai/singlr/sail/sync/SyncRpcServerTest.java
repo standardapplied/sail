@@ -6,78 +6,30 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncBoxes;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-/** The server loop in isolation over a fake authority: framing, the write gate, and clean EOF. */
+/** The server loop in isolation: the handshake, paging, batching, the write gate, and clean EOF. */
 class SyncRpcServerTest {
-  @Test
-  void everyHandshakeAndAuthorizationRefusalNamesItsEntity() throws Exception {
-    for (var request :
-        List.of(
-            new SyncWire.Fetch("message", "old"),
-            new SyncWire.Commit("file", "acme/config", Map.of(), null),
-            new SyncWire.FetchFdes())) {
-      var out = new StringWriter();
-      new SyncRpcServer(new FakeMain(), true)
-          .serve(new StringReader(SyncWire.encode(request) + "\n"), out);
-      var failed = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
-      assertTrue(failed.message().startsWith(SyncWire.context(request) + ":"), failed.message());
-    }
-    var unknown =
-        assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("unknown")));
-    assertTrue(unknown.message().startsWith("unknown:"));
-  }
 
-  @Test
-  void malformedAndOversizedFramesNameTheLastEntityAndLeaveTheSessionUsable() throws Exception {
-    var fetch = SyncWire.encode(new SyncWire.Fetch("message")) + "\n";
-    for (var bad : List.of("{", "x".repeat(257))) {
-      var out = new StringWriter();
-      new SyncRpcServer(
-              Map.of("message", new FakeMain()), new SyncPrincipal("node", true), FdeRoster.EMPTY)
-          .serve(new StringReader(fetch + bad + "\n" + fetch), out, 256);
-      var replies = out.toString().lines().map(SyncWire::decodeResponse).toList();
-      assertEquals(3, replies.size());
-      assertTrue(
-          assertInstanceOf(SyncWire.Failed.class, replies.get(1)).message().startsWith("message:"));
-      assertInstanceOf(SyncWire.Fetched.class, replies.get(2));
-    }
-  }
-
-  @Test
-  void storeFailuresAndReadOnlyRefusalsNameTheEntityAndId() throws Exception {
-    var failing =
-        new FakeMain() {
-          @Override
-          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-            throw new IllegalStateException("disk full");
-          }
-        };
-    for (var writable : List.of(true, false)) {
-      var out = new StringWriter();
-      new SyncRpcServer(
-              Map.of("file", failing), new SyncPrincipal("node", writable), FdeRoster.EMPTY)
-          .serve(
-              new StringReader(
-                  verifiedRequest(
-                      "file", new SyncWire.Commit("file", "acme/data.bin", Map.of(), null))),
-              out);
-      var failure = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
-      assertTrue(failure.message().startsWith("file acme/data.bin:"));
-      if (writable) assertTrue(failure.message().contains("disk full"));
-    }
-  }
+  private static final SyncWire.Hello HELLO = SyncWire.Hello.of("0.44.0", "node-box");
 
   private static class FakeMain implements MainReplica {
     @Override
@@ -111,68 +63,510 @@ class SyncRpcServerTest {
     }
   }
 
-  private static SyncWire.Response serve(boolean writable, SyncWire.Request request)
-      throws Exception {
+  private static SyncRpcServer server(MainReplica main, String type, SyncPrincipal principal) {
+    return new SyncRpcServer(Map.of(type, main), principal, FdeRoster.EMPTY);
+  }
+
+  private static List<SyncWire.Response> serveLines(
+      SyncRpcServer server, int frame, List<String> lines) throws Exception {
     var out = new StringWriter();
-    var input =
-        request instanceof SyncWire.Fetch
-            ? SyncWire.encode(request) + "\n"
-            : verifiedRequest("spec", request);
-    new SyncRpcServer(new FakeMain(), writable).serve(new StringReader(input), out);
-    return lastResponse(out);
+    server.serve(new StringReader(String.join("\n", lines) + "\n"), out, frame);
+    return out.toString().lines().map(SyncWire::decodeResponse).toList();
   }
 
-  private static String verifiedRequest(String entityType, SyncWire.Request request) {
-    return SyncWire.encode(new SyncWire.Fetch(entityType)) + "\n" + SyncWire.encode(request) + "\n";
+  private static List<SyncWire.Response> serve(SyncRpcServer server, SyncWire.Request... requests)
+      throws Exception {
+    var lines = new ArrayList<String>();
+    for (var request : requests) {
+      lines.add(SyncWire.encode(request));
+    }
+    return serveLines(server, SyncWire.MAX_FRAME, lines);
   }
 
-  private static SyncWire.Response lastResponse(StringWriter out) {
-    return SyncWire.decodeResponse(out.toString().lines().toList().getLast());
+  private static SyncWire.Response after(SyncRpcServer server, SyncWire.Request request)
+      throws Exception {
+    return serve(server, HELLO, request).getLast();
+  }
+
+  private static SyncWire.Push push(String type, MainReplica.Offer... offers) {
+    return new SyncWire.Push(type, List.of(offers));
+  }
+
+  private static SyncWire.Result only(SyncWire.Response response) {
+    var results = assertInstanceOf(SyncWire.Results.class, response).results();
+    assertEquals(1, results.size());
+    return results.getFirst();
   }
 
   @Test
-  void anEmptyStreamEndsTheSessionCleanly() throws Exception {
+  void helloIsRequiredBeforeAnythingElse() throws Exception {
+    for (var first :
+        List.<SyncWire.Request>of(
+            new SyncWire.Heads(),
+            new SyncWire.Pull("spec", 0, 10),
+            new SyncWire.Need("spec", List.of("a")),
+            push("spec", new MainReplica.Offer("a", Map.of(), null)),
+            new SyncWire.FetchFdes())) {
+      var refusal =
+          assertInstanceOf(
+              SyncWire.Refuse.class,
+              serve(new SyncRpcServer(new FakeMain(), true), first).getFirst());
+      assertEquals("hello required", refusal.reason());
+    }
+  }
+
+  @Test
+  void aProtocol3FetchIsRefusedNamingTheUpgradeInWordsAProtocol3NodeReads() throws Exception {
+    var fetch = "{\"op\": \"fetch\", \"entityType\": \"spec\", \"upgradeFloor\": \"0.34.0\"}";
+    var out = new StringWriter();
+    new SyncRpcServer(new FakeMain(), true).serve(new StringReader(fetch + "\n"), out);
+    var line = out.toString().strip();
+    var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    var legacy =
+        assertInstanceOf(LegacySyncSession.Failed.class, LegacySyncSession.decodeResponse(line));
+    assertEquals(refusal.reason(), legacy.message());
+  }
+
+  @Test
+  void aFloorBelowMainsIsRefusedWithTheRemedy() throws Exception {
+    var refusal =
+        assertInstanceOf(
+            SyncWire.Refuse.class,
+            serve(
+                    new SyncRpcServer(new FakeMain(), true),
+                    new SyncWire.Hello(4, "0.43.3", "0.34.0", "b"))
+                .getFirst());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+  }
+
+  @Test
+  void aFloorAboveMainsIsRefusedNamingTheOrder() throws Exception {
+    var server =
+        new SyncRpcServer(
+            Map.of("spec", new FakeMain()),
+            new SyncPrincipal("node", true),
+            FdeRoster.EMPTY,
+            SyncTransitionSink.NONE,
+            SyncRpcServer.ChangeHeads.NONE,
+            SyncRpcServer.BoxBindings.NONE,
+            "0.44.2");
+    var refusal =
+        assertInstanceOf(
+            SyncWire.Refuse.class,
+            serve(server, new SyncWire.Hello(4, "0.51.0", "0.50.0", "b")).getFirst());
+    assertEquals("main is 0.44.2, this node is 0.51.0: upgrade main first", refusal.reason());
+  }
+
+  @Test
+  void theSameFloorAtANewerPatchIsWelcomedWithMainsIdentity() throws Exception {
+    var welcome =
+        assertInstanceOf(
+            SyncWire.Welcome.class,
+            serve(
+                    new SyncRpcServer(new FakeMain(), true),
+                    new SyncWire.Hello(4, "0.44.9", SyncWire.UPGRADE_FLOOR, "b"))
+                .getFirst());
+    assertEquals(new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main"), welcome);
+  }
+
+  @Test
+  void aWrongProtocolAMalformedFloorOrAMissingBoxIsRefused() throws Exception {
+    for (var hello :
+        List.of(
+            new SyncWire.Hello(3, "0.44.0", SyncWire.UPGRADE_FLOOR, "b"),
+            new SyncWire.Hello(4, "0.44.0", "latest", "b"),
+            new SyncWire.Hello(4, "0.44.0", null, "b"),
+            new SyncWire.Hello(4, "0.44.0", SyncWire.UPGRADE_FLOOR, null),
+            new SyncWire.Hello(4, "0.44.0", SyncWire.UPGRADE_FLOOR, " "))) {
+      var refusal =
+          assertInstanceOf(
+              SyncWire.Refuse.class,
+              serve(new SyncRpcServer(new FakeMain(), true), hello).getFirst());
+      assertTrue(refusal.reason().contains("sail upgrade"), refusal.reason());
+    }
+  }
+
+  @Test
+  void aSecondHelloIsAProtocolFailureAndTheSessionStaysWelcomed() throws Exception {
+    var replies =
+        serve(new SyncRpcServer(new FakeMain(), true), HELLO, HELLO, new SyncWire.Heads());
+    assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
+    assertEquals("protocol", assertInstanceOf(SyncWire.Failed.class, replies.get(1)).kind());
+    assertInstanceOf(SyncWire.Tips.class, replies.get(2));
+  }
+
+  @Test
+  void aBoxIdIsBoundToItsFirstPrincipalAndRefusedUnderAnyOther() throws Exception {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var boxes = new SyncBoxes(db);
+      var ada = bound(boxes, "ada");
+      var grace = bound(boxes, "grace");
+      assertInstanceOf(
+          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
+      assertInstanceOf(
+          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
+
+      var stolen =
+          assertInstanceOf(
+              SyncWire.Refuse.class, serve(grace, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
+      assertTrue(stolen.reason().contains("box-1"), stolen.reason());
+      assertTrue(stolen.reason().contains("sail join"), stolen.reason());
+
+      var rebuilt =
+          assertInstanceOf(
+              SyncWire.Refuse.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
+      assertTrue(rebuilt.reason().contains("box-1"), rebuilt.reason());
+      assertTrue(rebuilt.reason().contains("sail fde key add"), rebuilt.reason());
+
+      boxes.release("ada");
+      assertInstanceOf(
+          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
+      var stillGraces =
+          assertInstanceOf(
+              SyncWire.Refuse.class, serve(grace, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
+      assertTrue(stillGraces.reason().contains("box-2"));
+
+      var anonymous = bound(boxes, null);
+      assertInstanceOf(
+          SyncWire.Welcome.class,
+          serve(anonymous, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
+    }
+  }
+
+  private static SyncRpcServer bound(SyncBoxes boxes, String handle) {
+    return new SyncRpcServer(
+        Map.of("spec", new FakeMain()),
+        new SyncPrincipal(handle, true),
+        FdeRoster.EMPTY,
+        SyncTransitionSink.NONE,
+        SyncRpcServer.ChangeHeads.NONE,
+        boxes::bind,
+        SyncWire.UPGRADE_FLOOR);
+  }
+
+  @Test
+  void headsAnswersEveryRegisteredTypeInRegistryOrder() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      var tips =
+          assertInstanceOf(
+              SyncWire.Tips.class,
+              after(main.server(new SyncPrincipal("n", true)), new SyncWire.Heads()));
+      assertEquals(
+          SyncedEntities.all().stream().map(SyncedEntities.Entity::type).toList(),
+          List.copyOf(tips.tips().keySet()));
+      assertEquals(main.replica.maxSeq(), tips.tips().get("spec"));
+      assertEquals(0L, tips.tips().get("file"));
+    }
+  }
+
+  @Test
+  void tenThousandSpecEntriesPageUnderTheFrame() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.db.transaction(
+          () -> {
+            for (var i = 0; i < 10_000; i++) {
+              main.specs.create(SyncBox.spec("spec-" + i, "Spec " + i, "pending"));
+            }
+          });
+      var page =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              after(
+                  main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", 0, 20_000)));
+      assertEquals(10_000, page.entries().size());
+      assertTrue(page.done());
+      assertEquals(main.replica.maxSeq(), page.next());
+      assertTrue(SyncWire.encode(page).length() <= SyncWire.MAX_FRAME);
+    }
+  }
+
+  @Test
+  void anEntryNearTheBoundIsAPageOfOneAndTheNextPullContinuesFromIt() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("a", "A", "pending"));
+      main.specs.setContent("a", "x".repeat(600), "");
+      main.specs.create(SyncBox.spec("b", "B", "pending"));
+      main.specs.setContent("b", "y".repeat(600), "");
+      var server = main.server(new SyncPrincipal("n", true));
+      var first =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              serveLines(
+                      server,
+                      1_500,
+                      List.of(
+                          SyncWire.encode(HELLO),
+                          SyncWire.encode(new SyncWire.Pull("spec", 0, 100))))
+                  .getLast());
+      assertEquals(List.of("a"), first.entries().stream().map(SyncWire.Entry::id).toList());
+      assertFalse(first.done());
+      assertTrue(first.next() < first.maxSeq());
+      var second =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              serveLines(
+                      server,
+                      1_500,
+                      List.of(
+                          SyncWire.encode(HELLO),
+                          SyncWire.encode(new SyncWire.Pull("spec", first.next(), 100))))
+                  .getLast());
+      assertEquals(List.of("b"), second.entries().stream().map(SyncWire.Entry::id).toList());
+      assertTrue(second.done());
+      assertEquals(second.maxSeq(), second.next());
+    }
+  }
+
+  @Test
+  void anEntryOverTheBoundIsRefusedNamingTheTypeIdAndSize() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("huge", "Huge", "pending"));
+      main.specs.setContent("huge", "x".repeat(700), "");
+      var server = main.server(new SyncPrincipal("n", true));
+      for (var request :
+          List.<SyncWire.Request>of(
+              new SyncWire.Pull("spec", 0, 100), new SyncWire.Need("spec", List.of("huge")))) {
+        var failed =
+            assertInstanceOf(
+                SyncWire.Failed.class,
+                serveLines(server, 700, List.of(SyncWire.encode(HELLO), SyncWire.encode(request)))
+                    .getLast());
+        assertEquals("protocol", failed.kind());
+        assertTrue(failed.message().startsWith("spec: huge:"), failed.message());
+        assertTrue(failed.message().contains("chars"), failed.message());
+      }
+    }
+  }
+
+  @Test
+  void sinceAtMaxSeqReturnsAnEmptyDonePage() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("a", "A", "pending"));
+      var high = main.replica.maxSeq();
+      var page =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              after(
+                  main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", high, 100)));
+      assertTrue(page.entries().isEmpty());
+      assertTrue(page.done());
+      assertEquals(high, page.next());
+      assertEquals(high, page.maxSeq());
+    }
+  }
+
+  @Test
+  void tombstonesPageAsEntriesWithoutASnapshot() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("gone", "Gone", "pending"));
+      main.specs.delete("gone");
+      main.specs.create(SyncBox.spec("kept", "Kept", "pending"));
+      var page =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              after(main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", 0, 100)));
+      assertEquals(
+          List.of("gone", "kept"), page.entries().stream().map(SyncWire.Entry::id).toList());
+      var tombstone = page.entries().getFirst();
+      assertTrue(tombstone.deleted());
+      assertNull(tombstone.snapshot());
+      assertEquals(main.replica.currentRev("gone"), tombstone.rev());
+      assertEquals("Kept", page.entries().get(1).snapshot().get("title"));
+    }
+  }
+
+  @Test
+  void needAnswersKnownIdsInOrderConsumesUnknownOnesAndCutsAtTheFrame() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("a", "A", "pending"));
+      main.specs.setContent("a", "x".repeat(600), "");
+      main.specs.create(SyncBox.spec("b", "B", "pending"));
+      main.specs.setContent("b", "y".repeat(600), "");
+      var server = main.server(new SyncPrincipal("n", true));
+      var whole =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              after(server, new SyncWire.Need("spec", List.of("ghost", "b", "a"))));
+      assertEquals(List.of("b", "a"), whole.entries().stream().map(SyncWire.Entry::id).toList());
+      assertEquals(3, whole.next());
+      assertTrue(whole.done());
+      assertEquals(0, whole.entries().getFirst().seq());
+
+      var cut =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              serveLines(
+                      server,
+                      1_500,
+                      List.of(
+                          SyncWire.encode(HELLO),
+                          SyncWire.encode(new SyncWire.Need("spec", List.of("ghost", "a", "b")))))
+                  .getLast());
+      assertEquals(List.of("a"), cut.entries().stream().map(SyncWire.Entry::id).toList());
+      assertEquals(2, cut.next());
+      assertFalse(cut.done());
+    }
+  }
+
+  @Test
+  void aPushBatchAnswersOneResultPerOfferInOrder() throws Exception {
+    var results =
+        assertInstanceOf(
+            SyncWire.Results.class,
+            after(
+                new SyncRpcServer(new FakeMain(), true),
+                push(
+                    "spec",
+                    new MainReplica.Offer("a", Map.of(), null),
+                    new MainReplica.Offer("b", Map.of(), "1-x"),
+                    new MainReplica.Offer("c", null, "2-y"))));
+    assertEquals(
+        List.of("a", "b", "c"), results.results().stream().map(SyncWire.Result::id).toList());
+    results
+        .results()
+        .forEach(
+            result -> assertEquals("1-x", assertInstanceOf(SyncWire.Accepted.class, result).rev()));
+    var empty =
+        assertInstanceOf(
+            SyncWire.Results.class, after(new SyncRpcServer(new FakeMain(), true), push("spec")));
+    assertTrue(empty.results().isEmpty());
+  }
+
+  @Test
+  void aReadOnlySessionMayPullButItsPushIsRefusedNamingTheType() throws Exception {
+    var server = new SyncRpcServer(new FakeMain(), false);
+    assertInstanceOf(SyncWire.Page.class, after(server, new SyncWire.Pull("spec", 0, 10)));
+    var failed =
+        assertInstanceOf(
+            SyncWire.Failed.class,
+            after(server, push("spec", new MainReplica.Offer("a", Map.of(), null))));
+    assertEquals("refused", failed.kind());
+    assertTrue(failed.message().startsWith("spec:"), failed.message());
+    assertTrue(failed.message().contains("read-only"));
+  }
+
+  @Test
+  void anUnknownEntityTypeIsRefusedForPullNeedAndPushNamingIt() throws Exception {
+    for (var request :
+        List.<SyncWire.Request>of(
+            new SyncWire.Pull("bogus", 0, 10),
+            new SyncWire.Need("bogus", List.of("a")),
+            push("bogus", new MainReplica.Offer("a", Map.of(), null)))) {
+      var failed =
+          assertInstanceOf(
+              SyncWire.Failed.class, after(new SyncRpcServer(new FakeMain(), true), request));
+      assertTrue(failed.message().startsWith("bogus:"), failed.message());
+      assertTrue(failed.message().contains("Unknown entity type"));
+    }
+    var limit =
+        assertInstanceOf(
+            SyncWire.Failed.class,
+            after(new SyncRpcServer(new FakeMain(), true), new SyncWire.Pull("spec", 0, 0)));
+    assertEquals("protocol", limit.kind());
+  }
+
+  @Test
+  void malformedAndOversizedFramesAfterHelloNameTheLastContextAndLeaveTheSessionUsable()
+      throws Exception {
+    var pull = SyncWire.encode(new SyncWire.Pull("message", 0, 10));
+    for (var bad : List.of("{", "x".repeat(600))) {
+      var replies =
+          serveLines(
+              server(new FakeMain(), "message", new SyncPrincipal("node", true)),
+              512,
+              List.of(SyncWire.encode(HELLO), pull, bad, pull));
+      assertEquals(4, replies.size());
+      assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
+      assertInstanceOf(SyncWire.Page.class, replies.get(1));
+      var failed = assertInstanceOf(SyncWire.Failed.class, replies.get(2));
+      assertEquals("protocol", failed.kind());
+      assertTrue(failed.message().startsWith("message:"), failed.message());
+      assertInstanceOf(SyncWire.Page.class, replies.get(3));
+    }
+  }
+
+  @Test
+  void anEmptyStreamOrAByeEndsTheSessionCleanly() throws Exception {
     new SyncRpcServer(new FakeMain(), true).serve(new StringReader(""), new StringWriter());
+    var replies =
+        serve(
+            new SyncRpcServer(new FakeMain(), true),
+            HELLO,
+            new SyncWire.Bye(),
+            new SyncWire.Heads());
+    assertEquals(1, replies.size());
   }
 
   @Test
-  void fetchIsAnswered() throws Exception {
-    assertInstanceOf(SyncWire.Fetched.class, serve(true, new SyncWire.Fetch("spec")));
+  void fetchFdesReturnsTheInjectedRosterAndDefaultsToEmpty() throws Exception {
+    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
+    var fdes =
+        assertInstanceOf(
+            SyncWire.Fdes.class,
+            after(
+                new SyncRpcServer(new FakeMain(), false, () -> roster), new SyncWire.FetchFdes()));
+    assertEquals("ada", fdes.fdes().getFirst().get("handle"));
+    assertTrue(
+        assertInstanceOf(
+                SyncWire.Fdes.class,
+                after(new SyncRpcServer(new FakeMain(), true), new SyncWire.FetchFdes()))
+            .fdes()
+            .isEmpty());
   }
 
   @Test
-  void aPreFloorNodeIsRefusedBeforeMainServesData() throws Exception {
-    var failure =
-        assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("spec", null)));
+  void aStoreExceptionAnywhereBecomesAFailedResponseNamingTheTypeAndTheRootCause()
+      throws Exception {
+    var failing =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
+            throw new IllegalStateException("commit failed", new RuntimeException("disk full"));
+          }
 
-    assertTrue(failure.message().contains(SyncWire.V1_UPGRADE_FLOOR));
-    assertTrue(failure.message().contains("sail upgrade"));
+          @Override
+          public long maxSeq() {
+            throw new IllegalStateException("database is locked");
+          }
+        };
+    var server = server(failing, "file", new SyncPrincipal("node", true));
+    var captured = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    List<SyncWire.Response> replies;
+    try {
+      replies =
+          serve(
+              server,
+              HELLO,
+              push("file", new MainReplica.Offer("acme/data.bin", Map.of(), null)),
+              new SyncWire.Pull("file", 0, 10),
+              new SyncWire.Heads());
+    } finally {
+      System.setErr(originalErr);
+    }
+    var pushFailure = assertInstanceOf(SyncWire.Failed.class, replies.get(1));
+    assertEquals("store", pushFailure.kind());
+    assertTrue(pushFailure.message().startsWith("file:"), pushFailure.message());
+    assertTrue(pushFailure.message().contains("disk full"), pushFailure.message());
+    assertTrue(
+        assertInstanceOf(SyncWire.Failed.class, replies.get(2))
+            .message()
+            .contains("database is locked"));
+    assertTrue(
+        assertInstanceOf(SyncWire.Failed.class, replies.get(3)).message().startsWith("heads:"));
+    assertTrue(
+        captured.toString(StandardCharsets.UTF_8).contains("disk full"),
+        "a swallowed store exception must leave a server-side diagnostic");
   }
 
   @Test
-  void aWritableServerAcceptsACommit() throws Exception {
-    var response = serve(true, new SyncWire.Commit("spec", "a", Map.of(), null));
-    assertEquals("1-x", assertInstanceOf(SyncWire.Committed.class, response).rev());
-  }
-
-  @Test
-  void aCommitBeforeTheUpgradeFloorHandshakeIsRefused() throws Exception {
-    var response = new StringWriter();
-
-    new SyncRpcServer(new FakeMain(), true)
-        .serve(
-            new StringReader(
-                SyncWire.encode(new SyncWire.Commit("spec", "a", Map.of(), null)) + "\n"),
-            response);
-
-    var failure = assertInstanceOf(SyncWire.Failed.class, lastResponse(response));
-    assertTrue(failure.message().contains(SyncWire.V1_UPGRADE_FLOOR));
-  }
-
-  @Test
-  void theCommitBindsThePushingHandleAsSyncProvenance() throws Exception {
-    var seenPeer = new java.util.concurrent.atomic.AtomicReference<String>("unset");
-    MainReplica capturing =
+  void anOfferBindsThePushingHandleAsSyncProvenance() throws Exception {
+    var seenPeer = new AtomicReference<>("unset");
+    var capturing =
         new FakeMain() {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
@@ -180,30 +574,20 @@ class SyncRpcServerTest {
             return new CommitOutcome.Accepted("1-x");
           }
         };
-    var out = new StringWriter();
-    new SyncRpcServer(Map.of("spec", capturing), new SyncPrincipal("sumesh", true), FdeRoster.EMPTY)
-        .serve(
-            new StringReader(
-                verifiedRequest("spec", new SyncWire.Commit("spec", "a", Map.of(), null))),
-            out);
-
+    after(
+        server(capturing, "spec", new SyncPrincipal("sumesh", true)),
+        push("spec", new MainReplica.Offer("a", Map.of(), null)));
     assertEquals(
         "sumesh", seenPeer.get(), "the change_log written during the commit must name the pusher");
   }
 
-  @Test
-  void aReadOnlyServerRefusesACommit() throws Exception {
-    assertInstanceOf(
-        SyncWire.Failed.class, serve(false, new SyncWire.Commit("spec", "a", Map.of(), null)));
+  private static SyncWire.Result serveRun(
+      String handle, Map<String, Object> mainCurrent, MainReplica.Offer offer) throws Exception {
+    return serveRun(handle, mainCurrent, mainCurrent == null ? null : "1-x", offer);
   }
 
-  private static SyncWire.Response serveRun(
-      String handle, Map<String, Object> mainCurrent, SyncWire.Commit commit) throws Exception {
-    return serveRun(handle, mainCurrent, mainCurrent == null ? null : "1-x", commit);
-  }
-
-  private static SyncWire.Response serveRun(
-      String handle, Map<String, Object> mainCurrent, String mainRev, SyncWire.Commit commit)
+  private static SyncWire.Result serveRun(
+      String handle, Map<String, Object> mainCurrent, String mainRev, MainReplica.Offer offer)
       throws Exception {
     var main =
         new FakeMain() {
@@ -217,111 +601,101 @@ class SyncRpcServerTest {
             return mainRev;
           }
         };
-    var out = new StringWriter();
-    new SyncRpcServer(Map.of("run", main), new SyncPrincipal(handle, true), FdeRoster.EMPTY)
-        .serve(new StringReader(verifiedRequest("run", commit)), out);
-    return lastResponse(out);
+    return only(after(server(main, "run", new SyncPrincipal(handle, true)), push("run", offer)));
   }
 
   @Test
-  void aSessionCommitsItsOwnRun() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), null);
-    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", null, commit));
+  void aSessionCommitsItsOwnRunAndDeletesIt() throws Exception {
+    assertInstanceOf(
+        SyncWire.Accepted.class,
+        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
+    assertInstanceOf(
+        SyncWire.Accepted.class,
+        serveRun("ada", Map.of("node", "ada"), new MainReplica.Offer("r1", null, "1-x")));
+    assertInstanceOf(
+        SyncWire.Accepted.class,
+        serveRun("ada", null, "2-x", new MainReplica.Offer("r1", null, "2-x")),
+        "replaying a delete over a tombstone stays allowed");
   }
 
   @Test
-  void aRunStampedWithAnotherNodeIsRejectedNotFailed() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "grace"), null);
+  void aForeignOrUnstampedRunIsRejectedWithMainsVersionNotFailed() throws Exception {
     assertInstanceOf(
         SyncWire.Rejected.class,
-        serveRun("ada", null, commit),
+        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("node", "grace"), null)),
         "an un-owned run push is rejected, not failed, so one bad run cannot abort the whole sync");
-  }
-
-  @Test
-  void overwritingAnotherNodesRunReturnsMainsVersionToAdopt() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "1-x");
-    var rejected =
-        assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", Map.of("node", "grace"), commit));
-    assertEquals("1-x", rejected.currentRev());
+    var overwrite =
+        assertInstanceOf(
+            SyncWire.Rejected.class,
+            serveRun(
+                "ada",
+                Map.of("node", "grace"),
+                new MainReplica.Offer("r1", Map.of("node", "ada"), "1-x")));
+    assertEquals("1-x", overwrite.currentRev());
     assertEquals(
         "grace",
-        rejected.currentSnapshot().get("node"),
+        overwrite.currentSnapshot().get("node"),
         "the node is handed main's authoritative version to adopt, converging instead of clobbering");
+    assertEquals(
+        "grace",
+        assertInstanceOf(
+                SyncWire.Rejected.class,
+                serveRun("ada", Map.of("node", "grace"), new MainReplica.Offer("r1", null, "1-x")))
+            .currentSnapshot()
+            .get("node"));
+    assertInstanceOf(
+        SyncWire.Rejected.class,
+        serveRun("ada", null, "2-x", new MainReplica.Offer("r1", Map.of("node", "ada"), "2-x")),
+        "recreating a tombstoned run id is rejected so the node adopts the deletion");
+    assertInstanceOf(
+        SyncWire.Rejected.class,
+        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("status", "running"), null)));
   }
 
   @Test
-  void deletingAnotherNodesRunIsRejectedNotFailed() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", null, "1-x");
-    var rejected =
-        assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", Map.of("node", "grace"), commit));
-    assertEquals("grace", rejected.currentSnapshot().get("node"));
+  void aPrincipalWithoutAHandleHasItsRunOfferRefusedInsideTheBatch() throws Exception {
+    var refused =
+        assertInstanceOf(
+            SyncWire.Refused.class,
+            serveRun(null, null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
+    assertEquals("r1", refused.id());
+    assertTrue(refused.reason().contains("handle"), refused.reason());
+  }
+
+  private static FakeMain remembering() {
+    return new FakeMain() {
+      private Map<String, Object> committed;
+
+      @Override
+      public Map<String, Object> current(String entityId) {
+        return committed;
+      }
+
+      @Override
+      public CommitOutcome commit(
+          String entityId, Map<String, Object> snapshot, String expectedRev) {
+        committed = snapshot;
+        return new CommitOutcome.Accepted("1-x");
+      }
+    };
   }
 
   @Test
-  void deletingOnesOwnRunIsAccepted() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", null, "1-x");
-    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", Map.of("node", "ada"), commit));
-  }
-
-  @Test
-  void recreatingATombstonedRunIdIsRejectedSoTheNodeAdoptsTheDeletion() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), "2-x");
-    assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", null, "2-x", commit));
-  }
-
-  @Test
-  void replayingADeleteOverATombstoneStaysAllowed() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", null, "2-x");
-    assertInstanceOf(SyncWire.Committed.class, serveRun("ada", null, "2-x", commit));
-  }
-
-  @Test
-  void aRunWithoutANodeStampIsRejectedNotFailed() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("status", "running"), null);
-    assertInstanceOf(SyncWire.Rejected.class, serveRun("ada", null, commit));
-  }
-
-  @Test
-  void aPrincipalWithoutAHandleCanNeverCommitARun() throws Exception {
-    var commit = new SyncWire.Commit("run", "r1", Map.of("node", "ada"), null);
-    assertInstanceOf(SyncWire.Failed.class, serveRun(null, null, commit));
-  }
-
-  @Test
-  void anAcceptedCommitHandsItsTransitionsToTheSink() throws Exception {
-    var main =
-        new FakeMain() {
-          private Map<String, Object> committed;
-
-          @Override
-          public Map<String, Object> current(String entityId) {
-            return committed;
-          }
-
-          @Override
-          public CommitOutcome commit(
-              String entityId, Map<String, Object> snapshot, String expectedRev) {
-            committed = snapshot;
-            return new CommitOutcome.Accepted("1-x");
-          }
-        };
-    var seen = new java.util.ArrayList<SyncTransition>();
-    var out = new StringWriter();
-    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), null);
-
-    new SyncRpcServer(
-            Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
-        .serve(new StringReader(verifiedRequest("spec", commit)), out);
-
-    assertInstanceOf(SyncWire.Committed.class, lastResponse(out));
+  void anAcceptedOfferHandsItsTransitionsToTheSinkAndARejectedOneNever() throws Exception {
+    var seen = new ArrayList<SyncTransition>();
+    var accepted =
+        after(
+            new SyncRpcServer(
+                Map.of("spec", remembering()),
+                new SyncPrincipal(null, true),
+                FdeRoster.EMPTY,
+                seen::add),
+            push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), null)));
+    assertInstanceOf(SyncWire.Accepted.class, only(accepted));
     assertEquals(1, seen.size());
     assertEquals("in_progress", seen.getFirst().to());
-  }
 
-  @Test
-  void aRejectedCommitNeverReachesTheSink() throws Exception {
-    var main =
+    var rejecting =
         new FakeMain() {
           @Override
           public CommitOutcome commit(
@@ -329,177 +703,40 @@ class SyncRpcServerTest {
             return new CommitOutcome.Rejected("2-y", Map.of("status", "review"));
           }
         };
-    var seen = new java.util.ArrayList<SyncTransition>();
-    var out = new StringWriter();
-    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), "1-x");
-
-    new SyncRpcServer(
-            Map.of("spec", main), new SyncPrincipal(null, true), FdeRoster.EMPTY, seen::add)
-        .serve(new StringReader(verifiedRequest("spec", commit)), out);
-
-    assertInstanceOf(SyncWire.Rejected.class, lastResponse(out));
-    assertTrue(seen.isEmpty());
+    var quiet = new ArrayList<SyncTransition>();
+    var rejected =
+        after(
+            new SyncRpcServer(
+                Map.of("spec", rejecting),
+                new SyncPrincipal(null, true),
+                FdeRoster.EMPTY,
+                quiet::add),
+            push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), "1-x")));
+    assertInstanceOf(SyncWire.Rejected.class, only(rejected));
+    assertTrue(quiet.isEmpty());
   }
 
   @Test
-  void aThrowingSinkNeverFailsTheCommittedReply() throws Exception {
-    var main =
-        new FakeMain() {
-          private Map<String, Object> committed;
-
-          @Override
-          public Map<String, Object> current(String entityId) {
-            return committed;
-          }
-
-          @Override
-          public CommitOutcome commit(
-              String entityId, Map<String, Object> snapshot, String expectedRev) {
-            committed = snapshot;
-            return new CommitOutcome.Accepted("1-x");
-          }
-        };
-    var out = new StringWriter();
-    var commit = new SyncWire.Commit("spec", "auth", Map.of("status", "in_progress"), null);
+  void aThrowingSinkNeverFailsTheAcceptedResult() throws Exception {
     var captured = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    SyncWire.Response response;
     try {
-      new SyncRpcServer(
-              Map.of("spec", main),
-              new SyncPrincipal(null, true),
-              FdeRoster.EMPTY,
-              transition -> {
-                throw new IllegalStateException("slack is down");
-              })
-          .serve(new StringReader(verifiedRequest("spec", commit)), out);
+      response =
+          after(
+              new SyncRpcServer(
+                  Map.of("spec", remembering()),
+                  new SyncPrincipal(null, true),
+                  FdeRoster.EMPTY,
+                  transition -> {
+                    throw new IllegalStateException("slack is down");
+                  }),
+              push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), null)));
     } finally {
       System.setErr(originalErr);
     }
-
-    assertInstanceOf(SyncWire.Committed.class, lastResponse(out));
+    assertInstanceOf(SyncWire.Accepted.class, only(response));
     assertTrue(captured.toString(StandardCharsets.UTF_8).contains("slack is down"));
-  }
-
-  @Test
-  void fetchFdesReturnsTheInjectedRoster() throws Exception {
-    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
-    var out = new StringWriter();
-    new SyncRpcServer(new FakeMain(), false, () -> roster)
-        .serve(new StringReader(verifiedRequest("spec", new SyncWire.FetchFdes())), out);
-
-    var response = (SyncWire.Fdes) lastResponse(out);
-    assertEquals("ada", response.fdes().getFirst().get("handle"));
-  }
-
-  @Test
-  void fetchFdesDefaultsToAnEmptyRoster() throws Exception {
-    assertInstanceOf(SyncWire.Fdes.class, serve(true, new SyncWire.FetchFdes()));
-  }
-
-  @Test
-  void fetchFdesBeforeTheUpgradeFloorHandshakeIsRefused() throws Exception {
-    var out = new StringWriter();
-
-    new SyncRpcServer(new FakeMain(), true)
-        .serve(new StringReader(SyncWire.encode(new SyncWire.FetchFdes()) + "\n"), out);
-
-    assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
-  }
-
-  @Test
-  void anUnknownEntityTypeFetchIsRefused() throws Exception {
-    assertInstanceOf(SyncWire.Failed.class, serve(true, new SyncWire.Fetch("bogus")));
-  }
-
-  @Test
-  void anUnknownEntityTypeCommitIsRefused() throws Exception {
-    assertInstanceOf(
-        SyncWire.Failed.class, serve(true, new SyncWire.Commit("bogus", "a", Map.of(), null)));
-  }
-
-  @Test
-  void aStoreExceptionOnCommitBecomesAFailedResponseNotADroppedSession() throws Exception {
-    var throwing =
-        new FakeMain() {
-          @Override
-          public CommitOutcome commit(
-              String entityId, Map<String, Object> snapshot, String expectedRev) {
-            throw new IllegalStateException("database is locked");
-          }
-        };
-    var out = new StringWriter();
-    var request = new SyncWire.Commit("spec", "a", Map.of(), null);
-
-    new SyncRpcServer(throwing, true)
-        .serve(new StringReader(verifiedRequest("spec", request)), out);
-
-    assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
-  }
-
-  @Test
-  void aStoreExceptionOnFetchBecomesAFailedResponse() throws Exception {
-    var throwing =
-        new FakeMain() {
-          @Override
-          public Set<String> entityIds() {
-            throw new IllegalStateException("database is locked");
-          }
-        };
-    var out = new StringWriter();
-
-    new SyncRpcServer(throwing, true)
-        .serve(new StringReader(SyncWire.encode(new SyncWire.Fetch("spec")) + "\n"), out);
-
-    assertInstanceOf(SyncWire.Failed.class, SyncWire.decodeResponse(out.toString().strip()));
-  }
-
-  @Test
-  void aWrappedStoreExceptionSurfacesTheRootCauseInTheFailedMessage() throws Exception {
-    var throwing =
-        new FakeMain() {
-          @Override
-          public CommitOutcome commit(
-              String entityId, Map<String, Object> snapshot, String expectedRev) {
-            throw new IllegalStateException(
-                "commit failed", new RuntimeException("database is locked"));
-          }
-        };
-    var out = new StringWriter();
-    var request = new SyncWire.Commit("spec", "a", Map.of(), null);
-
-    new SyncRpcServer(throwing, true)
-        .serve(new StringReader(verifiedRequest("spec", request)), out);
-
-    var failed = assertInstanceOf(SyncWire.Failed.class, lastResponse(out));
-    assertTrue(
-        failed.message().contains("database is locked"),
-        "the actionable root cause must surface, not the wrapper: " + failed.message());
-  }
-
-  @Test
-  void aSwallowedStoreExceptionIsLoggedServerSide() throws Exception {
-    var throwing =
-        new FakeMain() {
-          @Override
-          public CommitOutcome commit(
-              String entityId, Map<String, Object> snapshot, String expectedRev) {
-            throw new IllegalStateException("database is locked");
-          }
-        };
-    var request = new SyncWire.Commit("spec", "a", Map.of(), null);
-    var captured = new ByteArrayOutputStream();
-    var originalErr = System.err;
-    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-    try {
-      new SyncRpcServer(throwing, true)
-          .serve(new StringReader(verifiedRequest("spec", request)), new StringWriter());
-    } finally {
-      System.setErr(originalErr);
-    }
-
-    assertTrue(
-        captured.toString(StandardCharsets.UTF_8).contains("database is locked"),
-        "a swallowed store exception must leave a server-side diagnostic");
   }
 }

@@ -5,13 +5,14 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.Capability;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.Role;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -22,7 +23,6 @@ import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -54,10 +54,10 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var host = HostInfo.hostname();
+    var boxId = BoxIdentity.config().boxId();
     SyncDatabase mainDb;
     try {
-      mainDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), host);
+      mainDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), boxId);
     } catch (RuntimeException e) {
       System.err.println(SyncCommand.reason(e));
       return 1;
@@ -66,7 +66,12 @@ public final class SyncServerCommand implements Callable<Integer> {
       var in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
       var out = new OutputStreamWriter(System.out, StandardCharsets.UTF_8);
       return serve(
-          mainDb, host, System.getenv("SAIL_TOKEN"), in, out, transitionBridge(mainDb.db(), host));
+          mainDb,
+          boxId,
+          System.getenv("SAIL_TOKEN"),
+          in,
+          out,
+          transitionBridge(mainDb.db(), boxId));
     }
   }
 
@@ -85,9 +90,13 @@ public final class SyncServerCommand implements Callable<Integer> {
       SyncTransitionSink transitionSink)
       throws IOException {
     var db = converged.db();
-    var replicas = SyncedEntities.replicas(db, mainId, mainId);
-    new SyncRpcServer(
-            new LinkedHashMap<>(replicas), principal(db, token), () -> roster(db), transitionSink)
+    SyncRpcServer.over(
+            db,
+            mainId,
+            principal(db, token),
+            () -> roster(db),
+            transitionSink,
+            SailVersion.version())
         .serve(in, out);
     return 0;
   }

@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.sync.SyncedEntities;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,27 +34,64 @@ class SyncStateTest {
 
   @Test
   void checkpointDefaultsToZero() {
-    assertEquals(0L, state.checkpoint("main"));
+    assertEquals(0L, state.checkpoint("main", "spec"));
   }
 
   @Test
   void advanceThenReadBack() {
-    state.advance("main", 42);
-    assertEquals(42L, state.checkpoint("main"));
+    state.advance("main", "spec", 42);
+    assertEquals(42L, state.checkpoint("main", "spec"));
   }
 
   @Test
   void advanceIsMonotonicAndNeverGoesBackward() {
-    state.advance("main", 42);
-    state.advance("main", 10);
-    assertEquals(42L, state.checkpoint("main"));
+    state.advance("main", "spec", 42);
+    state.advance("main", "spec", 10);
+    assertEquals(42L, state.checkpoint("main", "spec"));
   }
 
   @Test
-  void checkpointsAreTrackedPerPeer() {
-    state.advance("main", 5);
-    state.advance("backup", 9);
-    assertEquals(5L, state.checkpoint("main"));
-    assertEquals(9L, state.checkpoint("backup"));
+  void checkpointsAreTrackedPerPeerAndPerType() {
+    state.advance("main", "spec", 5);
+    state.advance("main", "file", 7);
+    state.advance("backup", "spec", 9);
+    assertEquals(5L, state.checkpoint("main", "spec"));
+    assertEquals(7L, state.checkpoint("main", "file"));
+    assertEquals(9L, state.checkpoint("backup", "spec"));
+    assertEquals(0L, state.checkpoint("main", "run"));
+  }
+
+  @Test
+  void theMigrationFromOnePeerOnlyRowLeavesEveryRegisteredTypeAtTheOldValue() {
+    try (var staged = Sqlite.open(tempDir.resolve("staged.db"))) {
+      FloorSchema.stage(staged);
+      staged.execute("PRAGMA foreign_keys = OFF");
+      SchemaManager.ON_RAMP.forEach(staged::execute);
+      var rewrite = migrationIndex("CREATE TABLE sync_state_v2");
+      SchemaManager.MIGRATIONS.subList(0, rewrite).forEach(staged::execute);
+      staged.execute("PRAGMA foreign_keys = ON");
+      staged.execute(
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+          SchemaManager.V1_VERSION + rewrite);
+      staged.execute(
+          "INSERT INTO sync_state (peer, checkpoint, updated_at) VALUES ('maindevbox', 314, 't0')");
+
+      new SchemaManager(staged).migrate();
+
+      var migrated = new SyncState(staged);
+      for (var entity : SyncedEntities.all()) {
+        assertEquals(314L, migrated.checkpoint("maindevbox", entity.type()), entity.type());
+      }
+      assertEquals(0L, migrated.checkpoint("other", "spec"));
+    }
+  }
+
+  private static int migrationIndex(String needle) {
+    for (var i = 0; i < SchemaManager.MIGRATIONS.size(); i++) {
+      if (SchemaManager.MIGRATIONS.get(i).contains(needle)) {
+        return i;
+      }
+    }
+    throw new AssertionError("no migration contains: " + needle);
   }
 }

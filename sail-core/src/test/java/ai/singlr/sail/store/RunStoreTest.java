@@ -112,7 +112,7 @@ class RunStoreTest {
   }
 
   @Test
-  void updateProcessPersistsThePidFingerprintAndItReplicates() {
+  void updateProcessPersistsThePidFingerprintAndItStaysOnTheExecutingBox() {
     var id = newRun("backend", "auth");
 
     assertTrue(store.updateProcess(id, 4321, 987654321L, 8765));
@@ -122,10 +122,14 @@ class RunStoreTest {
     assertEquals(987654321L, run.pidTicks());
     assertEquals(8765, run.watcherPid());
     var snapshot = store.comparableSnapshot(id);
-    assertEquals(987654321L, snapshot.get("pid_ticks"), "the fingerprint replicates with the run");
+    assertFalse(snapshot.containsKey("pid_ticks"), "process bookkeeping never replicates");
+    assertFalse(snapshot.containsKey("pid"));
+    assertFalse(snapshot.containsKey("watcher_pid"));
+    assertFalse(snapshot.containsKey("log_path"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, snapshot, "1-remote");
-    assertEquals(987654321L, store.findById(adopted).orElseThrow().pidTicks());
+    assertNull(store.findById(adopted).orElseThrow().pidTicks());
+    assertEquals("running", store.findById(adopted).orElseThrow().status());
   }
 
   @Test
@@ -1817,7 +1821,8 @@ class RunStoreTest {
 
     assertEquals("abc-123", snapshot.get("session_id"));
     assertEquals("startup", snapshot.get("session_source"));
-    assertEquals("/t/abc.jsonl", snapshot.get("transcript_path"));
+    assertFalse(
+        snapshot.containsKey("transcript_path"), "a transcript path is this box's file alone");
 
     var other = freshStore("session.db");
     other.applyRevision(id, snapshot, store.latestRev(id));
@@ -1825,7 +1830,7 @@ class RunStoreTest {
     var adopted = other.findById(id).orElseThrow();
     assertEquals("abc-123", adopted.sessionId());
     assertEquals("startup", adopted.sessionSource());
-    assertEquals("/t/abc.jsonl", adopted.transcriptPath());
+    assertNull(adopted.transcriptPath(), "the path never left the reporting box");
   }
 
   @Test

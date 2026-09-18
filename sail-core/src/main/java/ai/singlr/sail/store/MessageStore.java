@@ -254,6 +254,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return findById(id).map(MessageRow::baseRev).orElse(null);
   }
 
+  public Set<String> dirtyIds() {
+    return new LinkedHashSet<>(
+        db.query(
+            "SELECT id FROM room_messages WHERE base_rev IS NULL OR base_rev = '' OR rev <>"
+                + " base_rev",
+            row -> row.text(0)));
+  }
+
   public Set<String> syncEntityIds() {
     return new LinkedHashSet<>(
         db.query(

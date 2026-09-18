@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,33 +14,28 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PipedReader;
-import java.io.PipedWriter;
-import java.io.UncheckedIOException;
+import java.io.Writer;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The two-node harness from {@code TwoNodeSyncTest}, re-run through the real {@link SyncWire}
- * protocol: each node's engine drives a {@link RemoteMainReplica} over a byte pipe served by a
- * {@link SyncRpcServer} on a virtual thread. The pipe stands in for the SSH channel, so this proves
- * the serialization and the request loop converge exactly as the in-process engine does — and that
- * the write gate refuses a read-only push.
+ * Two nodes and a main joined by the real protocol-4 wire: each round opens a {@link SyncSession}
+ * over a pipe to a {@link SyncRpcServer} and the wire log says what it cost.
  */
 class SyncTransportTest {
 
-  @TempDir Path tempDir;
-  private final SyncEngine engine = new SyncEngine();
+  private static final int SMALL_FRAME = 1_500;
 
+  @TempDir Path tempDir;
   private SyncBox main;
   private SyncBox nodeA;
   private SyncBox nodeB;
@@ -58,128 +54,48 @@ class SyncTransportTest {
     main.close();
   }
 
-  private SpecStore.SpecRow spec(String id, String title, String status) {
+  private static SpecStore.SpecRow spec(String id, String title, String status) {
     return SyncBox.spec(id, title, status);
   }
 
-  private SyncEngine.Report syncToMain(SyncBox node) throws Exception {
-    return syncOverWire(node, true);
+  private SyncBox.Link connect(SyncBox node) throws IOException {
+    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node.id + "-box");
   }
 
-  @Test
-  void aNodePullsMainsFdeRosterOverTheSameSession() throws Exception {
-    var roster =
-        java.util.List.<java.util.Map<String, Object>>of(
-            java.util.Map.of("handle", "ada", "role", "admin"));
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-    var serverThread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    new SyncRpcServer(main.replica, true, () -> roster).serve(serverIn, toClient);
-                  } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                  }
-                });
+  private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<Writer> serverOut)
+      throws IOException {
+    return SyncBox.connect(
+        main.server(new SyncPrincipal(node.id, true)), node.id + "-box", frame, serverOut);
+  }
 
-    try (var session = new SyncSession(clientIn, toServer)) {
-      engine.reconcile(nodeA.replica, session.replica("spec"));
-      var pulled = session.fetchFdes();
-      assertEquals(1, pulled.size());
-      assertEquals("ada", pulled.getFirst().get("handle"));
-    } finally {
-      serverThread.join();
+  private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
+    try (var link = connect(node)) {
+      return link.reconcile("spec", node.replica);
     }
   }
 
-  @Test
-  void specsAndFilesReconcileOverTheWireInOneSession() throws Exception {
-    var mainFiles = new FileStore(main.db);
-    var nodeFiles = new FileStore(nodeA.db);
-    var nodeFileReplica =
-        new StoreReplica(
-            "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
-    var mainFileReplica =
-        new StoreReplica(
-            "main",
-            mainFiles,
-            new ChangeLog(main.db),
-            new SyncConflicts(main.db),
-            new SyncState(main.db));
-
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
-    nodeFiles.put("acme", "scripts/deploy.sh", "ZGVwbG95");
-
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-    var server =
-        new SyncRpcServer(
-            Map.of("spec", main.replica, "file", mainFileReplica),
-            new SyncPrincipal("A", true),
-            FdeRoster.EMPTY);
-    var serverThread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    server.serve(serverIn, toClient);
-                  } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                  }
-                });
-
-    try (var session = new SyncSession(clientIn, toServer)) {
-      engine.reconcile(nodeA.replica, session.replica("spec"));
-      engine.reconcile(nodeFileReplica, session.replica("file"));
-    } finally {
-      serverThread.join();
-    }
-
-    assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
-    assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
+  private long syncRows(SyncBox box) {
+    return box.db
+        .queryOne(
+            "SELECT COUNT(*) FROM change_log WHERE entity_type = 'spec' AND origin = 'sync'",
+            row -> row.integer(0))
+        .orElseThrow();
   }
 
-  private SyncEngine.Report syncOverWire(SyncBox node, boolean writable) throws Exception {
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-
-    var server = new SyncRpcServer(main.replica, writable);
-    var serverThread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    server.serve(serverIn, toClient);
-                  } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                  }
-                });
-
-    try (var session = new SyncSession(clientIn, toServer)) {
-      return engine.reconcile(node.replica, session.replica("spec"));
-    } finally {
-      serverThread.join();
-    }
+  private void bigSpec(SyncBox box, String id) {
+    box.specs.create(spec(id, "Spec " + id, "pending"));
+    box.specs.setContent(id, id.repeat(600 / id.length()), "");
   }
 
   @Test
   void aLocalCreatePropagatesAcrossTheWire() throws Exception {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
-
     var pushed = syncToMain(nodeA);
-    assertEquals(1, pushed.pushed());
+    assertEquals(1, pushed.report().pushed());
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
-
     var pulled = syncToMain(nodeB);
-    assertEquals(1, pulled.pulled());
+    assertEquals(1, pulled.report().pulled());
+    assertEquals(1, pulled.entries());
     assertEquals("Auth", nodeB.specs.findById("auth").orElseThrow().title());
   }
 
@@ -188,14 +104,11 @@ class SyncTransportTest {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
-
     nodeA.specs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
     nodeB.specs.setContent("auth", "node B body", "");
-
     syncToMain(nodeA);
     syncToMain(nodeB);
     syncToMain(nodeA);
-
     assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
     assertEquals("in_progress", nodeB.specs.findById("auth").orElseThrow().status().wire());
     assertEquals("node B body", nodeA.specs.getContent("auth").orElseThrow().body());
@@ -208,17 +121,13 @@ class SyncTransportTest {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
-
     nodeA.specs.update(spec("auth", "Title from A", "pending"));
     nodeB.specs.update(spec("auth", "Title from B", "pending"));
-
     syncToMain(nodeA);
     var report = syncToMain(nodeB);
-
-    assertEquals(1, report.conflicts());
+    assertEquals(1, report.report().conflicts());
     assertEquals("Title from A", main.specs.findById("auth").orElseThrow().title());
-    var pending = nodeB.conflicts.pending();
-    assertEquals(List.of("title"), pending.getFirst().fields());
+    assertEquals(List.of("title"), nodeB.conflicts.pending().getFirst().fields());
     assertEquals("Title from B", nodeB.specs.findById("auth").orElseThrow().title());
   }
 
@@ -227,11 +136,9 @@ class SyncTransportTest {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
-
     nodeA.specs.delete("auth");
-    syncToMain(nodeA);
+    assertEquals(1, syncToMain(nodeA).report().pushed());
     assertTrue(main.specs.findById("auth").isEmpty());
-
     syncToMain(nodeB);
     assertTrue(nodeB.specs.findById("auth").isEmpty());
   }
@@ -241,79 +148,307 @@ class SyncTransportTest {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
-
     nodeA.specs.delete("auth");
     nodeB.specs.update(spec("auth", "Edited by B", "pending"));
-
     syncToMain(nodeA);
     var report = syncToMain(nodeB);
-
-    assertEquals(1, report.conflicts());
+    assertEquals(1, report.report().conflicts());
     assertTrue(main.specs.findById("auth").isEmpty());
     assertEquals(List.of("<deleted>"), nodeB.conflicts.pending().getFirst().fields());
   }
 
   @Test
-  void reSyncOverTheWireConvergesAndAdvancesTheCheckpoint() throws Exception {
+  void afterASeedOneEditMovesExactlyOneEntryAndTheReportSaysSo() throws Exception {
+    for (var id : List.of("a", "b", "c")) {
+      main.specs.create(spec(id, "Spec " + id, "pending"));
+    }
+    var seed = syncToMain(nodeA);
+    assertEquals(3, seed.report().pulled());
+    assertEquals(1, seed.pages());
+    assertEquals(3, seed.entries());
+    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+
+    main.specs.update(spec("b", "Spec b, edited", "pending"));
+    try (var link = connect(nodeA)) {
+      var round = link.reconcile("spec", nodeA.replica);
+      assertEquals(1, round.report().pulled());
+      assertEquals(1, round.entries());
+      assertEquals(1, round.pages());
+      assertFalse(round.skipped());
+      assertEquals(List.of("hello", "heads", "pull"), link.ops());
+    }
+    assertEquals("Spec b, edited", nodeA.specs.findById("b").orElseThrow().title());
+    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+  }
+
+  @Test
+  void theCheckpointAdvancesOnlyToWhatTheNodeHasSeenAndAnIdleRoundIsOneHeadsExchange()
+      throws Exception {
+    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    try (var link = connect(nodeA)) {
+      var first = link.reconcile("spec", nodeA.replica);
+      assertEquals(1, first.report().pushed());
+      assertEquals(0, first.pages());
+      assertEquals(List.of("hello", "heads", "need", "push"), link.ops());
+    }
+    assertEquals(0L, nodeA.syncState.checkpoint("main", "spec"), "an own push is not a seen entry");
+
+    try (var link = connect(nodeA)) {
+      var second = link.reconcile("spec", nodeA.replica);
+      assertEquals(0, second.report().total());
+      assertEquals(1, second.entries(), "the node reads its own change back and converges");
+      assertFalse(second.skipped());
+    }
+    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+
+    try (var link = connect(nodeA)) {
+      var idle = link.reconcile("spec", nodeA.replica);
+      assertTrue(idle.skipped());
+      assertEquals(0, idle.report().total());
+      assertTrue(link.session().fetchFdes().isEmpty());
+      assertEquals(List.of("hello", "heads", "fetch-fdes"), link.ops());
+      assertEquals(0, link.count("pull"));
+      assertEquals(0, link.count("need"));
+    }
+    assertEquals(1, syncRows(nodeA));
+  }
+
+  @Test
+  void aRoundKilledAfterPageTwoOfSixResumesAtPageThreeWithNothingReAdopted() throws Exception {
+    for (var id : List.of("s1", "s2", "s3", "s4", "s5", "s6")) {
+      bigSpec(main, id);
+    }
+    var pages = new AtomicInteger();
+    UnaryOperator<Writer> killAfterTwoPages =
+        out ->
+            new Writer() {
+              @Override
+              public void write(char[] buffer, int offset, int length) throws IOException {
+                if (new String(buffer, offset, length).contains("\"op\": \"page\"")
+                    && pages.incrementAndGet() > 2) {
+                  throw new IOException("channel cut");
+                }
+                out.write(buffer, offset, length);
+              }
+
+              @Override
+              public void flush() throws IOException {
+                out.flush();
+              }
+
+              @Override
+              public void close() throws IOException {
+                out.close();
+              }
+            };
+    var link = connect(nodeA, SMALL_FRAME, killAfterTwoPages);
+    var failure = assertThrows(RuntimeException.class, () -> link.reconcile("spec", nodeA.replica));
+    assertTrue(
+        failure instanceof SyncTransportException
+            || failure instanceof java.io.UncheckedIOException,
+        failure.toString());
+    try {
+      link.close();
+    } catch (RuntimeException ignored) {
+      link.server().join();
+    }
+    assertEquals(2, nodeA.replica.entityIds().size(), "pages one and two are adopted");
+    assertEquals(2, syncRows(nodeA));
+    var checkpoint = nodeA.syncState.checkpoint("main", "spec");
+    assertEquals(
+        nodeA
+                .db
+                .queryOne(
+                    "SELECT MAX(seq) FROM change_heads WHERE entity_type = 'spec'",
+                    r -> r.integer(0))
+                .orElseThrow()
+            > 0,
+        true);
+    assertTrue(checkpoint > 0 && checkpoint < main.replica.maxSeq());
+
+    try (var resumed = connect(nodeA, SMALL_FRAME, out -> out)) {
+      var round = resumed.reconcile("spec", nodeA.replica);
+      assertEquals(4, round.report().pulled());
+      assertEquals(4, round.pages());
+      assertEquals(4, round.entries());
+    }
+    assertEquals(6, nodeA.replica.entityIds().size());
+    assertEquals(6, syncRows(nodeA), "no entry was adopted twice");
+    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+  }
+
+  @Test
+  void aLocalEditAbsentFromEveryPageIsPushedThroughNeed() throws Exception {
+    main.specs.create(spec("x", "X", "pending"));
+    main.specs.create(spec("y", "Y", "pending"));
+    syncToMain(nodeA);
+    main.specs.update(spec("x", "X from main", "pending"));
+    nodeA.specs.update(spec("y", "Y from A", "pending"));
+    try (var link = connect(nodeA)) {
+      var round = link.reconcile("spec", nodeA.replica);
+      assertEquals(1, round.report().pulled());
+      assertEquals(1, round.report().pushed());
+      assertEquals(1, round.entries(), "the page carried only main's edit");
+      assertEquals(List.of("hello", "heads", "pull", "need", "push"), link.ops());
+    }
+    assertEquals("Y from A", main.specs.findById("y").orElseThrow().title());
+    assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
+  }
+
+  private UnaryOperator<Writer> afterTheFirstPage(Runnable action) {
+    var done = new AtomicInteger();
+    return out ->
+        new Writer() {
+          @Override
+          public void write(char[] buffer, int offset, int length) throws IOException {
+            if (new String(buffer, offset, length).contains("\"op\": \"page\"")
+                && done.getAndIncrement() == 0) {
+              action.run();
+            }
+            out.write(buffer, offset, length);
+          }
+
+          @Override
+          public void flush() throws IOException {
+            out.flush();
+          }
+
+          @Override
+          public void close() throws IOException {
+            out.close();
+          }
+        };
+  }
+
+  @Test
+  void aLocalEditRacingADisjointMainEditMergesThroughTheRejectionPath() throws Exception {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
+    syncToMain(nodeB);
+    nodeA.specs.update(spec("auth", "Title from A", "pending"));
+    main.specs.update(spec("auth", "Auth", "pending"));
+    var engine = new SyncEngine();
+    Runnable bLandsFirst =
+        () -> {
+          nodeB.specs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
+          engine.reconcile(nodeB.replica, main.replica);
+        };
+    try (var link = connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(bLandsFirst))) {
+      var round = link.reconcile("spec", nodeA.replica);
+      assertEquals(1, round.report().merged());
+      assertEquals(2, link.count("push"), "the stale push is rejected and the merge pushed again");
+    }
+    var merged = main.specs.findById("auth").orElseThrow();
+    assertEquals("Title from A", merged.title());
+    assertEquals("in_progress", merged.status().wire());
+    assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
+    assertTrue(nodeA.conflicts.pending().isEmpty());
+  }
 
-    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main"));
-    assertTrue(main.replica.maxSeq() > 0);
+  @Test
+  void aLocalEditRacingTheSameFieldOnMainParksAConflictAndKeepsLocalWork() throws Exception {
+    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    syncToMain(nodeA);
+    syncToMain(nodeB);
+    nodeA.specs.update(spec("auth", "Title from A", "pending"));
+    main.specs.update(spec("auth", "Auth", "pending"));
+    var engine = new SyncEngine();
+    Runnable bLandsFirst =
+        () -> {
+          nodeB.specs.update(spec("auth", "Title from B", "pending"));
+          engine.reconcile(nodeB.replica, main.replica);
+        };
+    try (var link = connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(bLandsFirst))) {
+      assertEquals(1, link.reconcile("spec", nodeA.replica).report().conflicts());
+    }
+    assertEquals("Title from B", main.specs.findById("auth").orElseThrow().title());
+    assertEquals(
+        List.of("title"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
+    assertEquals("Title from A", nodeA.specs.findById("auth").orElseThrow().title());
+  }
 
-    var second = syncToMain(nodeA);
-    assertEquals(0, second.total());
+  @Test
+  void aPushIsSplitIntoBatchesAtTheFrameBound() throws Exception {
+    for (var id : List.of("p1", "p2", "p3", "p4")) {
+      bigSpec(nodeA, id);
+    }
+    try (var link = connect(nodeA)) {
+      var paged = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
+      var round = paged.reconcile("spec", nodeA.replica);
+      assertEquals(4, round.report().pushed());
+      assertEquals(4, link.count("push"));
+      assertEquals(1, link.count("need"));
+    }
+    assertEquals(4, main.replica.entityIds().size());
+  }
+
+  @Test
+  void anEntryNeitherSideCanFrameFailsTheTypeNamingIt() throws Exception {
+    bigSpec(main, "toobig");
+    try (var link = connect(nodeA, 700, out -> out)) {
+      var failure =
+          assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
+      assertEquals("protocol", failure.kind());
+      assertTrue(failure.getMessage().contains("toobig"), failure.getMessage());
+      assertTrue(failure.getMessage().contains("chars"), failure.getMessage());
+    }
+    bigSpec(nodeB, "mine");
+    try (var link = connect(nodeB)) {
+      var paged = ((PagedSyncSession) link.session()).frame(700);
+      var failure =
+          assertThrows(SyncTransportException.class, () -> paged.reconcile("spec", nodeB.replica));
+      assertEquals("protocol", failure.kind());
+      assertTrue(failure.getMessage().startsWith("spec mine:"), failure.getMessage());
+    }
+    assertTrue(main.specs.findById("mine").isEmpty());
   }
 
   @Test
   void aReadOnlyFdeMayPullButItsPushIsRefused() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
-    var pull = syncOverWire(nodeA, false);
-    assertEquals(1, pull.pulled());
+    var readOnly = main.server(new SyncPrincipal("A", false));
+    try (var link = SyncBox.connect(readOnly, "A-box")) {
+      assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
+    }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
-
     nodeA.specs.create(spec("mine", "Local only", "pending"));
-    assertThrows(SyncTransportException.class, () -> syncOverWire(nodeA, false));
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), "A-box")) {
+      var failure =
+          assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
+      assertEquals("refused", failure.kind());
+    }
     assertTrue(main.specs.findById("mine").isEmpty(), "the read-only push never reached main");
   }
 
   @Test
-  void aStalePushIsRejectedByMainAndReReconciledIntoAConflict() throws Exception {
+  void specsAndFilesReconcileOverTheWireInOneSessionAndTheRosterComesAlong() throws Exception {
+    var mainFiles = new FileStore(main.db);
+    var nodeFiles = new FileStore(nodeA.db);
+    var nodeFileReplica =
+        new StoreReplica(
+            "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
     nodeA.specs.create(spec("auth", "Auth", "pending"));
-    syncToMain(nodeA);
-    syncToMain(nodeB);
-
-    nodeA.specs.update(spec("auth", "Title from A", "pending"));
-    nodeB.specs.update(spec("auth", "Title from B", "pending"));
-
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-    var serverThread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    new SyncRpcServer(main.replica, true).serve(serverIn, toClient);
-                  } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                  }
-                });
-
-    try (var session = new SyncSession(clientIn, toServer)) {
-      var remoteA = session.replica("spec");
-      remoteA.entityIds();
-      syncToMain(nodeB);
-      var report = engine.reconcile(nodeA.replica, remoteA);
-      assertEquals(1, report.conflicts());
-    } finally {
-      serverThread.join();
+    nodeFiles.put("acme", "scripts/deploy.sh", "ZGVwbG95");
+    var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
+    var server =
+        SyncRpcServer.over(
+            main.db,
+            "main",
+            new SyncPrincipal("A", true),
+            () -> roster,
+            SyncTransitionSink.NONE,
+            SyncWire.UPGRADE_FLOOR);
+    try (var link = SyncBox.connect(server, "A-box")) {
+      assertEquals(1, link.reconcile("spec", nodeA.replica).report().pushed());
+      assertEquals(1, link.reconcile("file", nodeFileReplica).report().pushed());
+      assertEquals("ada", link.session().fetchFdes().getFirst().get("handle"));
+      assertEquals(1, link.count("heads"), "tips are read once per session");
     }
-
-    assertEquals("Title from B", main.specs.findById("auth").orElseThrow().title());
+    assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
+    assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
     assertEquals(
-        List.of("title"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
-    assertEquals("Title from A", nodeA.specs.findById("auth").orElseThrow().title());
+        List.of("A-box"),
+        main.db.query("SELECT box_id FROM sync_boxes WHERE principal = 'A'", r -> r.text(0)));
   }
 }

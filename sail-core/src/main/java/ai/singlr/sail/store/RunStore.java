@@ -1267,6 +1267,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return journal.entityIds();
   }
 
+  public Set<String> dirtyIds() {
+    return journal.dirtyIds();
+  }
+
   /**
    * Adopts main's authoritative state at its exact rev (no minting), as the new synced ancestor.
    */
@@ -1369,12 +1373,35 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return map;
   }
 
-  private static final Set<String> SURROGATE_FIELDS = Set.of("id");
+  private static final Set<String> SYNC_FIELDS =
+      Set.of(
+          "project",
+          "spec_id",
+          "node",
+          "role",
+          "agent",
+          "branch",
+          "task",
+          "status",
+          "exit_code",
+          "unit",
+          "started_at",
+          "completed_at",
+          "repos",
+          "principal",
+          "owner",
+          "session_id",
+          "session_source",
+          "last_activity_at",
+          "room_id",
+          "principals");
 
   /**
-   * The subset of a snapshot that carries the run's meaning — everything except the surrogate id,
-   * which every replica keys on independently. Runs have no per-replica volatile metadata (no
-   * {@code updated_at}), so every remaining field participates.
+   * The subset of a snapshot that carries the run's meaning across boxes. The surrogate id is out
+   * because every replica keys on it independently, and so is the executing box's process
+   * bookkeeping — {@code pid}, {@code watcher_pid}, {@code pid_ticks}, {@code log_path}, {@code
+   * transcript_path} — which only that box can act on and which it rewrites while the run lives:
+   * carrying it would make a liveness bump a spurious change to push, or a conflict to park.
    */
   private static Map<String, Object> comparable(Map<String, Object> full) {
     if (full == null) {
@@ -1382,7 +1409,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
     var m = new LinkedHashMap<String, Object>();
     for (var field : full.keySet()) {
-      if (!SURROGATE_FIELDS.contains(field) && !field.startsWith("_")) {
+      if (SYNC_FIELDS.contains(field)) {
         m.put(field, full.get(field));
       }
     }

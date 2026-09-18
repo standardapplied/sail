@@ -312,8 +312,8 @@ public final class Fleet implements AutoCloseable {
       slack = new CapturingPoster();
       var syncConfig =
           main
-              ? new SyncConfig("main", null, handle)
-              : new SyncConfig("node", "sail@mainbox", handle);
+              ? new SyncConfig("main", null, handle, handle + "-box")
+              : new SyncConfig("node", "sail@mainbox", handle, handle + "-box");
       if (ServerStartCommand.narratesSlack(syncConfig)) {
         bus.subscribe(
             new SlackReactor(

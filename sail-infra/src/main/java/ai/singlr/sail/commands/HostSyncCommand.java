@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -79,12 +80,35 @@ public final class HostSyncCommand implements Runnable {
    * Applies the chosen role to {@code host}, reusing the validated {@code config set} primitives.
    */
   static HostYaml configure(HostYaml host, boolean asMain, String mainTarget) {
+    var identified = withBoxId(host);
     if (asMain) {
-      return HostConfigSetCommand.applyChange(host, "sync-role", SyncConfig.ROLE_MAIN);
+      return HostConfigSetCommand.applyChange(identified, "sync-role", SyncConfig.ROLE_MAIN);
     }
     HostConfigSetCommand.validate("sync-main", mainTarget);
-    var asNode = HostConfigSetCommand.applyChange(host, "sync-role", SyncConfig.ROLE_NODE);
+    var asNode = HostConfigSetCommand.applyChange(identified, "sync-role", SyncConfig.ROLE_NODE);
     return HostConfigSetCommand.applyChange(asNode, "sync-main", mainTarget);
+  }
+
+  /**
+   * Mints this box's stable sync identity the first time it takes a role. A box that already has
+   * one keeps it: every checkpoint a peer holds is keyed by it.
+   */
+  static HostYaml withBoxId(HostYaml host) {
+    if (host.sync().boxId() != null) {
+      return host;
+    }
+    return new HostYaml(
+        host.storageBackend(),
+        host.pool(),
+        host.poolDisk(),
+        host.bridge(),
+        host.baseProfile(),
+        host.image(),
+        host.incusVersion(),
+        host.serverIp(),
+        host.initializedAt(),
+        host.webauthn(),
+        host.sync().withBoxId(Ids.newId().toString()));
   }
 
   private void printRole(SyncConfig sync) {
@@ -93,6 +117,7 @@ public final class HostSyncCommand implements Runnable {
       map.put("role", sync.role());
       map.put("main", sync.main());
       map.put("handle", sync.handle());
+      map.put("box_id", sync.boxId());
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }

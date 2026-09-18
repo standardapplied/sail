@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,20 +16,29 @@ public final class SyncViews {
   private SyncViews() {}
 
   static Map<String, Object> report(SyncEngine.Report report) {
-    return Map.of(
-        "pulled",
-        report.pulled(),
-        "pushed",
-        report.pushed(),
-        "merged",
-        report.merged(),
-        "conflicts",
-        report.conflicts());
+    var map = new LinkedHashMap<String, Object>();
+    map.put("pulled", report.pulled());
+    map.put("pushed", report.pushed());
+    map.put("merged", report.merged());
+    map.put("conflicts", report.conflicts());
+    return map;
   }
 
   static Map<String, Object> round(SyncReport round) {
     var map = new LinkedHashMap<>(report(round.report()));
     map.put("message", round.message());
+    map.put("types", round.types().stream().map(SyncViews::type).toList());
+    return map;
+  }
+
+  public static Map<String, Object> type(SyncSession.TypeReport type) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("type", type.type());
+    map.putAll(report(type.report()));
+    map.put("pages", type.pages());
+    map.put("entries", type.entries());
+    map.put("skipped", type.skipped());
+    map.put("failure", type.failure());
     return map;
   }
 

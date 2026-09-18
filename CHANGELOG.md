@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.44.0
+
+- **Sync ships the change log since a checkpoint, in bounded pages.** Sync protocol 4 replaces
+  the whole-table-per-round wire: a round now costs O(what changed), a node can be seeded from
+  any history size, and no entity table can grow past what one message may carry. A session opens
+  with `hello`, is `welcome`d once (floors compare as versions; a node ahead of main is told the
+  order, main first), reads main's high-water per type with `heads`, pulls only the types that
+  moved as 16 MiB-bounded pages of the change log since a per-type checkpoint, asks `need` for
+  main's rows of what it changed locally, and pushes in batches. Each page reconciles inside one
+  local transaction and the checkpoint advances only to what the node has seen, so a round that
+  dies resumes at the next page with nothing re-adopted. Main keeps `change_heads` (one row per
+  entity naming its latest change) so every read the protocol makes is an index range, never a
+  scan of history; `sync_state` becomes per peer and per type, carrying the old checkpoint into
+  every type so no node re-seeds. Every box now has a stable sync id (`sync.box_id` in
+  `host.yaml`; `sail join` and `sail host sync --as-main` mint one, `sail migrate` persists the
+  hostname for a box that already has a role) which main binds to the SSH principal that first
+  presents it. `sail sync` prints a line per type that moved or failed, `--json` carries a
+  `types` list, and one type's failure no longer skips the others or the post-sync
+  materialization. A run's process bookkeeping (`pid`, `watcher_pid`, `pid_ticks`, `log_path`,
+  `transcript_path`) stays on the box that executes it. **Upgrade main first:** a 0.44 node still
+  syncs with a 0.43 main through a one-release fallback and says so on every round; a 0.43 node
+  meeting a 0.44 main is told to upgrade. The fallback is deleted in the next release.
+
 ## 0.42.0
 
 - **`sail upgrade` never kills a session.** Every pty master now lives in systemd's file

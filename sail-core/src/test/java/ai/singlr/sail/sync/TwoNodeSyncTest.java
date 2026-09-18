@@ -230,7 +230,7 @@ class TwoNodeSyncTest {
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
 
-    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main"));
+    assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
     assertTrue(main.replica.maxSeq() > 0);
   }
 }

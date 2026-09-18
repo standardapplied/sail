@@ -217,6 +217,9 @@ class HostConfigSetCommandTest {
   void syncRoleAndMainComposeAndPreserveOtherFields() {
     var asNode = HostConfigSetCommand.applyChange(BASE, "sync-role", "node");
     var pointed = HostConfigSetCommand.applyChange(asNode, "sync-main", "sail@maindevbox");
+    var minted = HostSyncCommand.withBoxId(pointed);
+    var identified = HostConfigSetCommand.applyChange(minted, "sync-handle", "mady");
+    assertEquals(minted.sync().boxId(), identified.sync().boxId());
 
     assertEquals("node", pointed.sync().role());
     assertEquals("sail@maindevbox", pointed.sync().main());

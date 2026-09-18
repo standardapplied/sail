@@ -652,6 +652,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.entityIds();
   }
 
+  public Set<String> dirtyIds() {
+    return journal.dirtyIds();
+  }
+
   /** Attributes a spec solely for the retained versioned 0.14 data migration. */
   public boolean assignMigrationProject(String id, String project) {
     return db.transaction(

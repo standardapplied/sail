@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.ProjectStore;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -26,6 +27,12 @@ import java.util.Objects;
  * concurrent edit, conflicting on an overlapping one — never silently overwriting it. The retry is
  * bounded; under pathological churn the entity is parked as a conflict rather than looping.
  *
+ * <p>Pushes are gathered while the round walks its entities and offered to main together through
+ * {@link MainReplica#commitAll}, then each answer is settled exactly as a single commit's would be;
+ * a rejection's re-reconcile may offer again, into the next batch, until the bounded retries are
+ * spent. Nothing about an entity's outcome depends on the batching — only on how many round trips a
+ * remote main costs — because every adoption is guarded by the rev it was decided against.
+ *
  * <p>The round is idempotent — a second run with no new changes converges everything and does
  * nothing — and order-independent across entities, because each entity reconciles against its own
  * merge base. Stateless: all state lives in the replicas, so a sync interrupted between entities
@@ -37,8 +44,19 @@ public final class SyncEngine {
   private static final String STALE_FIELD = "<stale>";
 
   public record Report(int pulled, int pushed, int merged, int conflicts) {
+    public static final Report NONE = new Report(0, 0, 0, 0);
+
     public int total() {
       return pulled + pushed + merged + conflicts;
+    }
+
+    /** Sums two reports into one. */
+    public Report plus(Report other) {
+      return new Report(
+          pulled + other.pulled,
+          pushed + other.pushed,
+          merged + other.merged,
+          conflicts + other.conflicts);
     }
   }
 
@@ -47,160 +65,193 @@ public final class SyncEngine {
     PULLED,
     PUSHED,
     MERGED,
-    CONFLICT
+    CONFLICT,
+    OFFERED
   }
 
   public Report reconcile(LocalReplica local, MainReplica main) {
-    var ids = new LinkedHashSet<String>();
-    ids.addAll(local.entityIds());
-    ids.addAll(main.entityIds());
-
-    var tally = new EnumMap<Outcome, Integer>(Outcome.class);
-    for (var id : ids) {
-      var outcome =
-          reconcileEntity(local, main, id, main.current(id), main.currentRev(id), MAX_REDETECTS);
-      tally.merge(outcome, 1, Integer::sum);
-    }
-
-    local.advanceCheckpoint(main.id(), main.maxSeq());
-    return new Report(
-        count(tally, Outcome.PULLED),
-        count(tally, Outcome.PUSHED),
-        count(tally, Outcome.MERGED),
-        count(tally, Outcome.CONFLICT));
+    return new Round(local, main).run();
   }
 
-  private static int count(EnumMap<Outcome, Integer> tally, Outcome outcome) {
-    return tally.getOrDefault(outcome, 0);
-  }
-
-  private Outcome reconcileEntity(
-      LocalReplica local,
-      MainReplica main,
-      String id,
-      Map<String, Object> remoteSnap,
-      String remoteRev,
-      int redetectsLeft) {
-    var base = local.base(id);
-    var captured = local.capture(id);
-    var localSnap = captured.snapshot();
-    var localRev = captured.rev();
-    if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
-      if (base == null) {
-        if (localSnap == null && Objects.equals(localRev, remoteRev)) {
-          return Outcome.CONVERGED;
-        }
-        return adoptOrRedetect(
-            local, main, id, localRev, null, remoteRev, Outcome.PULLED, redetectsLeft);
-      }
-      remoteSnap = null;
-    }
-    if (ProjectStore.isBlocksResurrectionMarker(localSnap) && base == null) {
-      if (remoteSnap != null) {
-        local.recordConflict(
-            id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
-        return Outcome.CONFLICT;
-      }
-      return push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
-    }
-    return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
-      case ConflictDetector.Converged ignored ->
-          remoteRev == null || Objects.equals(localRev, remoteRev)
-              ? Outcome.CONVERGED
-              : adoptOrRedetect(
-                  local,
-                  main,
-                  id,
-                  localRev,
-                  remoteSnap,
-                  remoteRev,
-                  Outcome.CONVERGED,
-                  redetectsLeft);
-      case ConflictDetector.TakeRemote ignored ->
-          adoptOrRedetect(
-              local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
-      case ConflictDetector.KeepLocal ignored ->
-          local.mayPush(id)
-              ? push(local, main, id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
-              : adoptOrRedetect(
-                  local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
-      case ConflictDetector.Merged m ->
-          local.mayPush(id)
-              ? push(
-                  local, main, id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
-              : adoptOrRedetect(
-                  local, main, id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
-      case ConflictDetector.Conflict c -> {
-        local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
-        yield Outcome.CONFLICT;
-      }
-    };
-  }
-
-  /**
-   * Adopts an authoritative state, but only if the local row still sits at the revision the round's
-   * snapshot was captured from — check and adoption are one atomic replica operation. A local write
-   * landing anywhere in the round makes the adoption stale; adopting anyway would overwrite (and,
-   * for aggregates, delete the non-replicated children of) the newer local state. Instead the
-   * entity is re-reconciled against main's fresh state, so the newer local work pushes, merges, or
-   * parks as a conflict — never silently vanishes. The retry is bounded; past the budget the entity
-   * parks as a stale conflict with the local row untouched.
-   */
-  private Outcome adoptOrRedetect(
-      LocalReplica local,
-      MainReplica main,
-      String id,
-      String expectedLocalRev,
-      Map<String, Object> snapshot,
-      String rev,
-      Outcome onAdopted,
-      int redetectsLeft) {
-    if (local.adoptIfCurrent(id, expectedLocalRev, snapshot, rev)) {
-      return onAdopted;
-    }
-    return redetectsLeft <= 0
-        ? recordStaleConflict(local, id, main.current(id))
-        : reconcileEntity(
-            local, main, id, main.current(id), main.currentRev(id), redetectsLeft - 1);
-  }
-
-  /** Commits the offered snapshot to main and, on acceptance, adopts it via the stale guard. */
-  private Outcome push(
-      LocalReplica local,
-      MainReplica main,
+  /** An offer awaiting main's verdict, with everything needed to settle it. */
+  private record Pending(
       String id,
       Map<String, Object> snapshot,
       String offeredLocalRev,
       String expectedRev,
       Outcome onAccepted,
-      int redetectsLeft) {
-    return switch (main.commit(id, snapshot, expectedRev)) {
-      case CommitOutcome.Accepted a ->
-          adoptOrRedetect(
-              local, main, id, offeredLocalRev, snapshot, a.rev(), onAccepted, redetectsLeft);
-      case CommitOutcome.Rejected r -> {
-        if (redetectsLeft <= 0) {
-          yield recordStaleConflict(local, id, r.currentSnapshot());
-        }
-        yield reconcileEntity(
-            local, main, id, r.currentSnapshot(), r.currentRev(), redetectsLeft - 1);
-      }
-    };
-  }
+      int redetectsLeft) {}
 
-  /**
-   * Main kept moving under our retries: park the entity as a conflict against its latest state so
-   * the user decides, naming the clashing fields when there are any.
-   */
-  private static Outcome recordStaleConflict(
-      LocalReplica local, String id, Map<String, Object> remoteSnap) {
-    var base = local.base(id);
-    var localSnap = local.current(id);
-    var fields =
-        ConflictDetector.detect(base, localSnap, remoteSnap) instanceof ConflictDetector.Conflict c
-            ? c.fields()
-            : List.of(STALE_FIELD);
-    local.recordConflict(id, base, localSnap, remoteSnap, fields);
-    return Outcome.CONFLICT;
+  private static final class Round {
+    private final LocalReplica local;
+    private final MainReplica main;
+    private final EnumMap<Outcome, Integer> tally = new EnumMap<>(Outcome.class);
+    private final List<Pending> pending = new ArrayList<>();
+
+    Round(LocalReplica local, MainReplica main) {
+      this.local = local;
+      this.main = main;
+    }
+
+    Report run() {
+      var ids = new LinkedHashSet<String>();
+      ids.addAll(local.entityIds());
+      ids.addAll(main.entityIds());
+      for (var id : ids) {
+        record(reconcileEntity(id, main.current(id), main.currentRev(id), MAX_REDETECTS));
+      }
+      while (!pending.isEmpty()) {
+        var batch = List.copyOf(pending);
+        pending.clear();
+        var outcomes =
+            main.commitAll(
+                batch.stream()
+                    .map(p -> new MainReplica.Offer(p.id(), p.snapshot(), p.expectedRev()))
+                    .toList());
+        if (outcomes.size() != batch.size()) {
+          throw new IllegalStateException(
+              "main answered " + outcomes.size() + " outcomes for " + batch.size() + " offers");
+        }
+        for (var i = 0; i < batch.size(); i++) {
+          record(settle(batch.get(i), outcomes.get(i)));
+        }
+      }
+      local.advanceCheckpoint(main.id(), main.maxSeq());
+      return new Report(
+          count(Outcome.PULLED),
+          count(Outcome.PUSHED),
+          count(Outcome.MERGED),
+          count(Outcome.CONFLICT));
+    }
+
+    private void record(Outcome outcome) {
+      if (outcome != Outcome.OFFERED) {
+        tally.merge(outcome, 1, Integer::sum);
+      }
+    }
+
+    private int count(Outcome outcome) {
+      return tally.getOrDefault(outcome, 0);
+    }
+
+    private Outcome reconcileEntity(
+        String id, Map<String, Object> remoteSnap, String remoteRev, int redetectsLeft) {
+      var base = local.base(id);
+      var captured = local.capture(id);
+      var localSnap = captured.snapshot();
+      var localRev = captured.rev();
+      if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
+        if (base == null) {
+          if (localSnap == null && Objects.equals(localRev, remoteRev)) {
+            return Outcome.CONVERGED;
+          }
+          return adoptOrRedetect(id, localRev, null, remoteRev, Outcome.PULLED, redetectsLeft);
+        }
+        remoteSnap = null;
+      }
+      if (ProjectStore.isBlocksResurrectionMarker(localSnap) && base == null) {
+        if (remoteSnap != null) {
+          local.recordConflict(
+              id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
+          return Outcome.CONFLICT;
+        }
+        return offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
+      }
+      return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
+        case ConflictDetector.Converged ignored ->
+            remoteRev == null || Objects.equals(localRev, remoteRev)
+                ? Outcome.CONVERGED
+                : adoptOrRedetect(
+                    id, localRev, remoteSnap, remoteRev, Outcome.CONVERGED, redetectsLeft);
+        case ConflictDetector.TakeRemote ignored ->
+            adoptOrRedetect(id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+        case ConflictDetector.KeepLocal ignored ->
+            local.mayPush(id)
+                ? offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
+                : adoptOrRedetect(
+                    id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+        case ConflictDetector.Merged m ->
+            local.mayPush(id)
+                ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
+                : adoptOrRedetect(
+                    id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+        case ConflictDetector.Conflict c -> {
+          local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
+          yield Outcome.CONFLICT;
+        }
+      };
+    }
+
+    /**
+     * Adopts an authoritative state, but only if the local row still sits at the revision the
+     * round's snapshot was captured from — check and adoption are one atomic replica operation. A
+     * local write landing anywhere in the round makes the adoption stale; adopting anyway would
+     * overwrite (and, for aggregates, delete the non-replicated children of) the newer local state.
+     * Instead the entity is re-reconciled against main's fresh state, so the newer local work
+     * pushes, merges, or parks as a conflict — never silently vanishes. The retry is bounded; past
+     * the budget the entity parks as a stale conflict with the local row untouched.
+     */
+    private Outcome adoptOrRedetect(
+        String id,
+        String expectedLocalRev,
+        Map<String, Object> snapshot,
+        String rev,
+        Outcome onAdopted,
+        int redetectsLeft) {
+      if (local.adoptIfCurrent(id, expectedLocalRev, snapshot, rev)) {
+        return onAdopted;
+      }
+      return redetectsLeft <= 0
+          ? recordStaleConflict(id, main.current(id))
+          : reconcileEntity(id, main.current(id), main.currentRev(id), redetectsLeft - 1);
+    }
+
+    /** Queues the snapshot for main's next batch; its verdict is settled when the batch answers. */
+    private Outcome offer(
+        String id,
+        Map<String, Object> snapshot,
+        String offeredLocalRev,
+        String expectedRev,
+        Outcome onAccepted,
+        int redetectsLeft) {
+      pending.add(
+          new Pending(id, snapshot, offeredLocalRev, expectedRev, onAccepted, redetectsLeft));
+      return Outcome.OFFERED;
+    }
+
+    /** Applies main's verdict on one offer: adopt via the stale guard, or re-reconcile. */
+    private Outcome settle(Pending offer, CommitOutcome outcome) {
+      return switch (outcome) {
+        case CommitOutcome.Accepted a ->
+            adoptOrRedetect(
+                offer.id(),
+                offer.offeredLocalRev(),
+                offer.snapshot(),
+                a.rev(),
+                offer.onAccepted(),
+                offer.redetectsLeft());
+        case CommitOutcome.Rejected r ->
+            offer.redetectsLeft() <= 0
+                ? recordStaleConflict(offer.id(), r.currentSnapshot())
+                : reconcileEntity(
+                    offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
+      };
+    }
+
+    /**
+     * Main kept moving under our retries: park the entity as a conflict against its latest state so
+     * the user decides, naming the clashing fields when there are any.
+     */
+    private Outcome recordStaleConflict(String id, Map<String, Object> remoteSnap) {
+      var base = local.base(id);
+      var localSnap = local.current(id);
+      var fields =
+          ConflictDetector.detect(base, localSnap, remoteSnap)
+                  instanceof ConflictDetector.Conflict c
+              ? c.fields()
+              : List.of(STALE_FIELD);
+      local.recordConflict(id, base, localSnap, remoteSnap, fields);
+      return Outcome.CONFLICT;
+    }
   }
 }

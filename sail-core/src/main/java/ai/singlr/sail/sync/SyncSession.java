@@ -9,43 +9,76 @@ import java.io.Reader;
 import java.io.Writer;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
- * One node-to-main sync session over a channel: it hands out a {@link RemoteMainReplica} per entity
- * type (specs, then files) that the engine reconciles in turn, pulls the FDE roster, and ends the
- * session with {@link SyncWire.Bye} on {@link #close}. All exchanges share the one reader/writer
- * and run sequentially, so the typed replicas never interleave on the wire.
+ * One node-to-main sync session over a channel: the seam the round drives, reconciling one entity
+ * type at a time, pulling the FDE roster, and ending the session on {@link #close}. All exchanges
+ * share the one reader/writer and run sequentially, so the typed exchanges never interleave on the
+ * wire. {@link #open} sends the hello and returns the implementation main can speak: the paged
+ * protocol-4 session, or — for one release — the whole-table legacy session a protocol-3 main still
+ * answers.
  */
-public final class SyncSession implements AutoCloseable {
+public sealed interface SyncSession extends AutoCloseable
+    permits PagedSyncSession, LegacySyncSession {
 
-  private final Reader in;
-  private final Writer out;
-
-  public SyncSession(Reader in, Writer out) {
-    this.in = Objects.requireNonNull(in, "in");
-    this.out = Objects.requireNonNull(out, "out");
+  /**
+   * How one entity type fared in a round: the engine's counts, how many pages and entries main
+   * served for it, whether nothing at all had to move ({@code skipped}), and the failure that
+   * stopped it, if one did.
+   */
+  record TypeReport(
+      String type,
+      SyncEngine.Report report,
+      int pages,
+      int entries,
+      boolean skipped,
+      String failure) {
+    public static TypeReport failed(String type, String failure) {
+      return new TypeReport(type, SyncEngine.Report.NONE, 0, 0, false, failure);
+    }
   }
 
-  /** A remote view of main's entities of {@code entityType} for this session's channel. */
-  public RemoteMainReplica replica(String entityType) {
-    return new RemoteMainReplica(in, out, entityType);
-  }
+  /**
+   * Reconciles every entity of {@code type}: what main changed since this node's checkpoint, then
+   * what this node changed itself, pushing and adopting through the engine as it goes.
+   */
+  TypeReport reconcile(String type, LocalReplica local);
 
   /** Pulls main's FDE roster; the node mirrors it main-authoritatively. */
-  public List<Map<String, Object>> fetchFdes() {
-    var response = Rpc.exchange(in, out, new SyncWire.FetchFdes());
-    if (response instanceof SyncWire.Fdes roster) {
-      return roster.fdes();
-    }
-    if (response instanceof SyncWire.Failed failed) {
-      throw new SyncTransportException(failed.kind(), "fde: " + failed.message(), null);
-    }
-    throw new SyncTransportException("fde: Expected an fde roster, got: " + response);
-  }
+  List<Map<String, Object>> fetchFdes();
 
+  /** Ends the session; main returns nothing. */
   @Override
-  public void close() {
-    Rpc.send(out, new SyncWire.Bye());
+  void close();
+
+  /**
+   * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session; the
+   * exact answer a protocol-3 main gives an unknown op yields the legacy session and one line of
+   * {@code notice}; a refusal or anything else fails naming it.
+   */
+  static SyncSession open(Reader in, Writer out, SyncWire.Hello hello, Consumer<String> notice) {
+    var context = SyncWire.context(hello);
+    var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
+    if (LegacySyncSession.answeredHello(line)) {
+      notice.accept(
+          "main is on the v3 sync protocol; upgrade main to " + SyncWire.UPGRADE_FLOOR + ".");
+      return new LegacySyncSession(in, out);
+    }
+    SyncWire.Response response;
+    try {
+      response = SyncWire.decodeResponse(line);
+    } catch (RuntimeException e) {
+      throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
+    }
+    return switch (response) {
+      case SyncWire.Welcome welcome -> PagedSyncSession.open(in, out, hello, welcome, notice);
+      case SyncWire.Refuse refuse ->
+          throw new SyncTransportException("refused", context + ": " + refuse.reason(), null);
+      case SyncWire.Failed failed ->
+          throw new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
+      default ->
+          throw new SyncTransportException(context + ": Expected a welcome, got: " + response);
+    };
   }
 }

@@ -751,7 +751,7 @@ class SchemaManagerTest {
 
   @Test
   void theSpecsRebuildShedsConversationColumnsAndKeepsRowsChildrenAndConstraints() {
-    var staged = SchemaManager.CURRENT_VERSION - 5;
+    var staged = SchemaManager.V1_VERSION + migrationIndex("CREATE TABLE specs_v2");
     stageAtBaseline();
     db.execute("PRAGMA foreign_keys = OFF");
     for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {

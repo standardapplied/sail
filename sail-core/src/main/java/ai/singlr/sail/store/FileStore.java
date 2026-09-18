@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Shared project files on SQLite: arbitrary workspace files (configs, scripts, docs) that every FDE
@@ -157,6 +158,10 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   public LinkedHashSet<String> syncEntityIds() {
     return new LinkedHashSet<>(journal.entityIds());
+  }
+
+  public Set<String> dirtyIds() {
+    return journal.dirtyIds();
   }
 
   /**

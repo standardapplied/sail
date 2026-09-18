@@ -6,6 +6,8 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +44,16 @@ class HostSyncCommandTest {
 
     assertEquals("node", updated.sync().role());
     assertEquals("sail@maindevbox", updated.sync().main());
+  }
+
+  @Test
+  void takingARoleMintsABoxIdOnceAndKeepsAnExistingOne() {
+    var asMain = HostSyncCommand.configure(BASE, true, null);
+    assertNotNull(asMain.sync().boxId());
+    var asNode = HostSyncCommand.configure(asMain, false, "sail@maindevbox");
+    assertEquals(asMain.sync().boxId(), asNode.sync().boxId(), "a box keeps its identity");
+    var another = HostSyncCommand.configure(BASE, false, "sail@maindevbox");
+    assertNotEquals(asMain.sync().boxId(), another.sync().boxId());
   }
 
   @Test

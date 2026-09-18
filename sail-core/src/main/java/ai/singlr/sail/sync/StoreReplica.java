@@ -74,6 +74,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public Set<String> dirtyIds() {
+    return store.dirtyIds();
+  }
+
+  @Override
   public boolean mayPush(String entityId) {
     return pushPolicy.test(entityId);
   }
@@ -127,8 +132,13 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public long checkpoint(String peerId) {
+    return syncState.checkpoint(peerId, store.entityType());
+  }
+
+  @Override
   public void advanceCheckpoint(String peerId, long seq) {
-    syncState.advance(peerId, seq);
+    syncState.advance(peerId, store.entityType(), seq);
   }
 
   private static String json(Map<String, Object> snapshot) {

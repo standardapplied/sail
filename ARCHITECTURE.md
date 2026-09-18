@@ -166,18 +166,39 @@ nothing here.
 
 ### What syncs, and how
 
-`sail sync` runs three bidirectional entity reconciliations plus one one-way roster pull:
+`sail sync` runs one bidirectional reconciliation per registered entity type, in the
+registry's dependency order (a spec before its runs, a room before its messages), plus one
+one-way roster pull:
 
-| Entity | Direction | Replica | Notes |
-|---|---|---|---|
-| specs | Bidirectional, field-level three-way merge | `SpecReplica` | The team board |
-| project definitions | Bidirectional | `ProjectReplica` | The `sail.yaml` catalog |
-| shared workspace files | Bidirectional | `FileReplica` | The `files/` bundle, opaque content |
-| FDE roster | One-way, main-authoritative pull | `FdeStore.replicate` | Handle, name, email, role, status, and never keys or tokens |
+| Entity | Direction | Notes |
+|---|---|---|
+| specs | Bidirectional, field-level three-way merge | The team board |
+| rooms and messages | Bidirectional; messages are immutable once posted | The conversation |
+| project definitions | Bidirectional | The `sail.yaml` catalog |
+| shared workspace files | Bidirectional | The `files/` bundle, opaque content |
+| runs and reviews | Bidirectional; a run is pushed only by the box that executes it | Execution provenance |
+| FDE roster | One-way, main-authoritative pull | Handle, name, email, role, status, and never keys or tokens |
 
-The three replicas are pure delegation adapters that implement both `LocalReplica` and
-`MainReplica`, so the same box acts as the node when it syncs up and as the authority when
-another node syncs to it.
+One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over any synced
+store, so the same box acts as the node when it syncs up and as the authority when another
+node syncs to it. Every synced store keeps a `change_log` of full snapshots and, beside it, a
+`change_heads` row per entity naming its latest entry, so the reads the protocol makes are
+O(what it asks for), never O(history).
+
+### The wire: sync protocol 4
+
+A session opens with `hello` (protocol, build, fleet floor, box id) and is `welcome`d or
+`refuse`d once; floors compare as versions, and a box id is bound to the SSH principal that
+first presented it. The node then asks `heads` for main's high-water per type and, for each
+type whose tip moved past its checkpoint, `pull`s main's change log since that checkpoint one
+bounded `page` at a time — a seed from any history size costs the same per page as an idle
+round. Each page is its own engine round inside one local transaction, and the checkpoint
+(kept per peer and per type) advances only to what the node has actually seen. After the
+pages the node asks `need` for main's current rows of whatever it changed itself, so the
+engine sees main's real state for a local edit, and `push`es its offers in batches. Every
+message is one JSON line under a single 16 MiB frame bound (`SyncWire.MAX_FRAME`), the size
+of a shared file with room to spare. For one release `LegacySyncSession` still speaks the
+protocol-3 whole-table exchange to a main that has not upgraded, and says so.
 
 Passkeys stay box-local by design: identity crosses boxes via the roster pull, but a
 WebAuthn credential is an RP-scoped secret bound to one box's origin and never leaves it.
@@ -574,9 +595,9 @@ support GUI and direct-API clients:
    `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
-3. **Sync identity is the box hostname.** Replicas key off the hostname rather than a stable
-   per-box id, so renames or collisions could confuse sync identity. A stable id is the
-   robust fix. The risk is low for a known small fleet and worth doing before larger ones.
+3. **The protocol-3 fallback is one release deep.** `LegacySyncSession` lets a 0.44 node sync
+   with a 0.43 main; it is deleted in the release after, so a fleet must move main first and
+   nodes within one release.
 4. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
    and projects, but shared files have no author column at all, which is a schema change for
    low value, and the change-log's internal author column stays null for projects and files.

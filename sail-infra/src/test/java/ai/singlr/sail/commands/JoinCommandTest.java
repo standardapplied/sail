@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +73,7 @@ class JoinCommandTest {
     assertEquals(SyncConfig.ROLE_NODE, written.sync().role());
     assertEquals("sail@maindevbox", written.sync().main());
     assertEquals("mady", written.sync().handle(), "join persists this box's FDE handle");
+    assertNotNull(written.sync().boxId(), "join mints this box's sync identity");
     assertEquals("10.0.0.1", written.serverIp(), "unrelated host config is preserved");
   }
 
