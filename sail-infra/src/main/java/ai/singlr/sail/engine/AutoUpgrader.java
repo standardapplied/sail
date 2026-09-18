@@ -55,12 +55,23 @@ public final class AutoUpgrader {
   }
 
   static boolean shouldSkip(String[] args) {
-    return shouldSkip(SailVersion.version(), System::getenv, args);
+    return shouldSkip(SailVersion.version(), System::getenv, System.console() != null, args);
   }
 
-  /** Pure skip decision; version and environment are injected so it is unit-tested. */
-  static boolean shouldSkip(String version, UnaryOperator<String> env, String[] args) {
-    if ("dev".equals(version)) {
+  /**
+   * Pure skip decision; version, environment and interactivity are injected so it is unit-tested.
+   * Internal lanes never upgrade: {@code _sync}, {@code _gateway}, {@code _pty-host} and their kin
+   * run unattended under a forced command or a service, where the download's sudo prompt lands in a
+   * sync pipe or nowhere at all (the field incident of 2026-09-17: main's {@code _sync} asked a
+   * node's terminal for main's sudo password). Nor does any invocation without a console to answer
+   * that prompt. Upgrading unattended machinery is {@code sail upgrade}, run on purpose.
+   */
+  static boolean shouldSkip(
+      String version, UnaryOperator<String> env, boolean interactive, String[] args) {
+    if ("dev".equals(version) || !interactive) {
+      return true;
+    }
+    if (args.length > 0 && args[0].startsWith("_")) {
       return true;
     }
     if ("1".equals(env.apply("SAIL_NO_UPDATE_CHECK"))) {
