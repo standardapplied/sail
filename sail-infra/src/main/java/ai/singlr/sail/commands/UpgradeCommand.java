@@ -154,6 +154,10 @@ public final class UpgradeCommand implements Runnable {
                 + actualChecksum
                 + "\n  The download may be corrupted. Try again.");
       }
+      if (!PlatformDetector.isValidBinary(binary)) {
+        throw new IOException(
+            "The download is not a " + PlatformDetector.platformSuffix() + " executable.");
+      }
       if (!json) {
         System.out.println(Banner.stepDoneLine(2, 4, "Checksum verified", Ansi.AUTO));
       }
