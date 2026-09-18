@@ -162,8 +162,12 @@ public final class Fleet implements AutoCloseable {
     Files.writeString(
         sailDir.resolve("host.yaml"),
         isMain
-            ? "sync:\n  role: main\n  handle: " + handle + "\n"
-            : "sync:\n  role: node\n  main: sail@mainbox\n  handle: " + handle + "\n");
+            ? "sync:\n  role: main\n  handle: " + handle + "\n  box_id: " + handle + "-box\n"
+            : "sync:\n  role: node\n  main: sail@mainbox\n  handle: "
+                + handle
+                + "\n  box_id: "
+                + handle
+                + "-box\n");
     var descriptor =
         Files.createDirectories(sailDir.resolve("projects").resolve(PROJECT)).resolve("sail.yaml");
     Files.writeString(descriptor, PROJECT_YAML);
@@ -312,8 +316,8 @@ public final class Fleet implements AutoCloseable {
       slack = new CapturingPoster();
       var syncConfig =
           main
-              ? new SyncConfig("main", null, handle)
-              : new SyncConfig("node", "sail@mainbox", handle);
+              ? new SyncConfig("main", null, handle, handle + "-box")
+              : new SyncConfig("node", "sail@mainbox", handle, handle + "-box");
       if (ServerStartCommand.narratesSlack(syncConfig)) {
         bus.subscribe(
             new SlackReactor(

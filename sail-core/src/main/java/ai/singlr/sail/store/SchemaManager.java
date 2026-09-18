@@ -466,7 +466,29 @@ public final class SchemaManager {
               last_report TEXT,
               state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
               stale_since TEXT
-          )""");
+          )""",
+          """
+          CREATE TABLE change_heads (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              seq INTEGER NOT NULL,
+              PRIMARY KEY (entity_type, entity_id)
+          )""",
+          "CREATE INDEX idx_change_heads_seq ON change_heads(entity_type, seq)",
+          """
+          INSERT INTO change_heads (entity_type, entity_id, seq)
+          SELECT entity_type, entity_id, MAX(seq) FROM change_log
+          GROUP BY entity_type, entity_id""",
+          """
+          CREATE TABLE sync_state_v2 (
+              peer TEXT NOT NULL,
+              entity_type TEXT NOT NULL,
+              checkpoint INTEGER NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY (peer, entity_type)
+          )""",
+          "DROP TABLE sync_state",
+          "ALTER TABLE sync_state_v2 RENAME TO sync_state");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

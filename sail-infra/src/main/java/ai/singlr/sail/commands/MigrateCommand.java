@@ -6,12 +6,15 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
@@ -98,6 +101,7 @@ public final class MigrateCommand implements Runnable {
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
       applyDataImports(db, jsonOutput);
       relocateHostConfig(jsonOutput);
+      assignBoxId(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
       ensureSshdKeepalive(jsonOutput);
       convergeContainers(jsonOutput);
@@ -286,6 +290,44 @@ public final class MigrateCommand implements Runnable {
               + e.getMessage()
               + ". Converge manually with 'sudo sail host ssh-identity'.");
     }
+  }
+
+  /**
+   * Persists a sync box id for a box that took its role before ids existed: the hostname, which is
+   * what every peer's checkpoints for this box are already keyed by, so nothing re-seeds. A box
+   * without a sync role has no identity to keep; a box that already has an id keeps it. Same
+   * upgrade-convergence rationale as {@link #relocateHostConfig}; quiet when {@code host.yaml} is
+   * not writable, since an unprivileged upgrade resolves the same value at runtime.
+   */
+  private static void assignBoxId(boolean jsonOutput) {
+    var path = SailPaths.hostConfigPath();
+    if (!Files.exists(path)) {
+      return;
+    }
+    try {
+      var host = HostYaml.fromMap(YamlUtil.parseFile(path));
+      var assigned = assignBoxId(host, HostInfo.hostname());
+      if (assigned.isEmpty()) {
+        return;
+      }
+      YamlUtil.dumpToFile(assigned.get().toMap(), path);
+      if (!jsonOutput) {
+        System.out.println(
+            Ansi.AUTO.string("  @|green ✓|@ sync box id set to " + assigned.get().sync().boxId()));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          "  sync box id not persisted: "
+              + e.getMessage()
+              + ". Run 'sudo sail migrate' to write it; sync uses the hostname until then.");
+    }
+  }
+
+  static Optional<HostYaml> assignBoxId(HostYaml host, String boxId) {
+    if (host.sync().role() == null || host.sync().boxId() != null) {
+      return Optional.empty();
+    }
+    return Optional.of(host.withSync(host.sync().withBoxId(boxId)));
   }
 
   /**

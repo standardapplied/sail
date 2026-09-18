@@ -18,9 +18,9 @@ import java.util.List;
 /**
  * One sync session's transport: an {@code ssh sail@main sail _sync} subprocess whose stdio is the
  * RPC pipe. The remote {@code _sync} server reads requests from this channel's {@link #writer} and
- * writes responses to its {@link #reader}; {@link ai.singlr.sail.sync.RemoteMainReplica} drives
- * both ends. Like the rest of the gateway lane, password and keyboard-interactive auth are disabled
- * so a missing key fails fast instead of dangling a prompt for the locked {@code sail} account.
+ * writes responses to its {@link #reader}; a {@link ai.singlr.sail.sync.SyncSession} drives both
+ * ends. Like the rest of the gateway lane, password and keyboard-interactive auth are disabled so a
+ * missing key fails fast instead of dangling a prompt for the locked {@code sail} account.
  */
 public final class SshSyncChannel implements SyncOperations.Channel {
 

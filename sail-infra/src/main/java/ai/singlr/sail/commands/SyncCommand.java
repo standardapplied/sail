@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncViews;
 import ai.singlr.sail.config.SyncConfig;
@@ -20,6 +21,8 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +35,8 @@ import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
 
 /**
- * Reconciles this box's local spec replica with the main devbox over the SSH-key gateway. The
- * engine runs here on the node and drives a {@link RemoteMainReplica} across the channel:
+ * Reconciles this box's local replicas with the main devbox over the SSH-key gateway. The engine
+ * runs here on the node and drives one page of main's change log at a time across the channel:
  * local-only work pushes (main mints the rev), main-only work pulls, disjoint edits auto-merge, and
  * same-field conflicts are parked locally for {@code sail conflicts} — the node's row is never
  * clobbered. The round is idempotent; running it again after it converges does nothing. The local
@@ -152,7 +155,7 @@ public final class SyncCommand implements Callable<Integer> {
   private int runOnce(Operations operations, String target) {
     try {
       var round = operations.sync(new SyncRequest(target));
-      System.out.println(render(round.report(), json));
+      System.out.println(render(round, json));
       return 0;
     } catch (Exception e) {
       System.err.println(
@@ -174,7 +177,7 @@ public final class SyncCommand implements Callable<Integer> {
     while (true) {
       try {
         var round = operations.sync(new SyncRequest(target));
-        System.out.println(render(round.report(), json));
+        System.out.println(render(round, json));
       } catch (InterruptedException e) {
         throw e;
       } catch (Exception e) {
@@ -192,10 +195,6 @@ public final class SyncCommand implements Callable<Integer> {
     return SyncOperations.pulledMessageEvents(messages, specs, known, host);
   }
 
-  static SyncEngine.Report combine(SyncEngine.Report a, SyncEngine.Report b) {
-    return SyncOperations.combine(a, b);
-  }
-
   static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
     return SyncOperations.applyFdes(fdes, roster);
   }
@@ -208,19 +207,24 @@ public final class SyncCommand implements Callable<Integer> {
     return SyncOperations.boardUpdatedEvent(host, report);
   }
 
-  static String render(SyncEngine.Report report, boolean json) {
+  static String render(SyncReport round, boolean json) {
+    var report = round.report();
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("pulled", report.pulled());
       map.put("pushed", report.pushed());
       map.put("merged", report.merged());
       map.put("conflicts", report.conflicts());
+      map.put("types", round.types().stream().map(SyncViews::type).toList());
       return YamlUtil.dumpJson(map);
     }
-    if (report.total() == 0) {
+    var detail =
+        round.types().stream().filter(SyncCommand::worthALine).map(SyncCommand::line).toList();
+    if (report.total() == 0 && detail.isEmpty()) {
       return Ansi.AUTO.string("  @|green ✓|@ Already in sync with main.");
     }
-    var summary =
+    var lines = new ArrayList<String>();
+    lines.add(
         Ansi.AUTO.string(
             "  @|green ✓|@ Synced with main: @|bold "
                 + report.pulled()
@@ -228,15 +232,43 @@ public final class SyncCommand implements Callable<Integer> {
                 + report.pushed()
                 + "|@ pushed, @|bold "
                 + report.merged()
-                + "|@ merged.");
-    if (report.conflicts() == 0) {
-      return summary;
+                + "|@ merged."));
+    lines.addAll(detail);
+    if (report.conflicts() > 0) {
+      lines.add(
+          Banner.errorLine(
+              report.conflicts()
+                  + " conflict(s) need your decision. Run 'sail conflicts' to resolve.",
+              Ansi.AUTO));
     }
-    return summary
-        + "\n"
-        + Banner.errorLine(
-            report.conflicts()
-                + " conflict(s) need your decision. Run 'sail conflicts' to resolve.",
-            Ansi.AUTO);
+    return String.join("\n", lines);
+  }
+
+  private static boolean worthALine(SyncSession.TypeReport type) {
+    return type.failure() != null || type.report().total() > 0;
+  }
+
+  private static String line(SyncSession.TypeReport type) {
+    if (type.failure() != null) {
+      return Banner.errorLine(type.type() + ": " + type.failure(), Ansi.AUTO);
+    }
+    var counts = type.report();
+    var conflicts = counts.conflicts() == 0 ? "" : ", " + counts.conflicts() + " conflict(s)";
+    return Ansi.AUTO.string(
+        "    @|faint "
+            + type.type()
+            + ":|@ "
+            + counts.pulled()
+            + " pulled, "
+            + counts.pushed()
+            + " pushed, "
+            + counts.merged()
+            + " merged"
+            + conflicts
+            + " @|faint ("
+            + type.pages()
+            + " page(s), "
+            + type.entries()
+            + " entries)|@");
   }
 }

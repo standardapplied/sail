@@ -55,6 +55,19 @@ class SyncConfigTest {
   }
 
   @Test
+  void theBoxIdRoundTripsAndIsNullUntilMinted() {
+    var minted = new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "mady", "box-7");
+    assertEquals("box-7", SyncConfig.fromMap(minted.toMap()).boxId());
+    assertEquals("box-7", minted.toMap().get("box_id"));
+    var legacy = new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "mady");
+    assertNull(legacy.boxId());
+    assertNull(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "mady", " ").boxId());
+    assertEquals("box-9", legacy.withBoxId("box-9").boxId());
+    assertEquals("mady", legacy.withBoxId("box-9").handle());
+    assertNull(SyncConfig.fromMap(Map.of("role", SyncConfig.ROLE_NODE)).boxId());
+  }
+
+  @Test
   void fromANullMapIsUnset() {
     assertFalse(SyncConfig.fromMap(null).isMain());
     assertNull(SyncConfig.fromMap(Map.of()).role());

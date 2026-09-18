@@ -22,9 +22,11 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -32,10 +34,13 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
+import ai.singlr.sail.sync.SyncTransitionSink;
+import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.io.PipedReader;
@@ -110,7 +115,7 @@ class SailOperationsSeamTest {
               node.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main", "node"),
+              () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> {
                 assertEquals("syncing", operations.syncStatus().state());
                 if (offline.get()) {
@@ -189,7 +194,7 @@ class SailOperationsSeamTest {
                   node.db,
                   "node",
                   tempDir,
-                  () -> new SyncConfig("node", "main", "owner"),
+                  () -> new SyncConfig("node", "main", "owner", "node-box"),
                   target -> {
                     attempts.incrementAndGet();
                     if (offline.get()) throw new IOException("main port blocked");
@@ -276,7 +281,7 @@ class SailOperationsSeamTest {
                   node.db,
                   "node",
                   tempDir,
-                  () -> new SyncConfig("node", "main", "node"),
+                  () -> new SyncConfig("node", "main", "node", "node-box"),
                   target -> channel(main)));
       if (previouslySynced) operations.sync(new SyncRequest(null));
       var lastSuccess = operations.syncStatus().lastSuccessAt();
@@ -361,7 +366,7 @@ class SailOperationsSeamTest {
               db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main", "node"),
+              () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> channel(main)));
 
       operations.sync(new SyncRequest(null));
@@ -384,7 +389,7 @@ class SailOperationsSeamTest {
               box.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main", "node"),
+              () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> {
                 throw new ai.singlr.sail.sync.SyncTransportException(
                     kind, "message m1: failure cause", null);
@@ -448,7 +453,7 @@ class SailOperationsSeamTest {
               box.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main", "owner"),
+              () -> new SyncConfig("node", "main", "owner", "node-box"),
               target -> {
                 throw new IOException("unused");
               }));
@@ -485,7 +490,7 @@ class SailOperationsSeamTest {
               box.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main", nodeOwner),
+              () -> new SyncConfig("node", "main", nodeOwner, "node-box"),
               target -> {
                 throw new IOException("unused");
               }));
@@ -532,7 +537,7 @@ class SailOperationsSeamTest {
                 box.db,
                 "node",
                 tempDir,
-                () -> new SyncConfig("node", "main", "owner"),
+                () -> new SyncConfig("node", "main", "owner", "node-box"),
                 target -> {
                   throw new IOException("unused");
                 }));
@@ -572,7 +577,7 @@ class SailOperationsSeamTest {
               node.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "trusted-main", "node"),
+              () -> new SyncConfig("node", "trusted-main", "node", "node-box"),
               target -> {
                 targets.add(target);
                 return channel(main);
@@ -848,7 +853,7 @@ class SailOperationsSeamTest {
               node.db,
               "node",
               tempDir,
-              () -> new SyncConfig("node", "main-target", "node"),
+              () -> new SyncConfig("node", "main-target", "node", "node-box"),
               target -> {
                 targets.add(target);
                 return channel(main);
@@ -868,6 +873,61 @@ class SailOperationsSeamTest {
   }
 
   @Test
+  void aPartiallyFailedRoundStillAnnouncesTheMessagesItPulledExactlyOnce() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      main.specs.create(SyncBox.spec("auth", "main spec", "pending"));
+      new MessageStore(main.db).append("auth", "raj", "hello from main", null);
+      var replicas =
+          new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", "node"));
+      replicas.remove("file");
+      var events = new ArrayList<Event>();
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node", "node-box"),
+              target ->
+                  channel(
+                      new SyncRpcServer(
+                          replicas,
+                          new SyncPrincipal("node", true),
+                          List::of,
+                          SyncTransitionSink.NONE,
+                          new ChangeLog(main.db)::headsAfter,
+                          SyncWire.UPGRADE_FLOOR)),
+              events::add));
+      operations.schema().prepareSync();
+      java.util.function.Supplier<List<String>> posted =
+          () ->
+              events.stream()
+                  .map(Event::type)
+                  .filter(Event.WellKnownTypes.SPEC_MESSAGE_POSTED::equals)
+                  .toList();
+
+      var failure = assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+      assertTrue(failure.getMessage().contains("file"), failure.getMessage());
+      assertEquals("hello from main", body(node, "auth"));
+      assertEquals(
+          List.of(Event.WellKnownTypes.SPEC_MESSAGE_POSTED),
+          posted.get(),
+          "a message the failed round still pulled is announced");
+
+      events.clear();
+      assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+      assertEquals(List.of(), posted.get(), "the next round never announces it again");
+    }
+  }
+
+  private static String body(SyncBox box, String room) {
+    return new MessageStore(box.db).list(room, null, 10).getFirst().body();
+  }
+
+  @Test
   void standaloneAndMainAreNoOpsAndTransportFailuresRemainFailures() throws Exception {
     try (var db = Sqlite.openMemory();
         var operations = operations(db)) {
@@ -882,7 +942,7 @@ class SailOperationsSeamTest {
               db,
               "main",
               tempDir,
-              () -> new SyncConfig("main", null, "owner"),
+              () -> new SyncConfig("main", null, "owner", "main-box"),
               target -> {
                 throw new IOException("unexpected connection");
               }));
@@ -1017,6 +1077,17 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncBox main) throws IOException {
+    return channel(
+        SyncRpcServer.over(
+            main.db,
+            "main",
+            new SyncPrincipal("node", true),
+            List::of,
+            SyncTransitionSink.NONE,
+            SyncWire.UPGRADE_FLOOR));
+  }
+
+  private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {
     var toServer = new PipedWriter();
     var serverIn = new PipedReader(toServer);
     var serverOut = new PipedWriter();
@@ -1028,11 +1099,7 @@ class SailOperationsSeamTest {
                 () -> {
                   try (serverIn;
                       serverOut) {
-                    new SyncRpcServer(
-                            new LinkedHashMap<>(SyncedEntities.replicas(main.db, "main", "main")),
-                            new SyncPrincipal("node", true),
-                            List::of)
-                        .serve(serverIn, serverOut);
+                    server.serve(serverIn, serverOut);
                   } catch (Throwable e) {
                     error.set(e);
                   }

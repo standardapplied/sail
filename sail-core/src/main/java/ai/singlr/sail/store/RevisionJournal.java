@@ -73,8 +73,27 @@ public final class RevisionJournal implements ConflictResolver {
 
   /** The latest revision recorded for an entity, including a tombstone; null if never recorded. */
   public String latestRev(String id) {
-    var history = changeLog.history(schema.entityType(), id);
-    return history.isEmpty() ? null : history.getLast().rev();
+    return changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::rev).orElse(null);
+  }
+
+  /**
+   * Every id with a change of this box's own that main has not acknowledged: a live row whose rev
+   * is not its synced base, plus every entity whose head entry is a locally decided deletion. In
+   * the order the rows were written, because a round offers them in this order and a child row must
+   * reach main after its parent.
+   */
+  public Set<String> dirtyIds() {
+    var dirty =
+        new LinkedHashSet<>(
+            db.query(
+                """
+                SELECT id FROM %s
+                WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev
+                ORDER BY rowid"""
+                    .formatted(schema.table()),
+                row -> row.text(0)));
+    dirty.addAll(changeLog.localTombstones(schema.entityType()));
+    return dirty;
   }
 
   /**
@@ -87,11 +106,10 @@ public final class RevisionJournal implements ConflictResolver {
     if (schema.exists(id)) {
       return rawBaseRev(id);
     }
-    var tombstone = changeLog.history(schema.entityType(), id);
-    if (tombstone.isEmpty()) {
-      return null;
-    }
-    return Snapshots.text(YamlUtil.parseMap(tombstone.getLast().snapshot()), TOMBSTONE_BASE);
+    return changeLog
+        .head(schema.entityType(), id)
+        .map(tombstone -> Snapshots.text(YamlUtil.parseMap(tombstone.snapshot()), TOMBSTONE_BASE))
+        .orElse(null);
   }
 
   /** Appends a revision for the current state of {@code id}, minting a rev from the counter. */

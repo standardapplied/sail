@@ -31,6 +31,7 @@ import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
+import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PipedReader;
@@ -144,8 +145,9 @@ class SyncServerCommandTest {
                   }
                 });
 
-    try (var session = new SyncSession(clientIn, toServer)) {
-      return new SyncEngine().reconcile(replica, session.replica(entityType));
+    try (var session =
+        SyncSession.open(clientIn, toServer, SyncWire.Hello.of("0.44.0", "node-box"), n -> {})) {
+      return session.reconcile(entityType, replica).report();
     } finally {
       serverThread.join();
     }

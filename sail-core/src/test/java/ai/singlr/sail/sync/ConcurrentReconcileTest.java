@@ -63,6 +63,11 @@ class ConcurrentReconcileTest {
     }
 
     @Override
+    public State state(String id) {
+      return new State(current(id), currentRev(id));
+    }
+
+    @Override
     public long maxSeq() {
       return minted;
     }

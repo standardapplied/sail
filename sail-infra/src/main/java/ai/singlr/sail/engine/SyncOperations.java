@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncReport;
@@ -19,10 +20,12 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncPeer;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransportException;
+import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.io.Reader;
@@ -31,16 +34,22 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
-/** Runs the shared node-to-main round and its existing local projections. */
+/**
+ * Runs the shared node-to-main round and its existing local projections. The round walks the entity
+ * registry in its order — the dependency order, a spec before its runs, a room before its messages
+ * — and one type's failure is recorded against that type while the rest of the round, post-steps
+ * included, still runs; the first failure is thrown afterwards with the others suppressed, so a
+ * broken type never silences the materialization of the ones that succeeded.
+ */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
     Reader reader();
@@ -61,6 +70,7 @@ public final class SyncOperations {
   private final Path projectsDir;
   private final Supplier<SyncConfig> configuration;
   private final Channels channels;
+  private final Consumer<Event> events;
   private SailEventPublisher publisher;
 
   public SyncOperations(
@@ -69,11 +79,23 @@ public final class SyncOperations {
       Path projectsDir,
       Supplier<SyncConfig> configuration,
       Channels channels) {
+    this(db, host, projectsDir, configuration, channels, null);
+  }
+
+  /** {@code events} receives every event a round publishes; {@code null} means the local API. */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels,
+      Consumer<Event> events) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
     this.configuration = configuration;
     this.channels = channels;
+    this.events = events == null ? this::publishQuietly : events;
   }
 
   public SyncConfig configuration() {
@@ -88,58 +110,114 @@ public final class SyncOperations {
     var config = configuration.get();
     var target = resolveMain(request.main(), config);
     if (target.target() == null) {
-      return new SyncReport(new SyncEngine.Report(0, 0, 0, 0), target.message());
+      return new SyncReport(SyncEngine.Report.NONE, target.message());
     }
     var round = SyncPeer.withChecked("main", () -> reconcileSession(target.target(), config));
-    notify(round);
-    return new SyncReport(round.report(), null);
+    return new SyncReport(round.report(), null, round.types());
   }
 
-  private record Round(SyncEngine.Report report, List<Event> pulledMessages) {}
+  private record Round(
+      SyncEngine.Report report, List<SyncSession.TypeReport> types, List<Event> pulledMessages) {}
 
   private Round reconcileSession(String target, SyncConfig config) throws Exception {
-    var replicas = SyncedEntities.replicas(db, host, Objects.toString(config.handle(), ""));
     var messages = new MessageStore(db);
     var specs = new SpecStore(db);
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
-    try (var channel = channels.open(target);
-        var session = new SyncSession(channel.reader(), channel.writer())) {
-      var reports = new LinkedHashMap<String, SyncEngine.Report>();
+    try (var channel = channels.open(target)) {
+      var boxId = requireBoxId(config);
+      var replicas = SyncedEntities.replicas(db, boxId, Objects.toString(config.handle(), ""));
+      var hello = SyncWire.Hello.of(SailVersion.version(), boxId);
+      return reconcile(channel, hello, replicas, messages, specs, files, projects);
+    }
+  }
+
+  private Round reconcile(
+      Channel channel,
+      SyncWire.Hello hello,
+      Map<String, StoreReplica> replicas,
+      MessageStore messages,
+      SpecStore specs,
+      FileStore files,
+      ProjectStore projects)
+      throws Exception {
+    try (var session =
+        SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice)) {
+      var types = new ArrayList<SyncSession.TypeReport>();
+      var failures = new ArrayList<SyncTransportException>();
       var knownMessages = messages.syncEntityIds();
       for (var entity : SyncedEntities.all()) {
         try {
-          reports.put(
-              entity.type(),
-              new SyncEngine()
-                  .reconcile(replicas.get(entity.type()), session.replica(entity.type())));
-        } catch (SyncTransportException e) {
-          throw e;
+          types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
         } catch (RuntimeException e) {
-          throw new SyncTransportException(
-              e instanceof UncheckedIOException ? "unreachable" : "store",
-              entity.type() + ": " + e.getMessage(),
-              e);
+          var failure = transportFailure(entity.type(), e);
+          failures.add(failure);
+          types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
         }
       }
       var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
-      var rejected = applyFdes(new FdeStore(db), session.fetchFdes());
-      if (!rejected.isEmpty()) {
-        System.err.println(
-            Banner.errorLine(
-                "Skipped "
-                    + rejected.size()
-                    + " malformed identity entry(ies) from main: "
-                    + String.join(", ", rejected),
-                Ansi.AUTO));
+      try {
+        reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+      } catch (RuntimeException e) {
+        failures.add(transportFailure("fde", e));
       }
       materialize(files);
       materializeProjects(projects);
-      reconcileLiveResources(projects, reports.get("project"));
-      return new Round(
-          reports.values().stream()
-              .reduce(new SyncEngine.Report(0, 0, 0, 0), SyncOperations::combine),
-          pulledMessages);
+      reconcileLiveResources(projects, reportFor(types, "project"));
+      var summed =
+          types.stream()
+              .map(SyncSession.TypeReport::report)
+              .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+      var round = new Round(summed, List.copyOf(types), pulledMessages);
+      notify(round);
+      if (!failures.isEmpty()) {
+        var first = failures.getFirst();
+        failures.stream().skip(1).forEach(first::addSuppressed);
+        throw first;
+      }
+      return round;
+    }
+  }
+
+  private static String requireBoxId(SyncConfig config) {
+    if (Strings.isBlank(config.boxId())) {
+      throw new IllegalStateException(
+          "This box has no sync box id. Run 'sudo sail migrate' to assign one, then sync again.");
+    }
+    return config.boxId();
+  }
+
+  private static SyncTransportException transportFailure(String context, RuntimeException e) {
+    if (e instanceof SyncTransportException transport) {
+      return transport;
+    }
+    return new SyncTransportException(
+        e instanceof UncheckedIOException ? "unreachable" : "store",
+        context + ": " + e.getMessage(),
+        e);
+  }
+
+  private static SyncEngine.Report reportFor(List<SyncSession.TypeReport> types, String type) {
+    return types.stream()
+        .filter(report -> report.type().equals(type))
+        .map(SyncSession.TypeReport::report)
+        .findFirst()
+        .orElse(SyncEngine.Report.NONE);
+  }
+
+  private static void notice(String line) {
+    System.err.println(Banner.errorLine(line, Ansi.AUTO));
+  }
+
+  private static void reportRejectedFdes(List<String> rejected) {
+    if (!rejected.isEmpty()) {
+      System.err.println(
+          Banner.errorLine(
+              "Skipped "
+                  + rejected.size()
+                  + " malformed identity entry(ies) from main: "
+                  + String.join(", ", rejected),
+              Ansi.AUTO));
     }
   }
 
@@ -273,15 +351,6 @@ public final class SyncOperations {
     }
   }
 
-  /** Sums two reconcile reports (specs + files) into one round summary. */
-  public static SyncEngine.Report combine(SyncEngine.Report a, SyncEngine.Report b) {
-    return new SyncEngine.Report(
-        a.pulled() + b.pulled(),
-        a.pushed() + b.pushed(),
-        a.merged() + b.merged(),
-        a.conflicts() + b.conflicts());
-  }
-
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
    * for a malformed role or status — dropped, never written with a bad authorization.
@@ -309,12 +378,17 @@ public final class SyncOperations {
     return value == null ? null : value.toString();
   }
 
+  /**
+   * Publishes what the round committed. Runs before a partial failure is thrown: the pulled
+   * messages are already checkpointed, so a round that never reached this point would leave them
+   * known-but-unannounced forever.
+   */
   private void notify(Round round) {
     for (var event : round.pulledMessages()) {
-      publishQuietly(event);
+      events.accept(event);
     }
     if (shouldNotify(round.report())) {
-      publishQuietly(boardUpdatedEvent(host, round.report()));
+      events.accept(boardUpdatedEvent(host, round.report()));
     }
   }
 

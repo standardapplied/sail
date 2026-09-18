@@ -40,6 +40,14 @@ public interface SyncedStore {
   /** Latest revision, including a tombstone; {@code null} if unknown. */
   String latestRev(String id);
 
+  /**
+   * Every id carrying a change this box made that main has not yet acknowledged: a live row whose
+   * revision is not the one it last synced from main, and an entity whose latest journal entry is a
+   * deletion this box decided itself. What a sync round must reconcile even when main's change log
+   * has nothing new for it.
+   */
+  Set<String> dirtyIds();
+
   /** Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). */
   void applyRevision(String id, Map<String, Object> snapshot, String rev);
 

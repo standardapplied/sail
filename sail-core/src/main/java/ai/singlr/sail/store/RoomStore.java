@@ -182,8 +182,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * was removed, so an idempotent minter must not resurrect it.
    */
   public boolean isTombstoned(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return !history.isEmpty() && history.getLast().deleted();
+    return changeLog.head(ENTITY, id).map(ChangeLog.Entry::deleted).orElse(false);
   }
 
   /**
@@ -264,6 +263,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   @Override
   public Set<String> syncEntityIds() {
     return new LinkedHashSet<>(journal.entityIds());
+  }
+
+  @Override
+  public Set<String> dirtyIds() {
+    return journal.dirtyIds();
   }
 
   /**

@@ -19,7 +19,7 @@ import java.util.Map;
  * dispatch matches a spec against ("me" = "on this box"), set by {@code sail join} and settable via
  * {@code sail host config set sync-handle}. Null until the box is bound to an FDE.
  */
-public record SyncConfig(String role, String main, String handle) {
+public record SyncConfig(String role, String main, String handle, String boxId) {
 
   public static final String ROLE_MAIN = "main";
   public static final String ROLE_NODE = "node";
@@ -28,6 +28,17 @@ public record SyncConfig(String role, String main, String handle) {
     role = Strings.isBlank(role) ? null : role;
     main = Strings.isBlank(main) ? null : main;
     handle = Strings.isBlank(handle) ? null : handle;
+    boxId = Strings.isBlank(boxId) ? null : boxId;
+  }
+
+  /** A configuration with no box id yet: the shape every box wore before ids were minted. */
+  public SyncConfig(String role, String main, String handle) {
+    this(role, main, handle, null);
+  }
+
+  /** The same role and peer, identified by {@code boxId}. */
+  public SyncConfig withBoxId(String boxId) {
+    return new SyncConfig(role, main, handle, boxId);
   }
 
   /** An undeclared box: neither main nor pointed at one, with no FDE. */
@@ -45,7 +56,10 @@ public record SyncConfig(String role, String main, String handle) {
       return unset();
     }
     return new SyncConfig(
-        (String) map.get("role"), (String) map.get("main"), (String) map.get("handle"));
+        (String) map.get("role"),
+        (String) map.get("main"),
+        (String) map.get("handle"),
+        (String) map.get("box_id"));
   }
 
   public Map<String, Object> toMap() {
@@ -53,6 +67,7 @@ public record SyncConfig(String role, String main, String handle) {
     map.put("role", role);
     map.put("main", main);
     map.put("handle", handle);
+    map.put("box_id", boxId);
     return map;
   }
 }

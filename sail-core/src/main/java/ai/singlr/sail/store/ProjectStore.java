@@ -157,20 +157,31 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   public String latestRev(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return history.isEmpty() ? null : history.getLast().rev();
+    return changeLog.head(ENTITY, id).map(ChangeLog.Entry::rev).orElse(null);
   }
 
   public String baseRevOf(String id) {
     if (findByName(id).isPresent()) {
       return rawBaseRev(id);
     }
-    var tombstone = changeLog.history(ENTITY, id);
-    if (tombstone.isEmpty()) {
-      return null;
-    }
-    var baseRev = YamlUtil.parseMap(tombstone.getLast().snapshot()).get("_base_rev");
-    return baseRev == null ? null : baseRev.toString();
+    return changeLog
+        .head(ENTITY, id)
+        .map(tombstone -> YamlUtil.parseMap(tombstone.snapshot()).get("_base_rev"))
+        .map(Object::toString)
+        .orElse(null);
+  }
+
+  public Set<String> dirtyIds() {
+    var dirty =
+        new LinkedHashSet<>(
+            db.query(
+                """
+                SELECT name FROM projects
+                WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev
+                ORDER BY rowid""",
+                row -> row.text(0)));
+    dirty.addAll(changeLog.localTombstones(ENTITY));
+    return dirty;
   }
 
   public Set<String> syncEntityIds() {
@@ -335,11 +346,13 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * pushing its surviving copy back. Only a rename's tombstone blocks; a plain delete does not.
    */
   public boolean blocksResurrection(String id) {
-    var history = changeLog.history(ENTITY, id);
-    return !history.isEmpty()
-        && history.getLast().deleted()
-        && Boolean.TRUE.equals(
-            YamlUtil.parseMap(history.getLast().snapshot()).get(BLOCKS_RESURRECTION));
+    return changeLog
+        .head(ENTITY, id)
+        .filter(ChangeLog.Entry::deleted)
+        .map(
+            head ->
+                Boolean.TRUE.equals(YamlUtil.parseMap(head.snapshot()).get(BLOCKS_RESURRECTION)))
+        .orElse(false);
   }
 
   /** The snapshot the sync engine reads as "this identity is authoritatively, blockingly gone". */

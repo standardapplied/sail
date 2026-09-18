@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class SemVerTest {
@@ -68,6 +69,14 @@ class SemVerTest {
   void comparePatch() {
     assertTrue(SemVer.parse("1.6.0").compareTo(SemVer.parse("1.6.1")) < 0);
     assertTrue(SemVer.parse("1.6.1").compareTo(SemVer.parse("1.6.0")) > 0);
+  }
+
+  @Test
+  void tryParseCarriesOnWithoutAMalformedOrMissingVersion() {
+    assertEquals(Optional.of(new SemVer(1, 7, 0)), SemVer.tryParse("v1.7"));
+    assertEquals(Optional.empty(), SemVer.tryParse("latest"));
+    assertEquals(Optional.empty(), SemVer.tryParse("1"));
+    assertEquals(Optional.empty(), SemVer.tryParse(null));
   }
 
   @Test

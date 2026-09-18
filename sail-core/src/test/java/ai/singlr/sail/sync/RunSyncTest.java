@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -215,5 +216,37 @@ class RunSyncTest {
     assertEquals(0, report.conflicts());
     assertEquals(
         mainRevAfterPull, main.runs.latestRev(id), "main's row is untouched by the reader's round");
+  }
+
+  @Test
+  void theOwningBoxKeepsItsProcessBookkeepingAcrossItsOwnPushesAndPulls() {
+    var id = startRun(node, "node");
+    sync(node);
+    node.runs.updateProcess(id, 4242, 99L, 4343);
+    sync(node);
+
+    var owned = node.runs.findById(id).orElseThrow();
+    assertEquals(4242, owned.pid());
+    assertEquals(4343, owned.watcherPid());
+    assertEquals(99L, owned.pidTicks());
+    assertEquals("/home/dev/.sail/runs/" + id + "/agent.log", owned.logPath());
+    assertEquals("running", main.runs.findById(id).orElseThrow().status());
+  }
+
+  @Test
+  void theOwningBoxBumpingItsProcessBookkeepingIsNoChangeAndNoConflictAnywhere() {
+    var id = startRun(node, "node");
+    sync(node);
+    sync(other);
+
+    node.runs.updateProcess(id, 4242, 99L, 4343);
+
+    assertEquals(0, engine.reconcile(node.replica, main.replica).total());
+    assertEquals(0, engine.reconcile(other.replica, main.replica).total());
+    assertTrue(other.conflicts.pending().isEmpty());
+    assertTrue(node.conflicts.pending().isEmpty());
+    assertNull(other.runs.findById(id).orElseThrow().pidTicks());
+    assertNull(other.runs.findById(id).orElseThrow().logPath());
+    assertEquals("running", other.runs.findById(id).orElseThrow().status());
   }
 }

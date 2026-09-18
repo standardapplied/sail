@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncIdentity;
@@ -120,7 +121,9 @@ public final class JoinCommand implements Runnable {
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
     var updated =
         HostConfigSetCommand.applyChange(
-            HostSyncCommand.configure(host, false, target), "sync-handle", handle);
+            HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
+            "sync-handle",
+            handle);
     requireWritable(hostConfig, target);
     YamlUtil.dumpToFile(updated.toMap(), hostConfig);
     return new Plan(target, handle, name, email, publicKey);

@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -131,7 +131,7 @@ public final class OperationsFactory {
                 db,
                 HostInfo.hostname(),
                 SailPaths.projectsDir(),
-                NodeIdentity::config,
+                BoxIdentity::config,
                 SshSyncChannel::open));
   }
 }

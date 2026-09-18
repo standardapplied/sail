@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
@@ -20,6 +21,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -140,28 +142,67 @@ class SyncCommandTest {
 
   @Test
   void rendersJsonReport() {
-    var json = SyncCommand.render(new SyncEngine.Report(1, 2, 3, 4), true);
-    assertEquals("{\"pulled\": 1, \"pushed\": 2, \"merged\": 3, \"conflicts\": 4}", json);
+    var json =
+        SyncCommand.render(
+            new SyncReport(
+                new SyncEngine.Report(1, 2, 3, 4),
+                null,
+                List.of(
+                    new SyncSession.TypeReport(
+                        "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null))),
+            true);
+    assertEquals(
+        "{\"pulled\": 1, \"pushed\": 2, \"merged\": 3, \"conflicts\": 4, \"types\": [{\"type\":"
+            + " \"spec\", \"pulled\": 1, \"pushed\": 2, \"merged\": 3, \"conflicts\": 4, \"pages\":"
+            + " 2, \"entries\": 40, \"skipped\": false, \"failure\": null}]}",
+        json);
   }
 
   @Test
   void rendersConvergedHumanReport() {
-    var text = SyncCommand.render(new SyncEngine.Report(0, 0, 0, 0), false);
+    var text =
+        SyncCommand.render(
+            new SyncReport(
+                SyncEngine.Report.NONE,
+                null,
+                List.of(
+                    new SyncSession.TypeReport("spec", SyncEngine.Report.NONE, 0, 0, true, null))),
+            false);
     assertTrue(text.contains("Already in sync"));
+    assertFalse(text.contains("spec"), "a skipped type earns no line");
   }
 
   @Test
   void rendersChangesWithoutConflicts() {
-    var text = SyncCommand.render(new SyncEngine.Report(2, 1, 0, 0), false);
+    var text =
+        SyncCommand.render(
+            new SyncReport(
+                new SyncEngine.Report(2, 1, 0, 0),
+                null,
+                List.of(
+                    new SyncSession.TypeReport(
+                        "spec", new SyncEngine.Report(2, 1, 0, 0), 3, 12, false, null),
+                    new SyncSession.TypeReport("file", SyncEngine.Report.NONE, 0, 0, true, null))),
+            false);
     assertTrue(text.contains("pulled"));
     assertFalse(text.contains("conflict"));
+    assertTrue(text.contains("spec:"), text);
+    assertTrue(text.contains("3 page(s), 12 entries"), text);
+    assertFalse(text.contains("file"), "a skipped type earns no line");
   }
 
   @Test
   void rendersConflictGuidanceWhenConflictsExist() {
-    var text = SyncCommand.render(new SyncEngine.Report(0, 0, 0, 2), false);
+    var text =
+        SyncCommand.render(
+            new SyncReport(
+                new SyncEngine.Report(0, 0, 0, 2),
+                null,
+                List.of(SyncSession.TypeReport.failed("run", "run: main is away"))),
+            false);
     assertTrue(text.contains("2 conflict(s) need your decision"));
     assertTrue(text.contains("sail conflicts"));
+    assertTrue(text.contains("run: main is away"), "a failed type is named");
   }
 
   @Test

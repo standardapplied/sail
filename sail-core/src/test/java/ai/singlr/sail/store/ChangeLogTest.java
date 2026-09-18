@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,5 +97,84 @@ class ChangeLogTest {
   @Test
   void historyIsEmptyForAnUnknownEntity() {
     assertTrue(log.history("spec", "ghost").isEmpty());
+  }
+
+  @Test
+  void anAppendMovesTheEntitysHeadAndTheTypesHighWater() {
+    log.append("spec", "a", "1-x", "uday", "local", false, "{}");
+    log.append("spec", "b", "1-y", "uday", "local", false, "{}");
+    log.append("spec", "a", "2-z", "uday", "local", false, "{}");
+
+    assertEquals("2-z", log.head("spec", "a").orElseThrow().rev());
+    assertEquals("1-y", log.head("spec", "b").orElseThrow().rev());
+    assertEquals(3L, log.maxSeq("spec"));
+    assertEquals(0L, log.maxSeq("file"));
+    assertTrue(log.head("spec", "missing").isEmpty());
+  }
+
+  @Test
+  void headsAfterPagesEachEntityOnceAtItsLatestChangeInSeqOrder() {
+    log.append("spec", "a", "1-x", "uday", "local", false, "{}");
+    log.append("spec", "b", "1-y", "uday", "local", false, "{}");
+    log.append("spec", "a", "2-z", "uday", "local", false, "{}");
+    log.append("file", "f", "1-f", "uday", "local", false, "{}");
+
+    var all = log.headsAfter("spec", 0, 10);
+    assertEquals(List.of("b", "a"), all.stream().map(ChangeLog.Head::entityId).toList());
+    assertEquals(List.of(2L, 3L), all.stream().map(ChangeLog.Head::seq).toList());
+    assertEquals(
+        List.of("b"), log.headsAfter("spec", 0, 1).stream().map(ChangeLog.Head::entityId).toList());
+    assertEquals(
+        List.of("a"),
+        log.headsAfter("spec", 2, 10).stream().map(ChangeLog.Head::entityId).toList());
+    assertTrue(log.headsAfter("spec", 3, 10).isEmpty());
+  }
+
+  @Test
+  void localTombstonesNameOnlyDeletionsThisBoxDecided() {
+    log.append("spec", "mine", "1-x", "uday", "local", false, "{}");
+    log.append("spec", "mine", "2-x", "uday", "local", true, "{}");
+    log.append("spec", "theirs", "1-y", "uday", "sync", true, "{}");
+    log.append("spec", "revived", "1-z", "uday", "local", true, "{}");
+    log.append("spec", "revived", "2-z", "uday", "local", false, "{}");
+
+    assertEquals(Set.of("mine"), log.localTombstones("spec"));
+  }
+
+  @Test
+  void aSeedPageRunsTheIncrementalPagesPlanAndNeverScansTheLog() {
+    db.transaction(
+        () -> {
+          for (var i = 0; i < 200_000; i++) {
+            db.execute(
+                "INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,"
+                    + " snapshot) VALUES ('spec', ?, ?, 't', 'local', 0, '{}')",
+                "spec-" + (i % 5_000),
+                (i / 5_000 + 1) + "-r");
+          }
+          db.execute(
+              "INSERT INTO change_heads (entity_type, entity_id, seq) SELECT entity_type,"
+                  + " entity_id, MAX(seq) FROM change_log GROUP BY entity_type, entity_id");
+        });
+    var seed = plan(0);
+    var incremental = plan(199_990);
+
+    assertEquals(seed, incremental);
+    assertTrue(seed.contains("idx_change_heads_seq"), seed);
+    assertFalse(seed.toLowerCase().contains("scan change_log"), seed);
+    assertEquals(2_000, log.headsAfter("spec", 0, 2_000).size());
+    assertEquals(200_000L, log.maxSeq("spec"));
+  }
+
+  private String plan(long since) {
+    return String.join(
+        "\n",
+        db.query(
+            "EXPLAIN QUERY PLAN SELECT seq, entity_id FROM change_heads WHERE entity_type = ? AND"
+                + " seq > ? ORDER BY seq LIMIT ?",
+            row -> row.text(3),
+            "spec",
+            since,
+            2_000));
   }
 }

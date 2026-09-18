@@ -203,6 +203,11 @@ class ReviewSyncTest {
       }
 
       @Override
+      public State state(String entityId) {
+        return main.replica.state(entityId);
+      }
+
+      @Override
       public long maxSeq() {
         return main.replica.maxSeq();
       }

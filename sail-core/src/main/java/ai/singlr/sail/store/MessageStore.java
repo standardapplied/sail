@@ -254,6 +254,20 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return findById(id).map(MessageRow::baseRev).orElse(null);
   }
 
+  /**
+   * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
+   * after the message it answers.
+   */
+  public Set<String> dirtyIds() {
+    return new LinkedHashSet<>(
+        db.query(
+            """
+            SELECT id FROM room_messages
+            WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev
+            ORDER BY rowid""",
+            row -> row.text(0)));
+  }
+
   public Set<String> syncEntityIds() {
     return new LinkedHashSet<>(
         db.query(

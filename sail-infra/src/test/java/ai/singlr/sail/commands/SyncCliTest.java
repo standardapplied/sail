@@ -166,8 +166,13 @@ class SyncCliTest {
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
     db.execute("DROP TABLE sync_health");
-    db.execute("UPDATE schema_version SET version = 193");
-    assertEquals(193, operations.schema().version());
+    db.execute("DROP TABLE change_heads");
+    db.execute("DROP TABLE sync_state");
+    db.execute(
+        "CREATE TABLE sync_state (peer TEXT PRIMARY KEY, checkpoint INTEGER NOT NULL DEFAULT 0,"
+            + " updated_at TEXT NOT NULL)");
+    db.execute("UPDATE schema_version SET version = ?", SchemaManager.SYNC_HEALTH_VERSION - 1);
+    assertEquals(SchemaManager.SYNC_HEALTH_VERSION - 1, operations.schema().version());
     assertNull(
         operations.syncStatus().state(),
         "a database from before health reports nothing attempted, not a missing table");
@@ -191,7 +196,7 @@ class SyncCliTest {
       }
     }
 
-    assertEquals(SchemaManager.SYNC_HEALTH_VERSION, operations.schema().version());
+    assertTrue(operations.schema().version() > SchemaManager.SYNC_HEALTH_VERSION);
     var status = operations.syncStatus();
     assertEquals("stale", status.state());
     assertEquals(1, status.consecutiveFailures());

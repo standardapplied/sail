@@ -629,6 +629,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return revisions.entityIds();
   }
 
+  public Set<String> dirtyIds() {
+    return revisions.dirtyIds();
+  }
+
   public String latestRev(String id) {
     return revisions.latestRev(id);
   }

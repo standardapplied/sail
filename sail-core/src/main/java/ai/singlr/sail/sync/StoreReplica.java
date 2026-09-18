@@ -74,6 +74,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public Set<String> dirtyIds() {
+    return store.dirtyIds();
+  }
+
+  @Override
   public boolean mayPush(String entityId) {
     return pushPolicy.test(entityId);
   }
@@ -96,6 +101,16 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   @Override
   public String currentRev(String entityId) {
     return store.latestRev(entityId);
+  }
+
+  @Override
+  public MainReplica.State state(String entityId) {
+    return snapshot(() -> new MainReplica.State(current(entityId), currentRev(entityId)));
+  }
+
+  @Override
+  public <T> T snapshot(Supplier<T> work) {
+    return changeLog.read(work);
   }
 
   @Override
@@ -127,8 +142,13 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public long checkpoint(String peerId) {
+    return syncState.checkpoint(peerId, store.entityType());
+  }
+
+  @Override
   public void advanceCheckpoint(String peerId, long seq) {
-    syncState.advance(peerId, seq);
+    syncState.advance(peerId, store.entityType(), seq);
   }
 
   private static String json(Map<String, Object> snapshot) {

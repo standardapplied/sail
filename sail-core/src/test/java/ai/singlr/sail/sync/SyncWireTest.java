@@ -7,17 +7,18 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import java.io.StringReader;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Every request and response survives a JSON round trip on a single line, deletions included. */
 class SyncWireTest {
 
   private static Map<String, Object> snapshot() {
@@ -31,165 +32,173 @@ class SyncWireTest {
     return map;
   }
 
+  private static final List<SyncWire.Request> REQUESTS =
+      List.of(
+          SyncWire.Hello.of("0.44.1", "box-7"),
+          new SyncWire.Heads(),
+          new SyncWire.Pull("spec", 41, 500),
+          new SyncWire.Need("file", List.of("acme/a", "acme/b")),
+          new SyncWire.Push(
+              "spec",
+              List.of(
+                  new MainReplica.Offer("auth", snapshot(), "2-base"),
+                  new MainReplica.Offer("gone", null, "3-x"))),
+          new SyncWire.FetchFdes(),
+          new SyncWire.Bye());
+
+  private static final List<SyncWire.Response> RESPONSES =
+      List.of(
+          new SyncWire.Welcome(4, "0.44.0", "main-box"),
+          new SyncWire.Refuse("hello required"),
+          new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
+          new SyncWire.Page(
+              List.of(
+                  new SyncWire.Entry(5, "auth", "3-abc", false, snapshot()),
+                  new SyncWire.Entry(9, "gone", "4-def", true, null)),
+              9,
+              false,
+              12),
+          new SyncWire.Results(
+              List.of(
+                  new SyncWire.Accepted("auth", "7-feed"),
+                  new SyncWire.Stale("b"),
+                  new SyncWire.Refused("d", "read-only")),
+              99),
+          new SyncWire.Fdes(
+              List.of(
+                  Map.of("handle", "ada", "role", "admin", "status", "active"),
+                  Map.of("handle", "uday", "role", "member", "status", "disabled"))),
+          new SyncWire.Failed("disk full", "store"));
+
+  @Test
+  void everyRequestRoundTripsOnOneLineTaggedWithItsOp() {
+    for (var request : REQUESTS) {
+      var line = SyncWire.encode(request);
+      assertFalse(line.contains("\n"), "a body's newlines must be escaped, never framed");
+      assertTrue(YamlUtil.parseMap(line).containsKey("op"), line);
+      assertEquals(request, SyncWire.decodeRequest(line));
+    }
+  }
+
+  @Test
+  void everyResponseRoundTripsOnOneLineTaggedWithItsOp() {
+    for (var response : RESPONSES) {
+      var line = SyncWire.encode(response);
+      assertFalse(line.contains("\n"));
+      assertTrue(YamlUtil.parseMap(line).containsKey("op"), line);
+      assertEquals(response, SyncWire.decodeResponse(line));
+    }
+  }
+
+  @Test
+  void aHelloOfThisBuildCarriesTheProtocolAndTheFloor() {
+    var hello = SyncWire.Hello.of("0.44.3", "box");
+    assertEquals(SyncWire.PROTOCOL, hello.protocol());
+    assertEquals(SyncWire.UPGRADE_FLOOR, hello.floor());
+    assertEquals("0.44.3", hello.version());
+  }
+
+  @Test
+  void anUnknownOpIsRejectedNamingItOnEitherSide() {
+    var request =
+        assertThrows(
+            IllegalArgumentException.class, () -> SyncWire.decodeRequest("{\"op\": \"dance\"}"));
+    assertTrue(request.getMessage().contains("dance"));
+    var response =
+        assertThrows(
+            IllegalArgumentException.class, () -> SyncWire.decodeResponse("{\"op\": \"waltz\"}"));
+    assertTrue(response.getMessage().contains("waltz"));
+    var untagged =
+        assertThrows(
+            IllegalArgumentException.class, () -> SyncWire.decodeResponse("{\"rev\": \"3-a\"}"));
+    assertTrue(untagged.getMessage().contains("Unknown sync op"));
+    assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeRequest("{\"entities\": 1}"));
+  }
+
+  @Test
+  void aRefusalAlsoWearsTheLegacyErrorKeysSoAProtocol3NodeCanReadIt() {
+    var line = SyncWire.encode(new SyncWire.Refuse("upgrade to 0.44.0: sail upgrade"));
+    var map = YamlUtil.parseMap(line);
+    assertEquals("upgrade to 0.44.0: sail upgrade", map.get("error"));
+    assertEquals("refused", map.get("error_kind"));
+    var legacy =
+        assertInstanceOf(LegacySyncSession.Failed.class, LegacySyncSession.decodeResponse(line));
+    assertEquals("upgrade to 0.44.0: sail upgrade", legacy.message());
+  }
+
+  @Test
+  void aTombstoneEntryCarriesNoSnapshotAndDecodesAsDeleted() {
+    var page =
+        new SyncWire.Page(List.of(new SyncWire.Entry(3, "gone", "2-x", true, null)), 3, true, 3);
+    var line = SyncWire.encode(page);
+    assertFalse(line.contains("snapshot"));
+    var decoded = (SyncWire.Page) SyncWire.decodeResponse(line);
+    assertTrue(decoded.entries().getFirst().deleted());
+    assertNull(decoded.entries().getFirst().snapshot());
+  }
+
+  @Test
+  void aResultWithoutAVerdictIsRejected() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SyncWire.decodeResponse(
+                "{\"op\": \"results\", \"results\": [{\"id\": \"a\"}], \"maxSeq\": 1}"));
+  }
+
+  @Test
+  void missingNumbersDecodeToZeroAndMissingListsToEmpty() {
+    var page = (SyncWire.Page) SyncWire.decodeResponse("{\"op\": \"page\"}");
+    assertTrue(page.entries().isEmpty());
+    assertEquals(0, page.next());
+    assertFalse(page.done());
+    var tips = (SyncWire.Tips) SyncWire.decodeResponse("{\"op\": \"tips\", \"tips\": null}");
+    assertTrue(tips.tips().isEmpty());
+    var need = (SyncWire.Need) SyncWire.decodeRequest("{\"op\": \"need\", \"type\": \"spec\"}");
+    assertTrue(need.ids().isEmpty());
+    var failed = (SyncWire.Failed) SyncWire.decodeResponse("{\"op\": \"failed\"}");
+    assertNull(failed.message());
+  }
+
   @Test
   void aFrameLargerThanTheLibraryDefaultParsesOnBothEnds() {
     var content = "x".repeat(4 * 1024 * 1024);
-    var request = new SyncWire.Commit("message", "m1", java.util.Map.of("body", content), null);
-    assertEquals(request, SyncWire.decodeRequest(SyncWire.encode(request)));
-    var response =
-        new SyncWire.Fetched(
-            "main",
+    var push =
+        new SyncWire.Push(
+            "message", List.of(new MainReplica.Offer("m1", Map.of("body", content), null)));
+    assertEquals(push, SyncWire.decodeRequest(SyncWire.encode(push)));
+    var page =
+        new SyncWire.Page(
+            List.of(new SyncWire.Entry(1, "m1", "1-main", false, Map.of("body", content))),
             1,
-            java.util.Map.of(
-                "m1", new SyncWire.Snapshot("1-main", java.util.Map.of("body", content))));
-    assertEquals(response, SyncWire.decodeResponse(SyncWire.encode(response)));
+            true,
+            1);
+    assertEquals(page, SyncWire.decodeResponse(SyncWire.encode(page)));
   }
 
   @Test
-  void fetchRequestRoundTripsWithItsEntityType() {
-    var line = SyncWire.encode(new SyncWire.Fetch("file"));
-    assertEquals(new SyncWire.Fetch("file"), SyncWire.decodeRequest(line));
+  void aFrameAdmitsItemsUntilTheBoundAndKnowsWhatCouldNeverFit() {
+    var frame = new SyncWire.Frame(600);
+    assertTrue(frame.isEmpty());
+    assertTrue(frame.canEverAdmit(300));
+    assertFalse(frame.canEverAdmit(400), "the envelope is reserved beside the item");
+    assertTrue(frame.admits(300));
+    frame.add(300);
+    assertFalse(frame.isEmpty());
+    assertFalse(frame.admits(300));
+    assertTrue(frame.admits(40));
   }
 
   @Test
-  void byeRequestRoundTrips() {
-    var line = SyncWire.encode(new SyncWire.Bye());
-    assertEquals(new SyncWire.Bye(), SyncWire.decodeRequest(line));
-  }
-
-  @Test
-  void fetchFdesRequestRoundTrips() {
-    var line = SyncWire.encode(new SyncWire.FetchFdes());
-    assertEquals(new SyncWire.FetchFdes(), SyncWire.decodeRequest(line));
-  }
-
-  @Test
-  void fdesResponseRoundTripsTheRoster() {
-    var roster =
-        List.<Map<String, Object>>of(
-            Map.of("handle", "ada", "role", "admin", "status", "active"),
-            Map.of("handle", "uday", "role", "member", "status", "disabled"));
-    var line = SyncWire.encode(new SyncWire.Fdes(roster));
-
-    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse(line);
-    assertEquals(2, decoded.fdes().size());
-    assertEquals("ada", decoded.fdes().getFirst().get("handle"));
-    assertEquals("disabled", decoded.fdes().get(1).get("status"));
-  }
-
-  @Test
-  void anEmptyFdesResponseDecodesToAnEmptyRoster() {
-    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse("{\"fdes\": []}");
-    assertTrue(decoded.fdes().isEmpty());
-  }
-
-  @Test
-  void aMalformedFdesValueDecodesToAnEmptyRoster() {
-    var decoded = (SyncWire.Fdes) SyncWire.decodeResponse("{\"fdes\": null}");
-    assertTrue(decoded.fdes().isEmpty());
-  }
-
-  @Test
-  void commitRequestRoundTripsWithNestedSnapshotOnOneLine() {
-    var line = SyncWire.encode(new SyncWire.Commit("spec", "auth", snapshot(), "2-base"));
-
-    assertFalse(line.contains("\n"), "a spec body's newlines must be escaped, never framed");
-    var decoded = (SyncWire.Commit) SyncWire.decodeRequest(line);
-    assertEquals("spec", decoded.entityType());
-    assertEquals("auth", decoded.entityId());
-    assertEquals("2-base", decoded.expectedRev());
-    assertEquals("Auth", decoded.snapshot().get("title"));
-    assertEquals(List.of("db", "api"), decoded.snapshot().get("depends_on"));
-    assertEquals("line one\nline two\twith a \"quote\"", decoded.snapshot().get("body"));
-    assertNull(decoded.snapshot().get("assignee"));
-  }
-
-  @Test
-  void commitRequestCarriesDeletionAsExplicitNull() {
-    var line = SyncWire.encode(new SyncWire.Commit("file", "acme/x", null, null));
-    var decoded = (SyncWire.Commit) SyncWire.decodeRequest(line);
-    assertEquals("file", decoded.entityType());
-    assertNull(decoded.snapshot());
-    assertNull(decoded.expectedRev());
-  }
-
-  @Test
-  void fetchedResponseRoundTripsEntitiesIncludingTombstone() {
-    var entities = new LinkedHashMap<String, SyncWire.Snapshot>();
-    entities.put("auth", new SyncWire.Snapshot("3-abc", snapshot()));
-    entities.put("gone", new SyncWire.Snapshot("4-def", null));
-    var line = SyncWire.encode(new SyncWire.Fetched("maindevbox", 42, entities));
-
-    var decoded = (SyncWire.Fetched) SyncWire.decodeResponse(line);
-    assertEquals("maindevbox", decoded.mainId());
-    assertEquals(42, decoded.maxSeq());
-    assertEquals("3-abc", decoded.entities().get("auth").rev());
-    assertEquals("Auth", decoded.entities().get("auth").snapshot().get("title"));
-    assertEquals("4-def", decoded.entities().get("gone").rev());
-    assertNull(decoded.entities().get("gone").snapshot());
-  }
-
-  @Test
-  void committedResponseRoundTrips() {
-    var line = SyncWire.encode(new SyncWire.Committed("7-feed", 99));
-    var decoded = (SyncWire.Committed) SyncWire.decodeResponse(line);
-    assertEquals("7-feed", decoded.rev());
-    assertEquals(99, decoded.maxSeq());
-  }
-
-  @Test
-  void failedResponseRoundTrips() {
-    var line = SyncWire.encode(new SyncWire.Failed("read-only"));
-    var decoded = (SyncWire.Failed) SyncWire.decodeResponse(line);
-    assertEquals("read-only", decoded.message());
-  }
-
-  @Test
-  void rejectedResponseRoundTripsWithMainsCurrentState() {
-    var line = SyncWire.encode(new SyncWire.Rejected("9-feed", snapshot()));
-    var decoded = (SyncWire.Rejected) SyncWire.decodeResponse(line);
-    assertEquals("9-feed", decoded.currentRev());
-    assertEquals("Auth", decoded.currentSnapshot().get("title"));
-  }
-
-  @Test
-  void rejectedResponseRoundTripsWithATombstone() {
-    var line = SyncWire.encode(new SyncWire.Rejected("9-gone", null));
-    var decoded = (SyncWire.Rejected) SyncWire.decodeResponse(line);
-    assertEquals("9-gone", decoded.currentRev());
-    assertNull(decoded.currentSnapshot());
-  }
-
-  @Test
-  void unknownRequestOpIsRejected() {
-    assertThrows(
-        IllegalArgumentException.class, () -> SyncWire.decodeRequest("{\"op\": \"dance\"}"));
-  }
-
-  @Test
-  void unrecognizedResponseIsRejected() {
-    assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeResponse("{\"hi\": 1}"));
-  }
-
-  @Test
-  void aResponseMissingMaxSeqDecodesToZero() {
-    var committed = (SyncWire.Committed) SyncWire.decodeResponse("{\"rev\": \"3-a\"}");
-    assertEquals(0, committed.maxSeq());
-  }
-
-  @Test
-  void aNullStringFieldDecodesToNull() {
-    var committed = (SyncWire.Committed) SyncWire.decodeResponse("{\"rev\": null, \"maxSeq\": 5}");
-    assertNull(committed.rev());
-    assertEquals(5, committed.maxSeq());
-  }
-
-  @Test
-  void aFetchedWithNullEntitiesDecodesToNoEntities() {
-    var fetched =
-        (SyncWire.Fetched)
-            SyncWire.decodeResponse("{\"id\": \"m\", \"maxSeq\": 0, \"entities\": null}");
-    assertTrue(fetched.entities().isEmpty());
+  void anEntrysEncodedLengthIsExactlyWhatThePageCarriesForIt() {
+    var entry = new SyncWire.Entry(5, "auth", "3-abc", false, snapshot());
+    var lone = SyncWire.encode(new SyncWire.Page(List.of(entry), 5, true, 5));
+    var pair = SyncWire.encode(new SyncWire.Page(List.of(entry, entry), 5, true, 5));
+    assertEquals(SyncWire.encodedLength(entry) + 2, pair.length() - lone.length());
+    var offer = new MainReplica.Offer("auth", snapshot(), "2-base");
+    var one = SyncWire.encode(new SyncWire.Push("spec", List.of(offer)));
+    var two = SyncWire.encode(new SyncWire.Push("spec", List.of(offer, offer)));
+    assertEquals(SyncWire.encodedLength(offer) + 2, two.length() - one.length());
   }
 
   @Test
@@ -208,13 +217,20 @@ class SyncWireTest {
   }
 
   @Test
-  void readFramedAcceptsAMessageExactlyAtTheBound() throws Exception {
+  void readFramedAcceptsAMessageExactlyAtTheBoundAndRejectsOneOver() throws Exception {
     assertEquals("abcd", SyncWire.readFramed(new StringReader("abcd\n"), 4));
+    assertThrows(
+        SyncTransportException.class, () -> SyncWire.readFramed(new StringReader("abcde"), 4));
   }
 
   @Test
-  void readFramedRejectsAMessageOverTheBound() {
-    assertThrows(
-        SyncTransportException.class, () -> SyncWire.readFramed(new StringReader("abcde"), 4));
+  void contextNamesTheTypeForTypedRequestsAndTheOpOtherwise() {
+    assertEquals("spec", SyncWire.context(new SyncWire.Pull("spec", 0, 1)));
+    assertEquals("file", SyncWire.context(new SyncWire.Need("file", List.of())));
+    assertEquals("run", SyncWire.context(new SyncWire.Push("run", List.of())));
+    assertEquals("hello", SyncWire.context(SyncWire.Hello.of("0.44.0", "b")));
+    assertEquals("heads", SyncWire.context(new SyncWire.Heads()));
+    assertEquals("fde", SyncWire.context(new SyncWire.FetchFdes()));
+    assertEquals("session", SyncWire.context(new SyncWire.Bye()));
   }
 }

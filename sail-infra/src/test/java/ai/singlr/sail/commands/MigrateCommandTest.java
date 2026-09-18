@@ -46,6 +46,21 @@ class MigrateCommandTest {
   }
 
   @Test
+  void aBoxIdIsAssignedFromTheHostnameOnlyToARoledBoxWithoutOne() {
+    var base = ai.singlr.sail.config.HostYaml.fromMap(java.util.Map.of("storage_backend", "dir"));
+    assertTrue(MigrateCommand.assignBoxId(base, "devbox").isEmpty(), "no role, no identity");
+    var node =
+        HostConfigSetCommand.applyChange(
+            HostConfigSetCommand.applyChange(base, "sync-role", "node"),
+            "sync-main",
+            "sail@maindevbox");
+    var assigned = MigrateCommand.assignBoxId(node, "devbox").orElseThrow();
+    assertEquals("devbox", assigned.sync().boxId());
+    assertEquals("sail@maindevbox", assigned.sync().main());
+    assertTrue(MigrateCommand.assignBoxId(assigned, "renamed").isEmpty(), "an id is kept");
+  }
+
+  @Test
   void applyMigrationsBringsTheSchemaCurrent() {
     MigrateCommand.applyMigrations(
         db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
