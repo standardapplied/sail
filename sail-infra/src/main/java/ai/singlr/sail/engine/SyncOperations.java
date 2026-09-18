@@ -351,11 +351,6 @@ public final class SyncOperations {
     }
   }
 
-  /** Sums two reconcile reports into one round summary. */
-  public static SyncEngine.Report combine(SyncEngine.Report a, SyncEngine.Report b) {
-    return a.plus(b);
-  }
-
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
    * for a malformed role or status — dropped, never written with a bad authorization.

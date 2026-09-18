@@ -28,10 +28,12 @@ import java.util.Objects;
  * bounded; under pathological churn the entity is parked as a conflict rather than looping.
  *
  * <p>Pushes are gathered while the round walks its entities and offered to main together through
- * {@link MainReplica#commitAll}, then each answer is settled exactly as a single commit's would be;
- * a rejection's re-reconcile may offer again, into the next batch, until the bounded retries are
- * spent. Nothing about an entity's outcome depends on the batching — only on how many round trips a
- * remote main costs — because every adoption is guarded by the rev it was decided against.
+ * {@link MainReplica#commitAll} — as soon as what is pending weighs {@link MainReplica#offerBudget}
+ * or at the end of the walk, whichever comes first, so a first upload of a large table never holds
+ * more than one batch of snapshots — then each answer is settled exactly as a single commit's would
+ * be; a rejection's re-reconcile may offer again, into the next batch, until the bounded retries
+ * are spent. Nothing about an entity's outcome depends on the batching — only on how many round
+ * trips a remote main costs — because every adoption is guarded by the rev it was decided against.
  *
  * <p>The round is idempotent — a second run with no new changes converges everything and does
  * nothing — and order-independent across entities, because each entity reconciles against its own
@@ -87,6 +89,7 @@ public final class SyncEngine {
     private final MainReplica main;
     private final EnumMap<Outcome, Integer> tally = new EnumMap<>(Outcome.class);
     private final List<Pending> pending = new ArrayList<>();
+    private long pendingWeight;
 
     Round(LocalReplica local, MainReplica main) {
       this.local = local;
@@ -99,22 +102,12 @@ public final class SyncEngine {
       ids.addAll(main.entityIds());
       for (var id : ids) {
         record(reconcileEntity(id, main.current(id), main.currentRev(id), MAX_REDETECTS));
+        if (pendingWeight >= main.offerBudget()) {
+          commitPending();
+        }
       }
       while (!pending.isEmpty()) {
-        var batch = List.copyOf(pending);
-        pending.clear();
-        var outcomes =
-            main.commitAll(
-                batch.stream()
-                    .map(p -> new MainReplica.Offer(p.id(), p.snapshot(), p.expectedRev()))
-                    .toList());
-        if (outcomes.size() != batch.size()) {
-          throw new IllegalStateException(
-              "main answered " + outcomes.size() + " outcomes for " + batch.size() + " offers");
-        }
-        for (var i = 0; i < batch.size(); i++) {
-          record(settle(batch.get(i), outcomes.get(i)));
-        }
+        commitPending();
       }
       local.advanceCheckpoint(main.id(), main.maxSeq());
       return new Report(
@@ -127,6 +120,25 @@ public final class SyncEngine {
     private void record(Outcome outcome) {
       if (outcome != Outcome.OFFERED) {
         tally.merge(outcome, 1, Integer::sum);
+      }
+    }
+
+    /** Offers everything pending to main as one batch and settles each verdict in order. */
+    private void commitPending() {
+      var batch = List.copyOf(pending);
+      pending.clear();
+      pendingWeight = 0;
+      var outcomes =
+          main.commitAll(
+              batch.stream()
+                  .map(p -> new MainReplica.Offer(p.id(), p.snapshot(), p.expectedRev()))
+                  .toList());
+      if (outcomes.size() != batch.size()) {
+        throw new IllegalStateException(
+            "main answered " + outcomes.size() + " outcomes for " + batch.size() + " offers");
+      }
+      for (var i = 0; i < batch.size(); i++) {
+        record(settle(batch.get(i), outcomes.get(i)));
       }
     }
 
@@ -216,6 +228,7 @@ public final class SyncEngine {
         int redetectsLeft) {
       pending.add(
           new Pending(id, snapshot, offeredLocalRev, expectedRev, onAccepted, redetectsLeft));
+      pendingWeight += main.weigh(new MainReplica.Offer(id, snapshot, expectedRev));
       return Outcome.OFFERED;
     }
 

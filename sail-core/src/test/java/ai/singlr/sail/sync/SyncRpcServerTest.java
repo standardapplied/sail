@@ -11,9 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncBoxes;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.StringReader;
@@ -154,7 +151,6 @@ class SyncRpcServerTest {
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             SyncRpcServer.ChangeHeads.NONE,
-            SyncRpcServer.BoxBindings.NONE,
             "0.44.2");
     var refusal =
         assertInstanceOf(
@@ -199,56 +195,6 @@ class SyncRpcServerTest {
     assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
     assertEquals("protocol", assertInstanceOf(SyncWire.Failed.class, replies.get(1)).kind());
     assertInstanceOf(SyncWire.Tips.class, replies.get(2));
-  }
-
-  @Test
-  void aBoxIdIsBoundToItsFirstPrincipalAndRefusedUnderAnyOther() throws Exception {
-    try (var db = Sqlite.openMemory()) {
-      new SchemaManager(db).migrate();
-      var boxes = new SyncBoxes(db);
-      var ada = bound(boxes, "ada");
-      var grace = bound(boxes, "grace");
-      assertInstanceOf(
-          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
-      assertInstanceOf(
-          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
-
-      var stolen =
-          assertInstanceOf(
-              SyncWire.Refuse.class, serve(grace, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
-      assertTrue(stolen.reason().contains("box-1"), stolen.reason());
-      assertTrue(stolen.reason().contains("sail join"), stolen.reason());
-
-      var rebuilt =
-          assertInstanceOf(
-              SyncWire.Refuse.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
-      assertTrue(rebuilt.reason().contains("box-1"), rebuilt.reason());
-      assertTrue(rebuilt.reason().contains("sail fde key add"), rebuilt.reason());
-
-      boxes.release("ada");
-      assertInstanceOf(
-          SyncWire.Welcome.class, serve(ada, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
-      var stillGraces =
-          assertInstanceOf(
-              SyncWire.Refuse.class, serve(grace, SyncWire.Hello.of("0.44.0", "box-2")).getFirst());
-      assertTrue(stillGraces.reason().contains("box-2"));
-
-      var anonymous = bound(boxes, null);
-      assertInstanceOf(
-          SyncWire.Welcome.class,
-          serve(anonymous, SyncWire.Hello.of("0.44.0", "box-1")).getFirst());
-    }
-  }
-
-  private static SyncRpcServer bound(SyncBoxes boxes, String handle) {
-    return new SyncRpcServer(
-        Map.of("spec", new FakeMain()),
-        new SyncPrincipal(handle, true),
-        FdeRoster.EMPTY,
-        SyncTransitionSink.NONE,
-        SyncRpcServer.ChangeHeads.NONE,
-        boxes::bind,
-        SyncWire.UPGRADE_FLOOR);
   }
 
   @Test

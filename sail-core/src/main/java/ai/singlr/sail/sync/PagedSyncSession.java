@@ -32,7 +32,9 @@ import java.util.function.Consumer;
  *
  * <p>A page's view of main answers the engine from the page alone; a checkpoint only ever advances
  * to a seq whose entries this node has actually seen, never to main's high-water after its own
- * pushes, so a change another node lands between two exchanges can never be skipped.
+ * pushes, so a change another node lands between two exchanges can never be skipped. The view
+ * weighs every offer as its chars on the wire and budgets the engine one frame of them, so a first
+ * upload of a large table holds one batch of snapshots at a time, never the whole table.
  */
 public final class PagedSyncSession implements SyncSession {
 
@@ -301,6 +303,16 @@ public final class PagedSyncSession implements SyncSession {
     @Override
     public long maxSeq() {
       return high;
+    }
+
+    @Override
+    public long weigh(Offer offer) {
+      return SyncWire.encodedLength(offer);
+    }
+
+    @Override
+    public long offerBudget() {
+      return frame;
     }
 
     @Override

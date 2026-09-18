@@ -8,7 +8,6 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncBoxes;
 import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
 import java.io.Reader;
@@ -23,16 +22,16 @@ import java.util.Optional;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
- * before a {@link SyncWire.Hello} has been welcomed — the protocol, the fleet floor and the box
- * identity are checked there, once. It then answers {@link SyncWire.Heads} with every type's
- * high-water, pages the change log for {@link SyncWire.Pull}, reads current rows for {@link
- * SyncWire.Need}, routes each offer of a {@link SyncWire.Push} to the authoritative {@link
- * MainReplica} for its entity type, serves the node's roster pull, and returns at {@link
- * SyncWire.Bye} or end of stream. The {@link SyncPrincipal} carries the push half of Door-2
- * authorization: a {@code viewer} opens a session and pulls every type, but its offers are refused
- * so only {@code member}+ work propagates. The principal's handle additionally binds run offers to
- * execution provenance — a session may create, update, or delete only runs stamped with its own
- * node, so no member can forge run metadata another box would treat as its own execution.
+ * before a {@link SyncWire.Hello} has been welcomed — the protocol and the fleet floor are checked
+ * there, once. It then answers {@link SyncWire.Heads} with every type's high-water, pages the
+ * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
+ * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
+ * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The {@link
+ * SyncPrincipal} carries the push half of Door-2 authorization: a {@code viewer} opens a session
+ * and pulls every type, but its offers are refused so only {@code member}+ work propagates. The
+ * principal's handle additionally binds run offers to execution provenance — a session may create,
+ * update, or delete only runs stamped with its own node, so no member can forge run metadata
+ * another box would treat as its own execution.
  */
 public final class SyncRpcServer {
 
@@ -46,20 +45,11 @@ public final class SyncRpcServer {
     List<ChangeLog.Head> after(String type, long since, int limit);
   }
 
-  /** Binds a box id to the principal that first presented it; a mismatch is a refusal reason. */
-  @FunctionalInterface
-  public interface BoxBindings {
-    BoxBindings NONE = (principal, boxId) -> Optional.empty();
-
-    Optional<String> bind(String principal, String boxId);
-  }
-
   private final Map<String, MainReplica> replicas;
   private final SyncPrincipal principal;
   private final FdeRoster fdeRoster;
   private final SyncTransitionSink transitionSink;
   private final ChangeHeads heads;
-  private final BoxBindings bindings;
   private final String version;
   private boolean welcomed;
 
@@ -81,14 +71,7 @@ public final class SyncRpcServer {
       SyncPrincipal principal,
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink) {
-    this(
-        replicas,
-        principal,
-        fdeRoster,
-        transitionSink,
-        ChangeHeads.NONE,
-        BoxBindings.NONE,
-        SyncWire.UPGRADE_FLOOR);
+    this(replicas, principal, fdeRoster, transitionSink, ChangeHeads.NONE, SyncWire.UPGRADE_FLOOR);
   }
 
   public SyncRpcServer(
@@ -97,21 +80,18 @@ public final class SyncRpcServer {
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink,
       ChangeHeads heads,
-      BoxBindings bindings,
       String version) {
     this.replicas = Collections.unmodifiableMap(new LinkedHashMap<>(replicas));
     this.principal = Objects.requireNonNull(principal, "principal");
     this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
     this.transitionSink = Objects.requireNonNull(transitionSink, "transitionSink");
     this.heads = Objects.requireNonNull(heads, "heads");
-    this.bindings = Objects.requireNonNull(bindings, "bindings");
     this.version = Objects.requireNonNull(version, "version");
   }
 
   /**
-   * The server for main's database: every registered entity's authoritative replica, its change log
-   * as the page source, and its box bindings, identified as {@code boxId} and built {@code
-   * version}.
+   * The server for main's database: every registered entity's authoritative replica and its change
+   * log as the page source, identified as {@code boxId} and built {@code version}.
    */
   public static SyncRpcServer over(
       Sqlite db,
@@ -127,7 +107,6 @@ public final class SyncRpcServer {
         fdeRoster,
         transitionSink,
         changes::headsAfter,
-        new SyncBoxes(db)::bind,
         version);
   }
 
@@ -213,8 +192,8 @@ public final class SyncRpcServer {
    * The one place a session's compatibility is decided. Floors compare as versions, never as
    * strings: a node below main's floor is told to upgrade, a node whose floor is above main's is
    * told the order — main first — and a node at the same floor is welcomed whatever its patch
-   * level. The box id is then bound to the authenticated principal, refusing an identity another
-   * key already presented.
+   * level. The box id names the node in main's log; who the node is stays the authenticated
+   * principal, which every commit is attributed to.
    */
   private SyncWire.Response onHello(SyncWire.Hello hello) {
     if (welcomed) {
@@ -243,12 +222,6 @@ public final class SyncRpcServer {
     }
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse("hello names no box id: " + upgradeRemedy());
-    }
-    if (principal.handle() != null) {
-      var refusal = bindings.bind(principal.handle(), hello.box());
-      if (refusal.isPresent()) {
-        return new SyncWire.Refuse(refusal.get());
-      }
     }
     welcomed = true;
     return new SyncWire.Welcome(SyncWire.PROTOCOL, version, mainId());

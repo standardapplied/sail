@@ -167,7 +167,6 @@ class SyncCliTest {
       throws Exception {
     db.execute("DROP TABLE sync_health");
     db.execute("DROP TABLE change_heads");
-    db.execute("DROP TABLE sync_boxes");
     db.execute("DROP TABLE sync_state");
     db.execute(
         "CREATE TABLE sync_state (peer TEXT PRIMARY KEY, checkpoint INTEGER NOT NULL DEFAULT 0,"

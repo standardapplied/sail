@@ -448,8 +448,5 @@ class SyncTransportTest {
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
     assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
     assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
-    assertEquals(
-        List.of("A-box"),
-        main.db.query("SELECT box_id FROM sync_boxes WHERE principal = 'A'", r -> r.text(0)));
   }
 }

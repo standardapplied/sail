@@ -33,7 +33,6 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncBoxes;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
@@ -900,7 +899,6 @@ class SailOperationsSeamTest {
                           List::of,
                           SyncTransitionSink.NONE,
                           new ChangeLog(main.db)::headsAfter,
-                          new SyncBoxes(main.db)::bind,
                           SyncWire.UPGRADE_FLOOR)),
               events::add));
       operations.schema().prepareSync();

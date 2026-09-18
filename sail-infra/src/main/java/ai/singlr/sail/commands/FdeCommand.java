@@ -20,7 +20,6 @@ import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
-import ai.singlr.sail.store.SyncBoxes;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -90,7 +89,6 @@ public final class FdeCommand implements Runnable {
       throw new IllegalArgumentException(
           "That key (" + key.fingerprint() + ") is already registered.");
     }
-    new SyncBoxes(db).release(fde.handle());
     System.out.println(
         Ansi.AUTO.string(
             "  @|green ✓|@ Registered key for " + fde.handle() + ": " + key.fingerprint()));

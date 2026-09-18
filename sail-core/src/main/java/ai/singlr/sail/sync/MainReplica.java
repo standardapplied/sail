@@ -64,6 +64,24 @@ public interface MainReplica {
         .toList();
   }
 
+  /**
+   * What {@code offer} costs to hold before it is committed, in whatever unit {@link #offerBudget}
+   * is measured in. An in-process authority holds nothing, so an offer weighs nothing; a remote one
+   * weighs an offer as the chars it will take on the wire.
+   */
+  default long weigh(Offer offer) {
+    return 0;
+  }
+
+  /**
+   * How much the engine may hold in pending offers before it must commit them: the bound on memory
+   * a first upload of a large table can take, so an offer is never retained longer than one batch.
+   * Unbounded for an in-process authority, the frame for a remote one.
+   */
+  default long offerBudget() {
+    return Long.MAX_VALUE;
+  }
+
   /** Main's highest change sequence — the node advances its checkpoint to this after a round. */
   long maxSeq();
 }

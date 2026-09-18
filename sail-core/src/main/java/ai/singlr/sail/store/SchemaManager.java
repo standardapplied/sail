@@ -491,13 +491,7 @@ public final class SchemaManager {
               + " 'project' UNION ALL SELECT 'run' UNION ALL SELECT 'review' UNION ALL SELECT"
               + " 'message') t",
           "DROP TABLE sync_state",
-          "ALTER TABLE sync_state_v2 RENAME TO sync_state",
-          """
-          CREATE TABLE sync_boxes (
-              box_id TEXT PRIMARY KEY,
-              principal TEXT NOT NULL UNIQUE,
-              bound_at TEXT NOT NULL
-          )""");
+          "ALTER TABLE sync_state_v2 RENAME TO sync_state");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

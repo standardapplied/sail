@@ -195,10 +195,6 @@ public final class SyncCommand implements Callable<Integer> {
     return SyncOperations.pulledMessageEvents(messages, specs, known, host);
   }
 
-  static SyncEngine.Report combine(SyncEngine.Report a, SyncEngine.Report b) {
-    return SyncOperations.combine(a, b);
-  }
-
   static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
     return SyncOperations.applyFdes(fdes, roster);
   }
