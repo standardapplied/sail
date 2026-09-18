@@ -5,16 +5,22 @@
 
 package ai.singlr.sail.sync;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
-/** A {@link LocalReplica} view over a fixed id set; see {@link LocalReplica#scopedTo}. */
+/**
+ * A {@link LocalReplica} view over a fixed id set; see {@link LocalReplica#scopedTo}. The ids keep
+ * the order they arrived in: a page lists a reply after its parent, and the engine must visit them
+ * that way or the reply is refused for a parent it has not adopted yet.
+ */
 record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalReplica {
 
   ScopedLocalReplica {
-    ids = Set.copyOf(ids);
+    ids = Collections.unmodifiableSet(new LinkedHashSet<>(ids));
   }
 
   @Override
