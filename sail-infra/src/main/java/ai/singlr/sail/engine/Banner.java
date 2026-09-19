@@ -193,6 +193,11 @@ public final class Banner {
     return amber(ansi, "  @|bold,red \u2717|@ " + message);
   }
 
+  /** Returns a formatted warning line: the command carries on, the engineer should still act. */
+  public static String warnLine(String message, Ansi ansi) {
+    return amber(ansi, "  @|yellow \u26a0|@ " + message);
+  }
+
   /** Prints the unsupported OS message. */
   public static void printUnsupported(HostDetector.HostInfo info, PrintStream out, Ansi ansi) {
     out.println(

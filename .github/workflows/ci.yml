@@ -94,3 +94,35 @@ jobs:
         run: |
           ./sail-infra/target/sail -V
           ./sail-infra/target/sail _pty-selftest
+
+      # The fleet tests upgrade from the release engineers run today to the binary built above,
+      # so the released binary is a test input: fetched from this repository's latest release
+      # and checked against the checksum published beside it.
+      - name: Download the latest released binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/released"
+          gh release download --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/released" \
+            --pattern sail-linux-amd64 --pattern sail-linux-amd64.sha256
+          cd "$RUNNER_TEMP/released"
+          echo "$(cat sail-linux-amd64.sha256)  sail-linux-amd64" | sha256sum -c -
+          chmod +x sail-linux-amd64
+          ./sail-linux-amd64 -V
+
+      # Sync end to end on the native binaries: Podman boxes, a real sshd and the gateway's forced
+      # command. Unit tests already ran above, so only this suite runs here; requireNative turns a
+      # missing binary or an unreachable Podman into a failure instead of a skip.
+      - name: Native fleet sync tests
+        run: >
+          mvn -B -Pintegration verify
+          -Dit.test=NativeFleetIT
+          -Dtest=NoUnitTests
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Dfailsafe.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
+          -Dsail.it.requireIncus=false
+          -Dsail.it.requireSystemd=false
+          -Dsail.it.requireNative=true
+          -Dsail.it.nativeBinary=${{ github.workspace }}/sail-infra/target/sail
+          -Dsail.it.releasedBinary=${{ runner.temp }}/released/sail-linux-amd64

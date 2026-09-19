@@ -85,7 +85,6 @@ public final class Sqlite implements AutoCloseable {
       var flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
       var rc = (int) lib.open.invokeExact(pathStr, dbPtr, flags, MemorySegment.NULL);
       if (rc != SQLITE_OK) {
-        arena.close();
         throw new SqliteException("Failed to open database: " + path, rc);
       }
       var db = dbPtr.get(ValueLayout.ADDRESS, 0);
@@ -95,10 +94,11 @@ public final class Sqlite implements AutoCloseable {
       sqlite.pragma("foreign_keys", "ON");
       return sqlite;
     } catch (SqliteException e) {
+      arena.close();
       throw e;
     } catch (Throwable t) {
       arena.close();
-      throw new SqliteException("Failed to open database", t);
+      throw new SqliteException("Failed to open database " + path + ": " + t.getMessage(), t);
     }
   }
 
@@ -364,6 +364,18 @@ public final class Sqlite implements AutoCloseable {
     }
   }
 
+  static SymbolLookup library(String libName, Arena arena) {
+    try {
+      return SymbolLookup.libraryLookup(libName, arena);
+    } catch (IllegalArgumentException e) {
+      throw new SqliteException(
+          "The SQLite library "
+              + libName
+              + " could not be loaded. On Ubuntu: sudo apt-get install -y libsqlite3-0",
+          e);
+    }
+  }
+
   private record SqliteLib(
       MethodHandle open,
       MethodHandle close,
@@ -387,7 +399,7 @@ public final class Sqlite implements AutoCloseable {
           System.getProperty("os.name", "").toLowerCase().contains("mac")
               ? "libsqlite3.dylib"
               : "libsqlite3.so.0";
-      var lookup = SymbolLookup.libraryLookup(libName, arena);
+      var lookup = library(libName, arena);
       var linker = Linker.nativeLinker();
 
       return new SqliteLib(

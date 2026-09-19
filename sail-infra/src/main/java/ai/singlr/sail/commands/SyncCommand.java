@@ -79,6 +79,7 @@ public final class SyncCommand implements Callable<Integer> {
     public Integer call() throws Exception {
       try (var ops = operations.get()) {
         var status = SyncViews.status(ops.syncStatus());
+        status.put("pending_conflicts", ops.conflicts().size());
         System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status));
       }
       return 0;
@@ -87,13 +88,18 @@ public final class SyncCommand implements Callable<Integer> {
 
   static String renderStatus(Map<String, Object> status) {
     var main = status.get("main");
-    return switch (Objects.toString(status.get("state"), "")) {
-      case "syncing" -> "Syncing with " + main;
-      case "stale" -> "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
-      case "in_sync" -> "In sync with " + main;
-      default ->
-          main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
-    };
+    var health =
+        switch (Objects.toString(status.get("state"), "")) {
+          case "syncing" -> "Syncing with " + main;
+          case "stale" ->
+              "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
+          case "in_sync" -> "In sync with " + main;
+          default ->
+              main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
+        };
+    return status.get("pending_conflicts") instanceof Integer pending && pending > 0
+        ? health + " — " + pending + " conflict(s) need your decision: sail conflicts"
+        : health;
   }
 
   @Option(
