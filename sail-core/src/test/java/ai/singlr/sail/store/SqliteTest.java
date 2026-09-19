@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
@@ -341,5 +342,16 @@ class SqliteTest {
 
     var total = db.queryOne("SELECT n FROM counter WHERE id = 1", row -> row.integer(0));
     assertEquals((long) threads * iterations, (long) total.orElseThrow());
+  }
+
+  @Test
+  void aMissingSqliteLibraryNamesItselfAndTheRemedy() {
+    try (var arena = Arena.ofConfined()) {
+      var thrown =
+          assertThrows(SqliteException.class, () -> Sqlite.library("libsail-absent.so.0", arena));
+
+      assertTrue(thrown.getMessage().contains("libsail-absent.so.0"));
+      assertTrue(thrown.getMessage().contains("apt-get install -y libsqlite3-0"));
+    }
   }
 }

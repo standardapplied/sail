@@ -103,8 +103,10 @@ public final class SyncWire {
 
   /**
    * Reads one newline-framed message, bounded by {@link #MAX_FRAME}. Returns {@code null} at end of
-   * stream (a clean session close), the line without its terminator otherwise. Used by both ends so
-   * the framing — and its bound — has a single definition.
+   * stream (a clean session close), the line without its terminator otherwise. A stream that ends
+   * inside a message is a lost channel, never a message: both ends terminate every line, so the
+   * fragment is what a dropped connection left behind. Used by both ends so the framing — and its
+   * bound — has a single definition.
    */
   public static String readFramed(Reader in) throws IOException {
     return readFramed(in, MAX_FRAME);
@@ -124,7 +126,13 @@ public final class SyncWire {
       }
       message.append((char) c);
     }
-    return message.isEmpty() ? null : message.toString();
+    if (message.isEmpty()) {
+      return null;
+    }
+    throw new SyncTransportException(
+        "unreachable",
+        "Sync channel closed mid-message, after " + message.length() + " characters.",
+        null);
   }
 
   public sealed interface Request permits Hello, Heads, Pull, Need, Push, FetchFdes, Bye {}

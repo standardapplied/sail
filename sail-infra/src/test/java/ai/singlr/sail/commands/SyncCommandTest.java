@@ -59,7 +59,15 @@ class SyncCommandTest {
       java.util.function.Supplier<SyncCommand.Status> status =
           () -> new SyncCommand.Status(() -> operations);
       assertEquals(
-          Map.of("role", "node", "main", "sail@main", "consecutive_failures", 0),
+          Map.of(
+              "role",
+              "node",
+              "main",
+              "sail@main",
+              "consecutive_failures",
+              0,
+              "pending_conflicts",
+              0),
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
 
@@ -77,7 +85,18 @@ class SyncCommandTest {
       assertEquals(
           "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale));
+
+      new ai.singlr.sail.store.SyncConflicts(db)
+          .record("spec", "auth", "base", "mine", "theirs", java.util.List.of("title"));
+      var conflicted =
+          nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
+      assertEquals(1, conflicted.get("pending_conflicts"));
     }
+    assertEquals(
+        "In sync with main — 1 conflict(s) need your decision: sail conflicts",
+        SyncCommand.renderStatus(
+            Map.of("state", "in_sync", "main", "main", "pending_conflicts", 1)),
+        "a round that parked a conflict is not the whole truth");
     assertEquals(
         "Syncing with main", SyncCommand.renderStatus(Map.of("state", "syncing", "main", "main")));
     assertEquals(

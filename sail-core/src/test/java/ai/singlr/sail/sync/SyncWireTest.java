@@ -210,10 +210,19 @@ class SyncWireTest {
   }
 
   @Test
-  void readFramedReturnsAFinalUnterminatedLineThenNull() throws Exception {
-    var in = new StringReader("tail");
-    assertEquals("tail", SyncWire.readFramed(in));
-    assertNull(SyncWire.readFramed(in));
+  void readFramedNamesAChannelThatClosedMidMessageInsteadOfReturningTheFragment() {
+    var in = new StringReader("first\n{\"op\": \"page\", \"entr");
+
+    var thrown =
+        assertThrows(
+            SyncTransportException.class,
+            () -> {
+              SyncWire.readFramed(in);
+              SyncWire.readFramed(in);
+            });
+
+    assertEquals("unreachable", thrown.kind());
+    assertTrue(thrown.getMessage().contains("closed mid-message"), thrown.getMessage());
   }
 
   @Test
