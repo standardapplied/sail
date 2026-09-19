@@ -205,6 +205,15 @@ class BannerTest {
   }
 
   @Test
+  void warnLineIsNotAnError() {
+    var line = Banner.warnLine("main is behind", Ansi.OFF);
+
+    assertTrue(line.contains("\u26a0"));
+    assertTrue(line.contains("main is behind"));
+    assertFalse(line.contains("\u2717"));
+  }
+
+  @Test
   void unsupportedMessageShowsOsAndSupported() {
     var out = new ByteArrayOutputStream();
     Banner.printUnsupported(UNSUPPORTED, new PrintStream(out), Ansi.OFF);

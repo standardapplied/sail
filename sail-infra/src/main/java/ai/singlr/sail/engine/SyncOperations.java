@@ -206,7 +206,7 @@ public final class SyncOperations {
   }
 
   private static void notice(String line) {
-    System.err.println(Banner.errorLine(line, Ansi.AUTO));
+    System.err.println(Banner.warnLine(line, Ansi.AUTO));
   }
 
   private static void reportRejectedFdes(List<String> rejected) {
