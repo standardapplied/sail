@@ -520,6 +520,9 @@
             <properties>
                 <sail.it.requireIncus>true</sail.it.requireIncus>
                 <sail.it.requireSystemd>true</sail.it.requireSystemd>
+                <sail.it.requireNative>false</sail.it.requireNative>
+                <sail.it.nativeBinary/>
+                <sail.it.releasedBinary/>
             </properties>
             <build>
                 <plugins>
@@ -536,6 +539,9 @@
                             <systemPropertyVariables>
                                 <sail.it.requireIncus>${sail.it.requireIncus}</sail.it.requireIncus>
                                 <sail.it.requireSystemd>${sail.it.requireSystemd}</sail.it.requireSystemd>
+                                <sail.it.requireNative>${sail.it.requireNative}</sail.it.requireNative>
+                                <sail.it.nativeBinary>${sail.it.nativeBinary}</sail.it.nativeBinary>
+                                <sail.it.releasedBinary>${sail.it.releasedBinary}</sail.it.releasedBinary>
                             </systemPropertyVariables>
                         </configuration>
                         <executions>
