@@ -78,7 +78,13 @@ class SessionVerbsTest {
               "--command",
               "sh",
               "-c",
-              "echo room=$SAIL_ROOM_ID > " + dir.resolve("seen") + "; read a"));
+              "echo room=$SAIL_ROOM_ID > "
+                  + dir.resolve("seen.partial")
+                  + " && mv "
+                  + dir.resolve("seen.partial")
+                  + " "
+                  + dir.resolve("seen")
+                  + "; read a"));
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
         var listed = client.list().getFirst();
         assertEquals("design-talk", listed.room());
