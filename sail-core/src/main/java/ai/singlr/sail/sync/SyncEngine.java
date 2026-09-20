@@ -169,7 +169,8 @@ public final class SyncEngine {
         }
         return offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
       }
-      return switch (ConflictDetector.detect(base, localSnap, remoteSnap)) {
+      return switch (ConflictDetector.detect(
+          base, localSnap, remoteSnap, local.latestWinsFields())) {
         case ConflictDetector.Converged ignored ->
             remoteRev == null || Objects.equals(localRev, remoteRev)
                 ? Outcome.CONVERGED
@@ -259,7 +260,7 @@ public final class SyncEngine {
       var base = local.base(id);
       var localSnap = local.current(id);
       var fields =
-          ConflictDetector.detect(base, localSnap, remoteSnap)
+          ConflictDetector.detect(base, localSnap, remoteSnap, local.latestWinsFields())
                   instanceof ConflictDetector.Conflict c
               ? c.fields()
               : List.of(STALE_FIELD);

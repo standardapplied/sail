@@ -94,6 +94,22 @@ public final class SyncConflicts {
     return db.changes() > 0;
   }
 
+  /**
+   * Closes whatever conflict is open on an entity that has just reconciled cleanly at {@code rev}:
+   * the disagreement it recorded no longer exists, and resolving it later would write its stale
+   * snapshot over the settled row.
+   */
+  public void settle(String entityType, String entityId, String rev) {
+    db.execute(
+        "UPDATE sync_conflicts SET status = ?, resolved_rev = ? WHERE entity_type = ?"
+            + " AND entity_id = ? AND status = ?",
+        RESOLVED,
+        rev,
+        entityType,
+        entityId,
+        PENDING);
+  }
+
   private static final String SELECT =
       "SELECT id, entity_type, entity_id, base_snapshot, local_snapshot, remote_snapshot, fields,"
           + " detected_at, status, resolved_rev FROM sync_conflicts";

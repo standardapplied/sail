@@ -18,6 +18,9 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -152,6 +155,38 @@ class RunSyncTest {
     sync(other);
     assertEquals("completed", other.runs.findById(id).orElseThrow().status());
     assertEquals(0, other.runs.findById(id).orElseThrow().exitCode());
+  }
+
+  @Test
+  void aHeartbeatThatMovedOnBothSidesTakesTheLaterStampInsteadOfParkingAConflict() {
+    var id = startRun(node, "node");
+    sync(node);
+    var pushedButNeverAcknowledged = new LinkedHashMap<>(node.replica.current(id));
+    pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
+    main.replica.commit(id, pushedButNeverAcknowledged, main.replica.currentRev(id));
+    node.runs.stampActivity(id, Duration.ZERO);
+    var latest = node.runs.findById(id).orElseThrow().lastActivityAt();
+
+    sync(node);
+
+    assertEquals(List.of(), node.conflicts.pending(), "a heartbeat is never a decision");
+    assertEquals(latest, main.runs.findById(id).orElseThrow().lastActivityAt());
+    assertEquals(latest, node.runs.findById(id).orElseThrow().lastActivityAt());
+  }
+
+  @Test
+  void aConflictParkedBeforeTheHeartbeatCouldMergeClosesOnceTheRunReconcilesCleanly() {
+    var id = startRun(node, "node");
+    sync(node);
+    node.runs.stampActivity(id, Duration.ZERO);
+    node.conflicts.record("run", id, "{}", "{}", "{}", List.of("last_activity_at"));
+
+    sync(node);
+
+    assertEquals(List.of(), node.conflicts.pending(), "nothing is left to decide");
+    assertEquals(
+        node.runs.findById(id).orElseThrow().lastActivityAt(),
+        main.runs.findById(id).orElseThrow().lastActivityAt());
   }
 
   @Test
