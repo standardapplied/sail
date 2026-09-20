@@ -11,6 +11,7 @@ import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -75,7 +76,9 @@ public final class StoreReplica implements LocalReplica, MainReplica {
 
   @Override
   public Set<String> dirtyIds() {
-    return store.dirtyIds();
+    var dirty = new LinkedHashSet<>(store.dirtyIds());
+    dirty.addAll(conflicts.pendingIds(store.entityType()));
+    return dirty;
   }
 
   @Override

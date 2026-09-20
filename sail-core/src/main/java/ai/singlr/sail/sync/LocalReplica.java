@@ -23,9 +23,12 @@ public interface LocalReplica {
   Set<String> entityIds();
 
   /**
-   * Every id carrying a change this node made that main has not acknowledged: a row whose revision
-   * is not the one last synced from main, or a deletion this node decided. What a round still has
-   * to reconcile after main's change log has been read.
+   * Every id a round still has to reconcile after main's change log has been read: a change this
+   * node made that main has not acknowledged (a row whose revision is not the one last synced from
+   * main, or a deletion this node decided), and every entity with a conflict parked on it. The
+   * conflict alone has to keep its entity in the round — once main's entry is behind the checkpoint
+   * and nothing here is journaled, as with a heartbeat stamped without a revision, no other rule
+   * would ever look at it again, and a conflict that has stopped being one could never close.
    */
   Set<String> dirtyIds();
 

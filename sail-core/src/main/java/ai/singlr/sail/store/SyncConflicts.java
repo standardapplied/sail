@@ -74,6 +74,15 @@ public final class SyncConflicts {
     return db.query(SELECT + " WHERE status = ? ORDER BY id", SyncConflicts::map, PENDING);
   }
 
+  /** The ids of every {@code entityType} entity with an open conflict, oldest first. */
+  public List<String> pendingIds(String entityType) {
+    return db.query(
+        "SELECT entity_id FROM sync_conflicts WHERE status = ? AND entity_type = ? ORDER BY id",
+        row -> row.text(0),
+        PENDING,
+        entityType);
+  }
+
   public Optional<Conflict> pendingFor(String entityType, String entityId) {
     return db.queryOne(
         SELECT + " WHERE status = ? AND entity_type = ? AND entity_id = ?",

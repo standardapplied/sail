@@ -788,11 +788,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * {@code floor} of now, so a continuous {@code agent_log_chunk} stream costs one UPDATE per
    * window instead of one per chunk. Deliberately journals <em>no</em> revision — presence needs
    * ~minute granularity, and a revision per stamp would flood the ChangeLog and fire sync-on-write
-   * on every chunk; the next round pushes the live row instead, so a foreign box's copy is as fresh
-   * as the normal sync cadence, and {@link #latestWinsFields} keeps a stamp that moved on both
-   * sides from ever parking a conflict. Only a {@code running} row is stamped: a late event must
-   * never dirty a terminal row whose final revision has already been journaled. Returns whether a
-   * write happened.
+   * on every chunk; the value rides along on the run's next real revision instead, so a foreign
+   * box's copy is as fresh as the run's own lifecycle, and {@link #latestWinsFields} keeps a stamp
+   * that moved on both sides from ever parking a conflict. Only a {@code running} row is stamped: a
+   * late event must never dirty a terminal row whose final revision has already been journaled.
+   * Returns whether a write happened.
    */
   public boolean stampActivity(String id, Duration floor) {
     var now = DateTimeUtils.now();
