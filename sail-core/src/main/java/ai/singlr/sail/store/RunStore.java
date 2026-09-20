@@ -788,10 +788,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * {@code floor} of now, so a continuous {@code agent_log_chunk} stream costs one UPDATE per
    * window instead of one per chunk. Deliberately journals <em>no</em> revision — presence needs
    * ~minute granularity, and a revision per stamp would flood the ChangeLog and fire sync-on-write
-   * on every chunk; the value rides along on the run's next real revision instead, so a foreign
-   * box's copy is as fresh as the normal sync cadence. Only a {@code running} row is stamped: a
-   * late event must never dirty a terminal row whose final revision has already been journaled.
-   * Returns whether a write happened.
+   * on every chunk; the next round pushes the live row instead, so a foreign box's copy is as fresh
+   * as the normal sync cadence, and {@link #latestWinsFields} keeps a stamp that moved on both
+   * sides from ever parking a conflict. Only a {@code running} row is stamped: a late event must
+   * never dirty a terminal row whose final revision has already been journaled. Returns whether a
+   * write happened.
    */
   public boolean stampActivity(String id, Duration floor) {
     var now = DateTimeUtils.now();
@@ -1233,6 +1234,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * The heartbeat is stamped without a revision ({@link #stampActivity}), so the live row runs
+   * ahead of what main last heard, and a round main acknowledged but this box never recorded leaves
+   * both sides holding different stamps over one base. Two readings of a clock are not a decision:
+   * the later one wins.
+   */
+  @Override
+  public Set<String> latestWinsFields() {
+    return LATEST_WINS_FIELDS;
+  }
+
+  /**
    * Whether a box whose FDE handle is {@code handle} may push its own change to run {@code id} up
    * to main. Runs are single-writer: only the executing node pushes its runs. A box with no handle,
    * or a run whose node is unknown, defers to main's own ownership guard rather than being denied
@@ -1379,6 +1391,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    */
   private static final Set<String> LOCAL_FIELDS =
       Set.of("pid", "watcher_pid", "pid_ticks", "log_path", "transcript_path");
+
+  private static final Set<String> LATEST_WINS_FIELDS = Set.of("last_activity_at");
 
   private static final Set<String> SYNC_FIELDS =
       Set.of(

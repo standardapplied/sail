@@ -84,6 +84,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public Set<String> latestWinsFields() {
+    return store.latestWinsFields();
+  }
+
+  @Override
   public <T> T atomically(Supplier<T> work) {
     return changeLog.transaction(work);
   }
@@ -116,6 +121,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
     store.adoptForSync(entityId, snapshot, rev);
+    conflicts.settle(store.entityType(), entityId, rev);
   }
 
   @Override

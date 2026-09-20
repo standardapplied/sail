@@ -40,6 +40,11 @@ public interface LocalReplica {
     return true;
   }
 
+  /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#latestWinsFields}. */
+  default Set<String> latestWinsFields() {
+    return Set.of();
+  }
+
   /** A comparable snapshot paired with the exact revision it was read at. */
   record Captured(Map<String, Object> snapshot, String rev) {}
 

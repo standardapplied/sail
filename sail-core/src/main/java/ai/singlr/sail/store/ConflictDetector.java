@@ -5,12 +5,14 @@
 
 package ai.singlr.sail.store;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Pure three-way merge for one synced entity. Given the common ancestor ({@code base} — the
@@ -50,6 +52,19 @@ public final class ConflictDetector {
 
   public static Resolution detect(
       Map<String, Object> base, Map<String, Object> local, Map<String, Object> remote) {
+    return detect(base, local, remote, Set.of());
+  }
+
+  /**
+   * As {@link #detect(Map, Map, Map)}, except that {@code latestWins} names instant-valued fields
+   * that only ever move forward, such as a heartbeat. When both sides moved one, the later instant
+   * is the merge — there is nothing for a human to decide between two readings of a clock.
+   */
+  public static Resolution detect(
+      Map<String, Object> base,
+      Map<String, Object> local,
+      Map<String, Object> remote,
+      Set<String> latestWins) {
     var localDeleted = local == null;
     var remoteDeleted = remote == null;
 
@@ -86,14 +101,16 @@ public final class ConflictDetector {
 
     var conflicts = new ArrayList<String>();
     for (var field : localChanged) {
-      if (remoteChanged.contains(field) && !Objects.equals(local.get(field), remote.get(field))) {
+      if (remoteChanged.contains(field)
+          && !latestWins.contains(field)
+          && !Objects.equals(local.get(field), remote.get(field))) {
         conflicts.add(field);
       }
     }
     if (!conflicts.isEmpty()) {
       return new Conflict(List.copyOf(conflicts));
     }
-    return new Merged(merge(safeBase, local, remote, localChanged, remoteChanged));
+    return new Merged(merge(safeBase, local, remote, localChanged, remoteChanged, latestWins));
   }
 
   private static Map<String, Object> merge(
@@ -101,10 +118,15 @@ public final class ConflictDetector {
       Map<String, Object> local,
       Map<String, Object> remote,
       LinkedHashSet<String> localChanged,
-      LinkedHashSet<String> remoteChanged) {
+      LinkedHashSet<String> remoteChanged,
+      Set<String> latestWins) {
     var result = new LinkedHashMap<String, Object>();
     for (var field : workKeys(base, local, remote)) {
-      if (localChanged.contains(field)) {
+      if (latestWins.contains(field)
+          && localChanged.contains(field)
+          && remoteChanged.contains(field)) {
+        result.put(field, later(local.get(field), remote.get(field)));
+      } else if (localChanged.contains(field)) {
         result.put(field, local.get(field));
       } else if (remoteChanged.contains(field)) {
         result.put(field, remote.get(field));
@@ -119,6 +141,13 @@ public final class ConflictDetector {
           }
         });
     return result;
+  }
+
+  private static Object later(Object left, Object right) {
+    if (left == null || right == null) {
+      return left == null ? right : left;
+    }
+    return Instant.parse(left.toString()).isBefore(Instant.parse(right.toString())) ? right : left;
   }
 
   private static LinkedHashSet<String> changedFields(

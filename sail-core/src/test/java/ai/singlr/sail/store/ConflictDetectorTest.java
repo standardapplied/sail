@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ConflictDetectorTest {
@@ -199,5 +201,55 @@ class ConflictDetectorTest {
     assertEquals("in_progress", merged.result().get("status"));
     assertEquals(
         "ada", merged.result().get("_actor"), "the merging box authored the merged result");
+  }
+
+  @Test
+  void aLatestWinsFieldMovedOnBothSidesMergesToTheLaterInstant() {
+    var base = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:00Z");
+    var earlier = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:41Z");
+    var later = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:41.5Z");
+
+    var localLater =
+        assertInstanceOf(
+            ConflictDetector.Merged.class,
+            ConflictDetector.detect(base, later, earlier, Set.of("beat")));
+    var remoteLater =
+        assertInstanceOf(
+            ConflictDetector.Merged.class,
+            ConflictDetector.detect(base, earlier, later, Set.of("beat")));
+
+    assertEquals("2026-09-01T00:00:41.5Z", localLater.result().get("beat"));
+    assertEquals("2026-09-01T00:00:41.5Z", remoteLater.result().get("beat"));
+  }
+
+  @Test
+  void aLatestWinsFieldNeverExcusesARealConflictBesideIt() {
+    var base = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:00Z");
+    var local = Map.<String, Object>of("status", "completed", "beat", "2026-09-01T00:00:05Z");
+    var remote = Map.<String, Object>of("status", "cancelled", "beat", "2026-09-01T00:00:09Z");
+
+    var conflict =
+        assertInstanceOf(
+            ConflictDetector.Conflict.class,
+            ConflictDetector.detect(base, local, remote, Set.of("beat")));
+
+    assertEquals(List.of("status"), conflict.fields());
+  }
+
+  @Test
+  void aLatestWinsFieldStampedOnOneSideOnlyBeatsAnAbsentStamp() {
+    var base = new LinkedHashMap<String, Object>();
+    base.put("status", "running");
+    base.put("beat", "2026-09-01T00:00:00Z");
+    var cleared = new LinkedHashMap<String, Object>(base);
+    cleared.put("beat", null);
+    var stamped = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:09Z");
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class,
+            ConflictDetector.detect(base, cleared, stamped, Set.of("beat")));
+
+    assertEquals("2026-09-01T00:00:09Z", merged.result().get("beat"));
   }
 }

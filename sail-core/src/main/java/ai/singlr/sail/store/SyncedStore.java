@@ -25,6 +25,14 @@ public interface SyncedStore {
   /** The {@code change_log.entity_type} discriminator, e.g. {@code "spec"}. */
   String entityType();
 
+  /**
+   * Instant-valued fields that only ever move forward and so can never be a conflict: when both
+   * sides moved one, the later instant wins. None by default.
+   */
+  default Set<String> latestWinsFields() {
+    return Set.of();
+  }
+
   /** Every entity id this replica knows of, including tombstoned ones. */
   Set<String> syncEntityIds();
 

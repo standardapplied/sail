@@ -39,6 +39,11 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   }
 
   @Override
+  public Set<String> latestWinsFields() {
+    return inner.latestWinsFields();
+  }
+
+  @Override
   public <T> T atomically(Supplier<T> work) {
     return inner.atomically(work);
   }
