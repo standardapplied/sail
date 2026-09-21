@@ -30,7 +30,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,17 +161,10 @@ class ApiRouterTest {
       assertEquals(200, put(server, "/v1/projects/acme/files/empty", "token", "").statusCode());
       assertEquals("", get(server, "/v1/projects/acme/files/empty", "token").body());
       assertEquals(
-          200,
-          put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(ProjectFiles.MAX_BYTES))
-              .statusCode());
+          200, put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(1024)).statusCode());
       assertEquals(
           413,
-          put(
-                  server,
-                  "/v1/projects/acme/files/large",
-                  "token",
-                  "x".repeat(ProjectFiles.MAX_BYTES + 1))
-              .statusCode());
+          put(server, "/v1/projects/acme/files/large", "token", "x".repeat(1024 + 1)).statusCode());
       assertTrue(get(server, "/v1/projects/acme/files", "token").body().contains("dir/config"));
       assertEquals(
           200,
@@ -254,16 +246,31 @@ class ApiRouterTest {
                       new FileStore.FileRow(
                           project,
                           entry.getKey(),
-                          Base64.getEncoder().encodeToString(entry.getValue())))
+                          ai.singlr.sail.store.BlobStore.hash(entry.getValue()),
+                          entry.getValue().length,
+                          0644,
+                          "binary"))
               .toList();
         }
 
-        public Optional<byte[]> get(String path) {
-          return Optional.ofNullable(files.get(path));
+        public ai.singlr.sail.config.FileLimits limits() {
+          return new ai.singlr.sail.config.FileLimits(1024);
         }
 
-        public String put(String path, byte[] bytes) {
-          files.put(path, bytes);
+        public Optional<FileStore.FileRow> find(String path) {
+          return list().stream().filter(row -> row.path().equals(path)).findFirst();
+        }
+
+        public java.io.InputStream open(FileStore.FileRow row) {
+          return new java.io.ByteArrayInputStream(files.get(row.path()));
+        }
+
+        public String put(String path, java.io.InputStream bytes, long size, int mode) {
+          try {
+            files.put(path, bytes.readAllBytes());
+          } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+          }
           return path;
         }
 

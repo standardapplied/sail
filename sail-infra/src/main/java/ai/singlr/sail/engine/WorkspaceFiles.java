@@ -8,12 +8,8 @@ package ai.singlr.sail.engine;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -26,35 +22,15 @@ public final class WorkspaceFiles {
   /** A file entry with its host path and path relative to the {@code files/} directory. */
   public record FileEntry(Path hostPath, String relativePath) {}
 
-  private static final Set<String> EXECUTABLE_EXTENSIONS = Set.of(".sh");
-
   private WorkspaceFiles() {}
 
-  /**
-   * Returns {@code true} if the given path should be treated as executable based on its file
-   * extension.
-   */
-  public static boolean isExecutable(String path) {
-    if (path == null) {
-      return false;
-    }
-    var lower = path.toLowerCase(Locale.ROOT);
-    return EXECUTABLE_EXTENSIONS.stream().anyMatch(lower::endsWith);
+  public static int mode(Path file) throws IOException {
+    return (int) Files.getAttribute(file, "unix:mode", java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        & 0777;
   }
 
-  /**
-   * Sets POSIX executable permissions on the given file if it {@linkplain #isExecutable(String) is
-   * executable}.
-   */
-  public static void setExecutableIfNeeded(Path file) throws IOException {
-    if (isExecutable(file.getFileName().toString())) {
-      var perms = Files.getPosixFilePermissions(file);
-      var mutable = new HashSet<>(perms);
-      mutable.add(PosixFilePermission.OWNER_EXECUTE);
-      mutable.add(PosixFilePermission.GROUP_EXECUTE);
-      mutable.add(PosixFilePermission.OTHERS_EXECUTE);
-      Files.setPosixFilePermissions(file, mutable);
-    }
+  public static void mode(Path file, int mode) throws IOException {
+    Files.setAttribute(file, "unix:mode", mode, java.nio.file.LinkOption.NOFOLLOW_LINKS);
   }
 
   /**

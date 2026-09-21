@@ -159,7 +159,8 @@ public final class SailOperations implements HostOperations {
       }
       throw e;
     }
-    if (health.succeeded(target, syncClock.instant(), round.report())) {
+    if (health.succeeded(
+        target, syncClock.instant(), round.report(), round.fetchedBytes(), round.sentBytes())) {
       publishSyncTransition(target, true, null, null);
     }
     return round;
@@ -210,7 +211,9 @@ public final class SailOperations implements HostOperations {
             health.consecutiveFailures(),
             health.lastErrorKind(),
             health.lastError(),
-            health.staleSince());
+            health.staleSince(),
+            health.fetchedBytes(),
+            health.sentBytes());
   }
 
   @Override

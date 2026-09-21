@@ -31,11 +31,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   private static final String ENTITY = "spec";
 
   private final Sqlite db;
+  private final BlobStore blobs;
   private final ChangeLog changeLog;
   private final RevisionJournal journal;
 
   public SpecStore(Sqlite db) {
     this.db = db;
+    this.blobs = new BlobStore(db);
     this.changeLog = new ChangeLog(db);
     this.journal = new RevisionJournal(db, changeLog, new SpecSchema());
   }
@@ -208,6 +210,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, '', '', ?)",
               spec.id(),
               now);
+          setHashes(spec.id(), "", "");
           recordRevision(spec.id(), "local", false);
         });
   }
@@ -433,6 +436,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               body,
               plan,
               now);
+          setHashes(specId, body, plan);
           recordRevision(specId, "local", false);
         });
   }
@@ -468,7 +472,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   private Map<String, Object> snapshotMap(SpecRow spec) {
-    var content = getContent(spec.id()).orElse(new SpecContent("", "", null));
+    var hashes =
+        db.queryOne(
+                "SELECT body_hash, plan_hash FROM specs WHERE id = ?",
+                row -> {
+                  requireMigrated(row.text(0), spec.id());
+                  requireMigrated(row.text(1), spec.id());
+                  return List.of(row.text(0), row.text(1));
+                },
+                spec.id())
+            .orElseThrow();
     var map = new LinkedHashMap<String, Object>();
     map.put("id", spec.id());
     map.put("project", spec.project());
@@ -487,12 +500,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     map.put("depends_on", spec.dependsOn());
     map.put("repos", spec.repos());
     map.put("room_id", spec.roomIdOrIdentity());
-    map.put("body", content.body());
-    map.put("plan", content.plan());
+    map.put("body_hash", hashes.get(0));
+    map.put("plan_hash", hashes.get(1));
     return map;
   }
 
   private void applySnapshot(String id, Map<String, Object> snapshot) {
+    var bodyHash = Snapshots.text(snapshot, "body_hash");
+    var planHash = Snapshots.text(snapshot, "plan_hash");
+    requireMigrated(bodyHash, id);
+    requireMigrated(planHash, id);
+    blobs.requireHeld(bodyHash);
+    blobs.requireHeld(planHash);
+    var body = blobs.text(bodyHash);
+    var plan = blobs.text(planHash);
     var spec = specFromSnapshot(snapshot);
     var now = DateTimeUtils.now().toString();
     if (findById(id).isPresent()) {
@@ -546,12 +567,14 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
         id,
-        Snapshots.text(snapshot, "body"),
-        Snapshots.text(snapshot, "plan"),
+        body,
+        plan,
         now,
-        Snapshots.text(snapshot, "body"),
-        Snapshots.text(snapshot, "plan"),
+        body,
+        plan,
         now);
+    db.execute(
+        "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?", bodyHash, planHash, id);
   }
 
   private static String roomIdOf(Map<String, Object> s) {
@@ -595,8 +618,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           "priority",
           "depends_on",
           "repos",
-          "body",
-          "plan",
+          "body_hash",
+          "plan_hash",
           "room_id");
 
   /**
@@ -625,6 +648,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   @Override
   public String entityType() {
     return ENTITY;
+  }
+
+  @Override
+  public Set<String> contentFields() {
+    return Set.of("body_hash", "plan_hash");
   }
 
   public Map<String, Object> comparableSnapshot(String id) {
@@ -769,9 +797,27 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   public Optional<SpecContent> getContent(String specId) {
     return db.queryOne(
-        "SELECT body, plan, updated_at FROM spec_content WHERE spec_id = ?",
-        row -> new SpecContent(row.text(0), row.text(1), row.text(2)),
+        "SELECT c.body, c.plan, c.updated_at, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
+        row -> {
+          requireMigrated(row.text(3), specId);
+          requireMigrated(row.text(4), specId);
+          return new SpecContent(row.text(0), row.text(1), row.text(2));
+        },
         specId);
+  }
+
+  private void setHashes(String id, String body, String plan) {
+    db.execute(
+        "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?",
+        blobs.putText(body),
+        blobs.putText(plan),
+        id);
+  }
+
+  private static void requireMigrated(String hash, String id) {
+    if (hash == null)
+      throw new IllegalStateException(
+          "Spec " + id + " content migration is incomplete; run sail migrate");
   }
 
   public List<SpecRow> readySpecs() {

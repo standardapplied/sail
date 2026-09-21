@@ -13,10 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.io.StringReader;
-import java.io.StringWriter;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.io.Writer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +28,15 @@ class SyncSessionTest {
   private static final String WELCOME =
       SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "main-box")) + "\n";
 
-  private static SyncSession open(String serverLines, StringWriter out, List<String> notices) {
-    return SyncSession.open(new StringReader(serverLines), out, HELLO, notices::add);
+  private static SyncSession open(
+      String serverLines, ai.singlr.sail.sync.ByteStreams.Output out, List<String> notices) {
+    return SyncSession.open(
+        new ai.singlr.sail.sync.ByteStreams.Input(serverLines), out, HELLO, notices::add);
   }
 
   @Test
   void openSendsHelloAndReturnsThePagedSessionOnWelcome() {
-    var out = new StringWriter();
+    var out = new ai.singlr.sail.sync.ByteStreams.Output();
     try (var session = open(WELCOME, out, new ArrayList<>())) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
@@ -55,7 +55,9 @@ class SyncSessionTest {
     var v3 = olderProtocol + "\n";
     var notices = new ArrayList<String>();
     var failure =
-        assertThrows(SyncTransportException.class, () -> open(v3, new StringWriter(), notices));
+        assertThrows(
+            SyncTransportException.class,
+            () -> open(v3, new ai.singlr.sail.sync.ByteStreams.Output(), notices));
     assertEquals("refused", failure.kind());
     assertTrue(
         failure
@@ -77,7 +79,9 @@ class SyncSessionTest {
     var failure =
         assertThrows(
             SyncTransportException.class,
-            () -> open(noise + "\n", new StringWriter(), new ArrayList<>()));
+            () ->
+                open(
+                    noise + "\n", new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
 
     assertEquals("protocol", failure.kind());
     assertTrue(
@@ -92,7 +96,7 @@ class SyncSessionTest {
     var failure =
         assertThrows(
             SyncTransportException.class,
-            () -> open(refuse, new StringWriter(), new ArrayList<>()));
+            () -> open(refuse, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertEquals("refused", failure.kind());
     assertTrue(failure.getMessage().contains("sail upgrade"), failure.getMessage());
   }
@@ -103,20 +107,25 @@ class SyncSessionTest {
     var store =
         assertThrows(
             SyncTransportException.class,
-            () -> open(failed, new StringWriter(), new ArrayList<>()));
+            () -> open(failed, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertEquals("store", store.kind());
     assertTrue(store.getMessage().contains("boom"));
 
     var tips = SyncWire.encode(new SyncWire.Tips(Map.of("spec", 1L))) + "\n";
     var other =
         assertThrows(
-            SyncTransportException.class, () -> open(tips, new StringWriter(), new ArrayList<>()));
+            SyncTransportException.class,
+            () -> open(tips, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertTrue(other.getMessage().contains("Tips"), other.getMessage());
 
     var unknownOp =
         assertThrows(
             SyncTransportException.class,
-            () -> open("{\"op\": \"bogus\"}\n", new StringWriter(), new ArrayList<>()));
+            () ->
+                open(
+                    "{\"op\": \"bogus\"}\n",
+                    new ai.singlr.sail.sync.ByteStreams.Output(),
+                    new ArrayList<>()));
     assertEquals("protocol", unknownOp.kind());
     assertTrue(unknownOp.getMessage().contains("Unknown sync op"), unknownOp.getMessage());
   }
@@ -126,11 +135,13 @@ class SyncSessionTest {
     var other = SyncWire.encode(new SyncWire.Welcome(5, "0.50.0", "main")) + "\n";
     var failure =
         assertThrows(
-            SyncTransportException.class, () -> open(other, new StringWriter(), new ArrayList<>()));
+            SyncTransportException.class,
+            () -> open(other, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertTrue(failure.getMessage().contains("upgrade main first"), failure.getMessage());
     var anonymous = SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "")) + "\n";
     assertThrows(
-        SyncTransportException.class, () -> open(anonymous, new StringWriter(), new ArrayList<>()));
+        SyncTransportException.class,
+        () -> open(anonymous, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
   }
 
   @Test
@@ -139,8 +150,8 @@ class SyncSessionTest {
     var notices = new ArrayList<String>();
     try (var session =
         SyncSession.open(
-            new StringReader(older),
-            new StringWriter(),
+            new ai.singlr.sail.sync.ByteStreams.Input(older),
+            new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
             notices::add)) {
       assertInstanceOf(PagedSyncSession.class, session);
@@ -157,8 +168,8 @@ class SyncSessionTest {
     var notices = new ArrayList<String>();
     try (var session =
         SyncSession.open(
-            new StringReader(dev),
-            new StringWriter(),
+            new ai.singlr.sail.sync.ByteStreams.Input(dev),
+            new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
             notices::add)) {
       assertInstanceOf(PagedSyncSession.class, session);
@@ -170,7 +181,8 @@ class SyncSessionTest {
   void aChannelClosedBeforeTheWelcomeIsUnreachable() {
     var failure =
         assertThrows(
-            SyncTransportException.class, () -> open("", new StringWriter(), new ArrayList<>()));
+            SyncTransportException.class,
+            () -> open("", new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertEquals("unreachable", failure.kind());
   }
 
@@ -178,7 +190,9 @@ class SyncSessionTest {
   void aBrokenChannelOnHelloRaisesUnchecked() {
     assertThrows(
         UncheckedIOException.class,
-        () -> SyncSession.open(new StringReader(""), brokenWriter(), HELLO, n -> {}));
+        () ->
+            SyncSession.open(
+                new ai.singlr.sail.sync.ByteStreams.Input(""), brokenWriter(), HELLO, n -> {}));
   }
 
   @Test
@@ -187,7 +201,7 @@ class SyncSessionTest {
     try (var session =
         open(
             WELCOME + SyncWire.encode(new SyncWire.Fdes(roster)) + "\n",
-            new StringWriter(),
+            new ai.singlr.sail.sync.ByteStreams.Output(),
             new ArrayList<>())) {
       var pulled = session.fetchFdes();
       assertEquals("ada", pulled.getFirst().get("handle"));
@@ -195,14 +209,14 @@ class SyncSessionTest {
     try (var session =
         open(
             WELCOME + SyncWire.encode(new SyncWire.Tips(Map.of())) + "\n",
-            new StringWriter(),
+            new ai.singlr.sail.sync.ByteStreams.Output(),
             new ArrayList<>())) {
       assertThrows(SyncTransportException.class, session::fetchFdes);
     }
     try (var session =
         open(
             WELCOME + SyncWire.encode(new SyncWire.Failed("fde: nope", "store")) + "\n",
-            new StringWriter(),
+            new ai.singlr.sail.sync.ByteStreams.Output(),
             new ArrayList<>())) {
       assertEquals("store", assertThrows(SyncTransportException.class, session::fetchFdes).kind());
     }
@@ -217,7 +231,8 @@ class SyncSessionTest {
             + SyncWire.encode(new SyncWire.Page(List.of(), 0, false, 5))
             + "\n";
     try (var node = new SyncBox("node");
-        var session = open(stuck, new StringWriter(), new ArrayList<>())) {
+        var session =
+            open(stuck, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>())) {
       var failure =
           assertThrows(SyncTransportException.class, () -> session.reconcile("spec", node.replica));
       assertEquals("protocol", failure.kind());
@@ -232,7 +247,7 @@ class SyncSessionTest {
         var session =
             open(
                 WELCOME + SyncWire.encode(new SyncWire.Tips(Map.of("spec", 0L))) + "\n",
-                new StringWriter(),
+                new ai.singlr.sail.sync.ByteStreams.Output(),
                 new ArrayList<>())) {
       var failure =
           assertThrows(SyncTransportException.class, () -> session.reconcile("file", node.replica));
@@ -248,7 +263,8 @@ class SyncSessionTest {
             IllegalStateException.class,
             () -> {
               try (var session =
-                  new PagedSyncSession(new StringReader(""), brokenWriter(), "main", 64)) {
+                  new PagedSyncSession(
+                      new ai.singlr.sail.sync.ByteStreams.Input(""), brokenWriter(), "main", 64)) {
                 throw original;
               }
             });
@@ -257,10 +273,15 @@ class SyncSessionTest {
     assertInstanceOf(UncheckedIOException.class, thrown.getSuppressed()[0]);
   }
 
-  private static Writer brokenWriter() {
-    return new Writer() {
+  private static OutputStream brokenWriter() {
+    return new OutputStream() {
       @Override
-      public void write(char[] buffer, int offset, int length) throws IOException {
+      public void write(int value) throws IOException {
+        throw new IOException("channel down");
+      }
+
+      @Override
+      public void write(byte[] buffer, int offset, int length) throws IOException {
         throw new IOException("channel down");
       }
 

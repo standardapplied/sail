@@ -14,10 +14,8 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,26 +180,9 @@ public final class ConflictsCommand implements Callable<Integer> {
       return out.toString().stripTrailing();
     }
 
-    /** Renders a value, decoding a file's base64 content to readable text (or a binary summary). */
     static String show(Object value, boolean isFile) {
-      if (!isFile || !(value instanceof String text) || text.isBlank()) {
-        return ConflictMerge.render(value);
-      }
-      var bytes = Base64.getDecoder().decode(text);
-      if (looksBinary(bytes)) {
-        return "<binary, " + bytes.length + " bytes>";
-      }
-      var decoded = new String(bytes, StandardCharsets.UTF_8);
-      return decoded.contains("\n") ? "\n" + decoded.stripTrailing() : decoded;
-    }
-
-    static boolean looksBinary(byte[] bytes) {
-      for (var b : bytes) {
-        if (b == 0 || (b > 0 && b < 0x09) || (b > 0x0d && b < 0x20)) {
-          return true;
-        }
-      }
-      return false;
+      var text = ConflictMerge.render(value);
+      return isFile && text.contains("\n") ? "\n" + text.stripTrailing() : text;
     }
   }
 

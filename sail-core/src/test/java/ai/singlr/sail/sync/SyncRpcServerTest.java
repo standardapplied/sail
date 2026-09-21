@@ -13,8 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.io.StringReader;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,8 +69,9 @@ class SyncRpcServerTest {
 
   private static List<SyncWire.Response> serveLines(
       SyncRpcServer server, int frame, List<String> lines) throws Exception {
-    var out = new StringWriter();
-    server.serve(new StringReader(String.join("\n", lines) + "\n"), out, frame);
+    var out = new ai.singlr.sail.sync.ByteStreams.Output();
+    server.serve(
+        new ai.singlr.sail.sync.ByteStreams.Input(String.join("\n", lines) + "\n"), out, frame);
     return out.toString().lines().map(SyncWire::decodeResponse).toList();
   }
 
@@ -120,8 +119,9 @@ class SyncRpcServerTest {
   @Test
   void anUnknownOpBeforeHelloIsRefusedNamingTheRemedy() throws Exception {
     var fetch = "{\"op\": \"fetch\", \"entityType\": \"spec\", \"upgradeFloor\": \"0.34.0\"}";
-    var out = new StringWriter();
-    new SyncRpcServer(new FakeMain(), true).serve(new StringReader(fetch + "\n"), out);
+    var out = new ai.singlr.sail.sync.ByteStreams.Output();
+    new SyncRpcServer(new FakeMain(), true)
+        .serve(new ai.singlr.sail.sync.ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
     assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
@@ -438,7 +438,10 @@ class SyncRpcServerTest {
 
   @Test
   void anEmptyStreamOrAByeEndsTheSessionCleanly() throws Exception {
-    new SyncRpcServer(new FakeMain(), true).serve(new StringReader(""), new StringWriter());
+    new SyncRpcServer(new FakeMain(), true)
+        .serve(
+            new ai.singlr.sail.sync.ByteStreams.Input(""),
+            new ai.singlr.sail.sync.ByteStreams.Output());
     var replies =
         serve(
             new SyncRpcServer(new FakeMain(), true),

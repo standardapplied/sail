@@ -42,6 +42,21 @@ public final class DataMigrator {
   public List<Run> run(ProjectRegistry projects, DataMigration.Prompter prompter) {
     var runs = new ArrayList<Run>();
     for (var migration : migrations) {
+      if (migration.resumable()) {
+        if (isApplied(migration.name())) {
+          runs.add(new Run(migration.name(), true, DataMigration.Report.empty()));
+        } else {
+          var report = migration.apply(db, projects, prompter);
+          db.transaction(
+              () ->
+                  db.execute(
+                      "INSERT OR IGNORE INTO data_migrations (name, applied_at) VALUES (?, ?)",
+                      migration.name(),
+                      DateTimeUtils.now().toString()));
+          runs.add(new Run(migration.name(), false, report));
+        }
+        continue;
+      }
       runs.add(
           db.transaction(
               () -> {

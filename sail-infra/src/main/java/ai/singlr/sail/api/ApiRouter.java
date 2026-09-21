@@ -18,7 +18,6 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -302,7 +301,13 @@ public final class ApiRouter implements HttpHandler {
                               "path",
                               row.path(),
                               "bytes",
-                              Base64.getDecoder().decode(row.content()).length))
+                              row.size(),
+                              "mode",
+                              row.mode(),
+                              "kind",
+                              row.kind(),
+                              "content_hash",
+                              row.contentHash()))
                   .toList()));
     }
     var path = suffix.substring(1);
@@ -310,16 +315,28 @@ public final class ApiRouter implements HttpHandler {
       throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
     }
     if (request.is(GET)) {
-      return ApiResponse.file(files.get(path).orElseThrow(ApiRouter::notFound));
+      var row = files.find(path).orElseThrow(ApiRouter::notFound);
+      var etag = "\"" + row.contentHash() + "\"";
+      var condition = exchange.getRequestHeaders().getFirst("If-None-Match");
+      if (condition != null
+          && java.util.Arrays.stream(condition.split(","))
+              .map(String::strip)
+              .anyMatch(
+                  value -> value.equals("*") || value.equals(etag) || value.equals("W/" + etag))) {
+        return new ApiResponse(304, Map.of(), Map.of("ETag", etag));
+      }
+      return ApiResponse.file(files.open(row), row.size(), row.contentHash());
     }
     if (request.is(PUT)) {
-      var content = exchange.getRequestBody().readNBytes(ProjectFiles.MAX_BYTES + 1);
-      if (content.length > ProjectFiles.MAX_BYTES) {
+      var declared = exchange.getRequestHeaders().getFirst("Content-Length");
+      if (declared == null)
+        throw new IllegalArgumentException("Content-Length is required for a shared file");
+      var size = Long.parseLong(declared);
+      if (size > files.limits().fileMax())
         throw new ApiException(
             ErrorCode.REQUEST_TOO_LARGE,
-            "File exceeds the " + ProjectFiles.MAX_BYTES + "-byte limit.");
-      }
-      var storedPath = files.put(path, content);
+            "File exceeds limits.file_max (" + files.limits().fileMax() + " bytes)");
+      var storedPath = files.put(path, exchange.getRequestBody(), size, 0644);
       files.materialize();
       return ApiResponse.ok(Map.of("path", storedPath));
     }
@@ -889,16 +906,27 @@ public final class ApiRouter implements HttpHandler {
   }
 
   private static void write(HttpExchange exchange, ApiResponse response) throws IOException {
-    var body =
-        response.content() != null
-            ? response.content()
-            : YamlUtil.dumpJson(new LinkedHashMap<>(response.body()))
-                .getBytes(StandardCharsets.UTF_8);
     var headers = exchange.getResponseHeaders();
     headers.set("Content-Type", "application/json; charset=utf-8");
     for (var entry : response.headers().entrySet()) {
       headers.set(entry.getKey(), entry.getValue());
     }
+    if (response.status() == 304) {
+      exchange.sendResponseHeaders(304, -1);
+      return;
+    }
+    if (response.content() != null) {
+      try (var input = response.content()) {
+        var size = Long.parseLong(response.headers().get("Content-Length"));
+        exchange.sendResponseHeaders(response.status(), size == 0 ? -1 : size);
+        try (var output = exchange.getResponseBody()) {
+          input.transferTo(output);
+        }
+      }
+      return;
+    }
+    var body =
+        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
     exchange.sendResponseHeaders(response.status(), body.length == 0 ? -1 : body.length);
     try (var output = exchange.getResponseBody()) {
       output.write(body);

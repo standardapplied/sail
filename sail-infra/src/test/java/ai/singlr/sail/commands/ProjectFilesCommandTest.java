@@ -85,7 +85,9 @@ class ProjectFilesCommandTest {
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
-    assertEquals(b64("echo hi"), files.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        b64("echo hi"),
+        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals("echo hi", Files.readString(filesDir("acme").resolve("scripts/deploy.sh")));
   }
 
@@ -125,18 +127,12 @@ class ProjectFilesCommandTest {
     var host = new ai.singlr.sail.engine.HostFileSource();
     var big = tempDir.resolve("big.bin");
     try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
-      raf.setLength(ProjectFilesCommand.Add.MAX_SHARE_BYTES + 1);
+      raf.setLength(ai.singlr.sail.config.FileLimits.DEFAULT_MAX + 1);
     }
 
     assertTrue(ProjectFilesCommand.Add.shareProblem(host, big, "big.bin").contains("larger than"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ProjectFilesCommand.Add.store(
-                files,
-                "acme",
-                "big.bin",
-                new byte[(int) ProjectFilesCommand.Add.MAX_SHARE_BYTES + 1]));
+    assertEquals(
+        1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
   }
 
   @Test
@@ -148,8 +144,8 @@ class ProjectFilesCommandTest {
 
   @Test
   void lsRendersHumanTableAndJson() {
-    files.put("acme", "a.txt", b64("AAAA"));
-    files.put("acme", "b.txt", b64("B"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAAA");
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "b.txt", "B");
 
     var captured = new ByteArrayOutputStream();
     Banner.printProjectFilesTable(
@@ -173,11 +169,12 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void catDecodesContentAndIsEmptyWhenAbsent() {
-    files.put("acme", "a.txt", b64("payload"));
+  void catStreamsContentAndIsEmptyWhenAbsent() throws Exception {
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "payload");
 
     assertArrayEquals(
-        "payload".getBytes(), ProjectFilesCommand.Cat.read(files, "acme", "a.txt").orElseThrow());
+        "payload".getBytes(),
+        ProjectFilesCommand.Cat.read(files, "acme", "a.txt").orElseThrow().readAllBytes());
     assertTrue(ProjectFilesCommand.Cat.read(files, "acme", "missing").isEmpty());
   }
 
@@ -203,12 +200,12 @@ class ProjectFilesCommandTest {
 
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
-    files.put("acme", "a.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A");
     var report = ProjectFilesCommand.Export.export(files, projectsDir, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
-    files.put("acme", "a.txt", b64("A2"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A2");
     var second = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
 
     assertEquals(0, second.written());

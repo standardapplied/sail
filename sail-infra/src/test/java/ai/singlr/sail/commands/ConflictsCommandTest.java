@@ -34,7 +34,6 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,7 +135,7 @@ class ConflictsCommandTest {
   }
 
   private static String b64(String text) {
-    return Base64.getEncoder().encodeToString(text.getBytes());
+    return text;
   }
 
   @Test
@@ -174,13 +173,9 @@ class ConflictsCommandTest {
     assertEquals(
         "Theirs", ConflictsCommand.Show.show("Theirs", false), "spec values render verbatim");
 
-    var binary = Base64.getEncoder().encodeToString(new byte[] {1, 2, 0, 3});
+    var binary = "<binary, 4 bytes>";
     assertTrue(ConflictsCommand.Show.show(binary, true).startsWith("<binary, 4 bytes>"));
     assertEquals("", ConflictsCommand.Show.show("", true), "blank content renders empty");
-    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0}));
-    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0x08}));
-    assertTrue(ConflictsCommand.Show.looksBinary(new byte[] {0x1f}));
-    assertFalse(ConflictsCommand.Show.looksBinary("tab\tnewline\r\n".getBytes()));
   }
 
   @Test

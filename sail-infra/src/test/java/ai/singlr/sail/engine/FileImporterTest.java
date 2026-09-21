@@ -63,8 +63,11 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(2, report.imported());
-    assertEquals(b64("hello"), files.find("acme", "scripts/deploy.sh").orElseThrow().content());
-    assertEquals(b64("docs"), files.find("acme", "README.md").orElseThrow().content());
+    assertEquals(
+        b64("hello"),
+        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(
+        b64("docs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "README.md"));
   }
 
   @Test
@@ -99,7 +102,7 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(1, report.imported());
-    assertEquals(b64("A2"), files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
   }
 
   @Test

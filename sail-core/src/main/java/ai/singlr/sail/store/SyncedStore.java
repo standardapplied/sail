@@ -33,6 +33,11 @@ public interface SyncedStore {
     return Set.of();
   }
 
+  /** Snapshot fields whose values name verified blobs. */
+  default Set<String> contentFields() {
+    return Set.of();
+  }
+
   /** Every entity id this replica knows of, including tombstoned ones. */
   Set<String> syncEntityIds();
 

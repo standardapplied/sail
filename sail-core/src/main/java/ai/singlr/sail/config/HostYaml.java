@@ -26,11 +26,40 @@ public record HostYaml(
     String serverIp,
     String initializedAt,
     WebauthnConfig webauthn,
-    SyncConfig sync) {
+    SyncConfig sync,
+    FileLimits limits) {
 
   public HostYaml {
     webauthn = webauthn == null ? WebauthnConfig.disabled() : webauthn;
     sync = sync == null ? SyncConfig.unset() : sync;
+    limits = limits == null ? FileLimits.defaults() : limits;
+  }
+
+  public HostYaml(
+      String storageBackend,
+      String pool,
+      String poolDisk,
+      String bridge,
+      String baseProfile,
+      String image,
+      String incusVersion,
+      String serverIp,
+      String initializedAt,
+      WebauthnConfig webauthn,
+      SyncConfig sync) {
+    this(
+        storageBackend,
+        pool,
+        poolDisk,
+        bridge,
+        baseProfile,
+        image,
+        incusVersion,
+        serverIp,
+        initializedAt,
+        webauthn,
+        sync,
+        FileLimits.defaults());
   }
 
   /** Constructor without a sync role; leaves the box undeclared in the sync star. */
@@ -122,7 +151,8 @@ public record HostYaml(
         (String) map.get("server_ip"),
         (String) map.get("initialized_at"),
         WebauthnConfig.fromMap((Map<String, Object>) map.get("webauthn")),
-        SyncConfig.fromMap((Map<String, Object>) map.get("sync")));
+        SyncConfig.fromMap((Map<String, Object>) map.get("sync")),
+        FileLimits.fromMap((Map<String, Object>) map.get("limits")));
   }
 
   /** This host with its sync block replaced and everything else kept. */
@@ -138,7 +168,8 @@ public record HostYaml(
         serverIp,
         initializedAt,
         webauthn,
-        sync);
+        sync,
+        limits);
   }
 
   public Map<String, Object> toMap() {
@@ -158,6 +189,8 @@ public record HostYaml(
     if (sync != null && sync.role() != null) {
       map.put("sync", sync.toMap());
     }
+    if (!limits.equals(FileLimits.defaults()))
+      map.put("limits", Map.of("file_max", limits.fileMax()));
     return map;
   }
 }

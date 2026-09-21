@@ -8,8 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.api.ProjectFiles;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,19 +25,23 @@ public record SharedProjectFiles(FileStore files, Path projectsDir, String proje
   }
 
   @Override
-  public Optional<byte[]> get(String path) {
-    return files.find(project, path).map(row -> Base64.getDecoder().decode(row.content()));
+  public Optional<FileStore.FileRow> find(String path) {
+    return files.find(project, path);
   }
 
   @Override
-  public String put(String path, byte[] bytes) {
+  public InputStream open(FileStore.FileRow row) {
+    return files.open(row);
+  }
+
+  @Override
+  public String put(String path, InputStream bytes, long size, int mode) {
     if (!FilePicker.isShareablePath(path)) {
       throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
     }
-    if (bytes.length > MAX_BYTES) {
-      throw new IllegalArgumentException("File exceeds the " + MAX_BYTES + "-byte limit.");
-    }
-    files.put(project, path, Base64.getEncoder().encodeToString(bytes));
+    var limits = limits();
+    limits.check(size);
+    files.put(project, path, limits.bounded(bytes, size), mode);
     return path;
   }
 

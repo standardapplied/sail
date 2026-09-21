@@ -6,8 +6,14 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.FastCdc;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.Reader;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -106,34 +112,78 @@ public final class SyncWire {
    * fragment is what a dropped connection left behind. Used by both ends so the framing — and its
    * bound — has a single definition.
    */
-  public static String readFramed(Reader in) throws IOException {
-    return readFramed(in, MAX_FRAME);
+  public static String readFramed(InputStream in) throws IOException {
+    return readLine(in, MAX_FRAME);
   }
 
-  static String readFramed(Reader in, int maxChars) throws IOException {
-    var message = new StringBuilder();
+  static String readFramed(InputStream in, int maxBytes) throws IOException {
+    return readLine(in, maxBytes);
+  }
+
+  public static String readLine(InputStream in) throws IOException {
+    return readLine(in, MAX_FRAME);
+  }
+
+  static String readLine(InputStream in, int maxBytes) throws IOException {
+    var message = new ByteArrayOutputStream();
     for (var c = in.read(); c != -1; c = in.read()) {
       if (c == '\n') {
-        return message.toString();
-      }
-      if (message.length() >= maxChars) {
-        while (c != -1 && c != '\n') {
-          c = in.read();
+        try {
+          return StandardCharsets.UTF_8
+              .newDecoder()
+              .decode(ByteBuffer.wrap(message.toByteArray()))
+              .toString();
+        } catch (CharacterCodingException e) {
+          throw new SyncTransportException("protocol", "Malformed UTF-8 in sync line", e);
         }
-        throw new SyncTransportException("Sync message exceeded " + maxChars + " characters.");
       }
-      message.append((char) c);
+      if (message.size() >= maxBytes) {
+        throw new SyncTransportException(
+            "protocol", "Sync message exceeded " + maxBytes + " bytes.", null);
+      }
+      message.write(c);
     }
-    if (message.isEmpty()) {
-      return null;
-    }
+    if (message.size() == 0) return null;
     throw new SyncTransportException(
         "unreachable",
-        "Sync channel closed mid-message, after " + message.length() + " characters.",
+        "Sync channel closed mid-message, after " + message.size() + " bytes.",
         null);
   }
 
-  public sealed interface Request permits Hello, Heads, Pull, Need, Push, FetchFdes, Bye {}
+  public static byte[] readBytes(InputStream in, int size) throws IOException {
+    requireChunkSize(size);
+    var bytes = new byte[size];
+    var offset = 0;
+    while (offset < size) {
+      var read = in.read(bytes, offset, size - offset);
+      if (read == -1)
+        throw new SyncTransportException(
+            "unreachable",
+            "Sync channel closed mid-chunk, after " + offset + " of " + size + " bytes",
+            null);
+      if (read == 0) throw new IOException("Sync channel made no progress");
+      offset += read;
+    }
+    return bytes;
+  }
+
+  public static void writeChunk(java.io.OutputStream out, String hash, byte[] bytes)
+      throws IOException {
+    requireChunkSize(bytes.length);
+    if (!BlobStore.hash(bytes).equals(hash))
+      throw new IllegalArgumentException("Invalid chunk " + hash + ": SHA-256 mismatch");
+    out.write((encode(new Chunk(hash, bytes.length)) + "\n").getBytes(StandardCharsets.UTF_8));
+    out.write(bytes);
+    out.flush();
+  }
+
+  private static void requireChunkSize(long size) {
+    if (size <= 0 || size > FastCdc.MAX)
+      throw new IllegalArgumentException(
+          "Invalid chunk size: " + size + "; maximum is " + FastCdc.MAX);
+  }
+
+  public sealed interface Request permits Hello, Heads, Pull, Need, Push, FetchFdes, Bye, Content {}
 
   /** Opens the session: the node's protocol, build, fleet floor and box identity. */
   public record Hello(int protocol, String version, String floor, String box) implements Request {
@@ -161,7 +211,96 @@ public final class SyncWire {
   /** End the session; main returns nothing. */
   public record Bye() implements Request {}
 
-  public sealed interface Response permits Welcome, Refuse, Tips, Page, Results, Fdes, Failed {}
+  public sealed interface Response
+      permits Welcome, Refuse, Tips, Page, Results, Fdes, Failed, Content {}
+
+  public sealed interface Content extends Request, Response
+      permits Fetch, FetchChunks, Manifest, Chunk, Done, Announce, Lack {}
+
+  public record Fetch(List<String> hashes) implements Content {
+    public Fetch {
+      hashes = checkedHashes(hashes);
+    }
+  }
+
+  public record FetchChunks(List<String> hashes) implements Content {
+    public FetchChunks {
+      hashes = checkedHashes(hashes);
+    }
+  }
+
+  public record Announce(List<String> hashes) implements Content {
+    public Announce {
+      hashes = checkedHashes(hashes);
+    }
+  }
+
+  public record Lack(List<String> hashes) implements Content {
+    public Lack {
+      hashes = checkedHashes(hashes);
+    }
+  }
+
+  public record Manifest(BlobStore.Manifest manifest) implements Content {}
+
+  public record Chunk(String hash, int size) implements Content {
+    public Chunk {
+      BlobStore.requireHash(hash);
+      requireChunkSize(size);
+    }
+  }
+
+  public record Done() implements Content {}
+
+  private static List<String> checkedHashes(List<String> hashes) {
+    hashes.forEach(BlobStore::requireHash);
+    return List.copyOf(hashes);
+  }
+
+  private static Content content(String op, Map<String, Object> map) {
+    return switch (op) {
+      case "fetch" -> new Fetch(strings(map, "hashes"));
+      case "fetch_chunks" -> new FetchChunks(strings(map, "hashes"));
+      case "announce" -> new Announce(strings(map, "hashes"));
+      case "lack" -> new Lack(strings(map, "hashes"));
+      case "manifest" ->
+          new Manifest(
+              new BlobStore.Manifest(
+                  string(map, "hash"), longValue(map, "size"), strings(map, "chunks")));
+      case "chunk" -> {
+        var size = longValue(map, "size");
+        requireChunkSize(size);
+        yield new Chunk(string(map, "hash"), (int) size);
+      }
+      case "done" -> new Done();
+      default -> throw new IllegalArgumentException("Unknown content op: " + op);
+    };
+  }
+
+  public static String encode(Content content) {
+    return YamlUtil.dumpJson(contentMap(content));
+  }
+
+  private static Map<String, Object> contentMap(Content content) {
+    return switch (content) {
+      case Fetch f -> Map.of(OP, "fetch", "hashes", f.hashes());
+      case FetchChunks f -> Map.of(OP, "fetch_chunks", "hashes", f.hashes());
+      case Announce a -> Map.of(OP, "announce", "hashes", a.hashes());
+      case Lack l -> Map.of(OP, "lack", "hashes", l.hashes());
+      case Manifest m ->
+          Map.of(
+              OP,
+              "manifest",
+              "hash",
+              m.manifest().hash(),
+              "size",
+              m.manifest().size(),
+              "chunks",
+              m.manifest().chunkHashes());
+      case Chunk c -> Map.of(OP, "chunk", "hash", c.hash(), "size", c.size());
+      case Done d -> Map.of(OP, "done");
+    };
+  }
 
   /** Main accepted the hello: its protocol, build, and the box id the node checkpoints against. */
   public record Welcome(int protocol, String version, String mainId) implements Response {}
@@ -258,12 +397,12 @@ public final class SyncWire {
 
   /** The chars {@code entry} takes inside a page. */
   public static int encodedLength(Entry entry) {
-    return YamlUtil.dumpJson(entryMap(entry)).length();
+    return YamlUtil.dumpJson(entryMap(entry)).getBytes(StandardCharsets.UTF_8).length;
   }
 
   /** The chars {@code offer} takes inside a push. */
   public static int encodedLength(MainReplica.Offer offer) {
-    return YamlUtil.dumpJson(offerMap(offer)).length();
+    return YamlUtil.dumpJson(offerMap(offer)).getBytes(StandardCharsets.UTF_8).length;
   }
 
   public static String context(Request request) {
@@ -275,6 +414,7 @@ public final class SyncWire {
       case Push push -> String.valueOf(push.type());
       case FetchFdes ignored -> "fde";
       case Bye ignored -> "session";
+      case Content c -> String.valueOf(contentMap(c).get(OP));
     };
   }
 
@@ -307,6 +447,7 @@ public final class SyncWire {
       }
       case FetchFdes ignored -> map.put(OP, OP_FETCH_FDES);
       case Bye ignored -> map.put(OP, OP_BYE);
+      case Content c -> map.putAll(contentMap(c));
     }
     return YamlUtil.dumpJson(map);
   }
@@ -314,6 +455,7 @@ public final class SyncWire {
   public static String encode(Response response) {
     var map = new LinkedHashMap<String, Object>();
     switch (response) {
+      case Content c -> map.putAll(contentMap(c));
       case Welcome welcome -> {
         map.put(OP, OP_WELCOME);
         map.put(PROTOCOL_KEY, welcome.protocol());
@@ -370,6 +512,8 @@ public final class SyncWire {
           new Push(string(map, TYPE), maps(map, OFFERS).stream().map(SyncWire::offer).toList());
       case OP_FETCH_FDES -> new FetchFdes();
       case OP_BYE -> new Bye();
+      case "fetch", "fetch_chunks", "announce", "lack", "manifest", "chunk", "done" ->
+          content(op, map);
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
     };
   }
@@ -410,6 +554,8 @@ public final class SyncWire {
               maps(map, RESULTS).stream().map(SyncWire::result).toList(), longValue(map, MAX_SEQ));
       case OP_FDES -> new Fdes(maps(map, FDES));
       case OP_FAILED -> new Failed(string(map, MESSAGE), string(map, KIND));
+      case "fetch", "fetch_chunks", "announce", "lack", "manifest", "chunk", "done" ->
+          content(op, map);
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
     };
   }

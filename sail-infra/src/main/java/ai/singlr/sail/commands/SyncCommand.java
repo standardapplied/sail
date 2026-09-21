@@ -54,8 +54,26 @@ import picocli.CommandLine.Option;
     name = "sync",
     description = "Reconcile this box's specs with the main devbox.",
     mixinStandardHelpOptions = true,
-    subcommands = SyncCommand.Status.class)
+    subcommands = {SyncCommand.Status.class, SyncCommand.Gc.class})
 public final class SyncCommand implements Callable<Integer> {
+
+  @Command(
+      name = "gc",
+      description = "Collect unreferenced sync content.",
+      mixinStandardHelpOptions = true)
+  static final class Gc implements Callable<Integer> {
+    @Override
+    public Integer call() {
+      try (var database =
+          SyncDatabase.converge(
+              ai.singlr.sail.engine.SailPaths.controlPlaneDb(),
+              ai.singlr.sail.engine.HostInfo.hostname())) {
+        var freed = new ai.singlr.sail.store.BlobStore(database.db()).gc(Set.of());
+        System.out.println("Freed " + freed + " bytes of unreferenced content.");
+      }
+      return 0;
+    }
+  }
 
   @Command(
       name = "status",
@@ -97,6 +115,13 @@ public final class SyncCommand implements Callable<Integer> {
           default ->
               main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
         };
+    if (status.get("last_report") != null)
+      health +=
+          " — "
+              + status.getOrDefault("bytes_fetched", 0)
+              + " bytes fetched, "
+              + status.getOrDefault("bytes_sent", 0)
+              + " bytes sent";
     return status.get("pending_conflicts") instanceof Integer pending && pending > 0
         ? health + " — " + pending + " conflict(s) need your decision: sail conflicts"
         : health;

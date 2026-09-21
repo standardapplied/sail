@@ -51,7 +51,7 @@ class ConflictResolutionTest {
   }
 
   private void sync(SyncBox box) {
-    engine.reconcile(box.replica, main.replica);
+    SyncBox.round(main.db, box.db, "spec");
   }
 
   private SyncConflicts.Conflict raiseTitleConflict() {
@@ -100,7 +100,7 @@ class ConflictResolutionTest {
 
     assertEquals("Title from other", node.specs.findById("auth").orElseThrow().title());
 
-    var second = engine.reconcile(node.replica, main.replica);
+    var second = SyncBox.round(main.db, node.db, "spec");
     assertEquals(0, second.conflicts());
     assertEquals("Title from other", main.specs.findById("auth").orElseThrow().title());
     assertTrue(
@@ -145,7 +145,7 @@ class ConflictResolutionTest {
     node.conflicts.resolve(conflict.id(), rev);
 
     assertEquals("Edited by other", node.specs.findById("auth").orElseThrow().title());
-    var second = engine.reconcile(node.replica, main.replica);
+    var second = SyncBox.round(main.db, node.db, "spec");
     assertEquals(0, second.conflicts());
   }
 

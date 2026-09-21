@@ -5,12 +5,13 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -58,9 +59,21 @@ public final class FileImporter {
     try (Stream<Path> tree = Files.walk(filesDir)) {
       for (var file : tree.filter(Files::isRegularFile).toList()) {
         var path = filesDir.relativize(file).toString();
-        var content = Base64.getEncoder().encodeToString(Files.readAllBytes(file));
-        if (files.find(project, path).map(row -> !row.content().equals(content)).orElse(true)) {
-          files.put(project, path, content);
+        var limits = FileLimits.load();
+        var size = Files.size(file);
+        limits.check(size);
+        String hash;
+        try (var input = Files.newInputStream(file)) {
+          hash = BlobStore.hash(limits.bounded(input, size));
+        }
+        var mode = WorkspaceFiles.mode(file);
+        if (files
+            .find(project, path)
+            .map(row -> !row.contentHash().equals(hash) || row.mode() != mode)
+            .orElse(true)) {
+          try (var input = Files.newInputStream(file)) {
+            files.put(project, path, limits.bounded(input, size), mode);
+          }
           imported++;
         }
       }

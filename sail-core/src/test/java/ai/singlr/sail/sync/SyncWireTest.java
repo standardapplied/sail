@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
-import java.io.StringReader;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -199,7 +198,7 @@ class SyncWireTest {
 
   @Test
   void readFramedReadsOneLinePerCallWithoutTheTerminator() throws Exception {
-    var in = new StringReader("first\nsecond\n");
+    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\nsecond\n");
     assertEquals("first", SyncWire.readFramed(in));
     assertEquals("second", SyncWire.readFramed(in));
     assertNull(SyncWire.readFramed(in));
@@ -207,7 +206,7 @@ class SyncWireTest {
 
   @Test
   void readFramedNamesAChannelThatClosedMidMessageInsteadOfReturningTheFragment() {
-    var in = new StringReader("first\n{\"op\": \"page\", \"entr");
+    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\n{\"op\": \"page\", \"entr");
 
     var thrown =
         assertThrows(
@@ -223,9 +222,11 @@ class SyncWireTest {
 
   @Test
   void readFramedAcceptsAMessageExactlyAtTheBoundAndRejectsOneOver() throws Exception {
-    assertEquals("abcd", SyncWire.readFramed(new StringReader("abcd\n"), 4));
+    assertEquals(
+        "abcd", SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcd\n"), 4));
     assertThrows(
-        SyncTransportException.class, () -> SyncWire.readFramed(new StringReader("abcde"), 4));
+        SyncTransportException.class,
+        () -> SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcde"), 4));
   }
 
   @Test
@@ -237,5 +238,38 @@ class SyncWireTest {
     assertEquals("heads", SyncWire.context(new SyncWire.Heads()));
     assertEquals("fde", SyncWire.context(new SyncWire.FetchFdes()));
     assertEquals("session", SyncWire.context(new SyncWire.Bye()));
+  }
+
+  @Test
+  void binaryChunksPreserveEveryByteAndReturnToLineMode() throws Exception {
+    var payload = new byte[] {0, -1, -2, 10, 13, 65};
+    var output = new java.io.ByteArrayOutputStream();
+    SyncWire.writeChunk(output, ai.singlr.sail.store.BlobStore.hash(payload), payload);
+    output.write("{\"op\":\"done\"}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var input = new java.io.ByteArrayInputStream(output.toByteArray());
+    var chunk = (SyncWire.Chunk) SyncWire.decodeResponse(SyncWire.readLine(input));
+    org.junit.jupiter.api.Assertions.assertArrayEquals(
+        payload, SyncWire.readBytes(input, chunk.size()));
+    assertEquals(new SyncWire.Done(), SyncWire.decodeResponse(SyncWire.readLine(input)));
+    org.junit.jupiter.api.Assertions.assertNull(SyncWire.readLine(input));
+  }
+
+  @Test
+  void malformedLinesAndTruncatedChunksHaveDistinctFailures() {
+    var malformed =
+        assertThrows(
+            SyncTransportException.class,
+            () -> SyncWire.readLine(new java.io.ByteArrayInputStream(new byte[] {-1, 10})));
+    assertEquals("protocol", malformed.kind());
+    var cut =
+        assertThrows(
+            SyncTransportException.class,
+            () -> SyncWire.readBytes(new java.io.ByteArrayInputStream(new byte[] {1}), 2));
+    assertEquals("unreachable", cut.kind());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SyncWire.readBytes(
+                java.io.InputStream.nullInputStream(), ai.singlr.sail.store.FastCdc.MAX + 1));
   }
 }

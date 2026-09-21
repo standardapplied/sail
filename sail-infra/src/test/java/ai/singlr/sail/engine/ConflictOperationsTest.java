@@ -62,7 +62,7 @@ class ConflictOperationsTest {
   }
 
   private void round() throws IOException {
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), "node-box")) {
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
       for (var type : List.of("spec", "room")) {
         link.reconcile(type, replicas.get(type));
       }
@@ -266,7 +266,7 @@ class ConflictOperationsTest {
   @Test
   void aFileConflictResolvesThroughTheFileStoreByItsIdAlone() {
     var files = new FileStore(node.db);
-    files.put("acme", "x.txt", b64("mine"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "mine");
     var local = files.comparableSnapshot("acme/x.txt");
     var remote = new LinkedHashMap<>(local);
     remote.put("content", b64("theirs"));
@@ -281,7 +281,8 @@ class ConflictOperationsTest {
     operations.resolve(null, "acme/x.txt", theirs());
 
     assertEquals(List.of(), operations.list());
-    assertEquals(b64("theirs"), files.find("acme", "x.txt").orElseThrow().content());
+    assertEquals(
+        b64("theirs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "x.txt"));
   }
 
   @Test

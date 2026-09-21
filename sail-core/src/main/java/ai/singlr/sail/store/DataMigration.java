@@ -19,6 +19,11 @@ public interface DataMigration {
   /** Unique name used as the primary key in {@code data_migrations}. Keep this stable. */
   String name();
 
+  /** A migration that owns short, independently resumable transactions. */
+  default boolean resumable() {
+    return false;
+  }
+
   /**
    * Applies the migration. Receives the database, a snapshot of registered projects (loaded from
    * {@code ~/.sail/projects/}), and a prompter so interactive heuristics can ask the operator.

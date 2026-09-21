@@ -16,7 +16,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncState;
 import java.io.IOException;
-import java.io.Writer;
+import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -59,13 +59,12 @@ class SyncTransportTest {
   }
 
   private SyncBox.Link connect(SyncBox node) throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node.id + "-box");
+    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node);
   }
 
-  private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<Writer> serverOut)
+  private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    return SyncBox.connect(
-        main.server(new SyncPrincipal(node.id, true)), node.id + "-box", frame, serverOut);
+    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node, frame, serverOut);
   }
 
   private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
@@ -219,11 +218,11 @@ class SyncTransportTest {
       bigSpec(main, id);
     }
     var pages = new AtomicInteger();
-    UnaryOperator<Writer> killAfterTwoPages =
+    UnaryOperator<OutputStream> killAfterTwoPages =
         out ->
-            new Writer() {
+            new java.io.FilterOutputStream(out) {
               @Override
-              public void write(char[] buffer, int offset, int length) throws IOException {
+              public void write(byte[] buffer, int offset, int length) throws IOException {
                 if (new String(buffer, offset, length).contains("\"op\": \"page\"")
                     && pages.incrementAndGet() > 2) {
                   throw new IOException("channel cut");
@@ -295,12 +294,12 @@ class SyncTransportTest {
     assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
   }
 
-  private UnaryOperator<Writer> afterTheFirstPage(Runnable action) {
+  private UnaryOperator<OutputStream> afterTheFirstPage(Runnable action) {
     var done = new AtomicInteger();
     return out ->
-        new Writer() {
+        new java.io.FilterOutputStream(out) {
           @Override
-          public void write(char[] buffer, int offset, int length) throws IOException {
+          public void write(byte[] buffer, int offset, int length) throws IOException {
             if (new String(buffer, offset, length).contains("\"op\": \"page\"")
                 && done.getAndIncrement() == 0) {
               action.run();
@@ -408,12 +407,12 @@ class SyncTransportTest {
   void aReadOnlyFdeMayPullButItsPushIsRefused() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
     var readOnly = main.server(new SyncPrincipal("A", false));
-    try (var link = SyncBox.connect(readOnly, "A-box")) {
+    try (var link = SyncBox.connect(readOnly, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
     }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
     nodeA.specs.create(spec("mine", "Local only", "pending"));
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), "A-box")) {
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), nodeA)) {
       var failure =
           assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
       assertEquals("refused", failure.kind());
@@ -429,7 +428,7 @@ class SyncTransportTest {
         new StoreReplica(
             "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
     nodeA.specs.create(spec("auth", "Auth", "pending"));
-    nodeFiles.put("acme", "scripts/deploy.sh", "ZGVwbG95");
+    ai.singlr.sail.store.ContentFixtures.put(nodeFiles, "acme", "scripts/deploy.sh", "ZGVwbG95");
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
     var server =
         SyncRpcServer.over(
@@ -439,14 +438,16 @@ class SyncTransportTest {
             () -> roster,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR);
-    try (var link = SyncBox.connect(server, "A-box")) {
+    try (var link = SyncBox.connect(server, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pushed());
       assertEquals(1, link.reconcile("file", nodeFileReplica).report().pushed());
       assertEquals("ada", link.session().fetchFdes().getFirst().get("handle"));
       assertEquals(1, link.count("heads"), "tips are read once per session");
     }
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
-    assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        "ZGVwbG95",
+        ai.singlr.sail.store.ContentFixtures.text(mainFiles, "acme", "scripts/deploy.sh"));
     assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
   }
 }

@@ -43,7 +43,7 @@ class ProjectRenamerTest {
     new SchemaManager(db).migrate();
     new ProjectStore(db).upsert("old", DEFINITION, "uday");
     new SpecStore(db).create(spec("s1", "old"));
-    new FileStore(db).put("old", "start-dev.sh", "ZWNobyBoaQ==");
+    ai.singlr.sail.store.ContentFixtures.put(new FileStore(db), "old", "start-dev.sh", "echo hi");
     projectsDir = tempDir.resolve("projects");
     Files.createDirectories(projectsDir.resolve("old"));
     Files.writeString(projectsDir.resolve("old").resolve("sail.yaml"), DEFINITION);

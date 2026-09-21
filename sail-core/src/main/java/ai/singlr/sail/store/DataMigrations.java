@@ -15,7 +15,7 @@ import java.util.List;
 public final class DataMigrations {
 
   public static final List<DataMigration> ALL =
-      List.of(new LegacyDataMigration(), new RoomsBackfillMigration());
+      List.of(new ContentMigration(), new LegacyDataMigration(), new RoomsBackfillMigration());
 
   private DataMigrations() {}
 

@@ -34,7 +34,9 @@ public final class SyncHealth {
       String lastError,
       SyncEngine.Report lastReport,
       String state,
-      Instant staleSince) {}
+      Instant staleSince,
+      long fetchedBytes,
+      long sentBytes) {}
 
   public Optional<Health> find(String peer) {
     return db.queryOne(
@@ -52,7 +54,9 @@ public final class SyncHealth {
                 row.text(5),
                 report(row.text(6)),
                 row.text(7),
-                instant(row.text(8))),
+                instant(row.text(8)),
+                bytes(row.text(6), "bytes_fetched"),
+                bytes(row.text(6), "bytes_sent")),
         peer);
   }
 
@@ -71,6 +75,11 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
+    return succeeded(peer, at, report, 0, 0);
+  }
+
+  public boolean succeeded(
+      String peer, Instant at, SyncEngine.Report report, long fetchedBytes, long sentBytes) {
     return db.transaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
@@ -91,7 +100,11 @@ public final class SyncHealth {
                       "merged",
                       report.merged(),
                       "conflicts",
-                      report.conflicts())),
+                      report.conflicts(),
+                      "bytes_fetched",
+                      fetchedBytes,
+                      "bytes_sent",
+                      sentBytes)),
               peer);
           return recovered;
         });
@@ -126,5 +139,10 @@ public final class SyncHealth {
         ((Number) map.get("pushed")).intValue(),
         ((Number) map.get("merged")).intValue(),
         ((Number) map.get("conflicts")).intValue());
+  }
+
+  private static long bytes(String json, String field) {
+    var value = YamlUtil.parseMap(json).get(field);
+    return value instanceof Number number ? number.longValue() : 0;
   }
 }

@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.engine;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,14 +23,13 @@ import java.util.List;
 public final class SshSyncChannel implements SyncOperations.Channel {
 
   private final Process process;
-  private final BufferedReader reader;
-  private final Writer writer;
+  private final InputStream reader;
+  private final OutputStream writer;
 
   private SshSyncChannel(Process process) {
     this.process = process;
-    this.reader =
-        new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-    this.writer = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
+    this.reader = new BufferedInputStream(process.getInputStream());
+    this.writer = process.getOutputStream();
   }
 
   /** Opens a sync channel to {@code target} (e.g. {@code sail@maindevbox}). */
@@ -80,11 +77,11 @@ public final class SshSyncChannel implements SyncOperations.Channel {
     return List.copyOf(command);
   }
 
-  public BufferedReader reader() {
+  public InputStream reader() {
     return reader;
   }
 
-  public Writer writer() {
+  public OutputStream writer() {
     return writer;
   }
 

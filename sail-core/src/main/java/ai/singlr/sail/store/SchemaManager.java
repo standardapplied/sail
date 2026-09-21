@@ -488,7 +488,27 @@ public final class SchemaManager {
               PRIMARY KEY (peer, entity_type)
           )""",
           "DROP TABLE sync_state",
-          "ALTER TABLE sync_state_v2 RENAME TO sync_state");
+          "ALTER TABLE sync_state_v2 RENAME TO sync_state",
+          """
+          CREATE TABLE chunks (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              bytes BLOB NOT NULL
+          )""",
+          """
+          CREATE TABLE blobs (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              chunks TEXT NOT NULL,
+              created_at TEXT NOT NULL
+          )""",
+          "ALTER TABLE specs ADD COLUMN body_hash TEXT",
+          "ALTER TABLE specs ADD COLUMN plan_hash TEXT",
+          "ALTER TABLE project_files ADD COLUMN content_hash TEXT",
+          "ALTER TABLE project_files ADD COLUMN size INTEGER",
+          "ALTER TABLE project_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 420",
+          "ALTER TABLE project_files ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
+          "CREATE TABLE known_content (entity_id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (entity_id, hash))");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
@@ -845,6 +865,7 @@ public final class SchemaManager {
           () -> {
             BASELINE.forEach(db::execute);
             MIGRATIONS.forEach(db::execute);
+            db.execute("ALTER TABLE project_files DROP COLUMN content");
             stamp(CURRENT_VERSION);
           });
       return;

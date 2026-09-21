@@ -61,6 +61,7 @@ public final class Sqlite implements AutoCloseable {
   private final ReentrantLock lock = new ReentrantLock();
   private int transactionDepth;
   private volatile boolean closed;
+  private Path path;
 
   private Sqlite(Arena arena, MemorySegment db, SqliteLib lib) {
     this.arena = arena;
@@ -89,6 +90,7 @@ public final class Sqlite implements AutoCloseable {
       }
       var db = dbPtr.get(ValueLayout.ADDRESS, 0);
       var sqlite = new Sqlite(arena, db, lib);
+      sqlite.path = location.equals(":memory:") ? null : path.toAbsolutePath().normalize();
       sqlite.pragma("busy_timeout", "5000");
       sqlite.pragma("journal_mode", "WAL");
       sqlite.pragma("foreign_keys", "ON");
@@ -113,6 +115,14 @@ public final class Sqlite implements AutoCloseable {
     } finally {
       arena.close();
     }
+  }
+
+  Path path() {
+    return path;
+  }
+
+  boolean inTransaction() {
+    return lock.isHeldByCurrentThread() && transactionDepth > 0;
   }
 
   public void execute(String sql, Object... params) {
@@ -157,7 +167,7 @@ public final class Sqlite implements AutoCloseable {
       } finally {
         var _ = (int) lib.finalize_.invokeExact(stmt);
       }
-    } catch (SqliteException e) {
+    } catch (RuntimeException e) {
       throw e;
     } catch (Throwable t) {
       throw new SqliteException("Query failed: " + sql, t);
@@ -282,6 +292,11 @@ public final class Sqlite implements AutoCloseable {
                   lib.bindText.invokeExact(
                       stmt, idx, str, (int) (str.byteSize() - 1), SQLITE_TRANSIENT);
         }
+        case byte[] bytes -> {
+          var data = stmtArena.allocate(Math.max(1, bytes.length));
+          MemorySegment.copy(bytes, 0, data, ValueLayout.JAVA_BYTE, 0, bytes.length);
+          rc = (int) lib.bindBlob.invokeExact(stmt, idx, data, bytes.length, SQLITE_TRANSIENT);
+        }
         case Integer n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
         case Long n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
         case Double d -> rc = (int) lib.bindDouble.invokeExact(stmt, idx, (double) d);
@@ -316,6 +331,8 @@ public final class Sqlite implements AutoCloseable {
   public interface Row {
     String text(int col);
 
+    byte[] bytes(int col);
+
     long integer(int col);
 
     boolean isNull(int col);
@@ -333,6 +350,17 @@ public final class Sqlite implements AutoCloseable {
         return ptr.reinterpret(bytes + 1L).getString(0);
       } catch (Throwable t) {
         throw new SqliteException("Failed to read text column " + col, t);
+      }
+    }
+
+    @Override
+    public byte[] bytes(int col) {
+      try {
+        var length = (int) lib.columnBytes.invokeExact(stmt, col);
+        var ptr = (MemorySegment) lib.columnBlob.invokeExact(stmt, col);
+        return length == 0 ? new byte[0] : ptr.reinterpret(length).toArray(ValueLayout.JAVA_BYTE);
+      } catch (Throwable t) {
+        throw new SqliteException("Failed to read blob column " + col, t);
       }
     }
 
@@ -383,10 +411,12 @@ public final class Sqlite implements AutoCloseable {
       MethodHandle step,
       MethodHandle finalize_,
       MethodHandle bindText,
+      MethodHandle bindBlob,
       MethodHandle bindInt64,
       MethodHandle bindDouble,
       MethodHandle bindNull,
       MethodHandle columnText,
+      MethodHandle columnBlob,
       MethodHandle columnInt64,
       MethodHandle columnType,
       MethodHandle columnBytes,
@@ -439,6 +469,15 @@ public final class Sqlite implements AutoCloseable {
                   ValueLayout.JAVA_INT,
                   ValueLayout.ADDRESS)),
           linker.downcallHandle(
+              lookup.find("sqlite3_bind_blob").orElseThrow(),
+              FunctionDescriptor.of(
+                  ValueLayout.JAVA_INT,
+                  ValueLayout.ADDRESS,
+                  ValueLayout.JAVA_INT,
+                  ValueLayout.ADDRESS,
+                  ValueLayout.JAVA_INT,
+                  ValueLayout.ADDRESS)),
+          linker.downcallHandle(
               lookup.find("sqlite3_bind_int64").orElseThrow(),
               FunctionDescriptor.of(
                   ValueLayout.JAVA_INT,
@@ -458,6 +497,10 @@ public final class Sqlite implements AutoCloseable {
                   ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
           linker.downcallHandle(
               lookup.find("sqlite3_column_text").orElseThrow(),
+              FunctionDescriptor.of(
+                  ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
+          linker.downcallHandle(
+              lookup.find("sqlite3_column_blob").orElseThrow(),
               FunctionDescriptor.of(
                   ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
           linker.downcallHandle(

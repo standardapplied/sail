@@ -115,8 +115,13 @@ class TerminalFilePickerTest {
     }
 
     @Override
-    public byte[] read(Path file) {
-      return new byte[0];
+    public int mode(Path file) {
+      return 0644;
+    }
+
+    @Override
+    public java.io.InputStream open(Path file) {
+      return java.io.InputStream.nullInputStream();
     }
   }
 }

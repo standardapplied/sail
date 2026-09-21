@@ -63,7 +63,7 @@ class ReplyChainSyncTest {
   }
 
   private SyncBox.Link connect() throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal("node", true)), "node-box");
+    return SyncBox.connect(main.server(new SyncPrincipal("node", true)), node);
   }
 
   private static void chain(MessageStore messages) {

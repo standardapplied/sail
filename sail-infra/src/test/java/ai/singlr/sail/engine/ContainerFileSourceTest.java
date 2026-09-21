@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -94,12 +93,15 @@ class ContainerFileSourceTest {
   }
 
   @Test
-  void readDecodesBase64IncludingWrappedLines() throws Exception {
-    var payload = "hello, container world".getBytes();
-    var wrapped = Base64.getMimeEncoder(20, "\n".getBytes()).encodeToString(payload);
-    var shell = new ScriptedShellExecutor().onOk("base64 " + WORKSPACE + "/a.txt", wrapped + "\n");
-
-    assertArrayEquals(payload, source(shell).read(Path.of(WORKSPACE, "a.txt")));
+  void readsRawBytesFromCatAndCapturesMode() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("cat -- " + WORKSPACE + "/a.txt", "raw\u0000content")
+            .onOk("stat -c %a", "750");
+    try (var input = source(shell).open(Path.of(WORKSPACE, "a.txt"))) {
+      assertArrayEquals("raw\u0000content".getBytes(), input.readAllBytes());
+    }
+    assertEquals(0750, source(shell).mode(Path.of(WORKSPACE, "a.txt")));
   }
 
   @Test

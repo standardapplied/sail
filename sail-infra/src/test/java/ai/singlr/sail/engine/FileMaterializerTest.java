@@ -63,7 +63,7 @@ class FileMaterializerTest {
 
   @Test
   void writesANewFilePreservingFolderStructure() throws Exception {
-    files.put("acme", "scripts/deploy.sh", b64("hello"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "scripts/deploy.sh", "hello");
 
     var report = materializer.materialize("acme");
 
@@ -73,9 +73,9 @@ class FileMaterializerTest {
 
   @Test
   void refreshesAStaleCopyThisBoxWrote() throws Exception {
-    files.put("acme", "x.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
-    files.put("acme", "x.txt", b64("B"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "B");
 
     var report = materializer.materialize("acme");
 
@@ -85,10 +85,10 @@ class FileMaterializerTest {
 
   @Test
   void leavesALocallyEditedFileUntouchedAndReportsIt() throws Exception {
-    files.put("acme", "x.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     Files.writeString(filesDir.resolve("x.txt"), "MY LOCAL EDIT");
-    files.put("acme", "x.txt", b64("B"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "B");
 
     var report = materializer.materialize("acme");
 
@@ -99,7 +99,7 @@ class FileMaterializerTest {
 
   @Test
   void removesADeletedFileWhenTheDiskCopyIsOneWeWrote() throws Exception {
-    files.put("acme", "x.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     files.delete("acme", "x.txt");
 
@@ -111,7 +111,7 @@ class FileMaterializerTest {
 
   @Test
   void keepsALocallyEditedFileEvenWhenDeletedOnMain() throws Exception {
-    files.put("acme", "x.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     Files.writeString(filesDir.resolve("x.txt"), "MINE");
     files.delete("acme", "x.txt");
@@ -125,7 +125,7 @@ class FileMaterializerTest {
 
   @Test
   void refusesAPathThatEscapesTheProjectDirectory() throws Exception {
-    files.put("acme", "../../escape.txt", b64("evil"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "../../escape.txt", "evil");
 
     var report = materializer.materialize("acme");
 
@@ -135,7 +135,7 @@ class FileMaterializerTest {
 
   @Test
   void doesNothingWhenDiskAlreadyMatches() throws Exception {
-    files.put("acme", "x.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
 
     var report = materializer.materialize("acme");

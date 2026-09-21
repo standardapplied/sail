@@ -5,12 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 
@@ -56,8 +56,8 @@ public final class FileMaterializer {
 
     for (var id : files.idsForProject(project)) {
       var path = id.substring(project.length() + 1);
-      var target = files.comparableSnapshot(id);
-      var targetContent = target == null ? null : (String) target.get("content");
+      var target = files.find(project, path).orElse(null);
+      var targetContent = target == null ? null : target.contentHash();
 
       var destination = filesDir.resolve(path).normalize();
       if (!destination.startsWith(filesDir)) {
@@ -65,12 +65,14 @@ public final class FileMaterializer {
         continue;
       }
 
-      var onDisk = readBase64(destination);
+      var onDisk = diskHash(destination);
       switch (decide(targetContent, onDisk, onDisk != null && files.isKnownContent(id, onDisk))) {
-        case IN_SYNC -> {}
+        case IN_SYNC -> {
+          if (target != null) WorkspaceFiles.mode(destination, target.mode());
+        }
         case SKIP_DIRTY -> skipped.add(path);
         case WRITE -> {
-          writeFile(destination, targetContent);
+          writeFile(destination, target);
           written++;
         }
         case DELETE -> {
@@ -97,15 +99,29 @@ public final class FileMaterializer {
     return targetContent == null ? Action.DELETE : Action.WRITE;
   }
 
-  private static String readBase64(Path file) throws IOException {
-    if (!Files.isRegularFile(file)) {
-      return null;
+  private static String diskHash(Path file) throws IOException {
+    if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+    try (var input = Files.newInputStream(file)) {
+      return BlobStore.hash(input);
     }
-    return Base64.getEncoder().encodeToString(Files.readAllBytes(file));
   }
 
-  private static void writeFile(Path file, String base64) throws IOException {
+  private void writeFile(Path file, FileStore.FileRow row) throws IOException {
     Files.createDirectories(file.getParent());
-    Files.write(file, Base64.getDecoder().decode(base64));
+    var temporary = Files.createTempFile(file.getParent(), ".sail-", ".tmp");
+    try {
+      try (var input = files.open(row);
+          var output = Files.newOutputStream(temporary)) {
+        input.transferTo(output);
+      }
+      WorkspaceFiles.mode(temporary, row.mode());
+      Files.move(
+          temporary,
+          file,
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(temporary);
+    }
   }
 }

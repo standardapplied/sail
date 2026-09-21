@@ -12,13 +12,21 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ProjectFiles {
-  int MAX_BYTES = 5 * 1024 * 1024;
+  default ai.singlr.sail.config.FileLimits limits() {
+    return ai.singlr.sail.config.FileLimits.load();
+  }
 
   List<FileStore.FileRow> list();
 
-  Optional<byte[]> get(String path);
+  Optional<FileStore.FileRow> find(String path);
 
-  String put(String path, byte[] bytes);
+  java.io.InputStream open(FileStore.FileRow row);
+
+  default Optional<java.io.InputStream> get(String path) {
+    return find(path).map(this::open);
+  }
+
+  String put(String path, java.io.InputStream bytes, long size, int mode);
 
   boolean remove(String path) throws IOException;
 

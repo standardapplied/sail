@@ -6,8 +6,11 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.engine.SemVer;
-import java.io.Reader;
-import java.io.Writer;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -42,14 +45,28 @@ public final class PagedSyncSession implements SyncSession {
   /** Entries asked for per pull; the frame bound, not this, is what caps a page's size. */
   static final int PAGE_LIMIT = 2000;
 
-  private final Reader in;
-  private final Writer out;
+  private final InputStream in;
+  private final OutputStream out;
   private final String mainId;
   private final int frame;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
+  private BlobStore blobs;
+  private Map<String, Set<String>> contentFields = Map.of();
+  private long fetchedBytes;
+  private long sentBytes;
+  private boolean sawTombstone;
 
-  PagedSyncSession(Reader in, Writer out, String mainId, int frame) {
+  PagedSyncSession content(Sqlite db) {
+    blobs = new BlobStore(db);
+    var fields = new LinkedHashMap<String, Set<String>>();
+    for (var entity : SyncedEntities.all())
+      fields.put(entity.type(), entity.store(db).contentFields());
+    contentFields = Map.copyOf(fields);
+    return this;
+  }
+
+  PagedSyncSession(InputStream in, OutputStream out, String mainId, int frame) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
     this.mainId = Objects.requireNonNull(mainId, "mainId");
@@ -60,12 +77,14 @@ public final class PagedSyncSession implements SyncSession {
   PagedSyncSession frame(int frame) {
     var copy = new PagedSyncSession(in, out, mainId, frame);
     copy.tips = tips;
+    copy.blobs = blobs;
+    copy.contentFields = contentFields;
     return copy;
   }
 
   static PagedSyncSession open(
-      Reader in,
-      Writer out,
+      InputStream in,
+      OutputStream out,
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
       Consumer<String> notice) {
@@ -99,6 +118,16 @@ public final class PagedSyncSession implements SyncSession {
 
   @Override
   public TypeReport reconcile(String type, LocalReplica local) {
+    if (blobs == null) return reconcileType(type, local);
+    try (var scope = blobs.retain()) {
+      return reconcileType(type, local);
+    }
+  }
+
+  private TypeReport reconcileType(String type, LocalReplica local) {
+    var fetchedBefore = fetchedBytes;
+    var sentBefore = sentBytes;
+    sawTombstone = false;
     var tip = tips().get(type);
     if (tip == null) {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
@@ -118,6 +147,7 @@ public final class PagedSyncSession implements SyncSession {
               type + ": main paged nothing past seq " + since + " yet is not done",
               null);
         }
+        fetchContent(type, page.entries());
         var ids = ids(page);
         seen.addAll(ids);
         report =
@@ -132,7 +162,16 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
-    return new TypeReport(type, report, pages, entries, pages == 0 && dirty.isEmpty(), null);
+    if (blobs != null && sawTombstone && report.pulled() > 0) blobs.gc(Set.of());
+    return new TypeReport(
+        type,
+        report,
+        pages,
+        entries,
+        pages == 0 && dirty.isEmpty(),
+        null,
+        fetchedBytes - fetchedBefore,
+        sentBytes - sentBefore);
   }
 
   /**
@@ -147,12 +186,12 @@ public final class PagedSyncSession implements SyncSession {
     need(
         type,
         ids,
-        (consumed, entries) ->
-            reports.add(
-                reconcile(
-                    local,
-                    new LinkedHashSet<>(consumed),
-                    new PageView(type, entries, checkpoint))));
+        (consumed, entries) -> {
+          fetchContent(type, entries);
+          reports.add(
+              reconcile(
+                  local, new LinkedHashSet<>(consumed), new PageView(type, entries, checkpoint)));
+        });
     return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
   }
 
@@ -174,6 +213,67 @@ public final class PagedSyncSession implements SyncSession {
       var consumed = asked.subList(0, (int) Math.min(answer.next(), asked.size()));
       onAnswer.accept(consumed, answer.entries());
       offset += consumed.size();
+    }
+  }
+
+  private void fetchContent(String type, List<SyncWire.Entry> entries) {
+    sawTombstone |= entries.stream().anyMatch(SyncWire.Entry::deleted);
+    var fields = contentFields.getOrDefault(type, Set.of());
+    if (fields.isEmpty()) return;
+    var hashes =
+        BlobStore.referenced(entries.stream().map(SyncWire.Entry::snapshot).toList(), fields);
+    var missing = blobs.missing(hashes);
+    if (missing.isEmpty()) return;
+    Rpc.send(out, SyncWire.encode(new SyncWire.Fetch(List.copyOf(missing))));
+    var manifests = new LinkedHashMap<String, BlobStore.Manifest>();
+    while (true) {
+      var response = Rpc.receive(in, type + " blobs " + missing);
+      if (response instanceof SyncWire.Done) break;
+      if (!(response instanceof SyncWire.Manifest m)) throw unexpected(type, "manifest", response);
+      var manifest = m.manifest();
+      if (!missing.contains(manifest.hash())
+          || manifests.putIfAbsent(manifest.hash(), manifest) != null) {
+        throw new SyncTransportException("Unexpected manifest " + manifest.hash());
+      }
+    }
+    if (!manifests.keySet().equals(missing)) {
+      var absent = new LinkedHashSet<>(missing);
+      absent.removeAll(manifests.keySet());
+      throw new SyncTransportException("Missing blob manifests " + absent);
+    }
+    var chunks = new LinkedHashSet<String>();
+    manifests.values().forEach(m -> chunks.addAll(m.chunkHashes()));
+    var needed = blobs.missingChunks(chunks);
+    if (!needed.isEmpty()) {
+      Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(List.copyOf(needed))));
+      while (true) {
+        var response = Rpc.receive(in, type + " blobs " + missing);
+        if (response instanceof SyncWire.Done) break;
+        if (!(response instanceof SyncWire.Chunk chunk)) throw unexpected(type, "chunk", response);
+        if (!needed.remove(chunk.hash()))
+          throw new SyncTransportException("Unexpected chunk " + chunk.hash());
+        try {
+          blobs.putChunk(chunk.hash(), SyncWire.readBytes(in, chunk.size()));
+          fetchedBytes += chunk.size();
+        } catch (IOException e) {
+          throw new SyncTransportException(
+              "unreachable",
+              "blob " + missing + ", chunk " + chunk.hash() + ": " + e.getMessage(),
+              e);
+        } catch (IllegalArgumentException e) {
+          throw new SyncTransportException("protocol", e.getMessage(), e);
+        }
+      }
+      if (!needed.isEmpty())
+        throw new SyncTransportException("blob " + missing + " missing chunks " + needed);
+    }
+    for (var manifest : manifests.values()) {
+      try {
+        blobs.assemble(manifest);
+      } catch (RuntimeException e) {
+        throw new SyncTransportException(
+            "protocol", "blob " + manifest.hash() + ": " + e.getMessage(), e);
+      }
     }
   }
 
@@ -396,6 +496,7 @@ public final class PagedSyncSession implements SyncSession {
           type,
           ids,
           (consumed, fetched) -> {
+            fetchContent(type, fetched);
             consumed.forEach(entries::remove);
             fetched.forEach(entry -> entries.put(entry.id(), entry));
           });

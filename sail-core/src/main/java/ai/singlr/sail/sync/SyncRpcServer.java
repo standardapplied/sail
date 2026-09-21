@@ -5,13 +5,15 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -51,6 +53,8 @@ public final class SyncRpcServer {
   private final ChangeHeads heads;
   private final String version;
   private boolean welcomed;
+  private BlobStore blobs;
+  private FileLimits limits = FileLimits.defaults();
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
@@ -101,19 +105,36 @@ public final class SyncRpcServer {
       String version) {
     var changes = new ChangeLog(db);
     return new SyncRpcServer(
-        new LinkedHashMap<>(SyncedEntities.replicas(db, boxId, boxId)),
-        principal,
-        fdeRoster,
-        transitionSink,
-        changes::headsAfter,
-        version);
+            new LinkedHashMap<>(SyncedEntities.replicas(db, boxId, boxId)),
+            principal,
+            fdeRoster,
+            transitionSink,
+            changes::headsAfter,
+            version)
+        .content(db, FileLimits.load());
   }
 
-  public void serve(Reader in, Writer out) throws IOException {
+  public SyncRpcServer content(Sqlite db, FileLimits limits) {
+    this.blobs = new BlobStore(db);
+    this.limits = limits;
+    return this;
+  }
+
+  public void serve(InputStream in, OutputStream out) throws IOException {
     serve(in, out, SyncWire.MAX_FRAME);
   }
 
-  void serve(Reader in, Writer out, int frame) throws IOException {
+  void serve(InputStream in, OutputStream out, int frame) throws IOException {
+    if (blobs == null) {
+      serveSession(in, out, frame);
+      return;
+    }
+    try (var scope = blobs.retain()) {
+      serveSession(in, out, frame);
+    }
+  }
+
+  private void serveSession(InputStream in, OutputStream out, int frame) throws IOException {
     welcomed = false;
     var context = "session";
     while (true) {
@@ -129,10 +150,34 @@ public final class SyncRpcServer {
             welcomed
                 ? new SyncWire.Failed(context + ": " + rootMessage(e), "protocol")
                 : new SyncWire.Refuse(upgradeRemedy()));
-        continue;
+        return;
       }
       if (request instanceof SyncWire.Bye) return;
-      reply(out, respondTo(request, frame));
+      if (request instanceof SyncWire.Content content && welcomed && blobs != null) {
+        try {
+          serveContent(content, in, out);
+        } catch (RuntimeException e) {
+          reply(out, new SyncWire.Failed(context + ": " + rootMessage(e), "protocol"));
+          return;
+        }
+      } else reply(out, respondTo(request, frame));
+    }
+  }
+
+  private void serveContent(SyncWire.Content content, InputStream in, OutputStream out)
+      throws IOException {
+    switch (content) {
+      case SyncWire.Fetch fetch -> {
+        for (var hash : fetch.hashes()) reply(out, new SyncWire.Manifest(blobs.manifest(hash)));
+        reply(out, new SyncWire.Done());
+      }
+      case SyncWire.FetchChunks fetch -> {
+        for (var hash : fetch.hashes()) SyncWire.writeChunk(out, hash, blobs.chunk(hash));
+        reply(out, new SyncWire.Done());
+      }
+      default ->
+          throw new IllegalArgumentException(
+              "Unexpected content operation " + SyncWire.context(content));
     }
   }
 
@@ -147,6 +192,8 @@ public final class SyncRpcServer {
     try {
       var response =
           switch (request) {
+            case SyncWire.Content content ->
+                new SyncWire.Failed("Content exchange requires a welcomed blob store", "protocol");
             case SyncWire.Hello hello -> onHello(hello);
             case SyncWire.Heads ignored -> welcomed ? tips() : helloRequired();
             case SyncWire.Pull pull -> welcomed ? page(pull, frame) : helloRequired();
@@ -173,8 +220,8 @@ public final class SyncRpcServer {
     return Objects.toString(root.getMessage(), root.getClass().getSimpleName());
   }
 
-  private static void reply(Writer out, SyncWire.Response response) throws IOException {
-    out.write(SyncWire.encode(response));
+  private static void reply(OutputStream out, SyncWire.Response response) throws IOException {
+    out.write(SyncWire.encode(response).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     out.write('\n');
     out.flush();
   }
@@ -351,10 +398,15 @@ public final class SyncRpcServer {
       }
     }
     var before = main.current(offer.id());
-    var outcome =
-        SyncPeer.with(
-            principal.handle(),
-            () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
+    CommitOutcome outcome;
+    try {
+      outcome =
+          SyncPeer.with(
+              principal.handle(),
+              () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
+    } catch (BlobStore.NotHeld e) {
+      return new SyncWire.Refused(offer.id(), e.getMessage());
+    }
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
         emitTransitions(type, offer.id(), before, main);

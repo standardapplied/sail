@@ -17,7 +17,35 @@ public record SyncStatus(
     int consecutiveFailures,
     String lastErrorKind,
     String lastError,
-    Instant staleSince) {
+    Instant staleSince,
+    long fetchedBytes,
+    long sentBytes) {
+  public SyncStatus(
+      String role,
+      String main,
+      SyncEngine.Report lastReport,
+      String state,
+      Instant lastAttemptAt,
+      Instant lastSuccessAt,
+      int consecutiveFailures,
+      String lastErrorKind,
+      String lastError,
+      Instant staleSince) {
+    this(
+        role,
+        main,
+        lastReport,
+        state,
+        lastAttemptAt,
+        lastSuccessAt,
+        consecutiveFailures,
+        lastErrorKind,
+        lastError,
+        staleSince,
+        0,
+        0);
+  }
+
   /** A node that has never completed a round, or a box with no main: nothing to report yet. */
   public static SyncStatus unattempted(String role, String main) {
     return new SyncStatus(role, main, null, null, null, null, 0, null, null, null);

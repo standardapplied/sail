@@ -12,6 +12,14 @@ import java.util.List;
 /** One round's summed counts, an optional reason nothing ran, and the per-type detail. */
 public record SyncReport(
     SyncEngine.Report report, String message, List<SyncSession.TypeReport> types) {
+  public long fetchedBytes() {
+    return types.stream().mapToLong(SyncSession.TypeReport::fetchedBytes).sum();
+  }
+
+  public long sentBytes() {
+    return types.stream().mapToLong(SyncSession.TypeReport::sentBytes).sum();
+  }
+
   public SyncReport(SyncEngine.Report report, String message) {
     this(report, message, List.of());
   }

@@ -75,6 +75,64 @@ public final class ShellExecutor implements ShellExec {
   }
 
   @Override
+  public InputStream stream(List<String> command) throws IOException {
+    if (dryRun) {
+      dryRunResult(command);
+      return InputStream.nullInputStream();
+    }
+    var process =
+        new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();
+    process.getOutputStream().close();
+    var watchdog =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    if (!process.waitFor(defaultTimeout.toMillis(), TimeUnit.MILLISECONDS))
+                      process.destroyForcibly();
+                  } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                  }
+                });
+    return new java.io.FilterInputStream(process.getInputStream()) {
+      private void finished(int read) throws IOException {
+        if (read != -1) return;
+        try {
+          if (process.waitFor() != 0)
+            throw new IOException("Content command failed: " + String.join(" ", command));
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new IOException("Interrupted reading content", e);
+        }
+      }
+
+      @Override
+      public int read() throws IOException {
+        var value = in.read();
+        finished(value);
+        return value;
+      }
+
+      @Override
+      public int read(byte[] bytes, int offset, int length) throws IOException {
+        var count = in.read(bytes, offset, length);
+        finished(count);
+        return count;
+      }
+
+      @Override
+      public void close() throws IOException {
+        try {
+          super.close();
+        } finally {
+          process.destroy();
+          watchdog.interrupt();
+        }
+      }
+    };
+  }
+
+  @Override
   public boolean isDryRun() {
     return dryRun;
   }
