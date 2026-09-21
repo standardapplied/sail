@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.0
+
+- **The sync protocol-3 fallback is gone.** 0.44.0 let a node upgraded ahead of its main keep
+  syncing over the whole-table protocol-3 wire for one release; that release is over. A node that
+  meets a main still on 0.43 or older now fails the round saying main is on a sync protocol it
+  cannot speak and to upgrade main, and a `refuse` no longer carries the `error`/`error_kind`
+  keys a protocol-3 node read. The fleet floor stays `0.44.0`: this release is wire-compatible
+  with every 0.44 box, so nothing already syncing is refused.
+
 ## 0.44.0
 
 - **Sync ships the change log since a checkpoint, in bounded pages.** Sync protocol 4 replaces

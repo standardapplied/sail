@@ -15,12 +15,9 @@ import java.util.function.Consumer;
  * One node-to-main sync session over a channel: the seam the round drives, reconciling one entity
  * type at a time, pulling the FDE roster, and ending the session on {@link #close}. All exchanges
  * share the one reader/writer and run sequentially, so the typed exchanges never interleave on the
- * wire. {@link #open} sends the hello and returns the implementation main can speak: the paged
- * protocol-4 session, or — for one release — the whole-table legacy session a protocol-3 main still
- * answers.
+ * wire. {@link #open} sends the hello and returns the paged protocol-4 session main welcomed.
  */
-public sealed interface SyncSession extends AutoCloseable
-    permits PagedSyncSession, LegacySyncSession {
+public sealed interface SyncSession extends AutoCloseable permits PagedSyncSession {
 
   /**
    * How one entity type fared in a round: the engine's counts, how many pages and entries main
@@ -53,23 +50,25 @@ public sealed interface SyncSession extends AutoCloseable
   void close();
 
   /**
-   * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session; the
-   * exact answer a protocol-3 main gives an unknown op yields the legacy session and one line of
-   * {@code notice}; a refusal or anything else fails naming it.
+   * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session, with
+   * one line of {@code notice} when this node runs ahead of main's version; a refusal or anything
+   * else fails naming it, and an answer this protocol cannot decode — what a main on an older
+   * protocol gives a hello — fails naming the remedy.
    */
   static SyncSession open(Reader in, Writer out, SyncWire.Hello hello, Consumer<String> notice) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
-    if (LegacySyncSession.answeredHello(line)) {
-      notice.accept(
-          "main is on the v3 sync protocol; upgrade main to " + SyncWire.UPGRADE_FLOOR + ".");
-      return new LegacySyncSession(in, out);
-    }
     SyncWire.Response response;
     try {
       response = SyncWire.decodeResponse(line);
     } catch (RuntimeException e) {
-      throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
+      throw new SyncTransportException(
+          "protocol",
+          context
+              + ": main is on a sync protocol this node cannot speak: upgrade main ("
+              + e.getMessage()
+              + ")",
+          e);
     }
     return switch (response) {
       case SyncWire.Welcome welcome -> PagedSyncSession.open(in, out, hello, welcome, notice);

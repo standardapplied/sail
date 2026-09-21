@@ -197,8 +197,8 @@ round. Each page is its own engine round inside one local transaction, and the c
 pages the node asks `need` for main's current rows of whatever it changed itself, so the
 engine sees main's real state for a local edit, and `push`es its offers in batches. Every
 message is one JSON line under a single 16 MiB frame bound (`SyncWire.MAX_FRAME`), the size
-of a shared file with room to spare. For one release `LegacySyncSession` still speaks the
-protocol-3 whole-table exchange to a main that has not upgraded, and says so.
+of a shared file with room to spare. A main that answers `hello` with anything this protocol
+cannot decode is on an older sync protocol, and the node fails naming the remedy: upgrade main.
 
 Passkeys stay box-local by design: identity crosses boxes via the roster pull, but a
 WebAuthn credential is an RP-scoped secret bound to one box's origin and never leaves it.
@@ -605,17 +605,14 @@ support GUI and direct-API clients:
    `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
-3. **The protocol-3 fallback is one release deep.** `LegacySyncSession` lets a 0.44 node sync
-   with a 0.43 main; it is deleted in the release after, so a fleet must move main first and
-   nodes within one release.
-4. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
+3. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
    and projects, but shared files have no author column at all, which is a schema change for
    low value, and the change-log's internal author column stays null for projects and files.
-5. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
+4. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
    them out everywhere, since the gateway refuses a disabled role, but the row lingers on
    nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
-6. **One platform per OS.** Mac arm64 and Linux amd64 only.
+5. **One platform per OS.** Mac arm64 and Linux amd64 only.
 
 ## The operations seam
 

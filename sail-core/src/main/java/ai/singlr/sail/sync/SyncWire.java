@@ -81,8 +81,6 @@ public final class SyncWire {
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
   private static final String KIND = "kind";
-  private static final String LEGACY_ERROR = "error";
-  private static final String LEGACY_ERROR_KIND = "error_kind";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -168,11 +166,7 @@ public final class SyncWire {
   /** Main accepted the hello: its protocol, build, and the box id the node checkpoints against. */
   public record Welcome(int protocol, String version, String mainId) implements Response {}
 
-  /**
-   * Main refused the session before serving anything, naming the remedy. Encoded with the legacy
-   * {@code error}/{@code error_kind} keys beside {@code reason}, because the peer most likely to be
-   * refused is a protocol-3 node that opened with a fetch and only reads those keys.
-   */
+  /** Main refused the session before serving anything, naming the remedy. */
   public record Refuse(String reason) implements Response {}
 
   /** Main's high-water per entity type. */
@@ -329,8 +323,6 @@ public final class SyncWire {
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
         map.put(REASON, refuse.reason());
-        map.put(LEGACY_ERROR, refuse.reason());
-        map.put(LEGACY_ERROR_KIND, "refused");
       }
       case Tips tips -> {
         map.put(OP, OP_TIPS);

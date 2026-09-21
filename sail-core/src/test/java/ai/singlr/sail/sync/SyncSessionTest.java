@@ -42,18 +42,18 @@ class SyncSessionTest {
   }
 
   @Test
-  void openReturnsTheLegacySessionOnTheExactProtocol3AnswerAndSaysSo() {
-    var v3 =
-        LegacySyncSession.encode(
-                new LegacySyncSession.Failed("session: Unknown sync op: hello", "protocol"))
-            + "\n";
+  void theProtocol3AnswerToHelloFailsNamingTheRemedy() {
+    var v3 = "{\"error\": \"session: Unknown sync op: hello\", \"error_kind\": \"protocol\"}\n";
     var notices = new ArrayList<String>();
-    try (var session = open(v3, new StringWriter(), notices)) {
-      assertInstanceOf(LegacySyncSession.class, session);
-    }
-    assertEquals(1, notices.size());
-    assertTrue(notices.getFirst().contains("v3"), notices.getFirst());
-    assertTrue(notices.getFirst().contains(SyncWire.UPGRADE_FLOOR), notices.getFirst());
+    var failure =
+        assertThrows(SyncTransportException.class, () -> open(v3, new StringWriter(), notices));
+    assertEquals("protocol", failure.kind());
+    assertTrue(
+        failure
+            .getMessage()
+            .contains("main is on a sync protocol this node cannot speak: upgrade main"),
+        failure.getMessage());
+    assertTrue(notices.isEmpty());
   }
 
   @Test

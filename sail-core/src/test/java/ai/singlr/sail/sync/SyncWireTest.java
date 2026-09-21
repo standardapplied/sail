@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -116,14 +115,11 @@ class SyncWireTest {
   }
 
   @Test
-  void aRefusalAlsoWearsTheLegacyErrorKeysSoAProtocol3NodeCanReadIt() {
+  void aRefusalCarriesItsReasonAndNothingElse() {
     var line = SyncWire.encode(new SyncWire.Refuse("upgrade to 0.44.0: sail upgrade"));
-    var map = YamlUtil.parseMap(line);
-    assertEquals("upgrade to 0.44.0: sail upgrade", map.get("error"));
-    assertEquals("refused", map.get("error_kind"));
-    var legacy =
-        assertInstanceOf(LegacySyncSession.Failed.class, LegacySyncSession.decodeResponse(line));
-    assertEquals("upgrade to 0.44.0: sail upgrade", legacy.message());
+    assertEquals(
+        Map.of("op", "refuse", "reason", "upgrade to 0.44.0: sail upgrade"),
+        YamlUtil.parseMap(line));
   }
 
   @Test
