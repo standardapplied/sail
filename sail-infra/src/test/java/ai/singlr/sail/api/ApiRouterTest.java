@@ -14,12 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.IOException;
 import java.net.URI;
@@ -72,6 +76,73 @@ class ApiRouterTest {
       assertEquals(405, post(server, "/v1/conflicts", "token", "{}").statusCode());
       assertEquals(405, put(server, "/v1/conflicts/acme/config", "token", "{}").statusCode());
     }
+  }
+
+  @Test
+  void aConflictIsAddressedByTypeAndAStaleOrAmbiguousResolveIsRefused() throws Exception {
+    try (var box = new SyncBox("node")) {
+      var rooms = new RoomStore(box.db);
+      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      rooms.ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+      park(box, "spec", box.specs.comparableSnapshot("auth"), "title", "remote");
+      park(box, "room", rooms.comparableSnapshot("auth"), "wake", "off");
+      var operations =
+          new TestOperations() {
+            @Override
+            public SyncConflicts.Conflict conflict(String type, String id) {
+              return new ConflictOperations(box.db).find(type, id);
+            }
+
+            @Override
+            public SyncConflicts.Conflict resolveConflict(
+                String type, String id, Resolution resolution) {
+              return new ConflictOperations(box.db).resolve(type, id, resolution);
+            }
+          };
+      try (var server = serverWith(operations, true)) {
+        var ambiguous = get(server, "/v1/conflicts/auth", "token");
+        assertEquals(400, ambiguous.statusCode(), ambiguous.body());
+        assertTrue(ambiguous.body().contains("open conflicts as spec and room"), ambiguous.body());
+        var blind = post(server, "/v1/conflicts/auth/resolve", "token", "{\"strategy\":\"mine\"}");
+        assertEquals(400, blind.statusCode(), blind.body());
+        assertTrue(blind.body().contains("open conflicts as spec and room"), blind.body());
+        var room = get(server, "/v1/conflicts/auth?type=room", "token");
+        assertEquals(200, room.statusCode(), room.body());
+        assertEquals("room", YamlUtil.parseMap(room.body()).get("entity_type"));
+        assertEquals(404, get(server, "/v1/conflicts/auth?type=file", "token").statusCode());
+
+        box.specs.setContent("auth", "written after the conflict was recorded", "");
+        var stale =
+            post(
+                server, "/v1/conflicts/auth/resolve?type=spec", "token", "{\"strategy\":\"mine\"}");
+        assertEquals(409, stale.statusCode(), stale.body());
+        assertTrue(
+            stale.body().contains("changed on this box after this conflict was recorded (body)"),
+            stale.body());
+        assertTrue(stale.body().contains("Run 'sail sync' to refresh it"), stale.body());
+        assertEquals(2, box.conflicts.pending().size());
+
+        var resolved =
+            post(
+                server,
+                "/v1/conflicts/auth/resolve?type=room",
+                "token",
+                "{\"strategy\":\"theirs\"}");
+        assertEquals(200, resolved.statusCode(), resolved.body());
+        assertEquals("off", rooms.findById("auth").orElseThrow().wake());
+        var remaining = get(server, "/v1/conflicts/auth", "token");
+        assertEquals(200, remaining.statusCode(), remaining.body());
+        assertEquals("spec", YamlUtil.parseMap(remaining.body()).get("entity_type"));
+      }
+    }
+  }
+
+  private static void park(
+      SyncBox box, String type, Map<String, Object> local, String field, String theirs) {
+    var remote = new LinkedHashMap<>(local);
+    remote.put(field, theirs);
+    box.conflicts.record(
+        type, "auth", null, YamlUtil.dumpJson(local), YamlUtil.dumpJson(remote), List.of(field));
   }
 
   @Test
@@ -163,12 +234,12 @@ class ApiRouterTest {
     }
 
     @Override
-    public SyncConflicts.Conflict conflict(String id) {
+    public SyncConflicts.Conflict conflict(String type, String id) {
       return id.equals(conflict.entityId()) ? conflict : null;
     }
 
     @Override
-    public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+    public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
       this.resolution = resolution;
       return conflict;
     }

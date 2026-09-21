@@ -17,9 +17,13 @@ public interface Operations extends LocalLaneOperations {
 
   SyncReport sync(SyncRequest request) throws Exception;
 
-  SyncConflicts.Conflict conflict(String id);
+  /**
+   * The open conflict on {@code id}, or {@code null}. A blank {@code type} is accepted only while
+   * the id names a single conflict; an id parked under several types is refused naming them.
+   */
+  SyncConflicts.Conflict conflict(String type, String id);
 
-  SyncConflicts.Conflict resolveConflict(String id, Resolution resolution);
+  SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution);
 
   ProjectFiles projectFiles(String project);
 

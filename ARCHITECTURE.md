@@ -237,6 +237,16 @@ theirs only. Resolving rebases the row onto main's version and writes the choice
 follow-up sync converges and the conflict cannot re-raise. Every version stays in the change
 log, so no choice loses work.
 
+A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
+a resolve is refused (`409` over the API) when the live row no longer matches the conflict's
+recorded local side, ignoring latest-wins fields such as a run's heartbeat; `sail sync`
+re-records every parked conflict, after which the same resolve applies. Main's side needs no
+such guard: the recorded remote only becomes the merge base, and the next round runs the
+three-way against main's current row, so a disjoint change on main merges and the same field
+parks again. Ids are unique only within a type and a spec's room carries the spec's id, so a
+conflict is addressed by type and id: `--type` on the CLI, `?type=` over the API. An id parked
+under several types is refused naming them (`400`) rather than guessed.
+
 ### The transport: pure SSH keys, no network enroll
 
 A node reaches main over a single SSH subprocess, `ssh sail@main sail _sync`, using that

@@ -30,18 +30,19 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public SyncConflicts.Conflict conflict(String id) {
+  public SyncConflicts.Conflict conflict(String type, String id) {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+  public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor) {
-    return resolveConflict(id, resolution);
+  public SyncConflicts.Conflict resolveConflict(
+      String type, String id, Resolution resolution, Actor actor) {
+    return resolveConflict(type, id, resolution);
   }
 
   @Override

@@ -433,7 +433,7 @@ class SailOperationsSeamTest {
             YamlUtil.dumpJson(remote),
             List.of(field));
         operations.resolveConflict(
-            entry.getValue(), new Resolution(Resolution.Strategy.THEIRS, null));
+            entry.getKey(), entry.getValue(), new Resolution(Resolution.Strategy.THEIRS, null));
         assertEquals(value, store.comparableSnapshot(entry.getValue()).get(field));
       }
       assertTrue(operations.conflicts().isEmpty());
@@ -501,8 +501,8 @@ class SailOperationsSeamTest {
           new TestOperations() {
             @Override
             public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(
-                String id, Resolution resolution, Actor actor) {
-              return operations.resolveConflict(id, resolution, actor);
+                String type, String id, Resolution resolution, Actor actor) {
+              return operations.resolveConflict(type, id, resolution, actor);
             }
           };
       var response =
@@ -697,12 +697,12 @@ class SailOperationsSeamTest {
       var response = send(server, method, path, admin, "{\"strategy\":\"theirs\"}");
       assertEquals(200, response.statusCode(), response.body());
       assertEquals("proj/dir/ /config", YamlUtil.parseMap(response.body()).get("entity_id"));
-      assertNotNull(operations.conflict("proj/dir/config"));
+      assertNotNull(operations.conflict("file", "proj/dir/config"));
       assertArrayEquals(
           "local".getBytes(StandardCharsets.UTF_8),
           operations.projectFiles("proj").get("dir/config").orElseThrow());
       if (method.equals("POST")) {
-        assertNull(operations.conflict("proj/dir/ /config"));
+        assertNull(operations.conflict(null, "proj/dir/ /config"));
         assertArrayEquals(
             "remote".getBytes(StandardCharsets.UTF_8),
             operations.projectFiles("proj").get("dir/ /config").orElseThrow());
@@ -793,17 +793,21 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(remote),
           List.of("title"));
       assertEquals(1, operations.conflicts().size());
-      assertEquals("auth", operations.conflict("auth").entityId());
-      assertNull(operations.conflict("missing"));
+      assertEquals("auth", operations.conflict(null, "auth").entityId());
+      assertNull(operations.conflict(null, "missing"));
       var resolved =
-          operations.resolveConflict("auth", new Resolution(Resolution.Strategy.THEIRS, null));
+          operations.resolveConflict(
+              null, "auth", new Resolution(Resolution.Strategy.THEIRS, null));
       assertEquals("resolved", resolved.status());
       assertNotNull(resolved.resolvedRev());
       assertEquals("remote", box.specs.findById("auth").orElseThrow().title());
       assertTrue(operations.conflicts().isEmpty());
       assertThrows(
           IllegalArgumentException.class,
-          () -> operations.resolveConflict("auth", new Resolution(Resolution.Strategy.MINE, null)));
+          () ->
+              operations.resolveConflict(
+                  "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+      box.specs.update(SyncBox.spec("auth", "local", "pending"));
       box.conflicts.record(
           "spec",
           "auth",
@@ -811,7 +815,7 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
-      operations.resolveConflict("auth", new Resolution(Resolution.Strategy.MINE, null));
+      operations.resolveConflict("spec", "auth", new Resolution(Resolution.Strategy.MINE, null));
       assertEquals("local", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record(
           "spec",
@@ -823,16 +827,19 @@ class SailOperationsSeamTest {
       var merged = new LinkedHashMap<>(local);
       merged.put("title", "merged");
       operations.resolveConflict(
-          "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
+          "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record("file", "auth", null, null, null, List.of("content"));
       assertThrows(
           IllegalArgumentException.class,
           () ->
               operations.resolveConflict(
-                  "auth", new Resolution(Resolution.Strategy.MERGE, "title: edited")));
+                  "file", "auth", new Resolution(Resolution.Strategy.MERGE, "title: edited")));
       box.conflicts.record("spec", "auth", null, null, null, List.of("title"));
-      assertNull(operations.conflict("auth"), "an ambiguous cross-type identity is never guessed");
+      var ambiguous = assertThrows(ApiException.class, () -> operations.conflict(null, "auth"));
+      assertEquals(
+          "'auth' has open conflicts as file and spec: pass --type", ambiguous.getMessage());
+      assertEquals("spec", operations.conflict("spec", "auth").entityType());
     }
   }
 

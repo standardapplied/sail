@@ -113,6 +113,19 @@ public final class ConflictDetector {
     return new Merged(merge(safeBase, local, remote, localChanged, remoteChanged, latestWins));
   }
 
+  /**
+   * The work fields on which {@code after} no longer matches {@code before}, leaving out {@code
+   * ignored}; a snapshot present on only one side drifted on {@link #DELETED_FIELD}. Empty when
+   * nothing a human decides on has moved.
+   */
+  public static List<String> drift(
+      Map<String, Object> before, Map<String, Object> after, Set<String> ignored) {
+    if (before == null || after == null) {
+      return before == after ? List.of() : List.of(DELETED_FIELD);
+    }
+    return changedFields(before, after).stream().filter(field -> !ignored.contains(field)).toList();
+  }
+
   private static Map<String, Object> merge(
       Map<String, Object> base,
       Map<String, Object> local,

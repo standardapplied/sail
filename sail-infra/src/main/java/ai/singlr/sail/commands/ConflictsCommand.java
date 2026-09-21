@@ -10,11 +10,8 @@ import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.store.ConflictResolver;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -101,22 +98,6 @@ public final class ConflictsCommand implements Callable<Integer> {
     return out.toString();
   }
 
-  /**
-   * The single open conflict for {@code entityId}, regardless of entity type. Spec and file ids
-   * share an {@code a/b} shape, so a rare cross-type id clash is reported rather than guessed.
-   */
-  static SyncConflicts.Conflict findUnique(SyncConflicts conflicts, String entityId) {
-    var matches = conflicts.pending().stream().filter(c -> c.entityId().equals(entityId)).toList();
-    if (matches.size() != 1) {
-      return null;
-    }
-    return matches.get(0);
-  }
-
-  static ConflictResolver resolverFor(Sqlite db, String entityType) {
-    return SyncedEntities.require(entityType).resolver(db);
-  }
-
   @Command(
       name = "show",
       description = "Show the field-level diff of a conflict.",
@@ -126,10 +107,15 @@ public final class ConflictsCommand implements Callable<Integer> {
     @Parameters(index = "0", description = "Entity id of the conflict.")
     private String entity;
 
+    @Option(
+        names = "--type",
+        description = "Entity type (spec, room, file, ...), when the id is parked under several.")
+    private String type;
+
     @Override
     public Integer call() {
       try (var operations = OperationsFactory.open()) {
-        var conflict = operations.conflict(entity);
+        var conflict = operations.conflict(type, entity);
         if (conflict == null) {
           System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
           return 1;
@@ -198,6 +184,11 @@ public final class ConflictsCommand implements Callable<Integer> {
     @Parameters(index = "0", description = "Entity id of the conflict.")
     private String entity;
 
+    @Option(
+        names = "--type",
+        description = "Entity type (spec, room, file, ...), when the id is parked under several.")
+    private String type;
+
     @Option(names = "--mine", description = "Keep this box's version.")
     private boolean mine;
 
@@ -225,7 +216,7 @@ public final class ConflictsCommand implements Callable<Integer> {
         return 1;
       }
       try (var operations = OperationsFactory.open()) {
-        var conflict = operations.conflict(entity);
+        var conflict = operations.conflict(type, entity);
         if (conflict == null) {
           System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
           return 1;
@@ -246,7 +237,9 @@ public final class ConflictsCommand implements Callable<Integer> {
           }
         }
         operations.resolveConflict(
-            entity, new Resolution(Resolution.Strategy.valueOf(strategy.name()), edited));
+            conflict.entityType(),
+            entity,
+            new Resolution(Resolution.Strategy.valueOf(strategy.name()), edited));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Resolved @|yellow "
@@ -278,29 +271,6 @@ public final class ConflictsCommand implements Callable<Integer> {
           && parse(conflict.baseSnapshot()) != null
           && parse(conflict.localSnapshot()) != null
           && parse(conflict.remoteSnapshot()) != null;
-    }
-
-    /**
-     * The snapshot to resolve to; {@code null} is a deletion. {@code edited} is the merged YAML.
-     */
-    static Map<String, Object> choose(
-        SyncConflicts.Conflict conflict, Strategy strategy, String edited) {
-      return switch (strategy) {
-        case MINE -> parse(conflict.localSnapshot());
-        case THEIRS -> parse(conflict.remoteSnapshot());
-        case MERGE -> ConflictMerge.parseTemplate(edited);
-      };
-    }
-
-    static String apply(
-        ConflictResolver resolver,
-        SyncConflicts conflicts,
-        SyncConflicts.Conflict conflict,
-        Map<String, Object> chosen) {
-      var rev =
-          resolver.resolveConflict(conflict.entityId(), chosen, parse(conflict.remoteSnapshot()));
-      conflicts.resolve(conflict.id(), rev);
-      return rev;
     }
 
     private String editInEditor(SyncConflicts.Conflict conflict)

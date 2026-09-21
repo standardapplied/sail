@@ -7,19 +7,12 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import java.nio.file.Path;
@@ -35,40 +28,18 @@ class ConflictsCommandTest {
 
   @TempDir Path tempDir;
   private Sqlite db;
-  private SpecStore specs;
   private SyncConflicts conflicts;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
-    specs = new SpecStore(db);
     conflicts = new SyncConflicts(db);
   }
 
   @AfterEach
   void tearDown() {
     db.close();
-  }
-
-  private SpecStore.SpecRow spec(String id, String title) {
-    return new SpecStore.SpecRow(
-        id,
-        "proj",
-        title,
-        SpecStatus.fromWire("pending"),
-        null,
-        null,
-        null,
-        null,
-        null,
-        0,
-        "uday",
-        "",
-        "",
-        "uday",
-        List.of(),
-        List.of());
   }
 
   private String json(Map<String, Object> map) {
@@ -97,25 +68,6 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void applyResolvesAndMarksTheConflict() {
-    specs.create(spec("auth", "Mine"));
-    var base = specs.comparableSnapshot("auth");
-    var mine = new java.util.LinkedHashMap<>(base);
-    mine.put("title", "Mine");
-    var theirs = new java.util.LinkedHashMap<>(base);
-    theirs.put("title", "Theirs");
-    var id =
-        conflicts.record("spec", "auth", json(base), json(mine), json(theirs), List.of("title"));
-    var conflict = conflicts.pendingFor("spec", "auth").orElseThrow();
-
-    ConflictsCommand.Resolve.apply(specs, conflicts, conflict, mine);
-
-    assertTrue(conflicts.pending().isEmpty(), "the conflict is marked resolved");
-    assertEquals("Mine", specs.findById("auth").orElseThrow().title());
-    assertNotEquals(0, id);
-  }
-
-  @Test
   void strategyRequiresExactlyOneChoice() {
     assertEquals(
         ConflictsCommand.Resolve.Strategy.MINE,
@@ -139,36 +91,6 @@ class ConflictsCommandTest {
     conflicts.record("spec", "b", "{}", null, "{}", List.of("<deleted>"));
     assertFalse(
         ConflictsCommand.Resolve.mergeable(conflicts.pendingFor("spec", "b").orElseThrow()));
-  }
-
-  @Test
-  void chooseSelectsTheStrategySnapshot() {
-    var conflict =
-        new SyncConflicts.Conflict(
-            1,
-            "spec",
-            "auth",
-            json(Map.of("title", "Base")),
-            json(Map.of("title", "Mine")),
-            json(Map.of("title", "Theirs")),
-            List.of("title"),
-            "now",
-            "pending",
-            null);
-
-    assertEquals(
-        "Mine",
-        ConflictsCommand.Resolve.choose(conflict, ConflictsCommand.Resolve.Strategy.MINE, null)
-            .get("title"));
-    assertEquals(
-        "Theirs",
-        ConflictsCommand.Resolve.choose(conflict, ConflictsCommand.Resolve.Strategy.THEIRS, null)
-            .get("title"));
-    assertEquals(
-        "Merged",
-        ConflictsCommand.Resolve.choose(
-                conflict, ConflictsCommand.Resolve.Strategy.MERGE, "title: Merged")
-            .get("title"));
   }
 
   @Test
@@ -205,40 +127,6 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void findUniqueResolvesByIdAcrossTypesAndReportsAbsenceAndAmbiguity() {
-    assertNull(ConflictsCommand.findUnique(conflicts, "ghost"));
-
-    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
-    var found = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
-    assertEquals("file", found.entityType());
-
-    conflicts.record("spec", "acme/x.txt", "{}", "{}", "{}", List.of("title"));
-    assertNull(
-        ConflictsCommand.findUnique(conflicts, "acme/x.txt"), "a cross-type clash is ambiguous");
-  }
-
-  @Test
-  void resolverForDispatchesOnEntityType() {
-    assertInstanceOf(FileStore.class, ConflictsCommand.resolverFor(db, "file"));
-    assertInstanceOf(SpecStore.class, ConflictsCommand.resolverFor(db, "spec"));
-    assertInstanceOf(ProjectStore.class, ConflictsCommand.resolverFor(db, "project"));
-    assertInstanceOf(RoomStore.class, ConflictsCommand.resolverFor(db, "room"));
-    assertInstanceOf(ai.singlr.sail.store.RunStore.class, ConflictsCommand.resolverFor(db, "run"));
-    assertInstanceOf(
-        ai.singlr.sail.store.ReviewStore.class, ConflictsCommand.resolverFor(db, "review"));
-    assertInstanceOf(
-        ai.singlr.sail.store.MessageStore.class, ConflictsCommand.resolverFor(db, "message"));
-  }
-
-  @Test
-  void resolverForRejectsAnUnknownEntityType() {
-    var error =
-        assertThrows(
-            IllegalStateException.class, () -> ConflictsCommand.resolverFor(db, "mystery"));
-    assertTrue(error.getMessage().contains("mystery"));
-  }
-
-  @Test
   void mergeIsOfferedOnlyForSpecsNotProjectsOrFiles() {
     conflicts.record("project", "acme", "{}", "{}", "{}", List.of("definition"));
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
@@ -252,28 +140,11 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void applyResolvesAFileConflictThroughTheFileStore() {
-    var files = new FileStore(db);
-    files.put("acme", "x.txt", b64("mine"));
-    var base = Map.<String, Object>of("content", b64("base"));
-    var mine = Map.<String, Object>of("content", b64("mine"));
-    var theirs = Map.<String, Object>of("content", b64("theirs"));
-    conflicts.record(
-        "file", "acme/x.txt", json(base), json(mine), json(theirs), List.of("content"));
-    var conflict = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
-
-    ConflictsCommand.Resolve.apply(
-        ConflictsCommand.resolverFor(db, conflict.entityType()), conflicts, conflict, theirs);
-
-    assertTrue(conflicts.pending().isEmpty());
-    assertEquals(b64("theirs"), files.find("acme", "x.txt").orElseThrow().content());
-  }
-
-  @Test
   void fileConflictsAreNeverFieldMergeable() {
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
     assertFalse(
-        ConflictsCommand.Resolve.mergeable(ConflictsCommand.findUnique(conflicts, "acme/x.txt")));
+        ConflictsCommand.Resolve.mergeable(
+            conflicts.pendingFor("file", "acme/x.txt").orElseThrow()));
   }
 
   @Test
