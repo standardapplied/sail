@@ -327,7 +327,10 @@ class ConflictsCommandTest {
     parkASpecAndItsRoomUnderOneId();
     var merged =
         new LinkedHashMap<>(
-            SyncedEntities.replicas(db, "node", "node").get("spec").current("auth"));
+            YamlUtil.parseMap(
+                new ai.singlr.sail.engine.ConflictOperations(db)
+                    .find("spec", "auth")
+                    .localSnapshot()));
     merged.put("title", "merged title");
     var file = Files.writeString(tempDir.resolve("merged.yaml"), YamlUtil.dumpJson(merged));
 

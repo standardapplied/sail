@@ -272,12 +272,17 @@ public final class FileStore implements ConflictResolver, SyncedStore {
       throw new IllegalArgumentException("Invalid file id: " + id);
     var hash = Snapshots.text(snapshot, "content_hash");
     blobs.requireHeld(hash);
+    var permission = snapshot.get("mode");
+    if (!(permission instanceof Long || permission instanceof Integer)
+        || ((Number) permission).longValue() < 0
+        || ((Number) permission).longValue() > 0777)
+      throw new IllegalArgumentException("Invalid file mode for " + id);
     return new FileRow(
         id.substring(0, slash),
         id.substring(slash + 1),
         hash,
         blobs.manifest(hash).size(),
-        ((Number) snapshot.get("mode")).intValue(),
+        ((Number) permission).intValue(),
         Snapshots.text(snapshot, "kind"));
   }
 

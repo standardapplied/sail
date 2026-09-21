@@ -146,7 +146,12 @@ class SyncServerCommandTest {
                 });
 
     try (var session =
-        SyncSession.open(clientIn, toServer, SyncWire.Hello.of("0.44.0", "node-box"), n -> {})) {
+        SyncSession.open(
+            clientIn,
+            toServer,
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            n -> {},
+            nodeDb)) {
       return session.reconcile(entityType, replica).report();
     } finally {
       serverThread.join();

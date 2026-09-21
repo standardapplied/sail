@@ -863,6 +863,7 @@ public final class SchemaManager {
     if (current == 0) {
       db.transaction(
           () -> {
+            if (currentVersion() != 0) return;
             BASELINE.forEach(db::execute);
             MIGRATIONS.forEach(db::execute);
             db.execute("ALTER TABLE project_files DROP COLUMN content");
@@ -905,6 +906,7 @@ public final class SchemaManager {
         var statement = MIGRATIONS.get(version - V1_VERSION - 1);
         db.transaction(
             () -> {
+              if (currentVersion() >= version) return;
               db.execute(statement);
               stamp(version);
             });
@@ -927,7 +929,9 @@ public final class SchemaManager {
     try {
       db.transaction(
           () -> {
-            ON_RAMP.subList(current - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
+            var lockedVersion = currentVersion();
+            if (lockedVersion >= V1_VERSION) return;
+            ON_RAMP.subList(lockedVersion - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
             stamp(V1_VERSION);
           });
       requireForeignKeysIntact();

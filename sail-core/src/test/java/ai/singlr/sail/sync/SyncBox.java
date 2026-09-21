@@ -168,7 +168,15 @@ public final class SyncBox implements AutoCloseable {
 
           @Override
           public void write(byte[] buffer, int offset, int length) throws IOException {
-            for (var i = offset; i < offset + length; i++) write(buffer[i] & 255);
+            var end = offset + length;
+            while (offset < end) {
+              if (remaining > 0) {
+                var count = Math.min(remaining, end - offset);
+                toServer.write(buffer, offset, count);
+                offset += count;
+                remaining -= count;
+              } else write(buffer[offset++] & 255);
+            }
           }
 
           @Override

@@ -17,6 +17,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -148,7 +149,9 @@ public final class SyncRpcServer {
         reply(
             out,
             welcomed
-                ? new SyncWire.Failed(context + ": " + rootMessage(e), "protocol")
+                ? new SyncWire.Failed(
+                    context + ": " + e.getMessage(),
+                    e instanceof SyncTransportException transport ? transport.kind() : "protocol")
                 : new SyncWire.Refuse(upgradeRemedy()));
         return;
       }
@@ -157,7 +160,11 @@ public final class SyncRpcServer {
         try {
           serveContent(content, in, out);
         } catch (RuntimeException e) {
-          reply(out, new SyncWire.Failed(context + ": " + rootMessage(e), "protocol"));
+          reply(
+              out,
+              new SyncWire.Failed(
+                  context + ": " + e.getMessage(),
+                  e instanceof SyncTransportException transport ? transport.kind() : "protocol"));
           return;
         }
       } else reply(out, respondTo(request, frame));
@@ -175,10 +182,77 @@ public final class SyncRpcServer {
         for (var hash : fetch.hashes()) SyncWire.writeChunk(out, hash, blobs.chunk(hash));
         reply(out, new SyncWire.Done());
       }
+      case SyncWire.Announce announce -> {
+        if (!principal.canWrite()) {
+          reply(out, new SyncWire.Refuse("read-only principal cannot upload content"));
+          return;
+        }
+        receiveContent(announce, in, out);
+      }
       default ->
           throw new IllegalArgumentException(
               "Unexpected content operation " + SyncWire.context(content));
     }
+  }
+
+  private void receiveContent(SyncWire.Announce announce, InputStream in, OutputStream out)
+      throws IOException {
+    var missing = blobs.missing(announce.hashes());
+    reply(out, new SyncWire.Lack(List.copyOf(missing)));
+    if (missing.isEmpty()) return;
+    var manifests = new LinkedHashMap<String, BlobStore.Manifest>();
+    while (true) {
+      var content = readContent(in);
+      if (content instanceof SyncWire.Done) break;
+      if (!(content instanceof SyncWire.Manifest m))
+        throw new IllegalArgumentException("Expected manifest for blobs " + missing);
+      var manifest = m.manifest();
+      if (!missing.contains(manifest.hash())
+          || manifests.putIfAbsent(manifest.hash(), manifest) != null)
+        throw new IllegalArgumentException("Unexpected blob manifest " + manifest.hash());
+      try {
+        limits.check(manifest.size());
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("blob " + manifest.hash() + ": " + e.getMessage());
+      }
+    }
+    if (!manifests.keySet().equals(missing))
+      throw new IllegalArgumentException("Missing manifests for blobs " + missing);
+    var chunks = new LinkedHashSet<String>();
+    manifests.values().forEach(manifest -> chunks.addAll(manifest.chunkHashes()));
+    reply(out, new SyncWire.Done());
+    var remainingBytes = manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum();
+    while (true) {
+      var content = readContent(in);
+      if (content instanceof SyncWire.Done) break;
+      if (!(content instanceof SyncWire.Chunk chunk))
+        throw new IllegalArgumentException("Expected chunk for blobs " + missing);
+      if (!chunks.remove(chunk.hash()))
+        throw new IllegalArgumentException("Unexpected chunk " + chunk.hash());
+      if (chunk.size() > remainingBytes)
+        throw new IllegalArgumentException(
+            "Chunk " + chunk.hash() + " exceeds declared content size for blobs " + missing);
+      remainingBytes -= chunk.size();
+      try {
+        blobs.putChunk(chunk.hash(), SyncWire.readBytes(in, chunk.size()));
+      } catch (SyncTransportException e) {
+        throw new SyncTransportException(
+            e.kind(), "blob " + missing + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
+      }
+    }
+    if (!chunks.isEmpty())
+      throw new IllegalArgumentException("Missing chunks " + chunks + " for blobs " + missing);
+    manifests.values().forEach(blobs::assemble);
+    reply(out, new SyncWire.Done());
+  }
+
+  private static SyncWire.Content readContent(InputStream input) throws IOException {
+    var line = SyncWire.readLine(input);
+    if (line == null)
+      throw new SyncTransportException("unreachable", "Channel closed during upload", null);
+    var request = SyncWire.decodeRequest(line);
+    if (request instanceof SyncWire.Content content) return content;
+    throw new IllegalArgumentException("Expected content, got " + SyncWire.context(request));
   }
 
   /**
@@ -193,7 +267,9 @@ public final class SyncRpcServer {
       var response =
           switch (request) {
             case SyncWire.Content content ->
-                new SyncWire.Failed("Content exchange requires a welcomed blob store", "protocol");
+                welcomed
+                    ? new SyncWire.Failed("Content exchange requires a blob store", "protocol")
+                    : helloRequired();
             case SyncWire.Hello hello -> onHello(hello);
             case SyncWire.Heads ignored -> welcomed ? tips() : helloRequired();
             case SyncWire.Pull pull -> welcomed ? page(pull, frame) : helloRequired();
@@ -365,7 +441,7 @@ public final class SyncRpcServer {
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {
     return new SyncWire.Failed(
-        id + ": entry of " + length + " chars exceeds the frame of " + frame + " chars",
+        id + ": entry of " + length + " bytes exceeds the frame of " + frame + " bytes",
         "protocol");
   }
 

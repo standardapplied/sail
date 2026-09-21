@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.sync.StoreReplica;
+import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncDatabase;
-import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -96,8 +96,7 @@ class SyncSchemaConvergenceTest {
         var node = SyncDatabase.converge(nodePath, "node")) {
       new SpecStore(main.db()).create(spec("auth", "Auth", "awaiting_merge"));
 
-      var report =
-          new SyncEngine().reconcile(replica("node", node.db()), replica("main", main.db()));
+      var report = SyncBox.round(main.db(), node.db(), "spec");
 
       assertEquals(1, report.pulled());
       assertEquals(
@@ -113,8 +112,7 @@ class SyncSchemaConvergenceTest {
         var node = SyncDatabase.converge(currentDatabase("node"), "node")) {
       new SpecStore(node.db()).create(spec("auth", "Auth", "awaiting_merge"));
 
-      var report =
-          new SyncEngine().reconcile(replica("node", node.db()), replica("main", main.db()));
+      var report = SyncBox.round(main.db(), node.db(), "spec");
 
       assertEquals(1, report.pushed());
       assertEquals(

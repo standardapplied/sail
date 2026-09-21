@@ -269,7 +269,7 @@ class ConflictOperationsTest {
     ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "mine");
     var local = files.comparableSnapshot("acme/x.txt");
     var remote = new LinkedHashMap<>(local);
-    remote.put("content", b64("theirs"));
+    remote.put("content_hash", new ai.singlr.sail.store.BlobStore(node.db).putText("theirs"));
     node.conflicts.record(
         "file",
         "acme/x.txt",

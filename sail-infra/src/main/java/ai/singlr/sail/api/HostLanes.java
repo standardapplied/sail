@@ -242,5 +242,11 @@ final class HostLanes {
     public void prepareSync() {
       sync.prepare();
     }
+
+    @Override
+    public long collectContent() {
+      prepareSync();
+      return new ai.singlr.sail.store.BlobStore(db).gc(java.util.Set.of());
+    }
   }
 }

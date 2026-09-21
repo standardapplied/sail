@@ -401,6 +401,7 @@ class SchemaManagerTest {
   }
 
   private static List<String> canonicalSchema(Sqlite database) {
+    new ContentMigration().apply(database, null, DataMigration.Prompter.NON_INTERACTIVE);
     return database.query(
         "SELECT type, name, tbl_name, sql FROM sqlite_master"
             + " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"

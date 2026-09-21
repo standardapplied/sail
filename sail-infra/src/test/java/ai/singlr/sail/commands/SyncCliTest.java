@@ -165,6 +165,14 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    for (var table : List.of("blobs", "chunks", "known_content")) db.execute("DROP TABLE " + table);
+    for (var column : List.of("body_hash", "plan_hash"))
+      db.execute("ALTER TABLE specs DROP COLUMN " + column);
+    for (var column : List.of("content_hash", "size", "mode", "kind"))
+      db.execute("ALTER TABLE project_files DROP COLUMN " + column);
+    db.execute("ALTER TABLE project_files ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+    db.execute(
+        "DELETE FROM data_migrations WHERE name = ?", ai.singlr.sail.store.ContentMigration.NAME);
     db.execute("DROP TABLE sync_health");
     db.execute("DROP TABLE change_heads");
     db.execute("DROP TABLE sync_state");

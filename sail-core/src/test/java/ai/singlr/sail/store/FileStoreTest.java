@@ -77,6 +77,26 @@ class FileStoreTest {
   }
 
   @Test
+  void invalidPermissionBitsCannotWrapIntoValidPermissions() {
+    var snapshot = new java.util.LinkedHashMap<>(ContentFixtures.snapshot(files, "data"));
+    snapshot.put("mode", 0x1_0000_01a4L);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> files.applyRevision(id("wrapped"), snapshot, "1-test"));
+    assertTrue(files.find("acme", "wrapped").isEmpty());
+  }
+
+  @Test
+  void knownContentDoesNotNeedAnyHistoryToBeParsed() {
+    ContentFixtures.put(files, "acme", "known", "first");
+    var first = files.find("acme", "known").orElseThrow().contentHash();
+    ContentFixtures.put(files, "acme", "known", "second");
+    db.execute("DELETE FROM change_log");
+    assertTrue(files.isKnownContent(id("known"), first));
+    assertFalse(files.isKnownContent(id("other"), first));
+  }
+
+  @Test
   void putAndFindAndList() {
     ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
     ai.singlr.sail.store.ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");

@@ -43,18 +43,13 @@ public final class SyncWire {
 
   /**
    * The fleet floor both sides must advertise before exchanging rows: the release that introduced
-   * protocol 4 (paged pulls, batched pushes, box identity). Bump again only when a change makes
-   * older peers unsafe, never for a routine release; patch releases above the floor are
-   * wire-compatible with each other.
+   * verified content hashes and binary chunks. Bump again only when a change makes older peers
+   * unsafe, never for a routine release; patch releases above the floor are wire-compatible with
+   * each other.
    */
-  public static final String UPGRADE_FLOOR = "0.44.0";
+  public static final String UPGRADE_FLOOR = "0.45.0";
 
-  /**
-   * The one bound on a framed message, on both ends and in both directions: what {@link
-   * #readFramed} accepts, what the parser admits, and what a page or a push batch grows to. 16 MiB
-   * because one entry must always fit a page, and the largest entry — a shared file of {@code
-   * ProjectFilesCommand.MAX_SHARE_BYTES} — encodes to under 7 MiB.
-   */
+  /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
 
   private static final String OP = "op";
@@ -257,18 +252,34 @@ public final class SyncWire {
     return List.copyOf(hashes);
   }
 
+  private static List<String> contentHashes(Map<String, Object> map, String key) {
+    if (!(map.get(key) instanceof List<?> values)
+        || values.stream().anyMatch(value -> !(value instanceof String))) {
+      throw new IllegalArgumentException(key + " must be an array of hashes");
+    }
+    return checkedHashes(values.stream().map(String.class::cast).toList());
+  }
+
+  private static long contentSize(Map<String, Object> map) {
+    var value = map.get("size");
+    if (!(value instanceof Long) && !(value instanceof Integer)) {
+      throw new IllegalArgumentException("size must be an integer");
+    }
+    return ((Number) value).longValue();
+  }
+
   private static Content content(String op, Map<String, Object> map) {
     return switch (op) {
-      case "fetch" -> new Fetch(strings(map, "hashes"));
-      case "fetch_chunks" -> new FetchChunks(strings(map, "hashes"));
-      case "announce" -> new Announce(strings(map, "hashes"));
-      case "lack" -> new Lack(strings(map, "hashes"));
+      case "fetch" -> new Fetch(contentHashes(map, "hashes"));
+      case "fetch_chunks" -> new FetchChunks(contentHashes(map, "hashes"));
+      case "announce" -> new Announce(contentHashes(map, "hashes"));
+      case "lack" -> new Lack(contentHashes(map, "hashes"));
       case "manifest" ->
           new Manifest(
               new BlobStore.Manifest(
-                  string(map, "hash"), longValue(map, "size"), strings(map, "chunks")));
+                  string(map, "hash"), contentSize(map), contentHashes(map, "chunks")));
       case "chunk" -> {
-        var size = longValue(map, "size");
+        var size = contentSize(map);
         requireChunkSize(size);
         yield new Chunk(string(map, "hash"), (int) size);
       }

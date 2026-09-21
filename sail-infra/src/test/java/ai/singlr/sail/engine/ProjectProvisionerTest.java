@@ -1454,6 +1454,7 @@ class ProjectProvisionerTest {
     java.nio.file.Files.createDirectories(filesDir.resolve("outline"));
     java.nio.file.Files.writeString(filesDir.resolve("outline/.env"), "KEY=VALUE");
     java.nio.file.Files.writeString(filesDir.resolve("setup.sh"), "#!/bin/bash");
+    WorkspaceFiles.mode(filesDir.resolve("setup.sh"), 0755);
     var sailYaml = tempDir.resolve("sail.yaml");
     java.nio.file.Files.writeString(sailYaml, "name: test");
 

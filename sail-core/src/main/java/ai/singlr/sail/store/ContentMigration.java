@@ -156,7 +156,8 @@ public final class ContentMigration implements DataMigration {
 
   private static String snapshot(Sqlite db, BlobStore blobs, String type, String id, String json) {
     if (json == null) return null;
-    var value = new LinkedHashMap<>(YamlUtil.parseMap(json));
+    var value =
+        new LinkedHashMap<>(YamlUtil.parseJsonLine(json, ai.singlr.sail.sync.SyncWire.MAX_FRAME));
     if (type.equals("spec")) {
       for (var field : List.of("body", "plan")) {
         if (value.containsKey(field)) {
@@ -172,7 +173,9 @@ public final class ContentMigration implements DataMigration {
       value.putIfAbsent("kind", kind(blobs, hash));
       known(db, id, hash);
     }
-    return value.equals(YamlUtil.parseMap(json)) ? json : YamlUtil.dumpJson(value);
+    return value.equals(YamlUtil.parseJsonLine(json, ai.singlr.sail.sync.SyncWire.MAX_FRAME))
+        ? json
+        : YamlUtil.dumpJson(value);
   }
 
   private static String legacyFile(BlobStore blobs, String encoded) {

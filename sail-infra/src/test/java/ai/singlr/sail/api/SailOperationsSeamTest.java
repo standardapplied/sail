@@ -230,7 +230,9 @@ class SailOperationsSeamTest {
               "consecutive_failures",
               "last_error_kind",
               "last_error",
-              "stale_since"),
+              "stale_since",
+              "bytes_fetched",
+              "bytes_sent"),
           YamlUtil.parseMap(stale.body()).keySet());
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -627,7 +629,12 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(remote),
           List.of("title"));
       var body =
-          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpJson(remote)));
+          YamlUtil.dumpJson(
+              Map.of(
+                  "strategy",
+                  strategy,
+                  "merged",
+                  operations.conflict("spec", "auth").remoteSnapshot()));
       for (var handle : List.of("uday", "other")) {
         var member = credential(box.db, handle, "member", lane);
         assertEquals(200, send(server, "GET", "/v1/conflicts/auth", member, "").statusCode());
@@ -832,7 +839,9 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
-      var merged = new LinkedHashMap<>(local);
+      var merged =
+          new LinkedHashMap<>(
+              YamlUtil.parseMap(operations.conflict("spec", "auth").localSnapshot()));
       merged.put("title", "merged");
       operations.resolveConflict(
           "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
@@ -909,12 +918,13 @@ class SailOperationsSeamTest {
               target ->
                   channel(
                       new SyncRpcServer(
-                          replicas,
-                          new SyncPrincipal("node", true),
-                          List::of,
-                          SyncTransitionSink.NONE,
-                          new ChangeLog(main.db)::headsAfter,
-                          SyncWire.UPGRADE_FLOOR)),
+                              replicas,
+                              new SyncPrincipal("node", true),
+                              List::of,
+                              SyncTransitionSink.NONE,
+                              new ChangeLog(main.db)::headsAfter,
+                              SyncWire.UPGRADE_FLOOR)
+                          .content(main.db, ai.singlr.sail.config.FileLimits.defaults())),
               events::add));
       operations.schema().prepareSync();
       java.util.function.Supplier<List<String>> posted =

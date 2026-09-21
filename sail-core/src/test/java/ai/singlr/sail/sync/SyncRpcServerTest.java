@@ -100,6 +100,62 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void unheldContentCannotBeCommitted() throws Exception {
+    try (var main = new SyncBox("main")) {
+      var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+      var response =
+          after(
+              main.server(new SyncPrincipal("node", true)),
+              new SyncWire.Push(
+                  "file",
+                  List.of(
+                      new MainReplica.Offer(
+                          "project/file",
+                          Map.of("content_hash", hash, "mode", 0644, "kind", "binary"),
+                          null))));
+      var results = assertInstanceOf(SyncWire.Results.class, response);
+      assertEquals(
+          "blob " + hash + " not held",
+          assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason());
+      assertTrue(new ai.singlr.sail.store.FileStore(main.db).list("project").isEmpty());
+    }
+  }
+
+  @Test
+  void tamperedAndTruncatedUploadChunksAreNeverStoredAndNameTheirFailure() throws Exception {
+    var bytes = new byte[] {1, 2, 3};
+    var hash = ai.singlr.sail.store.BlobStore.hash(bytes);
+    for (var truncated : List.of(false, true)) {
+      try (var main = new SyncBox("main")) {
+        var request = new java.io.ByteArrayOutputStream();
+        for (var content :
+            List.of(
+                SyncWire.encode(HELLO),
+                SyncWire.encode(new SyncWire.Announce(List.of(hash))),
+                SyncWire.encode(
+                    new SyncWire.Manifest(
+                        new ai.singlr.sail.store.BlobStore.Manifest(hash, 3, List.of(hash)))),
+                SyncWire.encode(new SyncWire.Done()),
+                SyncWire.encode(new SyncWire.Chunk(hash, 3))))
+          request.writeBytes((content + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        request.writeBytes(truncated ? new byte[] {1, 2} : new byte[] {3, 2, 1});
+        var output = new ByteStreams.Output();
+        main.server(new SyncPrincipal("node", true))
+            .serve(new java.io.ByteArrayInputStream(request.toByteArray()), output);
+        var failed =
+            assertInstanceOf(
+                SyncWire.Failed.class,
+                SyncWire.decodeResponse(output.toString().lines().toList().getLast()));
+        assertEquals(truncated ? "unreachable" : "protocol", failed.kind());
+        if (!truncated) assertTrue(failed.message().contains(hash));
+        assertEquals(
+            0,
+            main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      }
+    }
+  }
+
+  @Test
   void helloIsRequiredBeforeAnythingElse() throws Exception {
     for (var first :
         List.<SyncWire.Request>of(
@@ -234,10 +290,8 @@ class SyncRpcServerTest {
   @Test
   void anEntryNearTheBoundIsAPageOfOneAndTheNextPullContinuesFromIt() throws Exception {
     try (var main = new SyncBox("main")) {
-      main.specs.create(SyncBox.spec("a", "A", "pending"));
-      main.specs.setContent("a", "x".repeat(600), "");
-      main.specs.create(SyncBox.spec("b", "B", "pending"));
-      main.specs.setContent("b", "y".repeat(600), "");
+      main.specs.create(SyncBox.spec("a", "x".repeat(600), "pending"));
+      main.specs.create(SyncBox.spec("b", "y".repeat(600), "pending"));
       var server = main.server(new SyncPrincipal("n", true));
       var first =
           assertInstanceOf(
@@ -271,8 +325,7 @@ class SyncRpcServerTest {
   @Test
   void anEntryOverTheBoundIsRefusedNamingTheTypeIdAndSize() throws Exception {
     try (var main = new SyncBox("main")) {
-      main.specs.create(SyncBox.spec("huge", "Huge", "pending"));
-      main.specs.setContent("huge", "x".repeat(700), "");
+      main.specs.create(SyncBox.spec("huge", "x".repeat(700), "pending"));
       var server = main.server(new SyncPrincipal("n", true));
       for (var request :
           List.<SyncWire.Request>of(
@@ -284,7 +337,7 @@ class SyncRpcServerTest {
                     .getLast());
         assertEquals("protocol", failed.kind());
         assertTrue(failed.message().startsWith("spec: huge:"), failed.message());
-        assertTrue(failed.message().contains("chars"), failed.message());
+        assertTrue(failed.message().contains("bytes"), failed.message());
       }
     }
   }
@@ -329,10 +382,8 @@ class SyncRpcServerTest {
   @Test
   void needAnswersKnownIdsInOrderConsumesUnknownOnesAndCutsAtTheFrame() throws Exception {
     try (var main = new SyncBox("main")) {
-      main.specs.create(SyncBox.spec("a", "A", "pending"));
-      main.specs.setContent("a", "x".repeat(600), "");
-      main.specs.create(SyncBox.spec("b", "B", "pending"));
-      main.specs.setContent("b", "y".repeat(600), "");
+      main.specs.create(SyncBox.spec("a", "x".repeat(600), "pending"));
+      main.specs.create(SyncBox.spec("b", "y".repeat(600), "pending"));
       var server = main.server(new SyncPrincipal("n", true));
       var whole =
           assertInstanceOf(
@@ -417,7 +468,7 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void malformedAndOversizedFramesAfterHelloNameTheLastContextAndLeaveTheSessionUsable()
+  void malformedAndOversizedFramesAfterHelloNameTheLastContextAndCloseTheSession()
       throws Exception {
     var pull = SyncWire.encode(new SyncWire.Pull("message", 0, 10));
     for (var bad : List.of("{", "x".repeat(600))) {
@@ -426,13 +477,12 @@ class SyncRpcServerTest {
               server(new FakeMain(), "message", new SyncPrincipal("node", true)),
               512,
               List.of(SyncWire.encode(HELLO), pull, bad, pull));
-      assertEquals(4, replies.size());
+      assertEquals(3, replies.size());
       assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
       assertInstanceOf(SyncWire.Page.class, replies.get(1));
       var failed = assertInstanceOf(SyncWire.Failed.class, replies.get(2));
       assertEquals("protocol", failed.kind());
       assertTrue(failed.message().startsWith("message:"), failed.message());
-      assertInstanceOf(SyncWire.Page.class, replies.get(3));
     }
   }
 

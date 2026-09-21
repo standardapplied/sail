@@ -30,6 +30,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -145,7 +146,38 @@ class ApiRouterTest {
   }
 
   @Test
-  void fileRoutesCarryRawBytesAndEnforceTheFiveMiBCap() throws Exception {
+  void fileListingsUseMetadataAndConditionalDownloadsNeverOpenTheBlob() throws Exception {
+    var operations = new SeamOperations();
+    operations.files.put("data", new byte[] {1, 2, 3});
+    try (var server = serverWith(operations, true)) {
+      var listed = get(server, "/v1/projects/acme/files", "token");
+      assertTrue(listed.body().contains("content_hash"));
+      assertTrue(listed.body().contains("mode"));
+      assertTrue(listed.body().contains("kind"));
+      assertEquals(0, operations.openedFiles);
+      var download = get(server, "/v1/projects/acme/files/data", "token");
+      assertEquals("3", download.headers().firstValue("content-length").orElseThrow());
+      var etag = download.headers().firstValue("etag").orElseThrow();
+      assertEquals("\"" + ai.singlr.sail.store.BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
+      var request =
+          java.net.http.HttpRequest.newBuilder(
+                  java.net.URI.create(
+                      "http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
+              .header("Authorization", "Bearer token")
+              .header("If-None-Match", etag)
+              .GET()
+              .build();
+      try (var client = java.net.http.HttpClient.newHttpClient()) {
+        var cached = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertEquals(304, cached.statusCode());
+        assertEquals("", cached.body());
+      }
+      assertEquals(1, operations.openedFiles);
+    }
+  }
+
+  @Test
+  void fileRoutesCarryRawBytesAndEnforceTheHostCap() throws Exception {
     var operations = new SeamOperations();
     try (var server = serverWith(operations, true)) {
       assertEquals(200, get(server, "/v1/projects/acme/files", "token").statusCode());
@@ -183,6 +215,40 @@ class ApiRouterTest {
   }
 
   @Test
+  void aSharedFileNeedsADeclaredLengthAndAnOversizedHeaderIsRejectedWithoutABody()
+      throws Exception {
+    var operations = new SeamOperations();
+    try (var server = serverWith(operations, true)) {
+      var request =
+          HttpRequest.newBuilder(uri(server, "/v1/projects/acme/files/data"))
+              .header("Authorization", "Bearer token")
+              .PUT(
+                  HttpRequest.BodyPublishers.ofInputStream(
+                      () -> new java.io.ByteArrayInputStream(new byte[] {1})))
+              .build();
+      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      assertEquals(422, response.statusCode());
+      assertTrue(response.body().contains("Content-Length is required"));
+      try (var socket = new java.net.Socket("127.0.0.1", server.port())) {
+        socket.setSoTimeout(5000);
+        socket
+            .getOutputStream()
+            .write(
+                ("PUT /v1/projects/acme/files/large HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer token\r\nContent-Length: 1025\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+        socket.getOutputStream().flush();
+        var line =
+            new java.io.BufferedReader(
+                    new java.io.InputStreamReader(
+                        socket.getInputStream(), StandardCharsets.US_ASCII))
+                .readLine();
+        assertTrue(line.contains("413"), line);
+      }
+      assertTrue(operations.files.isEmpty());
+    }
+  }
+
+  @Test
   void viewerCanReadSyncButCannotResolveOrWriteFiles() throws Exception {
     var operations = new SeamOperations();
     ApiAuth viewer = exchange -> exchange.setAttribute("token.role", "viewer");
@@ -202,6 +268,7 @@ class ApiRouterTest {
   }
 
   private static final class SeamOperations extends TestOperations {
+    private int openedFiles;
     private SyncRequest request;
     private Resolution resolution;
     private final Map<String, byte[]> files = new LinkedHashMap<>();
@@ -262,6 +329,7 @@ class ApiRouterTest {
         }
 
         public java.io.InputStream open(FileStore.FileRow row) {
+          openedFiles++;
           return new java.io.ByteArrayInputStream(files.get(row.path()));
         }
 

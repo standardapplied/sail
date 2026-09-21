@@ -58,6 +58,26 @@ class SyncTransportTest {
     return SyncBox.spec(id, title, status);
   }
 
+  private static SpecStore.SpecRow specBy(String id, String title, String author) {
+    return new SpecStore.SpecRow(
+        id,
+        "proj",
+        title,
+        SpecStatus.fromWire("pending"),
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        author,
+        "",
+        "",
+        author,
+        List.of(),
+        List.of());
+  }
+
   private SyncBox.Link connect(SyncBox node) throws IOException {
     return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node);
   }
@@ -82,8 +102,7 @@ class SyncTransportTest {
   }
 
   private void bigSpec(SyncBox box, String id) {
-    box.specs.create(spec(id, "Spec " + id, "pending"));
-    box.specs.setContent(id, id.repeat(600 / id.length()), "");
+    box.specs.create(spec(id, id.repeat(600 / id.length()), "pending"));
   }
 
   @Test
@@ -96,6 +115,28 @@ class SyncTransportTest {
     assertEquals(1, pulled.report().pulled());
     assertEquals(1, pulled.entries());
     assertEquals("Auth", nodeB.specs.findById("auth").orElseThrow().title());
+  }
+
+  @Test
+  void authorsReachEveryReplicaOnCreateAndEdit() throws Exception {
+    nodeA.specs.create(specBy("auth", "Auth", "ada"));
+    syncToMain(nodeA);
+    syncToMain(nodeB);
+    assertEquals("ada", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("ada", nodeB.specs.findById("auth").orElseThrow().updatedBy());
+    nodeB.specs.update(specBy("auth", "Revised", "bob"));
+    syncToMain(nodeB);
+    syncToMain(nodeA);
+    assertEquals("bob", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("bob", nodeA.specs.findById("auth").orElseThrow().updatedBy());
+  }
+
+  @Test
+  void aDeletedSpecThatNeverReachedMainConvergesQuietly() throws Exception {
+    nodeA.specs.create(spec("local", "Local", "pending"));
+    nodeA.specs.delete("local");
+    assertEquals(0, syncToMain(nodeA).report().total());
+    assertTrue(main.specs.findById("local").isEmpty());
   }
 
   @Test
@@ -188,7 +229,9 @@ class SyncTransportTest {
       var first = link.reconcile("spec", nodeA.replica);
       assertEquals(1, first.report().pushed());
       assertEquals(0, first.pages());
-      assertEquals(List.of("hello", "heads", "need", "push"), link.ops());
+      assertEquals(
+          List.of("hello", "heads", "need", "announce", "manifest", "done", "done", "push"),
+          link.ops());
     }
     assertEquals(0L, nodeA.syncState.checkpoint("main", "spec"), "an own push is not a seen entry");
 
@@ -288,7 +331,7 @@ class SyncTransportTest {
       assertEquals(1, round.report().pulled());
       assertEquals(1, round.report().pushed());
       assertEquals(1, round.entries(), "the page carried only main's edit");
-      assertEquals(List.of("hello", "heads", "pull", "need", "push"), link.ops());
+      assertEquals(List.of("hello", "heads", "pull", "need", "announce", "push"), link.ops());
     }
     assertEquals("Y from A", main.specs.findById("y").orElseThrow().title());
     assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
@@ -390,7 +433,7 @@ class SyncTransportTest {
           assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
       assertEquals("protocol", failure.kind());
       assertTrue(failure.getMessage().contains("toobig"), failure.getMessage());
-      assertTrue(failure.getMessage().contains("chars"), failure.getMessage());
+      assertTrue(failure.getMessage().contains("bytes"), failure.getMessage());
     }
     bigSpec(nodeB, "mine");
     try (var link = connect(nodeB)) {

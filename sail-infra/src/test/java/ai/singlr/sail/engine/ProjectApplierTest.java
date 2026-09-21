@@ -830,6 +830,7 @@ class ProjectApplierTest {
     Files.createDirectories(filesDir.resolve("outline"));
     Files.writeString(filesDir.resolve("outline/.env"), "KEY=VALUE");
     Files.writeString(filesDir.resolve("setup.sh"), "#!/bin/bash");
+    WorkspaceFiles.mode(filesDir.resolve("setup.sh"), 0755);
     var sailYaml = projectDir.resolve("sail.yaml");
     Files.writeString(sailYaml, "name: test");
 

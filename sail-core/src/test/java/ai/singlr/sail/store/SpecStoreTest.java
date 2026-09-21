@@ -62,6 +62,27 @@ class SpecStoreTest {
   }
 
   @Test
+  void adoptionRequiresHeldContentAndFillsTheTextColumnsAtomically() {
+    var blobs = new BlobStore(db);
+    store.create(spec("template", "Template", "pending"));
+    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot("template"));
+    var hash = BlobStore.hash("remote body".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    snapshot.put("body_hash", hash);
+    var failure =
+        assertThrows(
+            BlobStore.NotHeld.class, () -> store.adoptForSync("incoming", snapshot, "1-main"));
+    assertTrue(failure.getMessage().contains(hash));
+    assertTrue(store.findById("incoming").isEmpty());
+    assertTrue(store.history("incoming").isEmpty());
+    blobs.putText("remote body");
+    store.adoptForSync("incoming", snapshot, "1-main");
+    assertEquals("remote body", store.getContent("incoming").orElseThrow().body());
+    assertFalse(
+        ai.singlr.sail.config.YamlUtil.parseMap(store.history("incoming").getFirst().snapshot())
+            .containsKey("body"));
+  }
+
+  @Test
   void assignedToMatchesOnlyANonBlankHandleEqualToTheAssignee() {
     var mine =
         new SpecStore.SpecRow(
@@ -561,8 +582,8 @@ class SpecStoreTest {
     snapshot.put("title", "From the future");
     snapshot.put("status", "warp_speed");
     snapshot.put("project", "test-project");
-    snapshot.put("body", "");
-    snapshot.put("plan", "");
+    snapshot.put("body_hash", new BlobStore(db).putText(""));
+    snapshot.put("plan_hash", new BlobStore(db).putText(""));
 
     var refusal =
         assertThrows(

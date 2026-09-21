@@ -27,15 +27,16 @@ public final class BlobStore {
   private static final java.util.Map<Object, java.util.concurrent.locks.ReentrantLock> LOCKS =
       new java.util.HashMap<>();
   private final Sqlite db;
-  private final Object lockKey;
   private final java.util.concurrent.locks.ReentrantLock contentLock;
 
   public BlobStore(Sqlite db) {
     this.db = Objects.requireNonNull(db, "db");
-    lockKey = db.path() == null ? db : db.path();
     synchronized (LOCKS) {
       contentLock =
-          LOCKS.computeIfAbsent(lockKey, ignored -> new java.util.concurrent.locks.ReentrantLock());
+          db.path() == null
+              ? db.contentLock
+              : LOCKS.computeIfAbsent(
+                  db.path(), ignored -> new java.util.concurrent.locks.ReentrantLock());
     }
   }
 
@@ -46,11 +47,19 @@ public final class BlobStore {
     if (contentLock.getHoldCount() > 1 || db.path() == null) return contentLock::unlock;
     java.nio.channels.FileChannel channel = null;
     try {
-      channel =
-          java.nio.channels.FileChannel.open(
-              db.path().resolveSibling(db.path().getFileName() + ".blobs.lock"),
-              java.nio.file.StandardOpenOption.CREATE,
-              java.nio.file.StandardOpenOption.WRITE);
+      var path = db.path().resolveSibling(db.path().getFileName() + ".blobs.lock");
+      try {
+        java.nio.file.Files.createFile(path);
+        var source =
+            java.nio.file.Files.readAttributes(
+                db.path(), java.nio.file.attribute.PosixFileAttributes.class);
+        java.nio.file.Files.getFileAttributeView(
+                path, java.nio.file.attribute.PosixFileAttributeView.class)
+            .setGroup(source.group());
+        java.nio.file.Files.setPosixFilePermissions(path, source.permissions());
+      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+      }
+      channel = java.nio.channels.FileChannel.open(path, java.nio.file.StandardOpenOption.WRITE);
       var lock = channel.lock();
       var held = channel;
       return () -> {
@@ -96,7 +105,9 @@ public final class BlobStore {
         throw new IllegalArgumentException(
             "Invalid blob manifest size: " + hash + " (" + size + ")");
       }
-      if ((size == 0) != chunkHashes.isEmpty() || size > (long) chunkHashes.size() * FastCdc.MAX) {
+      if ((size == 0) != chunkHashes.isEmpty()
+          || size > (long) chunkHashes.size() * FastCdc.MAX
+          || size > 0 && size <= (long) (chunkHashes.size() - 1) * FastCdc.MIN) {
         throw new IllegalArgumentException("Invalid blob manifest chunks: " + hash);
       }
     }
@@ -225,9 +236,15 @@ public final class BlobStore {
     requireHash(hash);
     return db.queryOne(
             "SELECT size, chunks FROM blobs WHERE hash = ?",
-            r -> new Manifest(hash, r.integer(0), YamlUtil.parseStringList(r.text(1))),
+            r -> new Manifest(hash, r.integer(0), chunkHashes(r.text(1))),
             hash)
         .orElseThrow(() -> new NotHeld(hash));
+  }
+
+  private static List<String> chunkHashes(String json) {
+    var map =
+        YamlUtil.parseJsonLine("{\"chunks\":" + json + "}", ai.singlr.sail.sync.SyncWire.MAX_FRAME);
+    return ((List<?>) map.get("chunks")).stream().map(Object::toString).toList();
   }
 
   public byte[] chunk(String hash) {
@@ -312,14 +329,16 @@ public final class BlobStore {
   }
 
   public Set<String> references() {
-    var references = new LinkedHashSet<String>();
+    var references =
+        new LinkedHashSet<>(
+            db.query(
+                "SELECT body_hash FROM specs UNION SELECT plan_hash FROM specs UNION SELECT content_hash FROM project_files",
+                row -> row.text(0)));
+    references.remove(null);
     for (var entity : ai.singlr.sail.sync.SyncedEntities.all()) {
       var store = entity.store(db);
       var fields = store.contentFields();
       if (fields.isEmpty()) continue;
-      for (var id : store.syncEntityIds()) {
-        addReferences(references, store.comparableSnapshot(id), fields);
-      }
       var after = 0L;
       while (true) {
         var entries =

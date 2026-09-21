@@ -49,6 +49,7 @@ public final class FileMaterializer {
   }
 
   public Report materialize(String project) throws IOException {
+    NameValidator.requireValidProjectName(project);
     var filesDir = projectsDir.resolve(project).resolve("files").normalize();
     var written = 0;
     var deleted = 0;
@@ -60,7 +61,7 @@ public final class FileMaterializer {
       var targetContent = target == null ? null : target.contentHash();
 
       var destination = filesDir.resolve(path).normalize();
-      if (!destination.startsWith(filesDir)) {
+      if (!destination.startsWith(filesDir) || hasSymlink(destination)) {
         skipped.add(path);
         continue;
       }
@@ -97,6 +98,13 @@ public final class FileMaterializer {
       return Action.SKIP_DIRTY;
     }
     return targetContent == null ? Action.DELETE : Action.WRITE;
+  }
+
+  private static boolean hasSymlink(Path path) {
+    for (var current = path; current != null; current = current.getParent()) {
+      if (Files.isSymbolicLink(current)) return true;
+    }
+    return false;
   }
 
   private static String diskHash(Path file) throws IOException {

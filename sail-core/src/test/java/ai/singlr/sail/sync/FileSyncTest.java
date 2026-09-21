@@ -126,7 +126,7 @@ class FileSyncTest {
     assertEquals(
         "from-node", ai.singlr.sail.store.ContentFixtures.text(main.files, "acme", "shared.conf"));
     var pending = other.conflicts.pendingFor("file", FileStore.idOf("acme", "shared.conf"));
-    assertEquals(List.of("content"), pending.orElseThrow().fields());
+    assertEquals(List.of("content_hash"), pending.orElseThrow().fields());
     assertEquals(
         "from-other",
         ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "shared.conf"));
@@ -142,7 +142,7 @@ class FileSyncTest {
 
     assertEquals(1, report.conflicts());
     assertEquals(
-        List.of("content"),
+        List.of("content_hash"),
         other
             .conflicts
             .pendingFor("file", FileStore.idOf("acme", "shared.conf"))
@@ -167,9 +167,12 @@ class FileSyncTest {
   @Test
   void aStaleCommitOnTheFileReplicaIsRejected() {
     var id = FileStore.idOf("acme", "a.txt");
-    node.files.applyRevision(id, java.util.Map.of("content", "AAA"), "1-base");
+    node.files.applyRevision(
+        id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "AAA"), "1-base");
 
-    var outcome = node.replica.commit(id, java.util.Map.of("content", "BBB"), "9-stale");
+    var outcome =
+        node.replica.commit(
+            id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "BBB"), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
     assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "a.txt"));

@@ -62,13 +62,20 @@ public final class SyncCommand implements Callable<Integer> {
       description = "Collect unreferenced sync content.",
       mixinStandardHelpOptions = true)
   static final class Gc implements Callable<Integer> {
+    private final Supplier<HostOperations> operations;
+
+    Gc() {
+      this(OperationsFactory::open);
+    }
+
+    Gc(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
+
     @Override
     public Integer call() {
-      try (var database =
-          SyncDatabase.converge(
-              ai.singlr.sail.engine.SailPaths.controlPlaneDb(),
-              ai.singlr.sail.engine.HostInfo.hostname())) {
-        var freed = new ai.singlr.sail.store.BlobStore(database.db()).gc(Set.of());
+      try (var ops = operations.get()) {
+        var freed = ops.schema().collectContent();
         System.out.println("Freed " + freed + " bytes of unreferenced content.");
       }
       return 0;
@@ -246,6 +253,8 @@ public final class SyncCommand implements Callable<Integer> {
       map.put("pushed", report.pushed());
       map.put("merged", report.merged());
       map.put("conflicts", report.conflicts());
+      map.put("bytes_fetched", round.fetchedBytes());
+      map.put("bytes_sent", round.sentBytes());
       map.put("types", round.types().stream().map(SyncViews::type).toList());
       return YamlUtil.dumpJson(map);
     }
