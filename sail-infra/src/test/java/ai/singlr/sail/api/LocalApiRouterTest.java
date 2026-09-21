@@ -15,6 +15,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -93,6 +94,36 @@ class LocalApiRouterTest {
     assertEquals(
         401,
         local.handle(new LocalApiRequest("GET", "/v1/conflicts", Map.of(), new byte[0])).status());
+  }
+
+  @Test
+  void aResolveCarriesTheTypeAndKeepsTheEnginesRefusalStatus() {
+    var asked = new ArrayList<String>();
+    var operations =
+        new TestOperations() {
+          @Override
+          public SyncConflicts.Conflict resolveConflict(
+              String type, String id, Resolution resolution, Actor actor) {
+            asked.add(type + ":" + id);
+            throw new ApiException(
+                type == null ? ErrorCode.BAD_REQUEST : ErrorCode.CONFLICT, "refused " + id);
+          }
+        };
+    var local = new LocalApiRouter(bus, operations);
+    var body = "strategy=mine".getBytes(StandardCharsets.UTF_8);
+
+    var stale =
+        local.handle(
+            new LocalApiRequest(
+                "POST", "/v1/conflicts/auth/resolve", Map.of("type", "room"), auth(), body));
+    var ambiguous =
+        local.handle(
+            new LocalApiRequest("POST", "/v1/conflicts/auth/resolve", Map.of(), auth(), body));
+
+    assertEquals(List.of("room:auth", "null:auth"), asked);
+    assertEquals(409, stale.status());
+    assertEquals(400, ambiguous.status());
+    assertTrue(stale.body().toString().contains("refused auth"), stale.body().toString());
   }
 
   @Test

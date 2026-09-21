@@ -25,7 +25,8 @@ public interface LocalLaneOperations {
 
   List<SyncConflicts.Conflict> conflicts();
 
-  SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor);
+  SyncConflicts.Conflict resolveConflict(
+      String type, String id, Resolution resolution, Actor actor);
 
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local

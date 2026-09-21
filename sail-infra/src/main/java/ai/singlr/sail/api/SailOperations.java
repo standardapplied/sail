@@ -219,25 +219,26 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public SyncConflicts.Conflict conflict(String id) {
-    return new ConflictOperations(controlPlane).find(id);
+  public SyncConflicts.Conflict conflict(String type, String id) {
+    return new ConflictOperations(controlPlane).find(type, id);
   }
 
   @Override
-  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution) {
+  public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     return resolveConflict(
-        id, resolution, Actor.cliOperator(syncOperations.configuration().handle()));
+        type, id, resolution, Actor.cliOperator(syncOperations.configuration().handle()));
   }
 
   @Override
-  public SyncConflicts.Conflict resolveConflict(String id, Resolution resolution, Actor actor) {
+  public SyncConflicts.Conflict resolveConflict(
+      String type, String id, Resolution resolution, Actor actor) {
     var owner = syncOperations.configuration().handle();
     if (!actor.isAdmin()
         && !(actor.canWrite() && Strings.isNotBlank(owner) && actor.actsFor(owner))) {
       throw new ApiException(
           ErrorCode.FORBIDDEN, "Only this node's owner or an admin can resolve its conflicts.");
     }
-    var resolved = new ConflictOperations(controlPlane).resolve(id, resolution);
+    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
   }

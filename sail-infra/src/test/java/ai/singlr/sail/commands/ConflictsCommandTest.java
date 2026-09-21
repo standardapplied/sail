@@ -10,65 +10,56 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.HostOperations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.SyncBox;
+import ai.singlr.sail.sync.SyncedEntities;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 class ConflictsCommandTest {
 
   @TempDir Path tempDir;
   private Sqlite db;
-  private SpecStore specs;
   private SyncConflicts conflicts;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
-    specs = new SpecStore(db);
     conflicts = new SyncConflicts(db);
   }
 
   @AfterEach
   void tearDown() {
     db.close();
-  }
-
-  private SpecStore.SpecRow spec(String id, String title) {
-    return new SpecStore.SpecRow(
-        id,
-        "proj",
-        title,
-        SpecStatus.fromWire("pending"),
-        null,
-        null,
-        null,
-        null,
-        null,
-        0,
-        "uday",
-        "",
-        "",
-        "uday",
-        List.of(),
-        List.of());
   }
 
   private String json(Map<String, Object> map) {
@@ -97,25 +88,6 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void applyResolvesAndMarksTheConflict() {
-    specs.create(spec("auth", "Mine"));
-    var base = specs.comparableSnapshot("auth");
-    var mine = new java.util.LinkedHashMap<>(base);
-    mine.put("title", "Mine");
-    var theirs = new java.util.LinkedHashMap<>(base);
-    theirs.put("title", "Theirs");
-    var id =
-        conflicts.record("spec", "auth", json(base), json(mine), json(theirs), List.of("title"));
-    var conflict = conflicts.pendingFor("spec", "auth").orElseThrow();
-
-    ConflictsCommand.Resolve.apply(specs, conflicts, conflict, mine);
-
-    assertTrue(conflicts.pending().isEmpty(), "the conflict is marked resolved");
-    assertEquals("Mine", specs.findById("auth").orElseThrow().title());
-    assertNotEquals(0, id);
-  }
-
-  @Test
   void strategyRequiresExactlyOneChoice() {
     assertEquals(
         ConflictsCommand.Resolve.Strategy.MINE,
@@ -139,36 +111,6 @@ class ConflictsCommandTest {
     conflicts.record("spec", "b", "{}", null, "{}", List.of("<deleted>"));
     assertFalse(
         ConflictsCommand.Resolve.mergeable(conflicts.pendingFor("spec", "b").orElseThrow()));
-  }
-
-  @Test
-  void chooseSelectsTheStrategySnapshot() {
-    var conflict =
-        new SyncConflicts.Conflict(
-            1,
-            "spec",
-            "auth",
-            json(Map.of("title", "Base")),
-            json(Map.of("title", "Mine")),
-            json(Map.of("title", "Theirs")),
-            List.of("title"),
-            "now",
-            "pending",
-            null);
-
-    assertEquals(
-        "Mine",
-        ConflictsCommand.Resolve.choose(conflict, ConflictsCommand.Resolve.Strategy.MINE, null)
-            .get("title"));
-    assertEquals(
-        "Theirs",
-        ConflictsCommand.Resolve.choose(conflict, ConflictsCommand.Resolve.Strategy.THEIRS, null)
-            .get("title"));
-    assertEquals(
-        "Merged",
-        ConflictsCommand.Resolve.choose(
-                conflict, ConflictsCommand.Resolve.Strategy.MERGE, "title: Merged")
-            .get("title"));
   }
 
   @Test
@@ -205,40 +147,6 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void findUniqueResolvesByIdAcrossTypesAndReportsAbsenceAndAmbiguity() {
-    assertNull(ConflictsCommand.findUnique(conflicts, "ghost"));
-
-    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
-    var found = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
-    assertEquals("file", found.entityType());
-
-    conflicts.record("spec", "acme/x.txt", "{}", "{}", "{}", List.of("title"));
-    assertNull(
-        ConflictsCommand.findUnique(conflicts, "acme/x.txt"), "a cross-type clash is ambiguous");
-  }
-
-  @Test
-  void resolverForDispatchesOnEntityType() {
-    assertInstanceOf(FileStore.class, ConflictsCommand.resolverFor(db, "file"));
-    assertInstanceOf(SpecStore.class, ConflictsCommand.resolverFor(db, "spec"));
-    assertInstanceOf(ProjectStore.class, ConflictsCommand.resolverFor(db, "project"));
-    assertInstanceOf(RoomStore.class, ConflictsCommand.resolverFor(db, "room"));
-    assertInstanceOf(ai.singlr.sail.store.RunStore.class, ConflictsCommand.resolverFor(db, "run"));
-    assertInstanceOf(
-        ai.singlr.sail.store.ReviewStore.class, ConflictsCommand.resolverFor(db, "review"));
-    assertInstanceOf(
-        ai.singlr.sail.store.MessageStore.class, ConflictsCommand.resolverFor(db, "message"));
-  }
-
-  @Test
-  void resolverForRejectsAnUnknownEntityType() {
-    var error =
-        assertThrows(
-            IllegalStateException.class, () -> ConflictsCommand.resolverFor(db, "mystery"));
-    assertTrue(error.getMessage().contains("mystery"));
-  }
-
-  @Test
   void mergeIsOfferedOnlyForSpecsNotProjectsOrFiles() {
     conflicts.record("project", "acme", "{}", "{}", "{}", List.of("definition"));
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
@@ -252,28 +160,11 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void applyResolvesAFileConflictThroughTheFileStore() {
-    var files = new FileStore(db);
-    files.put("acme", "x.txt", b64("mine"));
-    var base = Map.<String, Object>of("content", b64("base"));
-    var mine = Map.<String, Object>of("content", b64("mine"));
-    var theirs = Map.<String, Object>of("content", b64("theirs"));
-    conflicts.record(
-        "file", "acme/x.txt", json(base), json(mine), json(theirs), List.of("content"));
-    var conflict = ConflictsCommand.findUnique(conflicts, "acme/x.txt");
-
-    ConflictsCommand.Resolve.apply(
-        ConflictsCommand.resolverFor(db, conflict.entityType()), conflicts, conflict, theirs);
-
-    assertTrue(conflicts.pending().isEmpty());
-    assertEquals(b64("theirs"), files.find("acme", "x.txt").orElseThrow().content());
-  }
-
-  @Test
   void fileConflictsAreNeverFieldMergeable() {
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
     assertFalse(
-        ConflictsCommand.Resolve.mergeable(ConflictsCommand.findUnique(conflicts, "acme/x.txt")));
+        ConflictsCommand.Resolve.mergeable(
+            conflicts.pendingFor("file", "acme/x.txt").orElseThrow()));
   }
 
   @Test
@@ -311,5 +202,172 @@ class ConflictsCommandTest {
     assertTrue(rendered.contains("acme/x.txt"));
     assertTrue(rendered.contains("mine"));
     assertTrue(rendered.contains("theirs"));
+  }
+
+  private HostOperations operations() {
+    var config = new SyncConfig("node", "sail@main", "node");
+    return OperationsFactory.create(
+            db,
+            new ShellExecutor(true),
+            "sail.yaml",
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE)
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                "node",
+                tempDir,
+                () -> config,
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
+  }
+
+  private void parkASpecAndItsRoomUnderOneId() {
+    new SpecStore(db).create(SyncBox.spec("auth", "node title", "pending"));
+    new RoomStore(db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+    var replicas = SyncedEntities.replicas(db, "node", "node");
+    for (var parked : List.of(List.of("spec", "title"), List.of("room", "wake"))) {
+      var replica = replicas.get(parked.getFirst());
+      var field = parked.getLast();
+      var local = replica.current("auth");
+      var remote = new LinkedHashMap<>(local);
+      remote.put(field, "main's " + field);
+      replica.recordConflict("auth", local, local, remote, List.of(field));
+    }
+  }
+
+  private record Ran(int exit, String out, Exception escaped) {}
+
+  private Ran run(Object command, String... args) {
+    var out = new ByteArrayOutputStream();
+    var original = System.out;
+    var escaped = new Exception[1];
+    try (var stream = new PrintStream(out, true, StandardCharsets.UTF_8)) {
+      System.setOut(stream);
+      var exit =
+          new CommandLine(command)
+              .setExecutionExceptionHandler(
+                  (thrown, commandLine, parsed) -> {
+                    escaped[0] = thrown;
+                    return 1;
+                  })
+              .execute(args);
+      return new Ran(exit, out.toString(StandardCharsets.UTF_8), escaped[0]);
+    } finally {
+      System.setOut(original);
+    }
+  }
+
+  @Test
+  void theListVerbPrintsWhatIsParkedOnThisBox() {
+    parkASpecAndItsRoomUnderOneId();
+
+    var listed = run(new ConflictsCommand(this::operations), "--json");
+
+    assertEquals(0, listed.exit());
+    assertEquals(
+        List.of("room", "spec"),
+        YamlUtil.parseList(listed.out().strip()).stream()
+            .map(row -> (String) row.get("type"))
+            .sorted()
+            .toList());
+  }
+
+  @Test
+  void anIdParkedUnderSeveralTypesIsRefusedByNameUntilTypeSaysWhich() {
+    parkASpecAndItsRoomUnderOneId();
+
+    var ambiguous = run(new ConflictsCommand.Resolve(this::operations), "auth", "--mine");
+    var shown = run(new ConflictsCommand.Show(this::operations), "auth");
+
+    for (var refused : List.of(ambiguous, shown)) {
+      assertEquals(1, refused.exit());
+      assertEquals(
+          "'auth' has open conflicts as spec and room: pass --type",
+          refused.escaped().getMessage());
+    }
+    assertEquals(2, conflicts.pending().size(), "a refusal settles nothing");
+  }
+
+  @Test
+  void typeSettlesTheNamedConflictAndLeavesItsTwinParked() {
+    parkASpecAndItsRoomUnderOneId();
+
+    var shown = run(new ConflictsCommand.Show(this::operations), "auth", "--type", "room");
+    var resolved =
+        run(new ConflictsCommand.Resolve(this::operations), "auth", "--type", "spec", "--theirs");
+
+    assertEquals(0, shown.exit());
+    assertTrue(shown.out().contains("wake"), shown.out());
+    assertEquals(0, resolved.exit());
+    assertTrue(resolved.out().contains("Resolved"), resolved.out());
+    assertEquals(
+        List.of("room"),
+        conflicts.pending().stream().map(SyncConflicts.Conflict::entityType).toList());
+    assertEquals("main's title", new SpecStore(db).findById("auth").orElseThrow().title());
+  }
+
+  @Test
+  void aConflictTheBoxHasSinceWrittenOverIsRefusedOnTheCommandLineWithTheRemedy() {
+    parkASpecAndItsRoomUnderOneId();
+    new SpecStore(db).setContent("auth", "written after the conflict was recorded", "");
+
+    var stale =
+        run(new ConflictsCommand.Resolve(this::operations), "auth", "--type", "spec", "--mine");
+
+    assertEquals(1, stale.exit());
+    assertEquals(409, assertInstanceOf(ApiException.class, stale.escaped()).status());
+    assertTrue(stale.escaped().getMessage().contains("Run 'sail sync' to refresh it"));
+    assertEquals(2, conflicts.pending().size());
+  }
+
+  @Test
+  void aMergedRecordFromAFileSettlesASpecAndIsRefusedForWhatHasNoFieldsToMerge()
+      throws IOException {
+    parkASpecAndItsRoomUnderOneId();
+    var merged =
+        new LinkedHashMap<>(
+            SyncedEntities.replicas(db, "node", "node").get("spec").current("auth"));
+    merged.put("title", "merged title");
+    var file = Files.writeString(tempDir.resolve("merged.yaml"), YamlUtil.dumpJson(merged));
+
+    var room =
+        run(
+            new ConflictsCommand.Resolve(this::operations),
+            "auth",
+            "--type",
+            "room",
+            "--merge-file",
+            file.toString());
+    var spec =
+        run(
+            new ConflictsCommand.Resolve(this::operations),
+            "auth",
+            "--type",
+            "spec",
+            "--merge-file",
+            file.toString());
+
+    assertEquals(1, room.exit(), "a room has no field-level merge");
+    assertEquals(0, spec.exit());
+    assertEquals("merged title", new SpecStore(db).findById("auth").orElseThrow().title());
+    assertEquals(
+        List.of("room"),
+        conflicts.pending().stream().map(SyncConflicts.Conflict::entityType).toList());
+  }
+
+  @Test
+  void aVerbAimedAtNothingParkedSaysSoAndFails() {
+    assertEquals(1, run(new ConflictsCommand.Show(this::operations), "ghost").exit());
+    assertEquals(1, run(new ConflictsCommand.Resolve(this::operations), "ghost", "--mine").exit());
+    assertEquals(
+        1,
+        run(new ConflictsCommand.Resolve(this::operations), "ghost", "--mine", "--theirs").exit(),
+        "two strategies are no decision");
   }
 }

@@ -154,7 +154,9 @@ final class LocalApiRouter implements LocalApiHandler {
           new Resolution(
               Resolution.Strategy.valueOf(text.toUpperCase(Locale.ROOT)), (String) merged);
       return ApiResponse.ok(
-          SyncViews.conflict(operations.resolveConflict(id, resolution, caller.actor())));
+          SyncViews.conflict(
+              operations.resolveConflict(
+                  request.query().get("type"), id, resolution, caller.actor())));
     }
     if (WHOAMI.equals(path)) {
       return whoami(request, caller);

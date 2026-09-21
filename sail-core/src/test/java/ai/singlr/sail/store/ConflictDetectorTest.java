@@ -252,4 +252,25 @@ class ConflictDetectorTest {
 
     assertEquals("2026-09-01T00:00:09Z", merged.result().get("beat"));
   }
+
+  @Test
+  void driftNamesTheWorkFieldsThatMovedAndNothingAClockOrAnAuthorDid() {
+    var before = Map.<String, Object>of("status", "running", "beat", "1", "_actor", "uday");
+    var after = Map.<String, Object>of("status", "completed", "beat", "2", "_actor", "sail");
+
+    assertEquals(List.of("status"), ConflictDetector.drift(before, after, Set.of("beat")));
+    assertEquals(
+        List.of(), ConflictDetector.drift(before, Map.of("status", "running"), Set.of("beat")));
+  }
+
+  @Test
+  void driftTreatsARowThatAppearedOrVanishedAsDeleted() {
+    var row = Map.<String, Object>of("status", "running");
+
+    assertEquals(List.of(), ConflictDetector.drift(null, null, Set.of()));
+    assertEquals(
+        List.of(ConflictDetector.DELETED_FIELD), ConflictDetector.drift(row, null, Set.of()));
+    assertEquals(
+        List.of(ConflictDetector.DELETED_FIELD), ConflictDetector.drift(null, row, Set.of()));
+  }
 }
