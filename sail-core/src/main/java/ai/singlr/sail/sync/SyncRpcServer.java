@@ -200,6 +200,7 @@ public final class SyncRpcServer {
     var missing = blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
     if (missing.isEmpty()) return;
+    String refusal = null;
     var manifests = new LinkedHashMap<String, BlobStore.Manifest>();
     while (true) {
       var content = readContent(in);
@@ -213,21 +214,26 @@ public final class SyncRpcServer {
       try {
         limits.check(manifest.size());
       } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException("blob " + manifest.hash() + ": " + e.getMessage());
+        if (refusal == null) refusal = "blob " + manifest.hash() + ": " + e.getMessage();
       }
     }
     if (!manifests.keySet().equals(missing))
       throw new IllegalArgumentException("Missing manifests for blobs " + missing);
+    if (refusal != null) {
+      reply(out, new SyncWire.Refuse(refusal));
+      return;
+    }
     var chunks = new LinkedHashSet<String>();
     manifests.values().forEach(manifest -> chunks.addAll(manifest.chunkHashes()));
-    reply(out, new SyncWire.Done());
+    var requested = blobs.missingChunks(chunks);
+    reply(out, new SyncWire.Lack(List.copyOf(requested)));
     var remainingBytes = manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum();
     while (true) {
       var content = readContent(in);
       if (content instanceof SyncWire.Done) break;
       if (!(content instanceof SyncWire.Chunk chunk))
         throw new IllegalArgumentException("Expected chunk for blobs " + missing);
-      if (!chunks.remove(chunk.hash()))
+      if (!requested.remove(chunk.hash()))
         throw new IllegalArgumentException("Unexpected chunk " + chunk.hash());
       if (chunk.size() > remainingBytes)
         throw new IllegalArgumentException(
@@ -240,8 +246,8 @@ public final class SyncRpcServer {
             e.kind(), "blob " + missing + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
       }
     }
-    if (!chunks.isEmpty())
-      throw new IllegalArgumentException("Missing chunks " + chunks + " for blobs " + missing);
+    if (!requested.isEmpty())
+      throw new IllegalArgumentException("Missing chunks " + requested + " for blobs " + missing);
     manifests.values().forEach(blobs::assemble);
     reply(out, new SyncWire.Done());
   }

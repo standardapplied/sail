@@ -5,29 +5,40 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.sync.SyncWire;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 /** Verified, content-addressed blobs and deduplicated chunks, streamed through SQLite. */
 public final class BlobStore {
   public static final long MAX_SIZE = 8L * 1024 * 1024 * 1024;
-  private static final java.util.Map<Object, java.util.concurrent.locks.ReentrantLock> LOCKS =
-      new java.util.HashMap<>();
+  private static final Map<Object, ReentrantLock> LOCKS = new HashMap<>();
   private final Sqlite db;
-  private final java.util.concurrent.locks.ReentrantLock contentLock;
+  private final ReentrantLock contentLock;
 
   public BlobStore(Sqlite db) {
     this.db = Objects.requireNonNull(db, "db");
@@ -35,8 +46,7 @@ public final class BlobStore {
       contentLock =
           db.path() == null
               ? db.contentLock
-              : LOCKS.computeIfAbsent(
-                  db.path(), ignored -> new java.util.concurrent.locks.ReentrantLock());
+              : LOCKS.computeIfAbsent(db.path(), ignored -> new ReentrantLock());
     }
   }
 
@@ -45,21 +55,17 @@ public final class BlobStore {
     if (db.inTransaction()) return () -> {};
     contentLock.lock();
     if (contentLock.getHoldCount() > 1 || db.path() == null) return contentLock::unlock;
-    java.nio.channels.FileChannel channel = null;
+    FileChannel channel = null;
     try {
       var path = db.path().resolveSibling(db.path().getFileName() + ".blobs.lock");
       try {
-        java.nio.file.Files.createFile(path);
-        var source =
-            java.nio.file.Files.readAttributes(
-                db.path(), java.nio.file.attribute.PosixFileAttributes.class);
-        java.nio.file.Files.getFileAttributeView(
-                path, java.nio.file.attribute.PosixFileAttributeView.class)
-            .setGroup(source.group());
-        java.nio.file.Files.setPosixFilePermissions(path, source.permissions());
-      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+        Files.createFile(path);
+        var source = Files.readAttributes(db.path(), PosixFileAttributes.class);
+        Files.getFileAttributeView(path, PosixFileAttributeView.class).setGroup(source.group());
+        Files.setPosixFilePermissions(path, source.permissions());
+      } catch (FileAlreadyExistsException ignored) {
       }
-      channel = java.nio.channels.FileChannel.open(path, java.nio.file.StandardOpenOption.WRITE);
+      channel = FileChannel.open(path, StandardOpenOption.WRITE);
       var lock = channel.lock();
       var held = channel;
       return () -> {
@@ -192,15 +198,14 @@ public final class BlobStore {
 
   public String putText(String text) {
     return put(
-        new ByteArrayInputStream(
-            Objects.toString(text, "").getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        new ByteArrayInputStream(Objects.toString(text, "").getBytes(StandardCharsets.UTF_8)));
   }
 
   public String text(String hash) {
     try (var input = open(hash);
-        var output = new java.io.ByteArrayOutputStream()) {
+        var output = new ByteArrayOutputStream()) {
       input.transferTo(output);
-      return output.toString(java.nio.charset.StandardCharsets.UTF_8);
+      return output.toString(StandardCharsets.UTF_8);
     } catch (IOException e) {
       throw new UncheckedIOException("Cannot read blob " + hash, e);
     }
@@ -242,8 +247,7 @@ public final class BlobStore {
   }
 
   private static List<String> chunkHashes(String json) {
-    var map =
-        YamlUtil.parseJsonLine("{\"chunks\":" + json + "}", ai.singlr.sail.sync.SyncWire.MAX_FRAME);
+    var map = YamlUtil.parseJsonLine("{\"chunks\":" + json + "}", SyncWire.MAX_FRAME);
     return ((List<?>) map.get("chunks")).stream().map(Object::toString).toList();
   }
 
@@ -335,7 +339,7 @@ public final class BlobStore {
                 "SELECT body_hash FROM specs UNION SELECT plan_hash FROM specs UNION SELECT content_hash FROM project_files",
                 row -> row.text(0)));
     references.remove(null);
-    for (var entity : ai.singlr.sail.sync.SyncedEntities.all()) {
+    for (var entity : SyncedEntities.all()) {
       var store = entity.store(db);
       var fields = store.contentFields();
       if (fields.isEmpty()) continue;
@@ -355,7 +359,7 @@ public final class BlobStore {
       for (var snapshot :
           db.query(
               "SELECT base_snapshot, local_snapshot, remote_snapshot FROM sync_conflicts WHERE entity_type = ? AND status = 'pending'",
-              row -> java.util.Arrays.asList(row.text(0), row.text(1), row.text(2)),
+              row -> Arrays.asList(row.text(0), row.text(1), row.text(2)),
               entity.type())) {
         for (var side : snapshot) addReferences(references, YamlUtil.parseMap(side), fields);
       }

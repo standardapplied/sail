@@ -69,6 +69,58 @@ class SyncWireTest {
           new SyncWire.Failed("disk full", "store"));
 
   @Test
+  void aChunkCannotBeAnnouncedUntilItsBytesMatchItsHash() {
+    var output = new java.io.ByteArrayOutputStream();
+    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    assertThrows(
+        IllegalArgumentException.class, () -> SyncWire.writeChunk(output, hash, new byte[] {2}));
+    assertEquals(0, output.size());
+  }
+
+  @Test
+  void contentLengthsMustBeIntegersAndEntriesMustBeObjects() {
+    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    for (var size : List.of("\"1\"", "1.5", "null")) {
+      var line = "{\"op\":\"chunk\",\"hash\":\"" + hash + "\",\"size\":" + size + "}";
+      assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeRequest(line));
+      assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeResponse(line));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> SyncWire.decodeResponse("{\"op\":\"page\",\"entries\":[1]}"));
+  }
+
+  @Test
+  void rpcFailuresDistinguishMalformedMessagesFromClosedAndBrokenStreams() {
+    var malformed =
+        assertThrows(
+            SyncTransportException.class,
+            () ->
+                Rpc.exchange(
+                    new ByteStreams.Input("{\"op\":\"unknown\"}\n"),
+                    new ByteStreams.Output(),
+                    new SyncWire.Heads()));
+    assertEquals("protocol", malformed.kind());
+    assertTrue(malformed.getMessage().contains("heads"));
+    assertEquals(
+        "unreachable",
+        assertThrows(
+                SyncTransportException.class,
+                () -> Rpc.receive(new ByteStreams.Input(""), "manifest"))
+            .kind());
+    var broken =
+        new java.io.InputStream() {
+          @Override
+          public int read() throws java.io.IOException {
+            throw new java.io.IOException("connection reset");
+          }
+        };
+    var failure = assertThrows(SyncTransportException.class, () -> Rpc.receive(broken, "chunk"));
+    assertEquals("unreachable", failure.kind());
+    assertTrue(failure.getMessage().contains("connection reset"));
+  }
+
+  @Test
   void everyRequestRoundTripsOnOneLineTaggedWithItsOp() {
     for (var request : REQUESTS) {
       var line = SyncWire.encode(request);

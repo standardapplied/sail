@@ -411,6 +411,24 @@ class SyncTransportTest {
   }
 
   @Test
+  void needBatchesCountUtf8BytesAndEscapeCharacters() throws Exception {
+    var path = String.join("/", java.util.Collections.nCopies(6, "界".repeat(40)));
+    var files = new FileStore(nodeA.db);
+    for (var i = 0; i < 3; i++)
+      files.put("proj", path + i, new java.io.ByteArrayInputStream(new byte[] {1}), 0644);
+    try (var link = connect(nodeA, SMALL_FRAME, out -> out)) {
+      var session = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
+      assertEquals(
+          3,
+          session
+              .reconcile("file", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("file"))
+              .report()
+              .pushed());
+      assertEquals(3, link.count("need"));
+    }
+  }
+
+  @Test
   void aPushIsSplitIntoBatchesAtTheFrameBound() throws Exception {
     for (var id : List.of("p1", "p2", "p3", "p4")) {
       bigSpec(nodeA, id);

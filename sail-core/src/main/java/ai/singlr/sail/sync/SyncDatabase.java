@@ -17,8 +17,8 @@ import java.nio.file.Path;
  * Exists because of the in-sync self-update incident where a freshly-replaced binary kept syncing
  * against the previous release's schema and aborted on a stale CHECK constraint — both sync entry
  * points go through {@link #prepare}; {@link #converge} also owns the RPC server's database handle.
- * Schema migration is idempotent and cheap when already current; data migration on a pre-existing
- * database remains the explicit responsibility of {@code sail migrate}.
+ * Schema and pending data migrations finish before the handle can serve or synchronize content,
+ * including resuming a migration interrupted by an older release's upgrade timeout.
  */
 public final class SyncDatabase implements AutoCloseable {
 

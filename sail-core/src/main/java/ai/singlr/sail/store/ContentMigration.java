@@ -97,7 +97,7 @@ public final class ContentMigration implements DataMigration {
             "UPDATE project_files SET content_hash = ?, size = ?, kind = ? WHERE id = ?",
             hash,
             blobs.manifest(hash).size(),
-            kind(blobs, hash),
+            FileStore.kind(blobs, hash),
             id);
         known(db, id, hash);
         changed = true;
@@ -139,13 +139,20 @@ public final class ContentMigration implements DataMigration {
                         default -> field;
                       })
               .toList();
-      db.execute(
-          "UPDATE sync_conflicts SET base_snapshot = ?, local_snapshot = ?, remote_snapshot = ?, fields = ? WHERE id = ?",
-          base,
-          local,
-          remote,
-          YamlUtil.dumpJson(fields),
-          conflict.id());
+      var encodedFields = YamlUtil.dumpJson(fields);
+      if (!java.util.Objects.equals(base, conflict.base())
+          || !java.util.Objects.equals(local, conflict.local())
+          || !java.util.Objects.equals(remote, conflict.remote())
+          || !encodedFields.equals(conflict.fields())) {
+        db.execute(
+            "UPDATE sync_conflicts SET base_snapshot = ?, local_snapshot = ?, remote_snapshot = ?, fields = ? WHERE id = ?",
+            base,
+            local,
+            remote,
+            encodedFields,
+            conflict.id());
+        changed = true;
+      }
     }
     return changed;
   }
@@ -170,7 +177,7 @@ public final class ContentMigration implements DataMigration {
       var hash = legacyFile(blobs, content == null ? "" : content.toString());
       value.putIfAbsent("content_hash", hash);
       value.putIfAbsent("mode", 0644);
-      value.putIfAbsent("kind", kind(blobs, hash));
+      value.putIfAbsent("kind", FileStore.kind(blobs, hash));
       known(db, id, hash);
     }
     return value.equals(YamlUtil.parseJsonLine(json, ai.singlr.sail.sync.SyncWire.MAX_FRAME))
@@ -185,19 +192,6 @@ public final class ContentMigration implements DataMigration {
       return blobs.put(input);
     } catch (java.io.IOException e) {
       throw new java.io.UncheckedIOException("Cannot migrate legacy file content", e);
-    }
-  }
-
-  private static String kind(BlobStore blobs, String hash) {
-    try (var input = blobs.open(hash)) {
-      for (var i = 0; i < 8192; i++) {
-        var value = input.read();
-        if (value == 0) return "binary";
-        if (value == -1) break;
-      }
-      return "text";
-    } catch (java.io.IOException e) {
-      throw new java.io.UncheckedIOException(e);
     }
   }
 

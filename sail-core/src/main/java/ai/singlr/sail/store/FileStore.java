@@ -70,22 +70,20 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   private void ingest(String project, String path, InputStream input, int mode) {
     var hash = blobs.put(input);
-    var binary = false;
+    put(new FileRow(project, path, hash, blobs.manifest(hash).size(), mode, kind(blobs, hash)));
+  }
+
+  static String kind(BlobStore blobs, String hash) {
     try (var stream = blobs.open(hash)) {
       for (var i = 0; i < 8192; i++) {
         var value = stream.read();
         if (value == -1) break;
-        if (value == 0) {
-          binary = true;
-          break;
-        }
+        if (value == 0) return "binary";
       }
+      return "text";
     } catch (java.io.IOException e) {
       throw new java.io.UncheckedIOException(e);
     }
-    put(
-        new FileRow(
-            project, path, hash, blobs.manifest(hash).size(), mode, binary ? "binary" : "text"));
   }
 
   /** The change-log entity id for a file: its project and relative path. */

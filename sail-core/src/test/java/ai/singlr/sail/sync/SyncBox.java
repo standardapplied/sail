@@ -138,6 +138,27 @@ public final class SyncBox implements AutoCloseable {
   public static Link connect(
       SyncRpcServer server, Sqlite db, String box, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
+    return connect(server, db, box, frame, serverOut, output -> output);
+  }
+
+  public static Link connect(
+      SyncRpcServer server,
+      SyncBox box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
+    return connect(server, box.db, box.id, frame, serverOut, nodeOut);
+  }
+
+  private static Link connect(
+      SyncRpcServer server,
+      Sqlite db,
+      String box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
     var toServer = new PipedOutputStream();
     var serverIn = new BufferedInputStream(new PipedInputStream(toServer, 1024 * 1024));
     var toClient = new PipedOutputStream();
@@ -209,7 +230,11 @@ public final class SyncBox implements AutoCloseable {
     var notices = new ArrayList<String>();
     var session =
         SyncSession.open(
-            clientIn, tee, SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box), notices::add, db);
+            clientIn,
+            nodeOut.apply(tee),
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
+            notices::add,
+            db);
     return new Link(session, log, notices, thread);
   }
 

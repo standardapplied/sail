@@ -39,6 +39,9 @@ class NativeFleetIT {
                 "project", "files", "add", "-p", "demo", "/tmp/shared.bin", "--as", "shared.bin");
           });
       var sharedHash = main.shOk("sha256sum /tmp/shared.bin").split(" ")[0];
+      var sharedMode =
+          Integer.parseInt(
+              main.shOk("stat -c %a \"$HOME/.sail/projects/demo/files/shared.bin\"").strip(), 8);
       mady.sailOk("sync");
       fleet.assertConverged(mady);
 
@@ -82,7 +85,8 @@ class NativeFleetIT {
           sharedHash,
           mady.shOk("sail project files cat -p demo shared.bin | sha256sum").split(" ")[0]);
       assertEquals(
-          "420", mady.query("SELECT mode FROM project_files WHERE path = 'shared.bin'").strip());
+          Integer.toString(sharedMode),
+          mady.query("SELECT mode FROM project_files WHERE path = 'shared.bin'").strip());
       assertEquals(
           main.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"),
           mady.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"));

@@ -100,6 +100,39 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void contentRequiresAHandshakeAStoreAndTheCorrectExchangePhase() throws Exception {
+    var fetch = new SyncWire.Fetch(List.of());
+    var withoutStore = new SyncRpcServer(new FakeMain(), true);
+    assertInstanceOf(SyncWire.Refuse.class, serve(withoutStore, fetch).getFirst());
+    assertEquals(
+        "protocol", assertInstanceOf(SyncWire.Failed.class, after(withoutStore, fetch)).kind());
+    try (var main = new SyncBox("main")) {
+      var failure =
+          assertInstanceOf(
+              SyncWire.Failed.class,
+              after(main.server(new SyncPrincipal("node", true)), new SyncWire.Done()));
+      assertEquals("protocol", failure.kind());
+      assertTrue(failure.message().contains("Unexpected content operation"));
+    }
+  }
+
+  @Test
+  void closingDuringAnUploadManifestRunIsUnreachableAndStoresNothing() throws Exception {
+    try (var main = new SyncBox("main")) {
+      var failure =
+          assertInstanceOf(
+              SyncWire.Failed.class,
+              after(
+                  main.server(new SyncPrincipal("node", true)),
+                  new SyncWire.Announce(
+                      List.of(ai.singlr.sail.store.BlobStore.hash(new byte[] {1})))));
+      assertEquals("unreachable", failure.kind());
+      assertEquals(
+          0L, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+    }
+  }
+
+  @Test
   void unheldContentCannotBeCommitted() throws Exception {
     try (var main = new SyncBox("main")) {
       var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});

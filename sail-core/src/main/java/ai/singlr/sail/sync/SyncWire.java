@@ -386,12 +386,12 @@ public final class SyncWire {
       this.bound = bound;
     }
 
-    /** Whether an item of {@code length} chars still fits beside what is already in the frame. */
+    /** Whether an item of {@code length} bytes still fits beside what is already in the frame. */
     public boolean admits(int length) {
       return used + length + SEPARATOR <= bound;
     }
 
-    /** Whether an item of {@code length} chars could ever fit a frame of this bound on its own. */
+    /** Whether an item of {@code length} bytes could ever fit a frame of this bound on its own. */
     public boolean canEverAdmit(int length) {
       return ENVELOPE + length + SEPARATOR <= bound;
     }
@@ -406,12 +406,17 @@ public final class SyncWire {
     }
   }
 
-  /** The chars {@code entry} takes inside a page. */
+  /** The encoded UTF-8 bytes of an identifier, including quotes and escapes. */
+  public static int encodedLength(String id) {
+    return YamlUtil.dumpJson(List.of(id)).getBytes(StandardCharsets.UTF_8).length - 2;
+  }
+
+  /** The bytes {@code entry} takes inside a page. */
   public static int encodedLength(Entry entry) {
     return YamlUtil.dumpJson(entryMap(entry)).getBytes(StandardCharsets.UTF_8).length;
   }
 
-  /** The chars {@code offer} takes inside a push. */
+  /** The bytes {@code offer} takes inside a push. */
   public static int encodedLength(MainReplica.Offer offer) {
     return YamlUtil.dumpJson(offerMap(offer)).getBytes(StandardCharsets.UTF_8).length;
   }

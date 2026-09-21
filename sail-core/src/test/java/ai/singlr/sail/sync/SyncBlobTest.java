@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import java.io.ByteArrayInputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,6 +26,28 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SyncBlobTest {
+
+  @Test
+  void convergingDeletionsCollectOrphanedChunksAfterAdoptingTheTombstone() {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node")) {
+      var mainFiles = new FileStore(main.db);
+      mainFiles.put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+      SyncBox.round(main.db, node.db, "file");
+      mainFiles.delete("project", "file");
+      new FileStore(node.db).delete("project", "file");
+      var blobs = new BlobStore(node.db);
+      var orphan = blobs.putText("unfinished upload");
+
+      var report = SyncBox.round(main.db, node.db, "file");
+
+      assertEquals(0, report.pulled());
+      assertFalse(blobs.has(orphan));
+      assertEquals(
+          mainFiles.latestRev("project/file"), new FileStore(node.db).latestRev("project/file"));
+    }
+  }
+
   @TempDir Path dir;
 
   @Test
@@ -91,34 +114,7 @@ class SyncBlobTest {
       }
       var hash = files.find("proj", "binary").orElseThrow().contentHash();
       var all = new HashSet<>(files.blobs().manifest(hash).chunkHashes());
-      var chunks = new AtomicInteger();
-      UnaryOperator<OutputStream> cut =
-          output ->
-              new FilterOutputStream(output) {
-                private int raw;
-
-                @Override
-                public void write(byte[] bytes, int offset, int length) throws IOException {
-                  if (raw > 0) {
-                    if (chunks.get() == 3) {
-                      out.write(bytes, offset, length / 2);
-                      out.close();
-                      throw new IOException("cut during a chunk");
-                    }
-                    raw -= length;
-                  } else if (length > 1 && bytes[offset] == '{') {
-                    var message =
-                        YamlUtil.parseMap(
-                            new String(
-                                bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8));
-                    if ("chunk".equals(message.get("op"))) {
-                      raw = ((Number) message.get("size")).intValue();
-                      chunks.incrementAndGet();
-                    }
-                  }
-                  out.write(bytes, offset, length);
-                }
-              };
+      var cut = cutDuringChunk(3);
       var failure =
           assertThrows(
               SyncTransportException.class,
@@ -154,7 +150,7 @@ class SyncBlobTest {
 
   @Test
   void uploadsAnnounceContentBeforeCommittingAndSkipBlobsAlreadyOnMain() throws Exception {
-    var path = randomFile(5 * 1024 * 1024);
+    var path = randomFile(40 * 1024 * 1024);
     try (var main = new SyncBox(dir, "main");
         var node = new SyncBox(dir, "node")) {
       var files = new FileStore(node.db);
@@ -182,6 +178,162 @@ class SyncBlobTest {
       assertEquals(
           1, main.db.queryOne("SELECT COUNT(*) FROM blobs", row -> row.integer(0)).orElseThrow());
       assertEquals(0640, new FileStore(main.db).find("other", "copy").orElseThrow().mode());
+      try (var disk = new java.io.RandomAccessFile(path.toFile(), "rw")) {
+        disk.seek(20 * 1024 * 1024);
+        disk.write(new byte[1024]);
+      }
+      try (var input = Files.newInputStream(path)) {
+        files.put("proj", "binary", input, 0750);
+      }
+      var next = files.find("proj", "binary").orElseThrow();
+      var changed = new HashSet<>(files.blobs().manifest(next.contentHash()).chunkHashes());
+      changed.removeAll(files.blobs().manifest(file.contentHash()).chunkHashes());
+      assertEquals(1, changed.size());
+      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+        var report =
+            link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+        assertEquals(1, link.count("chunk"));
+        assertEquals(files.blobs().chunk(changed.iterator().next()).length, report.sentBytes());
+      }
+    }
+  }
+
+  @Test
+  void aCutUploadRetriesOnlyChunksMainDidNotVerify() throws Exception {
+    var path = randomFile(40 * 1024 * 1024);
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node")) {
+      var files = new FileStore(node.db);
+      try (var input = Files.newInputStream(path)) {
+        files.put("proj", "binary", input, 0750);
+      }
+      var hash = files.find("proj", "binary").orElseThrow().contentHash();
+      var chunks = new HashSet<>(files.blobs().manifest(hash).chunkHashes());
+      var failure =
+          assertThrows(
+              SyncTransportException.class,
+              () -> {
+                try (var link =
+                    SyncBox.connect(
+                        main.server(new SyncPrincipal("node", true)),
+                        node,
+                        SyncWire.MAX_FRAME,
+                        output -> output,
+                        cutDuringChunk(3))) {
+                  link.reconcile(
+                      "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+                }
+              });
+      assertEquals("unreachable", failure.kind());
+      var held =
+          main.db.query(
+              "SELECT hash, bytes FROM chunks",
+              row -> {
+                assertEquals(row.text(0), BlobStore.hash(row.bytes(1)));
+                return row.text(0);
+              });
+      assertEquals(2, held.size());
+      assertFalse(new BlobStore(main.db).has(hash));
+      assertTrue(new FileStore(main.db).list("proj").isEmpty());
+      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+        link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+        assertEquals(chunks.size() - held.size(), link.count("chunk"));
+      }
+      assertTrue(new BlobStore(main.db).has(hash));
+    }
+  }
+
+  @Test
+  void aViewerIsRefusedAtAnnounceBeforeMainStoresAnyContent() throws Exception {
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node")) {
+      new FileStore(node.db)
+          .put("proj", "binary", new java.io.ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+      var link = SyncBox.connect(main.server(SyncPrincipal.readOnly()), node);
+      var failure =
+          assertThrows(
+              SyncTransportException.class,
+              () -> {
+                try (link) {
+                  link.reconcile(
+                      "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+                }
+              });
+      assertEquals("refused", failure.kind());
+      assertEquals(1, link.count("announce"));
+      assertEquals(0, link.count("chunk"));
+      assertEquals(
+          0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      assertEquals(
+          0, main.db.queryOne("SELECT COUNT(*) FROM blobs", row -> row.integer(0)).orElseThrow());
+    }
+  }
+
+  @Test
+  void mainRefusesAnUnsolicitedChunkWithoutStoringIt() throws Exception {
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node")) {
+      new FileStore(node.db)
+          .put("proj", "binary", new java.io.ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+      var unsolicited = new byte[] {7, 8, 9};
+      var hash = BlobStore.hash(unsolicited);
+      var replies = new ByteStreams.Output();
+      UnaryOperator<OutputStream> record =
+          output ->
+              new FilterOutputStream(output) {
+                @Override
+                public void write(int value) throws IOException {
+                  out.write(value);
+                  replies.write(value);
+                }
+
+                @Override
+                public void write(byte[] bytes, int offset, int length) throws IOException {
+                  out.write(bytes, offset, length);
+                  replies.write(bytes, offset, length);
+                }
+              };
+      UnaryOperator<OutputStream> inject =
+          output ->
+              new FilterOutputStream(output) {
+                private boolean raw;
+
+                @Override
+                public void write(byte[] bytes, int offset, int length) throws IOException {
+                  if (raw) {
+                    out.write(unsolicited);
+                    raw = false;
+                    return;
+                  }
+                  var line =
+                      new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8);
+                  if (line.contains("\"op\": \"chunk\"")) {
+                    out.write(
+                        (SyncWire.encode(new SyncWire.Chunk(hash, unsolicited.length)) + "\n")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    raw = true;
+                  } else out.write(bytes, offset, length);
+                }
+              };
+      assertThrows(
+          RuntimeException.class,
+          () -> {
+            try (var link =
+                SyncBox.connect(
+                    main.server(new SyncPrincipal("node", true)),
+                    node,
+                    SyncWire.MAX_FRAME,
+                    record,
+                    inject)) {
+              link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+            }
+          });
+      var failed =
+          (SyncWire.Failed) SyncWire.decodeResponse(replies.toString().lines().toList().getLast());
+      assertEquals("protocol", failed.kind());
+      assertTrue(failed.message().contains(hash));
+      assertEquals(
+          0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
     }
   }
 
@@ -206,6 +358,8 @@ class SyncBlobTest {
               });
       assertTrue(failure.getMessage().contains(hash), failure.getMessage());
       assertTrue(failure.getMessage().contains("file_max"), failure.getMessage());
+      assertTrue(failure.getMessage().contains("proj/binary"), failure.getMessage());
+      assertEquals("refused", failure.kind());
       assertEquals(
           0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
       assertTrue(new FileStore(main.db).list("proj").isEmpty());
@@ -272,6 +426,35 @@ class SyncBlobTest {
                 .has(main.specs.comparableSnapshot("a").get("body_hash").toString()));
       }
     }
+  }
+
+  private static UnaryOperator<OutputStream> cutDuringChunk(int number) {
+    var chunks = new AtomicInteger();
+    return output ->
+        new FilterOutputStream(output) {
+          private int raw;
+
+          @Override
+          public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (raw > 0) {
+              if (chunks.get() == number) {
+                out.write(bytes, offset, length / 2);
+                out.close();
+                throw new IOException("cut during a chunk");
+              }
+              raw -= length;
+            } else if (length > 1 && bytes[offset] == '{') {
+              var message =
+                  YamlUtil.parseMap(
+                      new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8));
+              if ("chunk".equals(message.get("op"))) {
+                raw = ((Number) message.get("size")).intValue();
+                chunks.incrementAndGet();
+              }
+            }
+            out.write(bytes, offset, length);
+          }
+        };
   }
 
   private static int requestedChunks(SyncBox.Link link) {

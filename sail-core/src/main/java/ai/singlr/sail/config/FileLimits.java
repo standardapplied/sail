@@ -20,7 +20,7 @@ public record FileLimits(long fileMax) {
   public FileLimits {
     if (fileMax <= 0 || fileMax > BlobStore.MAX_SIZE) {
       throw new IllegalArgumentException(
-          "limits.file_max must be between 1 and 8 GiB: a blob manifest must fit one sync frame");
+          "limits.file_max must be between 1 byte and 8 GiB: a blob manifest must fit one sync frame");
     }
   }
 

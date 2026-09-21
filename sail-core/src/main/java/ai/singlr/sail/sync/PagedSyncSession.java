@@ -162,7 +162,7 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
-    if (blobs != null && sawTombstone && report.pulled() > 0) blobs.gc(Set.of());
+    if (blobs != null && sawTombstone) blobs.gc(Set.of());
     return new TypeReport(
         type,
         report,
@@ -229,11 +229,13 @@ public final class PagedSyncSession implements SyncSession {
     while (true) {
       var response = Rpc.receive(in, type + " blobs " + missing);
       if (response instanceof SyncWire.Done) break;
-      if (!(response instanceof SyncWire.Manifest m)) throw unexpected(type, "manifest", response);
+      if (!(response instanceof SyncWire.Manifest m))
+        throw unexpected(type + " blobs " + missing, "manifest", response);
       var manifest = m.manifest();
       if (!missing.contains(manifest.hash())
           || manifests.putIfAbsent(manifest.hash(), manifest) != null) {
-        throw new SyncTransportException("Unexpected manifest " + manifest.hash());
+        throw new SyncTransportException(
+            "Unexpected manifest " + manifest.hash() + " for blobs " + missing);
       }
     }
     if (!manifests.keySet().equals(missing)) {
@@ -250,9 +252,11 @@ public final class PagedSyncSession implements SyncSession {
       while (true) {
         var response = Rpc.receive(in, type + " blobs " + missing);
         if (response instanceof SyncWire.Done) break;
-        if (!(response instanceof SyncWire.Chunk chunk)) throw unexpected(type, "chunk", response);
+        if (!(response instanceof SyncWire.Chunk chunk))
+          throw unexpected(type + " blobs " + missing, "chunk", response);
         if (!needed.remove(chunk.hash()))
-          throw new SyncTransportException("Unexpected chunk " + chunk.hash());
+          throw new SyncTransportException(
+              "Unexpected chunk " + chunk.hash() + " for blobs " + missing);
         if (chunk.size() > remainingBytes)
           throw new SyncTransportException(
               "Chunk " + chunk.hash() + " exceeds declared content size for blobs " + missing);
@@ -269,7 +273,8 @@ public final class PagedSyncSession implements SyncSession {
           throw new SyncTransportException(
               e.kind(), "blob " + missing + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
         } catch (IllegalArgumentException e) {
-          throw new SyncTransportException("protocol", e.getMessage(), e);
+          throw new SyncTransportException(
+              "protocol", "blob " + missing + ": " + e.getMessage(), e);
         }
       }
       if (!needed.isEmpty())
@@ -290,8 +295,9 @@ public final class PagedSyncSession implements SyncSession {
     if (fields.isEmpty()) return;
     var hashes =
         BlobStore.referenced(offers.stream().map(MainReplica.Offer::snapshot).toList(), fields);
+    var context = type + " " + offers.stream().map(MainReplica.Offer::id).toList();
     var response = Rpc.exchange(in, out, new SyncWire.Announce(List.copyOf(hashes)));
-    if (!(response instanceof SyncWire.Lack lack)) throw unexpected(type, "lack", response);
+    if (!(response instanceof SyncWire.Lack lack)) throw unexpected(context, "lack", response);
     if (!hashes.containsAll(lack.hashes())
         || new LinkedHashSet<>(lack.hashes()).size() != lack.hashes().size())
       throw new SyncTransportException("Unexpected missing blobs " + lack.hashes());
@@ -303,9 +309,13 @@ public final class PagedSyncSession implements SyncSession {
       chunks.addAll(manifest.chunkHashes());
     }
     Rpc.send(out, SyncWire.encode(new SyncWire.Done()));
-    var ready = Rpc.receive(in, type + " blobs " + lack.hashes());
-    if (!(ready instanceof SyncWire.Done)) throw unexpected(type, "done", ready);
-    for (var hash : chunks) {
+    var ready = Rpc.receive(in, context + " blobs " + lack.hashes());
+    if (!(ready instanceof SyncWire.Lack requested)) throw unexpected(context, "lack", ready);
+    if (!chunks.containsAll(requested.hashes())
+        || new LinkedHashSet<>(requested.hashes()).size() != requested.hashes().size())
+      throw new SyncTransportException(
+          context + ": unexpected missing chunks " + requested.hashes());
+    for (var hash : requested.hashes()) {
       var bytes = blobs.chunk(hash);
       try {
         SyncWire.writeChunk(out, hash, bytes);
@@ -315,15 +325,15 @@ public final class PagedSyncSession implements SyncSession {
       sentBytes += bytes.length;
     }
     Rpc.send(out, SyncWire.encode(new SyncWire.Done()));
-    var accepted = Rpc.receive(in, type + " blobs " + lack.hashes());
-    if (!(accepted instanceof SyncWire.Done)) throw unexpected(type, "done", accepted);
+    var accepted = Rpc.receive(in, context + " blobs " + lack.hashes());
+    if (!(accepted instanceof SyncWire.Done)) throw unexpected(context, "done", accepted);
   }
 
   private List<String> askable(List<String> ids, int offset) {
     var budget = new SyncWire.Frame(frame);
     var asked = new ArrayList<String>();
     for (var i = offset; i < ids.size(); i++) {
-      var length = ids.get(i).length() + 2;
+      var length = SyncWire.encodedLength(ids.get(i));
       if (!asked.isEmpty() && !budget.admits(length)) {
         break;
       }
