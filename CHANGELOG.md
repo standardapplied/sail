@@ -5,9 +5,44 @@
 - **The sync protocol-3 fallback is gone.** 0.44.0 let a node upgraded ahead of its main keep
   syncing over the whole-table protocol-3 wire for one release; that release is over. A node that
   meets a main still on 0.43 or older now fails the round saying main is on a sync protocol it
-  cannot speak and to upgrade main, and a `refuse` no longer carries the `error`/`error_kind`
-  keys a protocol-3 node read. The fleet floor stays `0.44.0`: this release is wire-compatible
-  with every 0.44 box, so nothing already syncing is refused.
+  cannot speak and to upgrade main — recognised by main answering `hello` with a message that
+  names no `op`; noise on the channel is reported as noise, never as an old main. A `refuse` no
+  longer carries the `error`/`error_kind` keys a protocol-3 node read, so a 0.43 node refused by
+  this main sees the remedy inside an "Unrecognized sync response" line rather than on its own.
+  The fleet floor stays `0.44.0`: this release is wire-compatible with every 0.44 box, so nothing
+  already syncing is refused.
+- **A conflict is decided on what the box holds now, and addressed by type and id.** `sail
+  conflicts resolve` wrote the snapshot recorded at detection over whatever the box had written
+  since; it now refuses (`409`) when the row has moved, ignoring latest-wins fields, until `sail
+  sync` re-records the conflict. A spec and its room share an id, and the old lookup reported
+  both as "No open conflict": `--type` on the CLI and `?type=` over the API say which, and an id
+  parked under several types is refused naming them (`400`).
+
+## 0.44.3
+
+- **A parked conflict keeps its entity in the round.** A round examines what main changed since
+  the checkpoint and what this box journaled; an entity parked over an unjournaled field was
+  neither, so no round looked at it again and a conflict that had stopped being one could never
+  close. Every open conflict is now re-reconciled each round: it merges or adopts and closes, or
+  is re-recorded with fresh snapshots — and the round reports it instead of "Already in sync".
+
+## 0.44.2
+
+- **A run's heartbeat never parks a conflict.** `last_activity_at` is stamped without a revision;
+  when main also held a stamp the node never recorded as its base, both sides had moved one field
+  and the round parked it. Stores declare latest-wins fields (instants that only move forward):
+  when both sides moved one, the later wins. A real conflict beside it still surfaces. Adopting
+  an entity's settled state closes whatever conflict is still open on it.
+
+## 0.44.1
+
+- **A stream that ends inside a sync message is a lost channel**, reported as `unreachable`, not
+  as a malformed message with a parser dump.
+- `sail sync status` counts pending conflicts (`pending_conflicts` in `--json`); sync notices
+  about upgrade order are warnings, not errors; a box without `libsqlite3` is told which package
+  provides it, and every database open failure carries its cause.
+- CI runs sync end to end on the native binaries (`NativeFleetIT`): the latest release upgrading
+  to the build under test across real sshd and the gateway's forced command.
 
 ## 0.44.0
 
@@ -17,15 +52,16 @@
   with `hello`, is `welcome`d once (floors compare as versions; a node ahead of main is told the
   order, main first), reads main's high-water per type with `heads`, pulls only the types that
   moved as 16 MiB-bounded pages of the change log since a per-type checkpoint, asks `need` for
-  main's rows of what it changed locally, and pushes in batches. Each page reconciles inside one
-  local transaction and the checkpoint advances only to what the node has seen, so a round that
-  dies resumes at the next page with nothing re-adopted. Main keeps `change_heads` (one row per
+  main's rows of what it changed locally, and pushes in batches. Every adoption is one atomic
+  store operation, no transaction spans the wire, and the checkpoint advances only after a page
+  and only to what the node has seen, so a round that dies mid-page re-pulls it with nothing
+  re-adopted. Main keeps `change_heads` (one row per
   entity naming its latest change) so every read the protocol makes is an index range, never a
   scan of history; `sync_state` becomes per peer and per type, carrying the old checkpoint into
   every type so no node re-seeds. Every box now has a stable sync id (`sync.box_id` in
   `host.yaml`; `sail join` and `sail host sync --as-main` mint one, `sail migrate` persists the
-  hostname for a box that already has a role) which main binds to the SSH principal that first
-  presents it. `sail sync` prints a line per type that moved or failed, `--json` carries a
+  hostname for a box that already has a role); it names the node in main's log, while who the
+  node is stays the authenticated SSH principal. `sail sync` prints a line per type that moved or failed, `--json` carries a
   `types` list, and one type's failure no longer skips the others or the post-sync
   materialization. A run's process bookkeeping (`pid`, `watcher_pid`, `pid_ticks`, `log_path`,
   `transcript_path`) stays on the box that executes it. **Upgrade main first:** a 0.44 node still

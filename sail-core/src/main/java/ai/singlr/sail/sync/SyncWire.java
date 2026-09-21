@@ -374,6 +374,23 @@ public final class SyncWire {
     };
   }
 
+  /**
+   * Whether {@code line} is a JSON object that names no {@code op}. Every protocol-4 message names
+   * one and no earlier protocol did, so at a hello this is how an older main reads. The brace is
+   * checked first because the parser also accepts YAML, where a stray {@code Warning: …} line on
+   * the channel is a map too — and that is noise, not an older main.
+   */
+  static boolean predatesOps(String line) {
+    if (!line.stripLeading().startsWith("{")) {
+      return false;
+    }
+    try {
+      return !YamlUtil.parseJsonLine(line, MAX_FRAME).containsKey(OP);
+    } catch (RuntimeException notAMessage) {
+      return false;
+    }
+  }
+
   public static Response decodeResponse(String line) {
     var map = YamlUtil.parseJsonLine(line, MAX_FRAME);
     var op = string(map, OP);

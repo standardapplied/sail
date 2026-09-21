@@ -188,17 +188,22 @@ O(what it asks for), never O(history).
 ### The wire: sync protocol 4
 
 A session opens with `hello` (protocol, build, fleet floor, box id) and is `welcome`d or
-`refuse`d once; floors compare as versions, and a box id is bound to the SSH principal that
-first presented it. The node then asks `heads` for main's high-water per type and, for each
+`refuse`d once; floors compare as versions. The box id names the node in main's log; who the
+node is stays the authenticated SSH principal, which every commit is attributed to. The node
+then asks `heads` for main's high-water per type and, for each
 type whose tip moved past its checkpoint, `pull`s main's change log since that checkpoint one
 bounded `page` at a time — a seed from any history size costs the same per page as an idle
-round. Each page is its own engine round inside one local transaction, and the checkpoint
-(kept per peer and per type) advances only to what the node has actually seen. After the
+round. Each page is its own engine round: every adoption is one atomic store operation, no
+transaction spans the wire, and the checkpoint (kept per peer and per type) advances only after
+the page and only to what the node has actually seen, so a round that dies mid-page re-pulls it
+and re-adopts nothing. After the
 pages the node asks `need` for main's current rows of whatever it changed itself, so the
 engine sees main's real state for a local edit, and `push`es its offers in batches. Every
 message is one JSON line under a single 16 MiB frame bound (`SyncWire.MAX_FRAME`), the size
-of a shared file with room to spare. A main that answers `hello` with anything this protocol
-cannot decode is on an older sync protocol, and the node fails naming the remedy: upgrade main.
+of a shared file with room to spare. Every protocol-4 message names an `op` and no earlier
+protocol did, so a main that answers `hello` with a message naming none is on an older protocol
+and the node fails naming the remedy: upgrade main. Anything on the channel that is not a
+message at all is reported as that, never blamed on main's version.
 
 Passkeys stay box-local by design: identity crosses boxes via the roster pull, but a
 WebAuthn credential is an RP-scoped secret bound to one box's origin and never leaves it.

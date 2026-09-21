@@ -52,23 +52,27 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
   /**
    * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session, with
    * one line of {@code notice} when this node runs ahead of main's version; a refusal or anything
-   * else fails naming it, and an answer this protocol cannot decode — what a main on an older
-   * protocol gives a hello — fails naming the remedy.
+   * else fails naming it. An answer that is a message but names no {@code op} is what every
+   * protocol before 4 put on the wire, so it fails naming the remedy — upgrade main. Anything that
+   * is not a message at all is reported as what it is, never blamed on main's version.
    */
   static SyncSession open(Reader in, Writer out, SyncWire.Hello hello, Consumer<String> notice) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
+    if (SyncWire.predatesOps(line)) {
+      throw new SyncTransportException(
+          "refused",
+          context
+              + ": main is on a sync protocol this node cannot speak: upgrade main ('sail upgrade'"
+              + " on main), then sync again",
+          null);
+    }
     SyncWire.Response response;
     try {
       response = SyncWire.decodeResponse(line);
     } catch (RuntimeException e) {
       throw new SyncTransportException(
-          "protocol",
-          context
-              + ": main is on a sync protocol this node cannot speak: upgrade main ("
-              + e.getMessage()
-              + ")",
-          e);
+          "protocol", context + ": main did not answer with a sync message: " + e.getMessage(), e);
     }
     return switch (response) {
       case SyncWire.Welcome welcome -> PagedSyncSession.open(in, out, hello, welcome, notice);
