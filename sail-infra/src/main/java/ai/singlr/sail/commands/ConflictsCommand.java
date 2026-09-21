@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.Strings;
@@ -21,8 +22,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -49,9 +52,31 @@ public final class ConflictsCommand implements Callable<Integer> {
   @Option(names = "--json", description = "Output the pending conflicts as JSON.")
   private boolean json;
 
+  private final Supplier<HostOperations> operations;
+
+  public ConflictsCommand() {
+    this(OperationsFactory::open);
+  }
+
+  ConflictsCommand(Supplier<HostOperations> operations) {
+    this.operations = operations;
+  }
+
+  /** Which conflict a verb acts on: ids are unique only within a type. */
+  static final class Address {
+
+    @Parameters(index = "0", description = "Entity id of the conflict.")
+    private String entity;
+
+    @Option(
+        names = "--type",
+        description = "Entity type (spec, room, file, ...), when the id is parked under several.")
+    private String type;
+  }
+
   @Override
   public Integer call() {
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = this.operations.get()) {
       var pending = operations.conflicts();
       System.out.println(renderList(pending, json));
       return 0;
@@ -104,20 +129,25 @@ public final class ConflictsCommand implements Callable<Integer> {
       mixinStandardHelpOptions = true)
   static final class Show implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Entity id of the conflict.")
-    private String entity;
+    @Mixin private Address address;
 
-    @Option(
-        names = "--type",
-        description = "Entity type (spec, room, file, ...), when the id is parked under several.")
-    private String type;
+    private final Supplier<HostOperations> operations;
+
+    Show() {
+      this(OperationsFactory::open);
+    }
+
+    Show(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
 
     @Override
     public Integer call() {
-      try (var operations = OperationsFactory.open()) {
-        var conflict = operations.conflict(type, entity);
+      try (var operations = this.operations.get()) {
+        var conflict = operations.conflict(address.type, address.entity);
         if (conflict == null) {
-          System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
+          System.err.println(
+              Banner.errorLine("No open conflict for '" + address.entity + "'.", Ansi.AUTO));
           return 1;
         }
         System.out.println(render(conflict));
@@ -181,13 +211,17 @@ public final class ConflictsCommand implements Callable<Integer> {
       mixinStandardHelpOptions = true)
   static final class Resolve implements Callable<Integer> {
 
-    @Parameters(index = "0", description = "Entity id of the conflict.")
-    private String entity;
+    @Mixin private Address address;
 
-    @Option(
-        names = "--type",
-        description = "Entity type (spec, room, file, ...), when the id is parked under several.")
-    private String type;
+    private final Supplier<HostOperations> operations;
+
+    Resolve() {
+      this(OperationsFactory::open);
+    }
+
+    Resolve(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
 
     @Option(names = "--mine", description = "Keep this box's version.")
     private boolean mine;
@@ -215,10 +249,11 @@ public final class ConflictsCommand implements Callable<Integer> {
             Banner.errorLine("Choose exactly one of --mine, --theirs, or --merge.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = OperationsFactory.open()) {
-        var conflict = operations.conflict(type, entity);
+      try (var operations = this.operations.get()) {
+        var conflict = operations.conflict(address.type, address.entity);
         if (conflict == null) {
-          System.err.println(Banner.errorLine("No open conflict for '" + entity + "'.", Ansi.AUTO));
+          System.err.println(
+              Banner.errorLine("No open conflict for '" + address.entity + "'.", Ansi.AUTO));
           return 1;
         }
         String edited = null;
@@ -238,12 +273,12 @@ public final class ConflictsCommand implements Callable<Integer> {
         }
         operations.resolveConflict(
             conflict.entityType(),
-            entity,
+            address.entity,
             new Resolution(Resolution.Strategy.valueOf(strategy.name()), edited));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Resolved @|yellow "
-                    + entity
+                    + address.entity
                     + "|@. Run @|bold sail sync|@ to propagate."));
         return 0;
       }
