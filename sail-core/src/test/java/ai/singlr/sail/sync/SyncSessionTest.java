@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SyncSessionTest {
 
@@ -41,19 +44,46 @@ class SyncSessionTest {
     assertEquals(List.of(HELLO, new SyncWire.Bye()), sent);
   }
 
-  @Test
-  void openReturnsTheLegacySessionOnTheExactProtocol3AnswerAndSaysSo() {
-    var v3 =
-        LegacySyncSession.encode(
-                new LegacySyncSession.Failed("session: Unknown sync op: hello", "protocol"))
-            + "\n";
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"error\": \"session: Unknown sync op: hello\", \"error_kind\": \"protocol\"}",
+        "{\"rev\": \"3-abc\", \"maxSeq\": 9}",
+        "  {}"
+      })
+  void anAnswerThatNamesNoOpIsAnOlderMainAndFailsNamingTheRemedy(String olderProtocol) {
+    var v3 = olderProtocol + "\n";
     var notices = new ArrayList<String>();
-    try (var session = open(v3, new StringWriter(), notices)) {
-      assertInstanceOf(LegacySyncSession.class, session);
-    }
-    assertEquals(1, notices.size());
-    assertTrue(notices.getFirst().contains("v3"), notices.getFirst());
-    assertTrue(notices.getFirst().contains(SyncWire.UPGRADE_FLOOR), notices.getFirst());
+    var failure =
+        assertThrows(SyncTransportException.class, () -> open(v3, new StringWriter(), notices));
+    assertEquals("refused", failure.kind());
+    assertTrue(
+        failure
+            .getMessage()
+            .contains("main is on a sync protocol this node cannot speak: upgrade main"),
+        failure.getMessage());
+    assertTrue(notices.isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "Warning: Permanently added 'main' to the list of known hosts.",
+        "bash: sail: command not found",
+        "{\"op\": \"welcome\", \"protocol\": ",
+        "[1, 2]"
+      })
+  void whatIsNotASyncMessageIsReportedAsThatAndNeverBlamedOnMainsVersion(String noise) {
+    var failure =
+        assertThrows(
+            SyncTransportException.class,
+            () -> open(noise + "\n", new StringWriter(), new ArrayList<>()));
+
+    assertEquals("protocol", failure.kind());
+    assertTrue(
+        failure.getMessage().contains("main did not answer with a sync message"),
+        failure.getMessage());
+    assertFalse(failure.getMessage().contains("upgrade main"), failure.getMessage());
   }
 
   @Test
@@ -83,11 +113,12 @@ class SyncSessionTest {
             SyncTransportException.class, () -> open(tips, new StringWriter(), new ArrayList<>()));
     assertTrue(other.getMessage().contains("Tips"), other.getMessage());
 
-    var garbage =
+    var unknownOp =
         assertThrows(
             SyncTransportException.class,
-            () -> open("{\"rev\": 1}\n", new StringWriter(), new ArrayList<>()));
-    assertTrue(garbage.getMessage().contains("Unknown sync op"), garbage.getMessage());
+            () -> open("{\"op\": \"bogus\"}\n", new StringWriter(), new ArrayList<>()));
+    assertEquals("protocol", unknownOp.kind());
+    assertTrue(unknownOp.getMessage().contains("Unknown sync op"), unknownOp.getMessage());
   }
 
   @Test

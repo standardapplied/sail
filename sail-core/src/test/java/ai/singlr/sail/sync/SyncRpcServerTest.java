@@ -118,16 +118,13 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aProtocol3FetchIsRefusedNamingTheUpgradeInWordsAProtocol3NodeReads() throws Exception {
+  void anUnknownOpBeforeHelloIsRefusedNamingTheRemedy() throws Exception {
     var fetch = "{\"op\": \"fetch\", \"entityType\": \"spec\", \"upgradeFloor\": \"0.34.0\"}";
     var out = new StringWriter();
     new SyncRpcServer(new FakeMain(), true).serve(new StringReader(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
     assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
-    var legacy =
-        assertInstanceOf(LegacySyncSession.Failed.class, LegacySyncSession.decodeResponse(line));
-    assertEquals(refusal.reason(), legacy.message());
   }
 
   @Test

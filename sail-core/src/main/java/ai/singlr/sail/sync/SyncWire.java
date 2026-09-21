@@ -81,8 +81,6 @@ public final class SyncWire {
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
   private static final String KIND = "kind";
-  private static final String LEGACY_ERROR = "error";
-  private static final String LEGACY_ERROR_KIND = "error_kind";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -168,11 +166,7 @@ public final class SyncWire {
   /** Main accepted the hello: its protocol, build, and the box id the node checkpoints against. */
   public record Welcome(int protocol, String version, String mainId) implements Response {}
 
-  /**
-   * Main refused the session before serving anything, naming the remedy. Encoded with the legacy
-   * {@code error}/{@code error_kind} keys beside {@code reason}, because the peer most likely to be
-   * refused is a protocol-3 node that opened with a fetch and only reads those keys.
-   */
+  /** Main refused the session before serving anything, naming the remedy. */
   public record Refuse(String reason) implements Response {}
 
   /** Main's high-water per entity type. */
@@ -329,8 +323,6 @@ public final class SyncWire {
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
         map.put(REASON, refuse.reason());
-        map.put(LEGACY_ERROR, refuse.reason());
-        map.put(LEGACY_ERROR_KIND, "refused");
       }
       case Tips tips -> {
         map.put(OP, OP_TIPS);
@@ -380,6 +372,23 @@ public final class SyncWire {
       case OP_BYE -> new Bye();
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
     };
+  }
+
+  /**
+   * Whether {@code line} is a JSON object that names no {@code op}. Every protocol-4 message names
+   * one and no earlier protocol did, so at a hello this is how an older main reads. The brace is
+   * checked first because the parser also accepts YAML, where a stray {@code Warning: …} line on
+   * the channel is a map too — and that is noise, not an older main.
+   */
+  static boolean predatesOps(String line) {
+    if (!line.stripLeading().startsWith("{")) {
+      return false;
+    }
+    try {
+      return !YamlUtil.parseJsonLine(line, MAX_FRAME).containsKey(OP);
+    } catch (RuntimeException notAMessage) {
+      return false;
+    }
   }
 
   public static Response decodeResponse(String line) {
