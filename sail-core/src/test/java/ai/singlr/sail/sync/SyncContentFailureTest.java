@@ -74,6 +74,7 @@ class SyncContentFailureTest {
     WRONG_RESULT_ID,
     REFUSED_RESULT,
     BAD_HEADS,
+    UNKNOWN_FAILURE_KIND,
     NEED_NO_PROGRESS
   }
 
@@ -122,6 +123,11 @@ class SyncContentFailureTest {
             message.put("hashes", List.of(BlobStore.hash(new byte[] {9})));
         }
         if ("tips".equals(op) && fault == AnswerFault.BAD_HEADS) message.put("op", "done");
+        if ("tips".equals(op) && fault == AnswerFault.UNKNOWN_FAILURE_KIND) {
+          message.put("op", "failed");
+          message.put("kind", "future-kind");
+          message.put("message", "unknown peer failure");
+        }
         if ("page".equals(op) && fault == AnswerFault.NEED_NO_PROGRESS) message.put("next", 0);
         if ("results".equals(op)) {
           switch (fault) {

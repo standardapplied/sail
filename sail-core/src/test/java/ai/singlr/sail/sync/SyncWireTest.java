@@ -225,6 +225,9 @@ class SyncWireTest {
 
   @Test
   void aFrameAdmitsItemsUntilTheBoundAndKnowsWhatCouldNeverFit() {
+    var defaults = new SyncWire.Frame();
+    assertTrue(defaults.canEverAdmit(SyncWire.MAX_FRAME / 2));
+    assertFalse(defaults.canEverAdmit(SyncWire.MAX_FRAME));
     var frame = new SyncWire.Frame(600);
     assertTrue(frame.isEmpty());
     assertTrue(frame.canEverAdmit(300));
