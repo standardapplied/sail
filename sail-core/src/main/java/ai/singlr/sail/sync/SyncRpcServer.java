@@ -158,7 +158,7 @@ public final class SyncRpcServer {
       if (request instanceof SyncWire.Bye) return;
       if (request instanceof SyncWire.Content content && welcomed && blobs != null) {
         try {
-          serveContent(content, in, out);
+          serveContent(content, in, out, frame);
         } catch (RuntimeException e) {
           reply(
               out,
@@ -171,7 +171,7 @@ public final class SyncRpcServer {
     }
   }
 
-  private void serveContent(SyncWire.Content content, InputStream in, OutputStream out)
+  private void serveContent(SyncWire.Content content, InputStream in, OutputStream out, int frame)
       throws IOException {
     switch (content) {
       case SyncWire.Fetch fetch -> {
@@ -187,7 +187,7 @@ public final class SyncRpcServer {
           reply(out, new SyncWire.Refuse("read-only principal cannot upload content"));
           return;
         }
-        receiveContent(announce, in, out);
+        receiveContent(announce, in, out, frame);
       }
       default ->
           throw new IllegalArgumentException(
@@ -195,15 +195,16 @@ public final class SyncRpcServer {
     }
   }
 
-  private void receiveContent(SyncWire.Announce announce, InputStream in, OutputStream out)
-      throws IOException {
+  private void receiveContent(
+      SyncWire.Announce announce, InputStream in, OutputStream out, int frame) throws IOException {
     var missing = blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
     if (missing.isEmpty()) return;
     String refusal = null;
     var manifests = new LinkedHashMap<String, BlobStore.Manifest>();
+    var inventory = new SyncWire.Frame(frame);
     while (true) {
-      var content = readContent(in);
+      var content = readContent(in, frame);
       if (content instanceof SyncWire.Done) break;
       if (!(content instanceof SyncWire.Manifest m))
         throw new IllegalArgumentException("Expected manifest for blobs " + missing);
@@ -211,6 +212,13 @@ public final class SyncRpcServer {
       if (!missing.contains(manifest.hash())
           || manifests.putIfAbsent(manifest.hash(), manifest) != null)
         throw new IllegalArgumentException("Unexpected blob manifest " + manifest.hash());
+      var weight = SyncWire.inventoryWeight(manifest);
+      if (!inventory.admits(weight))
+        throw new IllegalArgumentException(
+            "Blob "
+                + manifest.hash()
+                + " makes the inventory exceed the sync frame; announce fewer blobs");
+      inventory.add(weight);
       try {
         limits.check(manifest.size());
       } catch (IllegalArgumentException e) {
@@ -229,7 +237,7 @@ public final class SyncRpcServer {
     reply(out, new SyncWire.Lack(List.copyOf(requested)));
     var remainingBytes = manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum();
     while (true) {
-      var content = readContent(in);
+      var content = readContent(in, frame);
       if (content instanceof SyncWire.Done) break;
       if (!(content instanceof SyncWire.Chunk chunk))
         throw new IllegalArgumentException("Expected chunk for blobs " + missing);
@@ -252,8 +260,8 @@ public final class SyncRpcServer {
     reply(out, new SyncWire.Done());
   }
 
-  private static SyncWire.Content readContent(InputStream input) throws IOException {
-    var line = SyncWire.readLine(input);
+  private static SyncWire.Content readContent(InputStream input, int frame) throws IOException {
+    var line = SyncWire.readFramed(input, frame);
     if (line == null)
       throw new SyncTransportException("unreachable", "Channel closed during upload", null);
     var request = SyncWire.decodeRequest(line);

@@ -100,6 +100,37 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void anUploadInventoryThatCannotFitAFrameIsRefusedBeforeStoringChunks() throws Exception {
+    try (var main = new SyncBox("main")) {
+      var requests = new ArrayList<String>();
+      requests.add(SyncWire.encode(HELLO));
+      var blobs =
+          List.of(
+              ai.singlr.sail.store.BlobStore.hash(new byte[] {1}),
+              ai.singlr.sail.store.BlobStore.hash(new byte[] {2}));
+      requests.add(SyncWire.encode(new SyncWire.Announce(blobs)));
+      for (var index = 0; index < blobs.size(); index++) {
+        var chunks = new ArrayList<String>();
+        for (var chunk = 0; chunk < 7; chunk++)
+          chunks.add(ai.singlr.sail.store.BlobStore.hash(new byte[] {(byte) index, (byte) chunk}));
+        requests.add(
+            SyncWire.encode(
+                new SyncWire.Manifest(
+                    new ai.singlr.sail.store.BlobStore.Manifest(
+                        blobs.get(index), 7L * ai.singlr.sail.store.FastCdc.MIN, chunks))));
+      }
+      requests.add(SyncWire.encode(new SyncWire.Done()));
+      var response =
+          serveLines(main.server(new SyncPrincipal("node", true)), 900, requests).getLast();
+      var failure = assertInstanceOf(SyncWire.Failed.class, response);
+      assertEquals("protocol", failure.kind());
+      assertTrue(failure.message().contains("announce fewer blobs"));
+      assertEquals(
+          0L, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+    }
+  }
+
+  @Test
   void contentRequiresAHandshakeAStoreAndTheCorrectExchangePhase() throws Exception {
     var fetch = new SyncWire.Fetch(List.of());
     var withoutStore = new SyncRpcServer(new FakeMain(), true);

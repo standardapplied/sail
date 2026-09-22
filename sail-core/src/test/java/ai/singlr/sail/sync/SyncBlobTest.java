@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
 import java.io.ByteArrayInputStream;
 import java.io.FilterOutputStream;
@@ -18,12 +19,16 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SyncBlobTest {
 
@@ -49,6 +54,72 @@ class SyncBlobTest {
   }
 
   @TempDir Path dir;
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void combinedChunkInventoriesStayWithinTheFrameInBothDirections(boolean upload) throws Exception {
+    var frame = 900;
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node")) {
+      var files = new FileStore((upload ? node : main).db);
+      for (var file = 0; file < 2; file++) {
+        var bytes = new byte[7 * FastCdc.MIN];
+        new Random(file).nextBytes(bytes);
+        var chunks = new ArrayList<String>();
+        for (var offset = 0; offset < bytes.length; offset += FastCdc.MIN) {
+          var chunk = Arrays.copyOfRange(bytes, offset, offset + FastCdc.MIN);
+          var hash = BlobStore.hash(chunk);
+          files.blobs().putChunk(hash, chunk);
+          chunks.add(hash);
+        }
+        var hash = BlobStore.hash(bytes);
+        files.blobs().assemble(new BlobStore.Manifest(hash, bytes.length, chunks));
+        files.put(
+            new FileStore.FileRow("project", "file-" + file, hash, bytes.length, 0750, "binary"));
+      }
+      try (var link =
+          SyncBox.connect(
+              main.server(new SyncPrincipal("node", true)),
+              node,
+              frame,
+              output -> boundedLines(output, frame))) {
+        var session = ((PagedSyncSession) link.session()).frame(frame);
+        var report =
+            session.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+        assertEquals(14L * FastCdc.MIN, upload ? report.sentBytes() : report.fetchedBytes());
+        assertTrue(link.count(upload ? "announce" : "fetch_chunks") >= 2);
+        if (upload) assertEquals(link.count("push"), link.count("announce"));
+        assertTrue(
+            link.log()
+                .toString()
+                .lines()
+                .allMatch(
+                    line ->
+                        line.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= frame));
+      }
+      var destination = new FileStore((upload ? main : node).db);
+      assertEquals(files.list("project"), destination.list("project"));
+    }
+  }
+
+  private static OutputStream boundedLines(OutputStream output, int frame) {
+    return new FilterOutputStream(output) {
+      private int raw;
+
+      @Override
+      public void write(byte[] bytes, int offset, int length) throws IOException {
+        if (raw > 0) raw -= length;
+        else {
+          if (length > frame) throw new IOException("Announcing line exceeded frame: " + length);
+          var message =
+              YamlUtil.parseMap(
+                  new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8));
+          if ("chunk".equals(message.get("op"))) raw = ((Number) message.get("size")).intValue();
+        }
+        out.write(bytes, offset, length);
+      }
+    };
+  }
 
   @Test
   void fortyMegabytesCrossOnceAndAnEditTransfersOnlyOneChunk() throws Exception {

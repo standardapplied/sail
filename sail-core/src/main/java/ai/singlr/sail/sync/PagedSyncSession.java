@@ -245,10 +245,12 @@ public final class PagedSyncSession implements SyncSession {
     }
     var chunks = new LinkedHashSet<String>();
     manifests.values().forEach(m -> chunks.addAll(m.chunkHashes()));
-    var needed = blobs.missingChunks(chunks);
-    if (!needed.isEmpty()) {
-      var remainingBytes = manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum();
-      Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(List.copyOf(needed))));
+    var pending = List.copyOf(blobs.missingChunks(chunks));
+    var remainingBytes = manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum();
+    for (var offset = 0; offset < pending.size(); ) {
+      var batch = askable(pending, offset);
+      var needed = new LinkedHashSet<>(batch);
+      Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(batch)));
       while (true) {
         var response = Rpc.receive(in, type + " blobs " + missing);
         if (response instanceof SyncWire.Done) break;
@@ -279,6 +281,7 @@ public final class PagedSyncSession implements SyncSession {
       }
       if (!needed.isEmpty())
         throw new SyncTransportException("blob " + missing + " missing chunks " + needed);
+      offset += batch.size();
     }
     for (var manifest : manifests.values()) {
       try {
@@ -452,7 +455,13 @@ public final class PagedSyncSession implements SyncSession {
 
     @Override
     public long weigh(Offer offer) {
-      return SyncWire.encodedLength(offer);
+      var hashes =
+          BlobStore.referenced(
+              java.util.Collections.singletonList(offer.snapshot()),
+              contentFields.getOrDefault(type, Set.of()));
+      var inventory = 0L;
+      for (var hash : hashes) inventory += SyncWire.inventoryWeight(blobs.manifest(hash)) + 2L;
+      return Math.max(SyncWire.encodedLength(offer), inventory);
     }
 
     @Override
@@ -471,14 +480,14 @@ public final class PagedSyncSession implements SyncSession {
       var batch = new ArrayList<Offer>();
       var budget = new SyncWire.Frame(frame);
       for (var offer : offers) {
-        var length = SyncWire.encodedLength(offer);
+        var length = Math.toIntExact(weigh(offer));
         if (!budget.canEverAdmit(length)) {
           throw new SyncTransportException(
               "protocol",
               type
                   + " "
                   + offer.id()
-                  + ": snapshot of "
+                  + ": snapshot or content inventory of "
                   + length
                   + " bytes exceeds the frame of "
                   + frame

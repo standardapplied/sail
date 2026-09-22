@@ -411,6 +411,10 @@ public final class SyncWire {
     return YamlUtil.dumpJson(List.of(id)).getBytes(StandardCharsets.UTF_8).length - 2;
   }
 
+  public static int inventoryWeight(BlobStore.Manifest manifest) {
+    return (manifest.chunkHashes().size() + 1) * (encodedLength(manifest.hash()) + 2);
+  }
+
   /** The bytes {@code entry} takes inside a page. */
   public static int encodedLength(Entry entry) {
     return YamlUtil.dumpJson(entryMap(entry)).getBytes(StandardCharsets.UTF_8).length;
