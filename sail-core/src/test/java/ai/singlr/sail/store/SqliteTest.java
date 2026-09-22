@@ -365,4 +365,12 @@ class SqliteTest {
     assertFalse(db.read(() -> db.transaction(() -> db.holdsWriteLock())));
     assertFalse(db.holdsWriteLock());
   }
+
+  @Test
+  void inScopeInsideEitherKindOfTransaction() {
+    assertFalse(db.inScope());
+    assertTrue(db.transaction(() -> db.inScope()));
+    assertTrue(db.read(() -> db.inScope()));
+    assertFalse(db.inScope());
+  }
 }

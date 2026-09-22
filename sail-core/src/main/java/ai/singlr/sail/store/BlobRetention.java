@@ -36,6 +36,10 @@ final class BlobRetention {
     }
   }
 
+  boolean heldSharedByCurrentThread() {
+    return lock.getReadHoldCount() > 0;
+  }
+
   BlobStore.Scope acquireExclusive() {
     if (lock.getReadHoldCount() > 0 && !lock.isWriteLockedByCurrentThread()) {
       throw new IllegalStateException("Release blob retention before collecting content");

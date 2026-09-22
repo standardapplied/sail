@@ -11,13 +11,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -266,21 +270,97 @@ class BlobStoreTest {
   }
 
   @Test
-  void aPutLeasesRetentionUnderAReadTransactionAndOutsideOneButNotUnderAWriteOne() {
+  void aPutLeasesRetentionOutsideATransactionButNotUnderAWriteOne() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
       var store = new BlobStore(db);
       assertEquals(1, leasesWhilePutting(db, store));
-      assertEquals(1, db.read(() -> leasesWhilePutting(db, store)));
       assertEquals(0, db.transaction(() -> leasesWhilePutting(db, store)));
       assertEquals(0, db.contentRetention.leases());
     }
   }
 
+  @Test
+  void aLeaseTakenBeforeAReadTransactionCoversPutsInsideItWhileACollectorWaits() throws Exception {
+    try (var db = Sqlite.openMemory();
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      new SchemaManager(db).migrate();
+      var store = new BlobStore(db);
+      Future<Long> collecting;
+      try (var lease = store.retain()) {
+        collecting =
+            db.read(
+                () -> {
+                  var collector = executor.submit(() -> store.gc(Set.of()));
+                  assertThrows(
+                      TimeoutException.class, () -> collector.get(100, TimeUnit.MILLISECONDS));
+                  assertEquals(2, leasesWhilePutting(db, store));
+                  assertEquals("under read", store.text(store.putText("under read")));
+                  return collector;
+                });
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+      }
+      assertEquals(10, collecting.get(5, TimeUnit.SECONDS));
+      assertEquals(0, db.contentRetention.leases());
+    }
+  }
+
+  @Test
+  void aPutUnderAReadTransactionWithoutALeaseIsRefusedAndAConcurrentCollectorCompletes()
+      throws Exception {
+    try (var db = Sqlite.openMemory();
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      new SchemaManager(db).migrate();
+      var store = new BlobStore(db);
+      var orphan = store.putText("orphan");
+      var reading = new CountDownLatch(1);
+      var collectorStarted = new CountDownLatch(1);
+      var reader =
+          executor.submit(
+              () ->
+                  db.read(
+                      () -> {
+                        reading.countDown();
+                        await(collectorStarted);
+                        return assertThrows(
+                            IllegalStateException.class, () -> store.putText("data"));
+                      }));
+      assertTrue(reading.await(5, TimeUnit.SECONDS));
+      var collecting = executor.submit(() -> store.gc(Set.of()));
+      collectorStarted.countDown();
+      assertEquals(
+          "Take blob retention before opening a transaction, not inside one",
+          reader.get(5, TimeUnit.SECONDS).getMessage());
+      assertEquals(6, collecting.get(5, TimeUnit.SECONDS));
+      assertFalse(store.has(orphan));
+      assertEquals(0, db.contentRetention.leases());
+    }
+  }
+
+  @Test
+  void gcIsRefusedInsideAnyTransactionScope() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var store = new BlobStore(db);
+      assertThrows(IllegalStateException.class, () -> db.read(() -> store.gc(Set.of())));
+      assertThrows(IllegalStateException.class, () -> db.transaction(() -> store.gc(Set.of())));
+      assertEquals(0, store.gc(Set.of()));
+    }
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      assertTrue(latch.await(5, TimeUnit.SECONDS));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
+  }
+
   private static int leasesWhilePutting(Sqlite db, BlobStore store) {
-    var observed = new java.util.concurrent.atomic.AtomicInteger(-1);
+    var observed = new AtomicInteger(-1);
     store.put(
-        new java.io.InputStream() {
+        new InputStream() {
           @Override
           public int read() {
             observed.set(db.contentRetention.leases());

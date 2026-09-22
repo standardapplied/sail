@@ -129,7 +129,16 @@ public final class Sqlite implements AutoCloseable {
    * lock until its first write, so it offers none of the exclusion a caller may want to rely on.
    */
   boolean holdsWriteLock() {
-    return lock.isHeldByCurrentThread() && transactionDepth > 0 && writeLocked;
+    return inScope() && writeLocked;
+  }
+
+  /**
+   * Whether the calling thread is inside a {@link #transaction} or {@link #read} scope. Either
+   * holds this connection's lock for the whole scope, so every other thread's statement on it waits
+   * until the scope ends: anything the scope itself waits for must never be waiting on that.
+   */
+  boolean inScope() {
+    return lock.isHeldByCurrentThread() && transactionDepth > 0;
   }
 
   public void execute(String sql, Object... params) {
