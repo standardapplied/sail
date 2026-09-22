@@ -12,10 +12,13 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * One project's shared files. The size cap is read once, when an instance is made for a command or
+ * a request, so a bulk share consults {@code host.yaml} once and a corrupt one fails before any
+ * file is opened.
+ */
 public interface ProjectFiles {
-  default ai.singlr.sail.config.FileLimits limits() {
-    return FileLimits.load();
-  }
+  FileLimits limits();
 
   List<FileStore.FileRow> list();
 

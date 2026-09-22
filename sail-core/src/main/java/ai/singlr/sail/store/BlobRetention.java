@@ -30,6 +30,16 @@ final class BlobRetention {
     return acquire(lock.readLock(), true);
   }
 
+  int leases() {
+    synchronized (this) {
+      return leases;
+    }
+  }
+
+  boolean heldSharedByCurrentThread() {
+    return lock.getReadHoldCount() > 0;
+  }
+
   BlobStore.Scope acquireExclusive() {
     if (lock.getReadHoldCount() > 0 && !lock.isWriteLockedByCurrentThread()) {
       throw new IllegalStateException("Release blob retention before collecting content");

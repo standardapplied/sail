@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -115,5 +117,59 @@ class ShellExecutorTest {
 
     assertTrue(result.ok());
     assertFalse(executor.isDryRun());
+  }
+
+  @Test
+  void aStreamThatKeepsDeliveringOutlivesTheIdleTimeout() throws Exception {
+    var executor = new ShellExecutor(false, Duration.ofSeconds(2));
+    var command = List.of("sh", "-c", "for i in 1 2 3 4 5 6; do printf x; sleep 0.2; done");
+
+    try (var stream = executor.stream(command)) {
+      assertEquals("xxxxxx", new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+    }
+  }
+
+  @Test
+  void aStreamThatStallsIsDestroyedNamingTheCommandTheSilenceAndTheBytesReceived() {
+    var executor = new ShellExecutor(false, Duration.ofSeconds(1));
+    var command = List.of("sh", "-c", "printf hello; exec sleep 30");
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> {
+              try (var stream = executor.stream(command)) {
+                stream.readAllBytes();
+              }
+            });
+
+    assertTrue(failure.getMessage().contains("exec sleep 30"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("no output for 1s"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("after 5 bytes"), failure.getMessage());
+  }
+
+  @Test
+  void aStreamReadByteByByteCountsEveryByteAsProgress() throws Exception {
+    var executor = new ShellExecutor(false, Duration.ofSeconds(5));
+    try (var stream = executor.stream(List.of("sh", "-c", "printf abc"))) {
+      assertEquals('a', stream.read());
+      assertEquals('b', stream.read());
+      assertEquals('c', stream.read());
+      assertEquals(-1, stream.read());
+    }
+  }
+
+  @Test
+  void aStreamWhoseCommandFailsNamesTheCommand() {
+    var executor = new ShellExecutor(false, Duration.ofSeconds(5));
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> {
+              try (var stream = executor.stream(List.of("sh", "-c", "printf partial; exit 3"))) {
+                stream.readAllBytes();
+              }
+            });
+    assertTrue(failure.getMessage().startsWith("Content command failed:"), failure.getMessage());
   }
 }

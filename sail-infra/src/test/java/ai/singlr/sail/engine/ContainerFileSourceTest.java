@@ -135,7 +135,12 @@ class ContainerFileSourceTest {
     try (var main = new SyncBox(tempDir, "main");
         var node = new SyncBox(tempDir, "node")) {
       var files = new FileStore(main.db);
-      var shared = new SharedProjectFiles(files, tempDir.resolve("main-projects"), "acme");
+      var shared =
+          new SharedProjectFiles(
+              files,
+              tempDir.resolve("main-projects"),
+              "acme",
+              ai.singlr.sail.config.FileLimits.defaults());
       var path = workspace.relativize(link).toString();
       try (var input = source.open(link)) {
         shared.put(path, input, source.size(link), source.mode(link));

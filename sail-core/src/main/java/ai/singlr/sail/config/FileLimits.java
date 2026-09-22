@@ -13,6 +13,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** The host's guard against accidentally replicating an enormous shared file. */
 public record FileLimits(long fileMax) {
@@ -49,10 +50,24 @@ public record FileLimits(long fileMax) {
   }
 
   public void check(long size) {
-    if (size < 0) throw new IllegalArgumentException("A declared file length is required");
+    problem(size)
+        .ifPresent(
+            problem -> {
+              throw new IllegalArgumentException(problem);
+            });
+  }
+
+  /** Why a file of {@code size} bytes cannot be shared under this cap, naming where to raise it. */
+  public Optional<String> problem(long size) {
+    if (size < 0) return Optional.of("A declared file length is required");
     if (size > fileMax)
-      throw new IllegalArgumentException(
-          "File of " + size + " bytes exceeds limits.file_max (" + fileMax + " bytes)");
+      return Optional.of(
+          "File of "
+              + size
+              + " bytes exceeds limits.file_max ("
+              + fileMax
+              + " bytes); raise limits.file_max in host.yaml to share it");
+    return Optional.empty();
   }
 
   public InputStream bounded(InputStream input, long declaredSize) {

@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -353,5 +354,23 @@ class SqliteTest {
       assertTrue(thrown.getMessage().contains("libsail-absent.so.0"));
       assertTrue(thrown.getMessage().contains("apt-get install -y libsqlite3-0"));
     }
+  }
+
+  @Test
+  void holdsWriteLockOnlyInsideAnImmediateTransaction() {
+    assertFalse(db.holdsWriteLock());
+    assertTrue(db.transaction(() -> db.holdsWriteLock()));
+    assertFalse(db.read(() -> db.holdsWriteLock()));
+    assertTrue(db.transaction(() -> db.read(() -> db.holdsWriteLock())));
+    assertFalse(db.read(() -> db.transaction(() -> db.holdsWriteLock())));
+    assertFalse(db.holdsWriteLock());
+  }
+
+  @Test
+  void inScopeInsideEitherKindOfTransaction() {
+    assertFalse(db.inScope());
+    assertTrue(db.transaction(() -> db.inScope()));
+    assertTrue(db.read(() -> db.inScope()));
+    assertFalse(db.inScope());
   }
 }

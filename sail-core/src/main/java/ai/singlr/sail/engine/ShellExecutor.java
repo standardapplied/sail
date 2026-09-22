@@ -75,6 +75,12 @@ public final class ShellExecutor implements ShellExec {
     return new Result(process.exitValue(), stdout.get(), stderr.get());
   }
 
+  /**
+   * Streams the child's stdout under an idle watchdog, not a stopwatch: the child is destroyed only
+   * once no byte has arrived for {@code defaultTimeout}, so a large transfer that keeps delivering
+   * is never killed and one that stalls is, with the stream then failing by name. The buffered
+   * {@link #exec} keeps its wall-clock deadline, the right bound for a command expected to finish.
+   */
   @Override
   public InputStream stream(List<String> command) throws IOException {
     if (dryRun) {
@@ -84,53 +90,91 @@ public final class ShellExecutor implements ShellExec {
     var process =
         new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start();
     process.getOutputStream().close();
-    var watchdog =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try {
-                    if (!process.waitFor(defaultTimeout.toMillis(), TimeUnit.MILLISECONDS))
-                      process.destroyForcibly();
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                  }
-                });
-    return new FilterInputStream(process.getInputStream()) {
-      private void finished(int read) throws IOException {
-        if (read != -1) return;
-        try {
-          if (process.waitFor() != 0)
-            throw new IOException("Content command failed: " + String.join(" ", command));
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          throw new IOException("Interrupted reading content", e);
+    return new WatchedStream(process, command, defaultTimeout);
+  }
+
+  private static final class WatchedStream extends FilterInputStream {
+    private final Process process;
+    private final List<String> command;
+    private final Duration idleTimeout;
+    private final Thread watchdog;
+    private volatile long lastByteNanos = System.nanoTime();
+    private volatile long received;
+    private volatile boolean stalled;
+
+    WatchedStream(Process process, List<String> command, Duration idleTimeout) {
+      super(process.getInputStream());
+      this.process = process;
+      this.command = command;
+      this.idleTimeout = idleTimeout;
+      this.watchdog = Thread.ofVirtual().start(this::watch);
+    }
+
+    private void watch() {
+      try {
+        while (true) {
+          var remaining = idleTimeout.toNanos() - (System.nanoTime() - lastByteNanos);
+          if (remaining <= 0) {
+            stalled = true;
+            process.destroyForcibly();
+            return;
+          }
+          if (process.waitFor(remaining, TimeUnit.NANOSECONDS)) return;
         }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
       }
+    }
 
-      @Override
-      public int read() throws IOException {
-        var value = in.read();
-        finished(value);
-        return value;
-      }
+    private void progressed(int bytes) {
+      received += bytes;
+      lastByteNanos = System.nanoTime();
+    }
 
-      @Override
-      public int read(byte[] bytes, int offset, int length) throws IOException {
-        var count = in.read(bytes, offset, length);
-        finished(count);
-        return count;
+    private void ended() throws IOException {
+      try {
+        var exit = process.waitFor();
+        if (stalled)
+          throw new IOException(
+              "Content command produced no output for "
+                  + idleTimeout.toSeconds()
+                  + "s after "
+                  + received
+                  + " bytes: "
+                  + String.join(" ", command));
+        if (exit != 0)
+          throw new IOException("Content command failed: " + String.join(" ", command));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Interrupted reading content", e);
       }
+    }
 
-      @Override
-      public void close() throws IOException {
-        try {
-          super.close();
-        } finally {
-          process.destroy();
-          watchdog.interrupt();
-        }
+    @Override
+    public int read() throws IOException {
+      var value = in.read();
+      if (value == -1) ended();
+      else progressed(1);
+      return value;
+    }
+
+    @Override
+    public int read(byte[] bytes, int offset, int length) throws IOException {
+      var count = in.read(bytes, offset, length);
+      if (count == -1) ended();
+      else if (count > 0) progressed(count);
+      return count;
+    }
+
+    @Override
+    public void close() throws IOException {
+      try {
+        super.close();
+      } finally {
+        process.destroy();
+        watchdog.interrupt();
       }
-    };
+    }
   }
 
   @Override

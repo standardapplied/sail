@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -27,15 +28,23 @@ public final class FileImporter {
 
   private final Path projectsDir;
   private final FileStore files;
+  private final Supplier<FileLimits> limits;
 
   public FileImporter(Path projectsDir, FileStore files) {
+    this(projectsDir, files, FileLimits::load);
+  }
+
+  /** With the size cap read by {@code limits}, once per import, before any file is opened. */
+  public FileImporter(Path projectsDir, FileStore files, Supplier<FileLimits> limits) {
     this.projectsDir = projectsDir;
     this.files = files;
+    this.limits = limits;
   }
 
   public record Report(int imported, List<String> notes) {}
 
   public Report importAll() {
+    var cap = limits.get();
     if (!Files.isDirectory(projectsDir)) {
       return new Report(0, List.of());
     }
@@ -43,7 +52,8 @@ public final class FileImporter {
     var notes = new ArrayList<String>();
     try (Stream<Path> projects = Files.list(projectsDir)) {
       for (var projectDir : projects.filter(Files::isDirectory).toList()) {
-        imported += importProject(projectDir.getFileName().toString(), projectDir.resolve("files"));
+        imported +=
+            importProject(projectDir.getFileName().toString(), projectDir.resolve("files"), cap);
       }
     } catch (IOException e) {
       notes.add("Could not scan project files: " + e.getMessage());
@@ -51,7 +61,7 @@ public final class FileImporter {
     return new Report(imported, List.copyOf(notes));
   }
 
-  private int importProject(String project, Path filesDir) throws IOException {
+  private int importProject(String project, Path filesDir, FileLimits limits) throws IOException {
     if (!Files.isDirectory(filesDir)) {
       return 0;
     }
@@ -59,7 +69,6 @@ public final class FileImporter {
     try (Stream<Path> tree = Files.walk(filesDir)) {
       for (var file : tree.filter(Files::isRegularFile).toList()) {
         var path = filesDir.relativize(file).toString();
-        var limits = FileLimits.load();
         var size = Files.size(file);
         limits.check(size);
         String hash;

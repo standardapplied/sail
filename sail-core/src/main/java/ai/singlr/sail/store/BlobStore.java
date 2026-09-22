@@ -46,11 +46,29 @@ public final class BlobStore {
 
   /**
    * Shares retention across rounds and ingests while excluding collection, across processes. A
-   * waiting collector does not block new transfers from joining the active shared leases.
+   * waiting collector does not block new transfers from joining the active shared leases. Inside a
+   * write transaction the lease is not needed: the database's write lock already keeps a collector
+   * in any process from committing between a chunk and the row that references it. A read
+   * transaction holds no such lock, so an ingest under one needs the lease, taken before the
+   * transaction opened: see {@link #requireRetentionBeforeConnection}.
    */
   public Scope retain() {
-    if (db.inTransaction()) return () -> {};
+    if (db.holdsWriteLock()) return () -> {};
+    requireRetentionBeforeConnection(retention.heldSharedByCurrentThread());
     return retention.acquireShared();
+  }
+
+  /**
+   * Retention is taken before the connection lock, everywhere. A collector holds exclusive
+   * retention while it waits for the connection; a scope that holds the connection and waits for
+   * retention would then wait for the collector forever, and every statement on the connection
+   * behind them both. So a transaction scope may only enter retention it already holds.
+   */
+  private void requireRetentionBeforeConnection(boolean alreadyHeld) {
+    if (db.inScope() && !alreadyHeld) {
+      throw new IllegalStateException(
+          "Take blob retention before opening a transaction, not inside one");
+    }
   }
 
   @FunctionalInterface
@@ -266,6 +284,7 @@ public final class BlobStore {
   }
 
   public long gc(Set<String> referenced) {
+    requireRetentionBeforeConnection(false);
     try (var scope = retention.acquireExclusive()) {
       return collect(referenced);
     }

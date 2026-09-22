@@ -332,10 +332,13 @@ public final class ApiRouter implements HttpHandler {
       if (declared == null)
         throw new IllegalArgumentException("Content-Length is required for a shared file");
       var size = Long.parseLong(declared);
-      if (size > files.limits().fileMax())
-        throw new ApiException(
-            ErrorCode.REQUEST_TOO_LARGE,
-            "File exceeds limits.file_max (" + files.limits().fileMax() + " bytes)");
+      files
+          .limits()
+          .problem(size)
+          .ifPresent(
+              problem -> {
+                throw new ApiException(ErrorCode.REQUEST_TOO_LARGE, problem);
+              });
       var mode = files.find(path).map(row -> row.mode()).orElse(0644);
       var storedPath = files.put(path, exchange.getRequestBody(), size, mode);
       files.materialize();

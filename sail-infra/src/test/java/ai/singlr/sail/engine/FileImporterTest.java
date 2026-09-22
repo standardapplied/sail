@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.FileStore;
@@ -131,6 +132,44 @@ class FileImporterTest {
 
     assertEquals(1, report.imported());
     assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void readsTheCapOnceForTheWholeImport() throws Exception {
+    writeOnDisk("acme", "a.txt", "A");
+    writeOnDisk("acme", "b.txt", "B");
+    writeOnDisk("globex", "c.txt", "C");
+    var loads = new java.util.concurrent.atomic.AtomicInteger();
+    var counting =
+        new FileImporter(
+            projectsDir,
+            files,
+            () -> {
+              loads.incrementAndGet();
+              return ai.singlr.sail.config.FileLimits.defaults();
+            });
+
+    assertEquals(3, counting.importAll().imported());
+
+    assertEquals(1, loads.get());
+  }
+
+  @Test
+  void aCorruptCapFailsTheImportBeforeAnyFileIsRead() throws Exception {
+    writeOnDisk("acme", "a.txt", "A");
+    var corrupt =
+        new FileImporter(
+            projectsDir,
+            files,
+            () -> {
+              throw new IllegalArgumentException(
+                  "limits.file_max must be an integer number of bytes");
+            });
+
+    var failure = assertThrows(IllegalArgumentException.class, corrupt::importAll);
+
+    assertTrue(failure.getMessage().contains("limits.file_max"));
+    assertTrue(files.find("acme", "a.txt").isEmpty());
   }
 
   @Test

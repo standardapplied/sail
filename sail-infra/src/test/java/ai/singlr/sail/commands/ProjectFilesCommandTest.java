@@ -12,21 +12,30 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ProjectFiles;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.FileSource;
+import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,9 +91,7 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("deploy.sh");
     Files.writeString(source, "echo hi");
 
-    var path =
-        ProjectFilesCommand.Add.store(
-            files, "acme", "scripts/deploy.sh", Files.readAllBytes(source));
+    var path = share(files, "acme", "scripts/deploy.sh", source);
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
@@ -132,6 +139,13 @@ class ProjectFilesCommandTest {
       assertEquals("private", Files.readString(copy));
       assertEquals(0600, WorkspaceFiles.mode(copy));
       assertEquals(0600, WorkspaceFiles.mode(source));
+      var big = source.resolveSibling("big.bin");
+      try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
+        raf.setLength(FileLimits.DEFAULT_MAX + 1);
+      }
+      assertEquals(
+          1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
+      assertTrue(new FileStore(database).find("acme", "big.bin").isEmpty());
     }
   }
 
@@ -140,8 +154,7 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("notes.md");
     Files.writeString(source, "hello");
 
-    var path =
-        ProjectFilesCommand.Add.store(files, "acme", "docs/notes.md", Files.readAllBytes(source));
+    var path = share(files, "acme", "docs/notes.md", source);
 
     assertEquals("docs/notes.md", path);
     assertTrue(files.find("acme", "docs/notes.md").isPresent());
@@ -151,32 +164,157 @@ class ProjectFilesCommandTest {
   void addRejectsAPathThatEscapesTheProject() throws Exception {
     assertThrows(
         IllegalArgumentException.class,
-        () -> ProjectFilesCommand.Add.store(files, "acme", "../escape", "x".getBytes()));
+        () -> share(files, "acme", "../escape", tempDir.resolve("x")));
   }
 
   @Test
   void shareProblemAcceptsRealFilesAndFlagsTheRest() throws Exception {
-    var host = new ai.singlr.sail.engine.HostFileSource();
+    var host = new HostFileSource();
+    var limits = FileLimits.defaults();
     var ok = tempDir.resolve("ok.txt");
     Files.writeString(ok, "hi");
-    assertNull(ProjectFilesCommand.Add.shareProblem(host, ok, "ok.txt"));
+    assertNull(ProjectFilesCommand.Add.shareProblem(host, ok, "ok.txt", limits));
 
-    assertEquals("unsafe path", ProjectFilesCommand.Add.shareProblem(host, ok, "../escape"));
     assertEquals(
-        "unreadable", ProjectFilesCommand.Add.shareProblem(host, tempDir.resolve("gone"), "gone"));
+        "unsafe path", ProjectFilesCommand.Add.shareProblem(host, ok, "../escape", limits));
+    assertEquals(
+        "unreadable",
+        ProjectFilesCommand.Add.shareProblem(host, tempDir.resolve("gone"), "gone", limits));
   }
 
   @Test
-  void shareProblemRejectsAnOversizedFile() throws Exception {
-    var host = new ai.singlr.sail.engine.HostFileSource();
+  void shareProblemRejectsAnOversizedFileNamingTheCapAndWhereToRaiseIt() throws Exception {
     var big = tempDir.resolve("big.bin");
-    try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
-      raf.setLength(ai.singlr.sail.config.FileLimits.DEFAULT_MAX + 1);
-    }
+    Files.writeString(big, "12345");
 
-    assertTrue(ProjectFilesCommand.Add.shareProblem(host, big, "big.bin").contains("larger than"));
-    assertEquals(
-        1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
+    var problem =
+        ProjectFilesCommand.Add.shareProblem(
+            new HostFileSource(), big, "big.bin", new FileLimits(4));
+
+    assertTrue(problem.contains("5 bytes"), problem);
+    assertTrue(problem.contains("limits.file_max (4 bytes)"), problem);
+    assertTrue(problem.contains("host.yaml"), problem);
+  }
+
+  @Test
+  void aBulkShareConsultsTheCapOnceAndSkipsWhatItCannotShare() throws Exception {
+    var root = Files.createDirectory(tempDir.resolve("root"));
+    var selected = new java.util.ArrayList<Path>();
+    for (var name : List.of("a.txt", "b.txt", "c.txt")) {
+      selected.add(Files.writeString(root.resolve(name), name));
+    }
+    selected.add(Files.writeString(root.resolve("big.txt"), "too large"));
+    var loads = new java.util.concurrent.atomic.AtomicInteger();
+    var shared =
+        capped(
+            new SharedProjectFiles(files, projectsDir, "acme", new FileLimits(5)),
+            () -> {
+              loads.incrementAndGet();
+              return new FileLimits(5);
+            });
+
+    var report = ProjectFilesCommand.Add.share(shared, new HostFileSource(), root, selected);
+
+    assertEquals(1, loads.get());
+    assertEquals(3, report.count());
+    assertEquals(1, report.skipped().size());
+    assertTrue(report.skipped().getFirst().startsWith("big.txt (File of 9 bytes"));
+    assertEquals(3, files.list("acme").size());
+    assertTrue(Files.exists(filesDir("acme").resolve("a.txt")));
+  }
+
+  @Test
+  void aBulkShareWithACorruptCapFailsBeforeAnyFileIsTouched() throws Exception {
+    var root = Files.createDirectory(tempDir.resolve("root"));
+    var selected = List.of(Files.writeString(root.resolve("a.txt"), "a"));
+    var corrupt =
+        capped(
+            new SharedProjectFiles(files, projectsDir, "acme", FileLimits.defaults()),
+            () -> {
+              throw new IllegalArgumentException(
+                  "limits.file_max must be an integer number of bytes");
+            });
+
+    var failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ProjectFilesCommand.Add.share(corrupt, untouchable(), root, selected));
+
+    assertTrue(failure.getMessage().contains("limits.file_max"));
+    assertTrue(files.list("acme").isEmpty());
+  }
+
+  private static ProjectFiles capped(ProjectFiles delegate, Supplier<FileLimits> limits) {
+    return new ProjectFiles() {
+      @Override
+      public FileLimits limits() {
+        return limits.get();
+      }
+
+      @Override
+      public List<FileStore.FileRow> list() {
+        return delegate.list();
+      }
+
+      @Override
+      public Optional<FileStore.FileRow> find(String path) {
+        return delegate.find(path);
+      }
+
+      @Override
+      public InputStream open(FileStore.FileRow row) {
+        return delegate.open(row);
+      }
+
+      @Override
+      public String put(String path, InputStream bytes, long size, int mode) {
+        return delegate.put(path, bytes, size, mode);
+      }
+
+      @Override
+      public boolean remove(String path) throws IOException {
+        return delegate.remove(path);
+      }
+
+      @Override
+      public FileMaterializer.Report materialize() throws IOException {
+        return delegate.materialize();
+      }
+    };
+  }
+
+  private static FileSource untouchable() {
+    return new FileSource() {
+      @Override
+      public List<ai.singlr.sail.engine.FilePicker.Entry> children(Path dir) {
+        throw new AssertionError("a file was touched");
+      }
+
+      @Override
+      public boolean isDirectory(Path path) {
+        throw new AssertionError("a file was touched");
+      }
+
+      @Override
+      public long size(Path file) {
+        throw new AssertionError("a file was touched");
+      }
+
+      @Override
+      public List<Path> walkFiles(Path dir) {
+        throw new AssertionError("a file was touched");
+      }
+
+      @Override
+      public InputStream open(Path file) {
+        throw new AssertionError("a file was touched");
+      }
+
+      @Override
+      public int mode(Path file) {
+        throw new AssertionError("a file was touched");
+      }
+    };
   }
 
   @Test
@@ -226,7 +364,7 @@ class ProjectFilesCommandTest {
   void rmTombstonesAndRemovesTheLocalCopy() throws Exception {
     var source = tempDir.resolve("a.txt");
     Files.writeString(source, "data");
-    ProjectFilesCommand.Add.store(files, "acme", "a.txt", Files.readAllBytes(source));
+    share(files, "acme", "a.txt", source);
     new FileMaterializer(files, projectsDir).materialize("acme");
     assertTrue(Files.exists(filesDir("acme").resolve("a.txt")));
 
@@ -261,5 +399,14 @@ class ProjectFilesCommandTest {
     var cmd = new CommandLine(new ProjectFilesCommand.Export());
     cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
     assertEquals(1, cmd.execute("-p", "acme", "--all"));
+  }
+
+  private String share(FileStore files, String project, String path, Path source)
+      throws IOException {
+    if (!Files.exists(source)) Files.writeString(source, "x");
+    try (var input = Files.newInputStream(source)) {
+      return new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults())
+          .put(path, input, Files.size(source), 0644);
+    }
   }
 }
