@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -24,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,6 +92,47 @@ class ProjectFilesCommandTest {
         b64("echo hi"),
         ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals("echo hi", Files.readString(filesDir("acme").resolve("scripts/deploy.sh")));
+  }
+
+  @Test
+  void addSymlinkPreservesTargetPermissions() throws Exception {
+    var data = Files.createDirectories(tempDir.resolve("isolated"));
+    var output = tempDir.resolve("add-output.txt");
+    var builder =
+        new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Duser.home=" + tempDir,
+                "--enable-native-access=ALL-UNNAMED",
+                "-cp",
+                System.getProperty("java.class.path"),
+                ProjectFilesCommandTest.class.getName())
+            .redirectErrorStream(true)
+            .redirectOutput(output.toFile());
+    builder.environment().put("SAIL_DATA_DIR", data.toString());
+    var process = builder.start();
+    try {
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated add timed out");
+      assertEquals(0, process.exitValue(), Files.readString(output));
+    } finally {
+      process.destroyForcibly();
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    var source =
+        Files.writeString(Path.of(System.getProperty("user.home"), "restricted.txt"), "private");
+    WorkspaceFiles.mode(source, 0600);
+    var link = Files.createSymbolicLink(source.resolveSibling("linked.txt"), source);
+    try (var database = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(database).migrate();
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", link.toString()));
+      assertEquals(0600, new FileStore(database).find("acme", "linked.txt").orElseThrow().mode());
+      var copy = SailPaths.projectsDir().resolve("acme/files/linked.txt");
+      assertEquals("private", Files.readString(copy));
+      assertEquals(0600, WorkspaceFiles.mode(copy));
+      assertEquals(0600, WorkspaceFiles.mode(source));
+    }
   }
 
   @Test

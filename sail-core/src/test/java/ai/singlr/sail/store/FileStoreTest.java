@@ -97,6 +97,22 @@ class FileStoreTest {
   }
 
   @Test
+  void knownVersionsMatchContentAndModeFromTheSameRevisionOfTheSameFile() {
+    var first = files.blobs().putText("first");
+    var second = files.blobs().putText("second");
+    files.put(new FileStore.FileRow("acme", "known", first, 5, 0644, "text"));
+    files.put(new FileStore.FileRow("acme", "known", second, 6, 0600, "text"));
+    files.delete("acme", "known");
+
+    assertTrue(files.isKnownVersion(id("known"), first, 0644));
+    assertTrue(files.isKnownVersion(id("known"), second, 0600));
+    assertFalse(files.isKnownVersion(id("known"), first, 0600));
+    assertFalse(files.isKnownVersion(id("known"), second, 0644));
+    assertFalse(files.isKnownVersion(id("other"), first, 0644));
+    assertFalse(files.isKnownVersion(id("known"), files.blobs().putText("unknown"), 0644));
+  }
+
+  @Test
   void putAndFindAndList() {
     ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
     ai.singlr.sail.store.ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");

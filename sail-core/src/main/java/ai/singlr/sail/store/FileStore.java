@@ -198,6 +198,21 @@ public final class FileStore implements ConflictResolver, SyncedStore {
         .isPresent();
   }
 
+  /** Whether this exact content-and-mode pair is a recorded version of the file. */
+  public boolean isKnownVersion(String id, String hash, int mode) {
+    return db.queryOne(
+            """
+            SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
+                AND json_extract(snapshot, '$.content_hash') = ?
+                AND json_extract(snapshot, '$.mode') = ? LIMIT 1
+            """,
+            row -> row.integer(0),
+            id,
+            hash,
+            mode)
+        .isPresent();
+  }
+
   public Map<String, Object> comparableAtRev(String id, String rev) {
     return journal.comparableAtRev(id, rev);
   }

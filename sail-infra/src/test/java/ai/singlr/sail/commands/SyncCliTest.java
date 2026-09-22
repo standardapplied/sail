@@ -165,6 +165,7 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("DROP INDEX idx_change_log_file_version");
     for (var table : List.of("blobs", "chunks", "known_content")) db.execute("DROP TABLE " + table);
     for (var column : List.of("body_hash", "plan_hash"))
       db.execute("ALTER TABLE specs DROP COLUMN " + column);

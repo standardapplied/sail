@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Materialization is the data-safety boundary: it refreshes copies it wrote, never clobbers a file
@@ -143,5 +146,67 @@ class FileMaterializerTest {
     assertEquals(0, report.written());
     assertEquals(0, report.deleted());
     assertTrue(report.skipped().isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"unchanged", "content", "mode", "deleted"})
+  void preservesLocalPermissionEditsAcrossPagedSync(String update) throws Exception {
+    try (var main = new SyncBox(tempDir, "main")) {
+      var remote = new FileStore(main.db);
+      var hash = remote.blobs().putText("original");
+      remote.put(new FileStore.FileRow("acme", "x.txt", hash, 8, 0644, "text"));
+      SyncBox.round(main.db, db, "file");
+      materializer.materialize("acme");
+      var destination = filesDir.resolve("x.txt");
+      WorkspaceFiles.mode(destination, 0600);
+
+      switch (update) {
+        case "content" ->
+            ai.singlr.sail.store.ContentFixtures.put(remote, "acme", "x.txt", "changed");
+        case "mode" -> remote.put(new FileStore.FileRow("acme", "x.txt", hash, 8, 0750, "text"));
+        case "deleted" -> remote.delete("acme", "x.txt");
+        default -> {}
+      }
+      SyncBox.round(main.db, db, "file");
+
+      var report = materializer.materialize("acme");
+
+      assertEquals(0600, WorkspaceFiles.mode(destination));
+      assertEquals("original", Files.readString(destination));
+      assertEquals(new FileMaterializer.Report(0, 0, List.of("x.txt")), report);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"content", "mode", "deleted"})
+  void updatesPreviouslyRecordedVersionsAcrossPagedSync(String update) throws Exception {
+    try (var main = new SyncBox(tempDir, "main")) {
+      var remote = new FileStore(main.db);
+      var original = remote.blobs().putText("original");
+      remote.put(new FileStore.FileRow("acme", "x.txt", original, 8, 0644, "text"));
+      SyncBox.round(main.db, db, "file");
+      materializer.materialize("acme");
+      var hash = "content".equals(update) ? remote.blobs().putText("modified") : original;
+      if ("deleted".equals(update)) {
+        remote.delete("acme", "x.txt");
+      } else {
+        remote.put(new FileStore.FileRow("acme", "x.txt", hash, 8, 0600, "text"));
+      }
+      SyncBox.round(main.db, db, "file");
+
+      var report = materializer.materialize("acme");
+
+      assertTrue(report.skipped().isEmpty());
+      var destination = filesDir.resolve("x.txt");
+      if ("deleted".equals(update)) {
+        assertEquals(1, report.deleted());
+        assertFalse(Files.exists(destination));
+      } else {
+        assertEquals(0600, WorkspaceFiles.mode(destination));
+        assertEquals(
+            "content".equals(update) ? "modified" : "original", Files.readString(destination));
+        assertEquals("content".equals(update) ? 1 : 0, report.written());
+      }
+    }
   }
 }

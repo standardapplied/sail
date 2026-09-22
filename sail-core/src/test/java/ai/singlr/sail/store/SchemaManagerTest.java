@@ -34,6 +34,44 @@ class SchemaManagerTest {
   }
 
   @Test
+  void fileVersionIndexMigratesExistingContentAndPermissionHistory() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE INDEX idx_change_log_file_version");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
+    var files = new FileStore(db);
+    var hash = files.blobs().putText("content");
+    files.put(new FileStore.FileRow("acme", "known", hash, 7, 0644, "text"));
+    files.put(new FileStore.FileRow("acme", "known", hash, 7, 0600, "text"));
+    files.delete("acme", "known");
+
+    new SchemaManager(db).migrate();
+
+    assertTrue(files.isKnownVersion("acme/known", hash, 0644));
+    assertTrue(files.isKnownVersion("acme/known", hash, 0600));
+    assertFalse(files.isKnownVersion("acme/known", hash, 0755));
+    var plan =
+        db.query(
+            """
+            EXPLAIN QUERY PLAN SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
+                AND json_extract(snapshot, '$.content_hash') = ?
+                AND json_extract(snapshot, '$.mode') = ? LIMIT 1
+            """,
+            row -> row.text(3),
+            "acme/known",
+            hash,
+            0644);
+    assertTrue(
+        plan.stream().anyMatch(step -> step.contains("idx_change_log_file_version")),
+        plan.toString());
+  }
+
+  @Test
   void syncHealthMigratesFromThePriorReleaseWithoutChangingTheReplica() {
     stageAtBaseline();
     var prior = migrationIndex("CREATE TABLE sync_health");

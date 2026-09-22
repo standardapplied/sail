@@ -25,8 +25,7 @@ public final class WorkspaceFiles {
   private WorkspaceFiles() {}
 
   public static int mode(Path file) throws IOException {
-    return (int) Files.getAttribute(file, "unix:mode", java.nio.file.LinkOption.NOFOLLOW_LINKS)
-        & 0777;
+    return (int) Files.getAttribute(file, "unix:mode") & 0777;
   }
 
   public static void mode(Path file, int mode) throws IOException {

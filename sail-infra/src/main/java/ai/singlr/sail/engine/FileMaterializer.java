@@ -21,7 +21,7 @@ import java.util.Objects;
  *
  * <ul>
  *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it matches a
- *       revision this box itself wrote ({@link FileStore#isKnownContent}); a file a human edited
+ *       revision's content and mode ({@link FileStore#isKnownVersion}); a file a human edited
  *       locally without {@code sail project files add} matches nothing in history, so it is left
  *       alone and reported as skipped.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
@@ -67,7 +67,10 @@ public final class FileMaterializer {
       }
 
       var onDisk = diskHash(destination);
-      switch (decide(targetContent, onDisk, onDisk != null && files.isKnownContent(id, onDisk))) {
+      switch (decide(
+          targetContent,
+          onDisk,
+          onDisk != null && files.isKnownVersion(id, onDisk, WorkspaceFiles.mode(destination)))) {
         case IN_SYNC -> {
           if (target != null) WorkspaceFiles.mode(destination, target.mode());
         }
@@ -91,11 +94,11 @@ public final class FileMaterializer {
    * never lost.
    */
   static Action decide(String targetContent, String onDisk, boolean onDiskIsKnown) {
-    if (Objects.equals(onDisk, targetContent)) {
-      return Action.IN_SYNC;
-    }
     if (onDisk != null && !onDiskIsKnown) {
       return Action.SKIP_DIRTY;
+    }
+    if (Objects.equals(onDisk, targetContent)) {
+      return Action.IN_SYNC;
     }
     return targetContent == null ? Action.DELETE : Action.WRITE;
   }
