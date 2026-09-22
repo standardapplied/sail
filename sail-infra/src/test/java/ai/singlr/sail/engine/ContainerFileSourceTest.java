@@ -22,6 +22,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -119,6 +121,7 @@ class ContainerFileSourceTest {
 
   @ParameterizedTest
   @ValueSource(ints = {0600, 0750})
+  @EnabledOnOs(OS.LINUX)
   void pickedSymlinkPreservesTargetPermissionsAcrossSync(int mode) throws Exception {
     var target = Files.writeString(tempDir.resolve("restricted target.txt"), "private");
     WorkspaceFiles.mode(target, mode);
@@ -165,6 +168,7 @@ class ContainerFileSourceTest {
   }
 
   @Test
+  @EnabledOnOs(OS.LINUX)
   void refusesPermissionsForADanglingSymlink() throws Exception {
     var link = Files.createSymbolicLink(tempDir.resolve("dangling"), Path.of("missing"));
     var source = new ContainerFileSource(new LocalContainerShell(), "acme");
@@ -180,6 +184,11 @@ class ContainerFileSourceTest {
     assertTrue(ex.getMessage().contains("cannot stat"));
   }
 
+  /**
+   * Runs the container's commands on this machine. They are GNU findutils and coreutils, which is
+   * what the Ubuntu container has and what a macOS host does not, so the tests that use this run on
+   * Linux only; the product never runs them outside a container.
+   */
   private record LocalContainerShell(ShellExecutor delegate) implements ShellExec {
     LocalContainerShell() {
       this(new ShellExecutor(false, Duration.ofSeconds(10)));
