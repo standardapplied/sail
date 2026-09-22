@@ -96,7 +96,8 @@ public final class ContainerFileSource implements FileSource {
 
   @Override
   public int mode(Path file) throws IOException {
-    return Integer.parseInt(run(List.of("stat", "-c", "%a", "--", file.toString())).strip(), 8)
+    return Integer.parseInt(
+            run(List.of("stat", "-L", "-c", "%a", "--", file.toString())).strip(), 8)
         & 0777;
   }
 
