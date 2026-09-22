@@ -23,7 +23,6 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.store.FileStore;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -291,12 +290,6 @@ public final class ProjectFilesCommand implements Runnable {
       } catch (IOException e) {
         return "unreadable";
       }
-    }
-
-    /** Stores {@code bytes} at {@code path} (no materialization); re-checks the guards. */
-    static String store(FileStore files, String project, String path, byte[] bytes) {
-      return new SharedProjectFiles(files, SailPaths.projectsDir(), project, FileLimits.defaults())
-          .put(path, new ByteArrayInputStream(bytes), bytes.length, 0644);
     }
   }
 

@@ -91,9 +91,7 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("deploy.sh");
     Files.writeString(source, "echo hi");
 
-    var path =
-        ProjectFilesCommand.Add.store(
-            files, "acme", "scripts/deploy.sh", Files.readAllBytes(source));
+    var path = share(files, "acme", "scripts/deploy.sh", source);
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
@@ -156,8 +154,7 @@ class ProjectFilesCommandTest {
     var source = tempDir.resolve("notes.md");
     Files.writeString(source, "hello");
 
-    var path =
-        ProjectFilesCommand.Add.store(files, "acme", "docs/notes.md", Files.readAllBytes(source));
+    var path = share(files, "acme", "docs/notes.md", source);
 
     assertEquals("docs/notes.md", path);
     assertTrue(files.find("acme", "docs/notes.md").isPresent());
@@ -167,7 +164,7 @@ class ProjectFilesCommandTest {
   void addRejectsAPathThatEscapesTheProject() throws Exception {
     assertThrows(
         IllegalArgumentException.class,
-        () -> ProjectFilesCommand.Add.store(files, "acme", "../escape", "x".getBytes()));
+        () -> share(files, "acme", "../escape", tempDir.resolve("x")));
   }
 
   @Test
@@ -367,7 +364,7 @@ class ProjectFilesCommandTest {
   void rmTombstonesAndRemovesTheLocalCopy() throws Exception {
     var source = tempDir.resolve("a.txt");
     Files.writeString(source, "data");
-    ProjectFilesCommand.Add.store(files, "acme", "a.txt", Files.readAllBytes(source));
+    share(files, "acme", "a.txt", source);
     new FileMaterializer(files, projectsDir).materialize("acme");
     assertTrue(Files.exists(filesDir("acme").resolve("a.txt")));
 
@@ -402,5 +399,14 @@ class ProjectFilesCommandTest {
     var cmd = new CommandLine(new ProjectFilesCommand.Export());
     cmd.setErr(new java.io.PrintWriter(new java.io.StringWriter()));
     assertEquals(1, cmd.execute("-p", "acme", "--all"));
+  }
+
+  private String share(FileStore files, String project, String path, Path source)
+      throws IOException {
+    if (!Files.exists(source)) Files.writeString(source, "x");
+    try (var input = Files.newInputStream(source)) {
+      return new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults())
+          .put(path, input, Files.size(source), 0644);
+    }
   }
 }

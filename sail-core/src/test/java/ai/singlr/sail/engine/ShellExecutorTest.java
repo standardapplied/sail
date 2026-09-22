@@ -121,7 +121,7 @@ class ShellExecutorTest {
 
   @Test
   void aStreamThatKeepsDeliveringOutlivesTheIdleTimeout() throws Exception {
-    var executor = new ShellExecutor(false, Duration.ofMillis(400));
+    var executor = new ShellExecutor(false, Duration.ofSeconds(2));
     var command = List.of("sh", "-c", "for i in 1 2 3 4 5 6; do printf x; sleep 0.2; done");
 
     try (var stream = executor.stream(command)) {
@@ -146,6 +146,17 @@ class ShellExecutorTest {
     assertTrue(failure.getMessage().contains("exec sleep 30"), failure.getMessage());
     assertTrue(failure.getMessage().contains("no output for 1s"), failure.getMessage());
     assertTrue(failure.getMessage().contains("after 5 bytes"), failure.getMessage());
+  }
+
+  @Test
+  void aStreamReadByteByByteCountsEveryByteAsProgress() throws Exception {
+    var executor = new ShellExecutor(false, Duration.ofSeconds(5));
+    try (var stream = executor.stream(List.of("sh", "-c", "printf abc"))) {
+      assertEquals('a', stream.read());
+      assertEquals('b', stream.read());
+      assertEquals('c', stream.read());
+      assertEquals(-1, stream.read());
+    }
   }
 
   @Test

@@ -56,6 +56,20 @@ class PtySessionHostHandoffTest {
 
   private final List<String> ended = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+  /**
+   * The host reports an end on the wire and to its events sink on two paths with no order between
+   * them, so a client that has read the end waits for the sink rather than asserting it.
+   */
+  private void awaitEnded(String entry) {
+    var deadline = System.nanoTime() + 30_000_000_000L;
+    while (!ended.contains(entry)) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError("host never reported " + entry + ": " + ended);
+      }
+      Thread.onSpinWait();
+    }
+  }
+
   private PtySessionHost host(PtySessionHost.Handoff handoff) throws IOException {
     var host =
         new PtySessionHost(
@@ -238,7 +252,7 @@ class PtySessionHostHandoffTest {
           assertEquals(
               "exited(7)", awaitEnd(owner).reason(), "the status crosses via the exit file");
           assertEquals(Map.of("s1", "remove"), drain(receiver, 1));
-          assertTrue(ended.contains("s1:exited(7)"), ended.toString());
+          awaitEnded("s1:exited(7)");
         }
         try (var stranger = connect("tok-root");
             var same = connect("tok-uday")) {
