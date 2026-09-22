@@ -6,17 +6,20 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectFiles;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
-public record SharedProjectFiles(FileStore files, Path projectsDir, String project)
-    implements ProjectFiles {
+public record SharedProjectFiles(
+    FileStore files, Path projectsDir, String project, FileLimits limits) implements ProjectFiles {
   public SharedProjectFiles {
     NameValidator.requireValidProjectName(project);
+    Objects.requireNonNull(limits, "limits");
   }
 
   @Override
@@ -39,7 +42,6 @@ public record SharedProjectFiles(FileStore files, Path projectsDir, String proje
     if (!FilePicker.isShareablePath(path)) {
       throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
     }
-    var limits = limits();
     limits.check(size);
     files.put(project, path, limits.bounded(bytes, size), mode);
     return path;

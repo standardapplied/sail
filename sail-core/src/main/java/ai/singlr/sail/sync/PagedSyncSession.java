@@ -271,12 +271,19 @@ public final class PagedSyncSession implements SyncSession {
    */
   private void fetchBlob(String type, String hash) {
     var context = type + " blob " + hash;
-    var manifest = receiveManifest(hash, context);
+    var receiver =
+        new ContentReceiver(in, () -> content(Rpc.receive(in, context), context), blobs, context);
+    var manifest =
+        owed(
+            () -> {
+              Rpc.send(out, SyncWire.encode(new SyncWire.Fetch(List.of(hash))));
+              return receiver.manifests(Set.of(hash), ignored -> {}).get(hash);
+            });
     var pending = List.copyOf(blobs.missingChunks(manifest.chunkHashes()));
     var remainingBytes = manifest.size();
     for (var offset = 0; offset < pending.size(); ) {
       var batch = askable(pending, offset);
-      remainingBytes = receiveChunks(batch, remainingBytes, context);
+      remainingBytes -= receiveChunks(receiver, batch, remainingBytes);
       offset += batch.size();
     }
     try {
@@ -286,60 +293,20 @@ public final class PagedSyncSession implements SyncSession {
     }
   }
 
-  private BlobStore.Manifest receiveManifest(String hash, String context) {
-    return owed(() -> receiveManifestRun(hash, context));
+  private long receiveChunks(ContentReceiver receiver, List<String> batch, long remainingBytes) {
+    var stored =
+        owed(
+            () -> {
+              Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(batch)));
+              return receiver.chunks(new LinkedHashSet<>(batch), remainingBytes);
+            });
+    fetchedBytes += stored;
+    return stored;
   }
 
-  private BlobStore.Manifest receiveManifestRun(String hash, String context) {
-    Rpc.send(out, SyncWire.encode(new SyncWire.Fetch(List.of(hash))));
-    BlobStore.Manifest manifest = null;
-    while (true) {
-      var response = Rpc.receive(in, context);
-      if (response instanceof SyncWire.Done) break;
-      if (!(response instanceof SyncWire.Manifest m))
-        throw unexpected(context, "manifest", response);
-      if (!hash.equals(m.manifest().hash()) || manifest != null) {
-        throw new SyncTransportException(
-            "Unexpected manifest " + m.manifest().hash() + " for " + context);
-      }
-      manifest = m.manifest();
-    }
-    if (manifest == null) throw new SyncTransportException("Missing manifest for " + context);
-    return manifest;
-  }
-
-  private long receiveChunks(List<String> batch, long remainingBytes, String context) {
-    return owed(() -> receiveChunksRun(batch, remainingBytes, context));
-  }
-
-  private long receiveChunksRun(List<String> batch, long remainingBytes, String context) {
-    var needed = new LinkedHashSet<>(batch);
-    Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(batch)));
-    while (true) {
-      var response = Rpc.receive(in, context);
-      if (response instanceof SyncWire.Done) break;
-      if (!(response instanceof SyncWire.Chunk chunk)) throw unexpected(context, "chunk", response);
-      if (!needed.remove(chunk.hash()))
-        throw new SyncTransportException("Unexpected chunk " + chunk.hash() + " for " + context);
-      if (chunk.size() > remainingBytes)
-        throw new SyncTransportException(
-            "Chunk " + chunk.hash() + " exceeds declared content size for " + context);
-      remainingBytes -= chunk.size();
-      try {
-        blobs.putChunk(chunk.hash(), SyncWire.readBytes(in, chunk.size()));
-        fetchedBytes += chunk.size();
-      } catch (IOException e) {
-        throw new SyncTransportException(
-            "unreachable", context + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
-      } catch (SyncTransportException e) {
-        throw new SyncTransportException(
-            e.kind(), context + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
-      } catch (IllegalArgumentException e) {
-        throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
-      }
-    }
-    if (!needed.isEmpty()) throw new SyncTransportException(context + " missing chunks " + needed);
-    return remainingBytes;
+  private static SyncWire.Content content(SyncWire.Response response, String context) {
+    if (response instanceof SyncWire.Content content) return content;
+    throw unexpected(context, "content line", response);
   }
 
   private void sendContent(String type, List<MainReplica.Offer> offers) {

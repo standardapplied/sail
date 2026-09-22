@@ -205,9 +205,10 @@ class ApiRouterTest {
       assertEquals("", get(server, "/v1/projects/acme/files/empty", "token").body());
       assertEquals(
           200, put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(1024)).statusCode());
-      assertEquals(
-          413,
-          put(server, "/v1/projects/acme/files/large", "token", "x".repeat(1024 + 1)).statusCode());
+      var large = put(server, "/v1/projects/acme/files/large", "token", "x".repeat(1024 + 1));
+      assertEquals(413, large.statusCode());
+      assertTrue(large.body().contains("raise limits.file_max in host.yaml"), large.body());
+      assertEquals(4, operations.capConsulted, "one cap read per PUT");
       assertTrue(get(server, "/v1/projects/acme/files", "token").body().contains("dir/config"));
       assertEquals(
           200,
@@ -234,10 +235,16 @@ class ApiRouterTest {
         var node = new SyncBox(directory, "node")) {
       var mainFiles =
           new SharedProjectFiles(
-              new FileStore(main.db), directory.resolve("main-projects"), "acme");
+              new FileStore(main.db),
+              directory.resolve("main-projects"),
+              "acme",
+              ai.singlr.sail.config.FileLimits.defaults());
       var nodeFiles =
           new SharedProjectFiles(
-              new FileStore(node.db), directory.resolve("node-projects"), "acme");
+              new FileStore(node.db),
+              directory.resolve("node-projects"),
+              "acme",
+              ai.singlr.sail.config.FileLimits.defaults());
       var path = "dir/config";
       if (existingMode != null) {
         var original = "original\n".getBytes(StandardCharsets.UTF_8);
@@ -330,6 +337,7 @@ class ApiRouterTest {
 
   private static final class SeamOperations extends TestOperations {
     private int openedFiles;
+    private int capConsulted;
     private SyncRequest request;
     private Resolution resolution;
     private final Map<String, byte[]> files = new LinkedHashMap<>();
@@ -382,6 +390,7 @@ class ApiRouterTest {
         }
 
         public ai.singlr.sail.config.FileLimits limits() {
+          capConsulted++;
           return new ai.singlr.sail.config.FileLimits(1024);
         }
 

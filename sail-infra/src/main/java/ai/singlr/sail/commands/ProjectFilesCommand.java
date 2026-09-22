@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectFiles;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
@@ -123,22 +124,17 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Not a file: " + source, Ansi.AUTO));
         return 1;
       }
-      if (Files.size(source) > FileLimits.load().fileMax()) {
-        System.err.println(
-            Banner.errorLine(
-                source
-                    + " is larger than "
-                    + (FileLimits.load().fileMax() / (1024 * 1024))
-                    + " MiB.",
-                Ansi.AUTO));
-        return 1;
-      }
       if (!FilePicker.isShareablePath(path)) {
         System.err.println(Banner.errorLine("Unsafe share path: '" + path + "'.", Ansi.AUTO));
         return 1;
       }
       try (var operations = OperationsFactory.open()) {
         var files = operations.projectFiles(project);
+        var problem = files.limits().problem(Files.size(source));
+        if (problem.isPresent()) {
+          System.err.println(Banner.errorLine(source + ": " + problem.get(), Ansi.AUTO));
+          return 1;
+        }
         try (var input = Files.newInputStream(source)) {
           files.put(path, input, Files.size(source), WorkspaceFiles.mode(source));
         }
@@ -233,35 +229,17 @@ public final class ProjectFilesCommand implements Runnable {
         System.out.println(Ansi.AUTO.string("  @|faint Nothing shared.|@"));
         return 0;
       }
-      var skipped = new ArrayList<String>();
-      var shared = 0;
+      Shared shared;
       try (var operations = OperationsFactory.open()) {
-        var files = operations.projectFiles(project);
-        for (var file : selected) {
-          var path = root.relativize(file).toString();
-          var problem = shareProblem(fileSource, file, path);
-          if (problem != null) {
-            skipped.add(path + " (" + problem + ")");
-            continue;
-          }
-          var size = fileSource.size(file);
-          FileLimits.load().check(size);
-          try (var input = fileSource.open(file)) {
-            files.put(path, input, size, fileSource.mode(file));
-          }
-          shared++;
-        }
-        if (shared > 0) {
-          files.materialize();
-        }
+        shared = share(operations.projectFiles(project), fileSource, root, selected);
       }
-      for (var skip : skipped) {
+      for (var skip : shared.skipped()) {
         System.err.println(Ansi.AUTO.string("  @|yellow ⚠|@ skipped " + skip));
       }
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Shared @|bold "
-                  + shared
+                  + shared.count()
                   + "|@ file(s) on @|bold "
                   + project
                   + "|@."
@@ -269,28 +247,55 @@ public final class ProjectFilesCommand implements Runnable {
       return 0;
     }
 
+    record Shared(int count, List<String> skipped) {}
+
+    /**
+     * Shares each of {@code selected} through {@code files}, skipping and naming what cannot be
+     * shared. The cap is consulted once, before the first file is opened.
+     */
+    static Shared share(ProjectFiles files, FileSource fileSource, Path root, List<Path> selected)
+        throws IOException {
+      var limits = files.limits();
+      var skipped = new ArrayList<String>();
+      var count = 0;
+      for (var file : selected) {
+        var path = root.relativize(file).toString();
+        var problem = shareProblem(fileSource, file, path, limits);
+        if (problem != null) {
+          skipped.add(path + " (" + problem + ")");
+          continue;
+        }
+        try (var input = fileSource.open(file)) {
+          files.put(path, input, fileSource.size(file), fileSource.mode(file));
+        }
+        count++;
+      }
+      if (count > 0) {
+        files.materialize();
+      }
+      return new Shared(count, List.copyOf(skipped));
+    }
+
     /**
      * Why {@code file} cannot be shared at {@code relPath}, or {@code null} if it can — a guard for
      * what real project trees throw at us: paths that would escape the files directory, oversized
      * blobs, and entries that vanished or became unreadable since the listing.
      */
-    static String shareProblem(FileSource fileSource, Path file, String relPath) {
+    static String shareProblem(
+        FileSource fileSource, Path file, String relPath, FileLimits limits) {
       if (!FilePicker.isShareablePath(relPath)) {
         return "unsafe path";
       }
       try {
-        if (fileSource.size(file) > FileLimits.load().fileMax()) {
-          return "larger than " + (FileLimits.load().fileMax() / (1024 * 1024)) + " MiB";
-        }
+        return limits.problem(fileSource.size(file)).orElse(null);
       } catch (IOException e) {
         return "unreadable";
       }
-      return null;
     }
 
     /** Stores {@code bytes} at {@code path} (no materialization); re-checks the guards. */
     static String store(FileStore files, String project, String path, byte[] bytes) {
-      return new SharedProjectFiles(files, SailPaths.projectsDir(), project)
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project, FileLimits.defaults())
           .put(path, new ByteArrayInputStream(bytes), bytes.length, 0644);
     }
   }
@@ -380,7 +385,8 @@ public final class ProjectFilesCommand implements Runnable {
     }
 
     static Optional<java.io.InputStream> read(FileStore files, String project, String path) {
-      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).get(path);
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project, FileLimits.defaults())
+          .get(path);
     }
   }
 
@@ -418,7 +424,8 @@ public final class ProjectFilesCommand implements Runnable {
     /** Tombstones the file and removes the local on-disk copy; false if it was not shared. */
     static boolean unshare(FileStore files, Path projectsDir, String project, String path)
         throws IOException {
-      return new SharedProjectFiles(files, projectsDir, project).remove(path);
+      return new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults())
+          .remove(path);
     }
   }
 

@@ -19,6 +19,19 @@
   retained history or open conflict references. Upgrading migrates existing content one entity
   per transaction — resumable if interrupted, safe when two processes run it — and the fleet
   floor moves to 0.45.0: a 0.44 box cannot read a hash-only snapshot, and is told so.
+- **Blobs hardening: one chunk loop, streams that outlive a stopwatch, a lease that means what it
+  says.** The chunk and manifest runs over the sync wire have one definition, `ContentReceiver`,
+  that both main's upload and the node's pull drive, with one vocabulary of failures (`protocol`,
+  `unreachable`, `store`); main's replies to a bad upload are pinned byte for byte by a test, and a
+  chunk the store cannot write is now reported as `store`, not `protocol`. Streaming a file out of
+  a container is bounded by silence, not by the clock: `sail project files add` of a file that
+  keeps delivering is never killed at two minutes, and one that stalls fails naming the command,
+  the idle period and the bytes received. `host.yaml` is read once per command or request rather
+  than once per file, so a corrupt file fails a bulk share or an upgrade's import before any file
+  is opened, and every "too large" refusal is the same sentence, naming the cap in bytes and where
+  to raise it (`limits.file_max` in `host.yaml`). A blob ingest inside a read transaction takes the
+  shared retention lease it was silently skipping, so only a write transaction, which holds the
+  lock that makes skipping safe, goes without one.
 - **The sync protocol-3 fallback is gone.** 0.44.0 let a node upgraded ahead of its main keep
   syncing over the whole-table protocol-3 wire for one release; that release is over. A node that
   meets a main still on 0.43 or older now fails the round saying main is on a sync protocol it

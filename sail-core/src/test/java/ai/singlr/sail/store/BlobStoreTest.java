@@ -264,4 +264,29 @@ class BlobStoreTest {
       assertEquals(3, collecting.get(5, java.util.concurrent.TimeUnit.SECONDS));
     }
   }
+
+  @Test
+  void aPutLeasesRetentionUnderAReadTransactionAndOutsideOneButNotUnderAWriteOne() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var store = new BlobStore(db);
+      assertEquals(1, leasesWhilePutting(db, store));
+      assertEquals(1, db.read(() -> leasesWhilePutting(db, store)));
+      assertEquals(0, db.transaction(() -> leasesWhilePutting(db, store)));
+      assertEquals(0, db.contentRetention.leases());
+    }
+  }
+
+  private static int leasesWhilePutting(Sqlite db, BlobStore store) {
+    var observed = new java.util.concurrent.atomic.AtomicInteger(-1);
+    store.put(
+        new java.io.InputStream() {
+          @Override
+          public int read() {
+            observed.set(db.contentRetention.leases());
+            return -1;
+          }
+        });
+    return observed.get();
+  }
 }

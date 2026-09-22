@@ -46,10 +46,13 @@ public final class BlobStore {
 
   /**
    * Shares retention across rounds and ingests while excluding collection, across processes. A
-   * waiting collector does not block new transfers from joining the active shared leases.
+   * waiting collector does not block new transfers from joining the active shared leases. Inside a
+   * write transaction the lease is not needed: the database's write lock already keeps a collector
+   * in any process from committing between a chunk and the row that references it. A read
+   * transaction holds no such lock, so it leases like any caller outside one.
    */
   public Scope retain() {
-    if (db.inTransaction()) return () -> {};
+    if (db.holdsWriteLock()) return () -> {};
     return retention.acquireShared();
   }
 

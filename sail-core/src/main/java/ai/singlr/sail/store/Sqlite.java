@@ -60,6 +60,7 @@ public final class Sqlite implements AutoCloseable {
   private final SqliteLib lib;
   private final ReentrantLock lock = new ReentrantLock();
   private int transactionDepth;
+  private boolean writeLocked;
   private volatile boolean closed;
   private Path path;
   final BlobRetention contentRetention = new BlobRetention(null);
@@ -122,8 +123,13 @@ public final class Sqlite implements AutoCloseable {
     return path;
   }
 
-  boolean inTransaction() {
-    return lock.isHeldByCurrentThread() && transactionDepth > 0;
+  /**
+   * Whether the calling thread is inside a {@link #transaction} scope, which took the database's
+   * write lock at {@code BEGIN IMMEDIATE}. A {@link #read} scope is a transaction too, but holds no
+   * lock until its first write, so it offers none of the exclusion a caller may want to rely on.
+   */
+  boolean holdsWriteLock() {
+    return lock.isHeldByCurrentThread() && transactionDepth > 0 && writeLocked;
   }
 
   public void execute(String sql, Object... params) {
@@ -226,6 +232,7 @@ public final class Sqlite implements AutoCloseable {
       }
       execute(begin);
       transactionDepth = 1;
+      writeLocked = begin.equals("BEGIN IMMEDIATE");
       try {
         var result = work.get();
         execute("COMMIT");

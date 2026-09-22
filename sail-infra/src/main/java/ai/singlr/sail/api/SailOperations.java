@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -248,7 +249,8 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public ProjectFiles projectFiles(String project) {
-    return new SharedProjectFiles(new FileStore(controlPlane), projectsDir, project);
+    return new SharedProjectFiles(
+        new FileStore(controlPlane), projectsDir, project, FileLimits.load());
   }
 
   private final ShellExec shell;
