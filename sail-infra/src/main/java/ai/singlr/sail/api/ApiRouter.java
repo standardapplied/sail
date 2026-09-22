@@ -336,7 +336,8 @@ public final class ApiRouter implements HttpHandler {
         throw new ApiException(
             ErrorCode.REQUEST_TOO_LARGE,
             "File exceeds limits.file_max (" + files.limits().fileMax() + " bytes)");
-      var storedPath = files.put(path, exchange.getRequestBody(), size, 0644);
+      var mode = files.find(path).map(row -> row.mode()).orElse(0644);
+      var storedPath = files.put(path, exchange.getRequestBody(), size, mode);
       files.materialize();
       return ApiResponse.ok(Map.of("path", storedPath));
     }
