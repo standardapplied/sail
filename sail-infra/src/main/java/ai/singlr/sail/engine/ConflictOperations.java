@@ -166,7 +166,8 @@ public final class ConflictOperations {
           "binary".equals(snapshot.get("kind"))
               ? "<binary, " + blobs.manifest(value).size() + " bytes>"
               : field.equals("content_hash") ? preview(blobs, value) : blobs.text(value);
-      snapshot.put(displayField(field), text);
+      snapshot.put(
+          displayField(field), field.equals("content_hash") ? text + "\nSHA-256: " + value : text);
     }
     return YamlUtil.dumpJson(snapshot);
   }

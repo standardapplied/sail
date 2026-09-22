@@ -99,6 +99,89 @@ class SyncBlobTest {
   }
 
   @Test
+  void idleViewerInAnotherProcessAllowsIngestAndSyncAfterGcStarts() throws Exception {
+    var path = dir.resolve("main.db");
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node");
+        var ingestDb = Sqlite.open(path);
+        var gcDb = Sqlite.open(path);
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var blobs = new BlobStore(main.db);
+      var orphan = blobs.putText("unfinished upload");
+      var viewer =
+          new ProcessBuilder(
+                  Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                  "--enable-native-access=ALL-UNNAMED",
+                  "-cp",
+                  System.getProperty(
+                      "surefire.test.class.path", System.getProperty("java.class.path")),
+                  IdleViewerProcess.class.getName(),
+                  path.toString())
+              .redirectError(ProcessBuilder.Redirect.INHERIT)
+              .start();
+      try {
+        assertEquals(
+            "idle", executor.submit(viewer.inputReader()::readLine).get(10, TimeUnit.SECONDS));
+        var started = new CountDownLatch(1);
+        var collecting =
+            executor.submit(
+                () -> {
+                  started.countDown();
+                  return new BlobStore(gcDb).gc(Set.of());
+                });
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+        var upload =
+            executor.submit(
+                () -> {
+                  new FileStore(ingestDb)
+                      .put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+                  return null;
+                });
+        upload.get(5, TimeUnit.SECONDS);
+        var syncing = executor.submit(() -> SyncBox.round(ingestDb, node.db, "file"));
+        assertEquals(1, syncing.get(5, TimeUnit.SECONDS).pulled());
+        assertTrue(new FileStore(node.db).find("project", "file").isPresent());
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+        assertTrue(blobs.has(orphan));
+        viewer.getOutputStream().close();
+        assertTrue(viewer.waitFor(5, TimeUnit.SECONDS));
+        assertEquals(0, viewer.exitValue());
+        assertEquals(17, collecting.get(5, TimeUnit.SECONDS));
+        assertFalse(blobs.has(orphan));
+        assertTrue(
+            blobs.has(new FileStore(ingestDb).find("project", "file").orElseThrow().contentHash()));
+      } finally {
+        viewer.destroyForcibly();
+        viewer.waitFor();
+      }
+    }
+  }
+
+  public static final class IdleViewerProcess {
+    public static void main(String[] args) throws Exception {
+      try (var db = Sqlite.open(Path.of(args[0]))) {
+        var input =
+            new InputStream() {
+              @Override
+              public int read() throws IOException {
+                System.out.println("idle");
+                return System.in.read();
+              }
+            };
+        SyncRpcServer.over(
+                db,
+                "main",
+                new SyncPrincipal("viewer", false),
+                FdeRoster.EMPTY,
+                SyncTransitionSink.NONE,
+                SyncWire.UPGRADE_FLOOR)
+            .serve(input, OutputStream.nullOutputStream());
+      }
+    }
+  }
+
+  @Test
   void convergingDeletionsCollectOrphanedChunksAfterAdoptingTheTombstone() {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node")) {

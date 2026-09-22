@@ -19,15 +19,20 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -41,6 +46,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
 
 class ConflictsCommandTest {
@@ -197,6 +204,48 @@ class ConflictsCommandTest {
     assertTrue(rendered.contains("acme/x.txt"));
     assertTrue(rendered.contains("mine"));
     assertTrue(rendered.contains("theirs"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void showPreservesContentConflictsWhenEqualSizeFilesHaveIdenticalPreviews(boolean binary) {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node")) {
+      var base =
+          binary
+              ? new byte[] {0, 1}
+              : ("x".repeat(64 * 1024) + "1").getBytes(StandardCharsets.UTF_8);
+      var mine = base.clone();
+      var theirs = base.clone();
+      mine[mine.length - 1]++;
+      theirs[theirs.length - 1] += 2;
+      var mainFiles = new FileStore(main.db);
+      var nodeFiles = new FileStore(node.db);
+      mainFiles.put("acme", "file", new ByteArrayInputStream(base), 0644);
+      SyncBox.round(main.db, node.db, "file");
+      mainFiles.put("acme", "file", new ByteArrayInputStream(theirs), 0644);
+      nodeFiles.put("acme", "file", new ByteArrayInputStream(mine), 0644);
+      SyncBox.round(main.db, node.db, "file");
+
+      var conflict = new ConflictOperations(node.db).find("file", "acme/file");
+      assertEquals(List.of("content"), conflict.fields());
+      var diff =
+          ConflictMerge.diff(
+              ConflictOperations.parse(conflict.baseSnapshot()),
+              ConflictOperations.parse(conflict.localSnapshot()),
+              ConflictOperations.parse(conflict.remoteSnapshot()),
+              conflict.fields());
+      assertEquals(
+          List.of("content"), diff.stream().map(ConflictMerge.FieldChange::field).toList());
+      assertTrue(diff.getFirst().clash());
+      var rendered = ConflictsCommand.Show.render(conflict);
+      assertTrue(rendered.contains("✗ content"));
+      for (var bytes : List.of(base, mine, theirs)) {
+        assertTrue(rendered.contains("SHA-256: " + BlobStore.hash(bytes)));
+      }
+      assertTrue(
+          rendered.contains(binary ? "<binary, 2 bytes>" : "… (preview; 65537 bytes total)"));
+    }
   }
 
   private HostOperations operations() {

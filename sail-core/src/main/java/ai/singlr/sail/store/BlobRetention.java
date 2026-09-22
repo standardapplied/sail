@@ -38,15 +38,28 @@ final class BlobRetention {
   }
 
   private BlobStore.Scope acquire(Lock local, boolean shared) {
-    if (!local.tryLock()) local.lock();
     try {
-      synchronized (this) {
-        if (leases == 0 && database != null) channel = open(shared);
-        leases++;
+      while (true) {
+        if (!local.tryLock()) local.lock();
+        var acquired = false;
+        try {
+          synchronized (this) {
+            if (leases == 0 && database != null) channel = open(shared);
+            if (database == null || channel != null) {
+              leases++;
+              acquired = true;
+              return () -> release(local);
+            }
+          }
+        } finally {
+          if (!acquired) local.unlock();
+        }
+        Thread.sleep(10);
       }
-      return () -> release(local);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted waiting for blob retention for " + database, e);
     } catch (IOException | RuntimeException e) {
-      local.unlock();
       throw new IllegalStateException("Cannot lock blob content for " + database, e);
     }
   }
@@ -62,7 +75,10 @@ final class BlobRetention {
     }
     var opened = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE);
     try {
-      opened.lock(0, Long.MAX_VALUE, shared);
+      if (opened.tryLock(0, Long.MAX_VALUE, shared) == null) {
+        opened.close();
+        return null;
+      }
       return opened;
     } catch (IOException | RuntimeException e) {
       try {
