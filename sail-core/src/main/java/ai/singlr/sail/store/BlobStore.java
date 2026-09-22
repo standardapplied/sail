@@ -12,13 +12,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -31,63 +26,31 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.locks.ReentrantLock;
 
 /** Verified, content-addressed blobs and deduplicated chunks, streamed through SQLite. */
 public final class BlobStore {
   public static final long MAX_SIZE = 8L * 1024 * 1024 * 1024;
-  private static final Map<Object, ReentrantLock> LOCKS = new HashMap<>();
+  private static final Map<Path, BlobRetention> RETENTION = new HashMap<>();
   private final Sqlite db;
-  private final ReentrantLock contentLock;
+  private final BlobRetention retention;
 
   public BlobStore(Sqlite db) {
     this.db = Objects.requireNonNull(db, "db");
-    synchronized (LOCKS) {
-      contentLock =
+    synchronized (RETENTION) {
+      retention =
           db.path() == null
-              ? db.contentLock
-              : LOCKS.computeIfAbsent(db.path(), ignored -> new ReentrantLock());
+              ? db.contentRetention
+              : RETENTION.computeIfAbsent(db.path(), BlobRetention::new);
     }
   }
 
-  /** Excludes collection while a round or ingest holds unpublished chunks, across processes. */
+  /**
+   * Shares retention across rounds and ingests while excluding collection, across processes. A
+   * waiting collector does not block new transfers from joining the active shared leases.
+   */
   public Scope retain() {
     if (db.inTransaction()) return () -> {};
-    contentLock.lock();
-    if (contentLock.getHoldCount() > 1 || db.path() == null) return contentLock::unlock;
-    FileChannel channel = null;
-    try {
-      var path = db.path().resolveSibling(db.path().getFileName() + ".blobs.lock");
-      try {
-        Files.createFile(path);
-        var source = Files.readAttributes(db.path(), PosixFileAttributes.class);
-        Files.getFileAttributeView(path, PosixFileAttributeView.class).setGroup(source.group());
-        Files.setPosixFilePermissions(path, source.permissions());
-      } catch (FileAlreadyExistsException ignored) {
-      }
-      channel = FileChannel.open(path, StandardOpenOption.WRITE);
-      var lock = channel.lock();
-      var held = channel;
-      return () -> {
-        try (held) {
-          lock.release();
-        } catch (IOException e) {
-          throw new UncheckedIOException(e);
-        } finally {
-          contentLock.unlock();
-        }
-      };
-    } catch (IOException | RuntimeException e) {
-      if (channel != null) {
-        try {
-          channel.close();
-        } catch (IOException close) {
-          e.addSuppressed(close);
-        }
-      }
-      contentLock.unlock();
-      throw new IllegalStateException("Cannot retain blob content", e);
-    }
+    return retention.acquireShared();
   }
 
   @FunctionalInterface
@@ -304,7 +267,7 @@ public final class BlobStore {
   }
 
   public long gc(Set<String> referenced) {
-    try (var scope = retain()) {
+    try (var scope = retention.acquireExclusive()) {
       return collect(referenced);
     }
   }

@@ -11,10 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class BlobStoreTest {
   @Test
@@ -113,6 +118,104 @@ class BlobStoreTest {
       assertEquals(6, blobs.gc(Set.of()));
       sides.forEach(hash -> assertTrue(blobs.has(hash)));
       assertFalse(blobs.has(orphan));
+    }
+  }
+
+  @Test
+  void sharedLeasesAcrossProcessesAllowIngestAndExcludeGc(@TempDir Path dir) throws Exception {
+    var path = dir.resolve("shared.db");
+    try (var db = Sqlite.open(path);
+        var gcDb = Sqlite.open(path);
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      new SchemaManager(db).migrate();
+      var blobs = new BlobStore(db);
+      Process child = null;
+      try {
+        try (var retained = blobs.retain()) {
+          child = retentionProcess(path, "retain");
+          var output = child.inputReader();
+          assertEquals("retained", executor.submit(output::readLine).get(10, TimeUnit.SECONDS));
+          assertEquals("local", blobs.text(blobs.putText("local")));
+        }
+        var collecting = executor.submit(() -> new BlobStore(gcDb).gc(Set.of()));
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+        child.getOutputStream().write(1);
+        child.getOutputStream().flush();
+        assertTrue(child.waitFor(10, TimeUnit.SECONDS));
+        assertEquals(0, child.exitValue());
+        assertEquals(5, collecting.get(5, TimeUnit.SECONDS));
+      } finally {
+        if (child != null) {
+          child.destroyForcibly();
+          child.waitFor();
+        }
+      }
+    }
+  }
+
+  @Test
+  void collectionInAnotherProcessWaitsForEveryLocalLease(@TempDir Path dir) throws Exception {
+    var path = dir.resolve("shared.db");
+    try (var first = Sqlite.open(path);
+        var second = Sqlite.open(path);
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      new SchemaManager(first).migrate();
+      var blobs = new BlobStore(first);
+      var orphan = blobs.putText("orphan");
+      Process child = null;
+      try {
+        java.util.concurrent.Future<String> collected;
+        try (var outer = blobs.retain()) {
+          try (var inner = new BlobStore(second).retain()) {
+            child = retentionProcess(path, "gc");
+            var output = child.inputReader();
+            assertEquals("collecting", executor.submit(output::readLine).get(10, TimeUnit.SECONDS));
+            collected = executor.submit(output::readLine);
+            assertThrows(TimeoutException.class, () -> collected.get(100, TimeUnit.MILLISECONDS));
+          }
+          assertThrows(TimeoutException.class, () -> collected.get(100, TimeUnit.MILLISECONDS));
+          assertTrue(blobs.has(orphan));
+        }
+        assertEquals("6", collected.get(5, TimeUnit.SECONDS));
+        assertTrue(child.waitFor(10, TimeUnit.SECONDS));
+        assertEquals(0, child.exitValue());
+        assertFalse(blobs.has(orphan));
+      } finally {
+        if (child != null) {
+          child.destroyForcibly();
+          child.waitFor();
+        }
+      }
+    }
+  }
+
+  private static Process retentionProcess(Path path, String operation) throws java.io.IOException {
+    return new ProcessBuilder(
+            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+            "--enable-native-access=ALL-UNNAMED",
+            "-cp",
+            System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
+            RetentionProcess.class.getName(),
+            path.toString(),
+            operation)
+        .redirectError(ProcessBuilder.Redirect.INHERIT)
+        .start();
+  }
+
+  public static final class RetentionProcess {
+    public static void main(String[] args) throws Exception {
+      try (var db = Sqlite.open(Path.of(args[0]))) {
+        var blobs = new BlobStore(db);
+        if (args[1].equals("gc")) {
+          System.out.println("collecting");
+          System.out.println(blobs.gc(Set.of()));
+        } else {
+          try (var scope = blobs.retain()) {
+            System.out.println("retained");
+            System.in.read();
+          }
+        }
+      }
     }
   }
 

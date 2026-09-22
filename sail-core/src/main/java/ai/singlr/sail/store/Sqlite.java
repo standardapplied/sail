@@ -62,7 +62,7 @@ public final class Sqlite implements AutoCloseable {
   private int transactionDepth;
   private volatile boolean closed;
   private Path path;
-  final ReentrantLock contentLock = new ReentrantLock();
+  final BlobRetention contentRetention = new BlobRetention(null);
 
   private Sqlite(Arena arena, MemorySegment db, SqliteLib lib) {
     this.arena = arena;

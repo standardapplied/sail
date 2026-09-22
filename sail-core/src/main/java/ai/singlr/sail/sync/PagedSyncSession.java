@@ -119,9 +119,12 @@ public final class PagedSyncSession implements SyncSession {
   @Override
   public TypeReport reconcile(String type, LocalReplica local) {
     if (blobs == null) return reconcileType(type, local);
+    TypeReport report;
     try (var scope = blobs.retain()) {
-      return reconcileType(type, local);
+      report = reconcileType(type, local);
     }
+    if (sawTombstone) blobs.gc(Set.of());
+    return report;
   }
 
   private TypeReport reconcileType(String type, LocalReplica local) {
@@ -162,7 +165,6 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
-    if (blobs != null && sawTombstone) blobs.gc(Set.of());
     return new TypeReport(
         type,
         report,

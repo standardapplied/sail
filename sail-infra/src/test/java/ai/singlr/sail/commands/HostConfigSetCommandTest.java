@@ -33,6 +33,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import picocli.CommandLine;
 
 @Execution(ExecutionMode.SAME_THREAD)
@@ -148,6 +150,33 @@ class HostConfigSetCommandTest {
 
   private static final HostYaml BASE =
       HostYaml.fromMap(java.util.Map.of("storage_backend", "dir", "server_ip", "10.0.0.1"));
+
+  @ParameterizedTest
+  @CsvSource({
+    "server-ip, 192.0.2.1",
+    "webauthn-rp-id, localhost",
+    "webauthn-rp-name, Sail",
+    "webauthn-origin, https://sail.example.com",
+    "webauthn-session-ttl-hours, 48",
+    "sync-role, node",
+    "sync-main, sail@main",
+    "sync-handle, node"
+  })
+  void unrelatedChangesPreserveFileLimitThroughSerialization(String key, String value) {
+    var host =
+        HostYaml.fromMap(
+            YamlUtil.parseMap(
+                """
+        storage_backend: dir
+        limits:
+          file_max: 10485760
+        """));
+
+    var updated = HostConfigSetCommand.applyChange(host, key, value);
+    var reloaded = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(updated.toMap())));
+
+    assertEquals(10485760, reloaded.limits().fileMax());
+  }
 
   @Test
   void webauthnRpIdIsSetWithoutDisturbingOtherFields() {

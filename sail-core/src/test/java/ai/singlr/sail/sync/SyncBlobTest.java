@@ -13,9 +13,11 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +25,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
@@ -31,6 +38,65 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SyncBlobTest {
+
+  @Test
+  void idleViewerAllowsOtherSessionsAndIngestsWhileGcWaits() throws Exception {
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node");
+        var ingestDb = Sqlite.open(dir.resolve("main.db"));
+        var gcDb = Sqlite.open(dir.resolve("main.db"));
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var reading = new CountDownLatch(1);
+      var disconnect = new CountDownLatch(1);
+      var input =
+          new InputStream() {
+            @Override
+            public int read() throws IOException {
+              reading.countDown();
+              try {
+                disconnect.await();
+                return -1;
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+              }
+            }
+          };
+      var blobs = new BlobStore(main.db);
+      var orphan = blobs.putText("unfinished upload");
+      var viewer =
+          executor.submit(
+              () -> {
+                main.server(new SyncPrincipal("viewer", false))
+                    .serve(input, OutputStream.nullOutputStream());
+                return null;
+              });
+      try {
+        assertTrue(reading.await(5, TimeUnit.SECONDS));
+        var collecting = executor.submit(() -> new BlobStore(gcDb).gc(Set.of()));
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+        var upload =
+            executor.submit(
+                () -> {
+                  new FileStore(ingestDb)
+                      .put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+                  return null;
+                });
+        upload.get(5, TimeUnit.SECONDS);
+        var syncing = executor.submit(() -> SyncBox.round(ingestDb, node.db, "file"));
+        assertEquals(1, syncing.get(5, TimeUnit.SECONDS).pulled());
+        assertTrue(new FileStore(node.db).find("project", "file").isPresent());
+        assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
+        assertTrue(blobs.has(orphan));
+        disconnect.countDown();
+        viewer.get(5, TimeUnit.SECONDS);
+        assertEquals(17, collecting.get(5, TimeUnit.SECONDS));
+        assertFalse(blobs.has(orphan));
+      } finally {
+        disconnect.countDown();
+      }
+    }
+  }
 
   @Test
   void convergingDeletionsCollectOrphanedChunksAfterAdoptingTheTombstone() {

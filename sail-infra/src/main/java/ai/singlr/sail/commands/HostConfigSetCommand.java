@@ -506,7 +506,8 @@ public final class HostConfigSetCommand implements Runnable {
         serverIp,
         current.initializedAt(),
         current.webauthn(),
-        current.sync());
+        current.sync(),
+        current.limits());
   }
 
   private static HostYaml withWebauthn(HostYaml current, WebauthnConfig webauthn) {
@@ -521,6 +522,7 @@ public final class HostConfigSetCommand implements Runnable {
         current.serverIp(),
         current.initializedAt(),
         webauthn,
-        current.sync());
+        current.sync(),
+        current.limits());
   }
 }

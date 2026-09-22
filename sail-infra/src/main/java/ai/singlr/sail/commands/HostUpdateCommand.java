@@ -84,18 +84,7 @@ public final class HostUpdateCommand implements Runnable {
 
     var previousVersion = hostYaml.incusVersion();
     if (!newVersion.equals(previousVersion) && !shell.isDryRun()) {
-      var updated =
-          new HostYaml(
-              hostYaml.storageBackend(),
-              hostYaml.pool(),
-              hostYaml.poolDisk(),
-              hostYaml.bridge(),
-              hostYaml.baseProfile(),
-              hostYaml.image(),
-              newVersion,
-              hostYaml.serverIp(),
-              hostYaml.initializedAt(),
-              hostYaml.webauthn());
+      var updated = hostYaml.withIncusVersion(newVersion);
       YamlUtil.dumpToFile(updated.toMap(), hostYamlPath);
     }
 
