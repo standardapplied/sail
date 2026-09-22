@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -66,7 +67,7 @@ class FileMaterializerTest {
 
   @Test
   void writesANewFilePreservingFolderStructure() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "scripts/deploy.sh", "hello");
+    ContentFixtures.put(files, "acme", "scripts/deploy.sh", "hello");
 
     var report = materializer.materialize("acme");
 
@@ -76,9 +77,9 @@ class FileMaterializerTest {
 
   @Test
   void refreshesAStaleCopyThisBoxWrote() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
+    ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "B");
+    ContentFixtures.put(files, "acme", "x.txt", "B");
 
     var report = materializer.materialize("acme");
 
@@ -88,10 +89,10 @@ class FileMaterializerTest {
 
   @Test
   void leavesALocallyEditedFileUntouchedAndReportsIt() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
+    ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     Files.writeString(filesDir.resolve("x.txt"), "MY LOCAL EDIT");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "B");
+    ContentFixtures.put(files, "acme", "x.txt", "B");
 
     var report = materializer.materialize("acme");
 
@@ -102,7 +103,7 @@ class FileMaterializerTest {
 
   @Test
   void removesADeletedFileWhenTheDiskCopyIsOneWeWrote() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
+    ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     files.delete("acme", "x.txt");
 
@@ -114,7 +115,7 @@ class FileMaterializerTest {
 
   @Test
   void keepsALocallyEditedFileEvenWhenDeletedOnMain() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
+    ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     Files.writeString(filesDir.resolve("x.txt"), "MINE");
     files.delete("acme", "x.txt");
@@ -127,8 +128,35 @@ class FileMaterializerTest {
   }
 
   @Test
+  void aSymlinkedAncestorOfTheProjectsDirectoryIsNotAnEscape() throws Exception {
+    var real = Files.createDirectories(tempDir.resolve("real-home"));
+    var linked = Files.createSymbolicLink(tempDir.resolve("home"), real);
+    var viaLink = new FileMaterializer(files, linked.resolve("projects"));
+    ContentFixtures.put(files, "acme", "notes.txt", "hello");
+
+    var report = viaLink.materialize("acme");
+
+    assertEquals(1, report.written());
+    assertEquals(List.of(), report.skipped());
+    assertEquals("hello", Files.readString(real.resolve("projects/acme/files/notes.txt")));
+  }
+
+  @Test
+  void aSymlinkInsideTheFilesDirectoryIsRefused() throws Exception {
+    var elsewhere = Files.createDirectories(tempDir.resolve("elsewhere"));
+    Files.createDirectories(filesDir);
+    Files.createSymbolicLink(filesDir.resolve("out"), elsewhere);
+    ContentFixtures.put(files, "acme", "out/planted.txt", "evil");
+
+    var report = materializer.materialize("acme");
+
+    assertEquals(List.of("out/planted.txt"), report.skipped());
+    assertFalse(Files.exists(elsewhere.resolve("planted.txt")));
+  }
+
+  @Test
   void refusesAPathThatEscapesTheProjectDirectory() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "../../escape.txt", "evil");
+    ContentFixtures.put(files, "acme", "../../escape.txt", "evil");
 
     var report = materializer.materialize("acme");
 
@@ -138,7 +166,7 @@ class FileMaterializerTest {
 
   @Test
   void doesNothingWhenDiskAlreadyMatches() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "x.txt", "A");
+    ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
 
     var report = materializer.materialize("acme");
@@ -161,8 +189,7 @@ class FileMaterializerTest {
       WorkspaceFiles.mode(destination, 0600);
 
       switch (update) {
-        case "content" ->
-            ai.singlr.sail.store.ContentFixtures.put(remote, "acme", "x.txt", "changed");
+        case "content" -> ContentFixtures.put(remote, "acme", "x.txt", "changed");
         case "mode" -> remote.put(new FileStore.FileRow("acme", "x.txt", hash, 8, 0750, "text"));
         case "deleted" -> remote.delete("acme", "x.txt");
         default -> {}

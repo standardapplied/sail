@@ -64,7 +64,7 @@ public final class ContainerFileSource implements FileSource {
 
   @Override
   public long size(Path file) throws IOException {
-    return parseLong(run(List.of("stat", "-c", "%s", file.toString())).strip());
+    return parseLong(run(List.of("stat", "-L", "-c", "%s", "--", file.toString())).strip());
   }
 
   @Override

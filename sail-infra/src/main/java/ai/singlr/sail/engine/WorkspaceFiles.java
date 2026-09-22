@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
@@ -29,7 +30,7 @@ public final class WorkspaceFiles {
   }
 
   public static void mode(Path file, int mode) throws IOException {
-    Files.setAttribute(file, "unix:mode", mode, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+    Files.setAttribute(file, "unix:mode", mode, LinkOption.NOFOLLOW_LINKS);
   }
 
   /**

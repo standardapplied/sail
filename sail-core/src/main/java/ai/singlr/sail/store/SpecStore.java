@@ -13,6 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -653,6 +654,17 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   @Override
   public Set<String> contentFields() {
     return Set.of("body_hash", "plan_hash");
+  }
+
+  @Override
+  public Set<String> liveContentHashes() {
+    var hashes =
+        new LinkedHashSet<>(
+            db.query(
+                "SELECT body_hash FROM specs UNION SELECT plan_hash FROM specs",
+                row -> row.text(0)));
+    hashes.remove(null);
+    return hashes;
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

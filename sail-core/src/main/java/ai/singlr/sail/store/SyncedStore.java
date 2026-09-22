@@ -33,6 +33,11 @@ public interface SyncedStore {
     return Set.of();
   }
 
+  /** The content hashes this store's live rows reference; empty unless it has content fields. */
+  default Set<String> liveContentHashes() {
+    return Set.of();
+  }
+
   /** Snapshot fields whose values name verified blobs. */
   default Set<String> contentFields() {
     return Set.of();

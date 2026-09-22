@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CyclicBarrier;
@@ -45,16 +47,16 @@ class FileStoreTest {
 
   @Test
   void reprojectJournalsATombstoneAndAFreshRevisionSoCheckpointedPeersSeeTheMove() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "old", "a.txt", "AAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "old", "dir/b.txt", "BBB");
+    ContentFixtures.put(files, "old", "a.txt", "AAA");
+    ContentFixtures.put(files, "old", "dir/b.txt", "BBB");
     var log = new ChangeLog(db);
     var checkpoint = log.maxSeq("file");
 
     files.reproject("old", "renamed");
 
     assertTrue(files.find("old", "a.txt").isEmpty(), "nothing left under the old project");
-    assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(files, "renamed", "a.txt"));
-    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(files, "renamed", "dir/b.txt"));
+    assertEquals("AAA", ContentFixtures.text(files, "renamed", "a.txt"));
+    assertEquals("BBB", ContentFixtures.text(files, "renamed", "dir/b.txt"));
     assertTrue(log.head("file", "old/a.txt").orElseThrow().deleted(), "old id tombstoned");
     assertFalse(log.head("file", "renamed/a.txt").orElseThrow().deleted(), "new id live");
     assertEquals(
@@ -68,7 +70,7 @@ class FileStoreTest {
 
   @Test
   void reprojectToTheSameNameJournalsNothing() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "old", "a.txt", "AAA");
+    ContentFixtures.put(files, "old", "a.txt", "AAA");
     var before = new ChangeLog(db).maxSeq("file");
 
     files.reproject("old", "old");
@@ -87,13 +89,22 @@ class FileStoreTest {
   }
 
   @Test
-  void knownContentDoesNotNeedAnyHistoryToBeParsed() {
-    ContentFixtures.put(files, "acme", "known", "first");
-    var first = files.find("acme", "known").orElseThrow().contentHash();
-    ContentFixtures.put(files, "acme", "known", "second");
-    db.execute("DELETE FROM change_log");
-    assertTrue(files.isKnownContent(id("known"), first));
-    assertFalse(files.isKnownContent(id("other"), first));
+  void aRevisionRecordedWithoutAModeIsKnownAtAnyMode() {
+    ContentFixtures.put(files, "acme", "legacy.sh", "first");
+    var hash = files.find("acme", "legacy.sh").orElseThrow().contentHash();
+    var stripped =
+        new LinkedHashMap<>(
+            YamlUtil.parseMap(
+                new ChangeLog(db).head("file", id("legacy.sh")).orElseThrow().snapshot()));
+    stripped.remove("mode");
+    db.execute(
+        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+        YamlUtil.dumpJson(stripped),
+        id("legacy.sh"));
+
+    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0664), "umask 002 on the old box");
+    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0755));
+    assertFalse(files.isKnownVersion(id("legacy.sh"), files.blobs().putText("edited"), 0644));
   }
 
   @Test
@@ -114,10 +125,10 @@ class FileStoreTest {
 
   @Test
   void putAndFindAndList() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
 
-    assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("AAA", ContentFixtures.text(files, "acme", "a.txt"));
     assertEquals(
         List.of("a.txt", "dir/b.txt"),
         files.list("acme").stream().map(FileStore.FileRow::path).toList());
@@ -126,14 +137,14 @@ class FileStoreTest {
   @Test
   void deleteReturnsFalseWhenAbsentAndTrueWhenPresent() {
     assertFalse(files.delete("acme", "missing"));
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     assertTrue(files.delete("acme", "a.txt"));
     assertTrue(files.find("acme", "a.txt").isEmpty());
   }
 
   @Test
   void comparableSnapshotAndAtRev() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     var rev = files.latestRev(id("a.txt"));
 
     assertEquals(
@@ -161,7 +172,7 @@ class FileStoreTest {
         files.commitRevision(id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "1-base");
 
     assertInstanceOf(PushOutcome.Accepted.class, outcome);
-    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("BBB", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
@@ -174,7 +185,7 @@ class FileStoreTest {
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals("1-base", stale.currentRev());
     assertEquals(files.blobs().putText("AAA"), stale.currentSnapshot().get("content_hash"));
-    assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("AAA", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
@@ -190,7 +201,7 @@ class FileStoreTest {
 
   @Test
   void baseRevOfADeletedLocalFileIsNull() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     files.delete("acme", "a.txt");
     assertNull(files.baseRevOf(id("a.txt")), "a locally-created file has no synced base");
   }
@@ -204,9 +215,9 @@ class FileStoreTest {
 
   @Test
   void idsForProjectIncludesTombstonedFiles() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
-    ai.singlr.sail.store.ContentFixtures.put(files, "globex", "c.txt", "CCC");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
+    ContentFixtures.put(files, "globex", "c.txt", "CCC");
     files.delete("acme", "a.txt");
 
     assertEquals(
@@ -216,28 +227,31 @@ class FileStoreTest {
 
   @Test
   void projectsWithFilesSpansEveryProjectTouched() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "globex", "c.txt", "CCC");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "globex", "c.txt", "CCC");
     files.delete("globex", "c.txt");
 
     assertEquals(java.util.Set.of("acme", "globex"), files.projectsWithFiles());
   }
 
   @Test
-  void isKnownContentRecognizesAnyRevisionThisBoxWrote() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "v1");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "v2");
+  void isKnownVersionRecognizesAnyRevisionThisBoxWroteAtItsRecordedMode() {
+    ContentFixtures.put(files, "acme", "a.txt", "v1");
+    ContentFixtures.put(files, "acme", "a.txt", "v2");
+    var recorded = files.find("acme", "a.txt").orElseThrow().mode();
 
     assertTrue(
-        files.isKnownContent(id("a.txt"), files.blobs().putText("v1")),
+        files.isKnownVersion(id("a.txt"), files.blobs().putText("v1"), recorded),
         "a superseded revision is still ours");
-    assertTrue(files.isKnownContent(id("a.txt"), files.blobs().putText("v2")));
-    assertFalse(files.isKnownContent(id("a.txt"), files.blobs().putText("a local human edit")));
+    assertTrue(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded));
+    assertFalse(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded ^ 0111));
+    assertFalse(
+        files.isKnownVersion(id("a.txt"), files.blobs().putText("a local human edit"), recorded));
   }
 
   @Test
   void resolveTakeTheirsAdoptsMainAndCannotReRaise() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     var rev =
         files.resolveConflict(
@@ -245,28 +259,31 @@ class FileStoreTest {
             ContentFixtures.snapshot(files, "theirs"),
             ContentFixtures.snapshot(files, "theirs"));
 
-    assertEquals("theirs", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("theirs", ContentFixtures.text(files, "acme", "a.txt"));
     assertEquals(rev, files.baseRevOf(id("a.txt")), "base now equals theirs, so no re-raise");
   }
 
   @Test
   void resolveKeepMineRebasesOntoTheirsAndPushesMineForward() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     files.resolveConflict(
         id("a.txt"),
         ContentFixtures.snapshot(files, "mine"),
         ContentFixtures.snapshot(files, "theirs"));
 
-    assertEquals("mine", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
     assertTrue(
-        files.isKnownContent(id("a.txt"), files.blobs().putText("theirs")),
+        files.isKnownVersion(
+            id("a.txt"),
+            files.blobs().putText("theirs"),
+            files.find("acme", "a.txt").orElseThrow().mode()),
         "theirs is journaled as the base");
   }
 
   @Test
   void resolveTakeTheirsWhereTheirsIsADeleteRemovesTheRow() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     files.resolveConflict(id("a.txt"), null, null);
 
@@ -276,11 +293,11 @@ class FileStoreTest {
   @Test
   void resolveKeepMineWhereTheirsIsADeleteRestoresMine() {
     files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "base"), "1-base");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     files.resolveConflict(id("a.txt"), ContentFixtures.snapshot(files, "mine"), null);
 
-    assertEquals("mine", ai.singlr.sail.store.ContentFixtures.text(files, "acme", "a.txt"));
+    assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
@@ -342,5 +359,18 @@ class FileStoreTest {
             errors.add(t);
           }
         });
+  }
+
+  @Test
+  void aFileRowMustBeOwnerReadable() {
+    var hash = files.blobs().putText("x");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FileStore.FileRow("acme", "dark", hash, 1, 0000, "text"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FileStore.FileRow("acme", "dark", hash, 1, 0200, "text"));
+    assertEquals(0400, new FileStore.FileRow("acme", "lit", hash, 1, 0400, "text").mode());
   }
 }

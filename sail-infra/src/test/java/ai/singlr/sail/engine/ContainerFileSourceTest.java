@@ -84,7 +84,8 @@ class ContainerFileSourceTest {
 
   @Test
   void sizeParsesStatOutput() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("stat -c %s " + WORKSPACE + "/a.txt", "  2048\n");
+    var shell =
+        new ScriptedShellExecutor().onOk("stat -L -c %s -- " + WORKSPACE + "/a.txt", "  2048\n");
     assertEquals(2048, source(shell).size(Path.of(WORKSPACE, "a.txt")));
   }
 
@@ -129,6 +130,7 @@ class ContainerFileSourceTest {
     var picked =
         FilePicker.step(FilePicker.State.at(workspace), FilePicker.list(source, workspace), "1");
     assertEquals(List.of(link), FilePicker.selectedFiles(source, picked.state()));
+    assertEquals(Files.size(target), source.size(link), "the size is the target's, not the link's");
 
     try (var main = new SyncBox(tempDir, "main");
         var node = new SyncBox(tempDir, "node")) {

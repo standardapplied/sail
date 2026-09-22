@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
@@ -13,7 +14,7 @@ import java.util.Optional;
 
 public interface ProjectFiles {
   default ai.singlr.sail.config.FileLimits limits() {
-    return ai.singlr.sail.config.FileLimits.load();
+    return FileLimits.load();
   }
 
   List<FileStore.FileRow> list();

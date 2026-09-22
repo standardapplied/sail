@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * The node's side of one framed request/response over a sync channel, so the encode/flush/read/
@@ -64,7 +65,7 @@ final class Rpc {
 
   static void send(OutputStream out, String line) {
     try {
-      out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      out.write(line.getBytes(StandardCharsets.UTF_8));
       out.write('\n');
       out.flush();
     } catch (IOException e) {

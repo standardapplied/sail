@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.Map;
+import java.util.Objects;
 
 /** The host's guard against accidentally replicating an enormous shared file. */
 public record FileLimits(long fileMax) {
@@ -69,7 +70,7 @@ public record FileLimits(long fileMax) {
 
       @Override
       public int read(byte[] bytes, int offset, int length) throws IOException {
-        java.util.Objects.checkFromIndexSize(offset, length, bytes.length);
+        Objects.checkFromIndexSize(offset, length, bytes.length);
         if (length == 0) return 0;
         if (read == fileMax) return read();
         var count = in.read(bytes, offset, (int) Math.min(length, fileMax - read));

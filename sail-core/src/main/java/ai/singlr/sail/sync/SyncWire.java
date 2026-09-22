@@ -11,6 +11,7 @@ import ai.singlr.sail.store.FastCdc;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
@@ -162,8 +163,7 @@ public final class SyncWire {
     return bytes;
   }
 
-  public static void writeChunk(java.io.OutputStream out, String hash, byte[] bytes)
-      throws IOException {
+  public static void writeChunk(OutputStream out, String hash, byte[] bytes) throws IOException {
     requireChunkSize(bytes.length);
     if (!BlobStore.hash(bytes).equals(hash))
       throw new IllegalArgumentException("Invalid chunk " + hash + ": SHA-256 mismatch");

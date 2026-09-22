@@ -14,6 +14,7 @@ import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -311,7 +312,7 @@ public final class SyncRpcServer {
   }
 
   private static void reply(OutputStream out, SyncWire.Response response) throws IOException {
-    out.write(SyncWire.encode(response).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    out.write(SyncWire.encode(response).getBytes(StandardCharsets.UTF_8));
     out.write('\n');
     out.flush();
   }

@@ -119,7 +119,7 @@ public final class BlobStore {
     } catch (IOException e) {
       throw new UncheckedIOException("Cannot read blob content", e);
     }
-    var hash = HexFormat.of().formatHex(digest.digest());
+    var hash = hex(digest);
     publish(new Manifest(hash, size, chunks));
     return hash;
   }
@@ -248,8 +248,7 @@ public final class BlobStore {
       size += bytes.length;
       digest.update(bytes);
     }
-    if (size != manifest.size()
-        || !HexFormat.of().formatHex(digest.digest()).equals(manifest.hash())) {
+    if (size != manifest.size() || !hex(digest).equals(manifest.hash())) {
       throw new IllegalArgumentException(
           "Invalid blob " + manifest.hash() + ": size or SHA-256 mismatch");
     }
@@ -295,17 +294,19 @@ public final class BlobStore {
         });
   }
 
+  /**
+   * Every hash something on this box still needs: each synced store's live rows, every history row
+   * still on disk, and all three sides of every open conflict. The store knows no table by name — a
+   * store that carries content declares it through {@link SyncedStore#contentFields} and {@link
+   * SyncedStore#liveContentHashes}, and a new kind of content joins by implementing both.
+   */
   public Set<String> references() {
-    var references =
-        new LinkedHashSet<>(
-            db.query(
-                "SELECT body_hash FROM specs UNION SELECT plan_hash FROM specs UNION SELECT content_hash FROM project_files",
-                row -> row.text(0)));
-    references.remove(null);
+    var references = new LinkedHashSet<String>();
     for (var entity : SyncedEntities.all()) {
       var store = entity.store(db);
       var fields = store.contentFields();
       if (fields.isEmpty()) continue;
+      references.addAll(store.liveContentHashes());
       var after = 0L;
       while (true) {
         var entries =
@@ -364,10 +365,14 @@ public final class BlobStore {
       for (var read = input.read(buffer); read != -1; read = input.read(buffer)) {
         digest.update(buffer, 0, read);
       }
-      return HexFormat.of().formatHex(digest.digest());
+      return hex(digest);
     } catch (IOException e) {
       throw new UncheckedIOException("Cannot hash content", e);
     }
+  }
+
+  private static String hex(MessageDigest digest) {
+    return HexFormat.of().formatHex(digest.digest());
   }
 
   private static MessageDigest digest() {

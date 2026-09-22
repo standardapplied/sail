@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.Sqlite;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
@@ -69,11 +70,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * is not a message at all is reported as what it is, never blamed on main's version.
    */
   static SyncSession open(
-      InputStream in,
-      OutputStream out,
-      SyncWire.Hello hello,
-      Consumer<String> notice,
-      ai.singlr.sail.store.Sqlite db) {
+      InputStream in, OutputStream out, SyncWire.Hello hello, Consumer<String> notice, Sqlite db) {
     return ((PagedSyncSession) open(in, out, hello, notice)).content(db);
   }
 

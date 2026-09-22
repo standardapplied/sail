@@ -9,7 +9,9 @@ import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -61,7 +63,7 @@ public final class FileMaterializer {
       var targetContent = target == null ? null : target.contentHash();
 
       var destination = filesDir.resolve(path).normalize();
-      if (!destination.startsWith(filesDir) || hasSymlink(destination)) {
+      if (!destination.startsWith(filesDir) || hasSymlinkBelow(filesDir, destination)) {
         skipped.add(path);
         continue;
       }
@@ -103,15 +105,17 @@ public final class FileMaterializer {
     return targetContent == null ? Action.DELETE : Action.WRITE;
   }
 
-  private static boolean hasSymlink(Path path) {
-    for (var current = path; current != null; current = current.getParent()) {
+  private static boolean hasSymlinkBelow(Path root, Path path) {
+    for (var current = path;
+        current != null && !current.equals(root);
+        current = current.getParent()) {
       if (Files.isSymbolicLink(current)) return true;
     }
     return false;
   }
 
   private static String diskHash(Path file) throws IOException {
-    if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+    if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return null;
     try (var input = Files.newInputStream(file)) {
       return BlobStore.hash(input);
     }
@@ -127,10 +131,7 @@ public final class FileMaterializer {
       }
       WorkspaceFiles.mode(temporary, row.mode());
       Files.move(
-          temporary,
-          file,
-          java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-          java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+          temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } finally {
       Files.deleteIfExists(temporary);
     }

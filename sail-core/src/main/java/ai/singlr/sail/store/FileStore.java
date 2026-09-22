@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,8 +49,13 @@ public final class FileStore implements ConflictResolver, SyncedStore {
         throw new IllegalStateException(
             "File " + project + "/" + path + " content migration is incomplete; run sail migrate");
       BlobStore.requireHash(contentHash);
-      if (size < 0 || mode < 0 || mode > 0777 || !("text".equals(kind) || "binary".equals(kind))) {
-        throw new IllegalArgumentException("Invalid file metadata for " + project + "/" + path);
+      if (size < 0
+          || mode < 0
+          || mode > 0777
+          || (mode & 0400) == 0
+          || !("text".equals(kind) || "binary".equals(kind))) {
+        throw new IllegalArgumentException(
+            "Invalid file metadata for " + project + "/" + path + " (mode must be owner-readable)");
       }
     }
   }
@@ -82,7 +88,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
       }
       return "text";
     } catch (java.io.IOException e) {
-      throw new java.io.UncheckedIOException(e);
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -162,6 +168,14 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return Set.of("content_hash");
   }
 
+  @Override
+  public Set<String> liveContentHashes() {
+    var hashes =
+        new LinkedHashSet<>(db.query("SELECT content_hash FROM project_files", row -> row.text(0)));
+    hashes.remove(null);
+    return hashes;
+  }
+
   public Map<String, Object> comparableSnapshot(String id) {
     return journal.comparableSnapshot(id);
   }
@@ -185,26 +199,17 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Whether {@code content} matches any revision this box has ever recorded for the file — i.e. a
-   * copy this box itself wrote to disk. Lets materialization tell a stale copy it may safely
-   * refresh from one a human edited locally, which it must never clobber.
+   * Whether this content-and-mode pair is a recorded version of the file. A revision the content
+   * migration converted recorded no mode — the old materializer wrote whatever the box's umask gave
+   * — so it matches its content at any mode.
    */
-  public boolean isKnownContent(String id, String content) {
-    return db.queryOne(
-            "SELECT 1 FROM known_content WHERE entity_id = ? AND hash = ?",
-            row -> row.integer(0),
-            id,
-            content)
-        .isPresent();
-  }
-
-  /** Whether this exact content-and-mode pair is a recorded version of the file. */
   public boolean isKnownVersion(String id, String hash, int mode) {
     return db.queryOne(
             """
             SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
                 AND json_extract(snapshot, '$.content_hash') = ?
-                AND json_extract(snapshot, '$.mode') = ? LIMIT 1
+                AND (json_extract(snapshot, '$.mode') = ?
+                     OR json_extract(snapshot, '$.mode') IS NULL) LIMIT 1
             """,
             row -> row.integer(0),
             id,
@@ -273,10 +278,6 @@ public final class FileStore implements ConflictResolver, SyncedStore {
         row.mode(),
         row.kind(),
         DateTimeUtils.now().toString());
-    db.execute(
-        "INSERT OR IGNORE INTO known_content (entity_id, hash) VALUES (?, ?)",
-        idOf(row.project(), row.path()),
-        row.contentHash());
   }
 
   private FileRow rowFrom(String id, Map<String, Object> snapshot) {

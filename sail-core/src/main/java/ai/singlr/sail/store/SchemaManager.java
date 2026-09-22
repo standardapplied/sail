@@ -508,7 +508,6 @@ public final class SchemaManager {
           "ALTER TABLE project_files ADD COLUMN size INTEGER",
           "ALTER TABLE project_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 420",
           "ALTER TABLE project_files ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
-          "CREATE TABLE known_content (entity_id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (entity_id, hash))",
           """
           CREATE INDEX idx_change_log_file_version ON change_log (
               entity_id, json_extract(snapshot, '$.content_hash'), json_extract(snapshot, '$.mode')

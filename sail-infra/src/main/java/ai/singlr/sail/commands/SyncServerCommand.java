@@ -25,6 +25,9 @@ import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -63,7 +66,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     }
     try (mainDb) {
       var in = new BufferedInputStream(System.in);
-      var out = System.out;
+      var out = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
       return serve(
           mainDb,
           boxId,

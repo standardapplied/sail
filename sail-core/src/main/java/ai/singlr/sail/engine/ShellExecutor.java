@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -94,7 +95,7 @@ public final class ShellExecutor implements ShellExec {
                     Thread.currentThread().interrupt();
                   }
                 });
-    return new java.io.FilterInputStream(process.getInputStream()) {
+    return new FilterInputStream(process.getInputStream()) {
       private void finished(int read) throws IOException {
         if (read != -1) return;
         try {

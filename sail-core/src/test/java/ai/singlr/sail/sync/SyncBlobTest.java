@@ -9,21 +9,26 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -33,10 +38,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+@Timeout(value = 3, unit = TimeUnit.MINUTES)
 class SyncBlobTest {
 
   @Test
@@ -242,9 +249,7 @@ class SyncBlobTest {
             link.log()
                 .toString()
                 .lines()
-                .allMatch(
-                    line ->
-                        line.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= frame));
+                .allMatch(line -> line.getBytes(StandardCharsets.UTF_8).length <= frame));
       }
       var destination = new FileStore((upload ? main : node).db);
       assertEquals(files.list("project"), destination.list("project"));
@@ -261,8 +266,7 @@ class SyncBlobTest {
         else {
           if (length > frame) throw new IOException("Announcing line exceeded frame: " + length);
           var message =
-              YamlUtil.parseMap(
-                  new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8));
+              YamlUtil.parseMap(new String(bytes, offset, length, StandardCharsets.UTF_8));
           if ("chunk".equals(message.get("op"))) raw = ((Number) message.get("size")).intValue();
         }
         out.write(bytes, offset, length);
@@ -365,6 +369,75 @@ class SyncBlobTest {
         assertEquals(all.size() - held.size(), requestedChunks(link));
       }
       assertEquals(hash, new FileStore(node.db).find("proj", "binary").orElseThrow().contentHash());
+    }
+  }
+
+  @Test
+  void aChannelLeftMidMessageIsNeverReusedForTheNextType() throws Exception {
+    var path = randomFile(5 * 1024 * 1024);
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node")) {
+      var files = new FileStore(main.db);
+      try (var input = Files.newInputStream(path)) {
+        files.put("proj", "binary", input, 0640);
+      }
+      main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      var replicas = SyncedEntities.replicas(node.db, "node", "node");
+      try (var link =
+          SyncBox.connect(
+              main.server(new SyncPrincipal("node", true)),
+              node.db,
+              "node-box",
+              SyncWire.MAX_FRAME,
+              corruptChunk(2),
+              output -> output,
+              SyncBlobTest::closeRefusing)) {
+        var first =
+            assertThrows(
+                SyncTransportException.class, () -> link.reconcile("file", replicas.get("file")));
+        assertEquals("protocol", first.kind());
+
+        var next =
+            assertThrows(
+                SyncTransportException.class, () -> link.reconcile("spec", replicas.get("spec")));
+
+        assertEquals("unreachable", next.kind());
+        assertTrue(next.getMessage().contains("earlier failure"), next.getMessage());
+        assertTrue(next.getMessage().contains(first.getMessage()), next.getMessage());
+        assertEquals(0, node.syncState.checkpoint("main", "spec"));
+        assertTrue(node.specs.findById("auth").isEmpty(), "no other type's page was adopted");
+        assertThrows(SyncTransportException.class, () -> link.session().fetchFdes());
+      }
+    }
+  }
+
+  @Test
+  void aRefusalThatArrivesWholeLeavesTheChannelUsableForTheNextType() throws Exception {
+    try (var main = new SyncBox(dir, "main");
+        var node = new SyncBox(dir, "node")) {
+      main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      var served =
+          new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", "node"));
+      served.remove("file");
+      var server =
+          new SyncRpcServer(
+                  served,
+                  new SyncPrincipal("node", true),
+                  FdeRoster.EMPTY,
+                  SyncTransitionSink.NONE,
+                  new ChangeLog(main.db)::headsAfter,
+                  SyncWire.UPGRADE_FLOOR)
+              .content(main.db, FileLimits.defaults());
+      var replicas = SyncedEntities.replicas(node.db, "node", "node");
+      try (var link = SyncBox.connect(server, node)) {
+        var refused =
+            assertThrows(
+                SyncTransportException.class, () -> link.reconcile("file", replicas.get("file")));
+        assertEquals("refused", refused.kind());
+
+        assertEquals(1, link.reconcile("spec", replicas.get("spec")).report().pulled());
+      }
+      assertEquals("Auth", node.specs.findById("auth").orElseThrow().title());
     }
   }
 
@@ -525,12 +598,11 @@ class SyncBlobTest {
                     raw = false;
                     return;
                   }
-                  var line =
-                      new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8);
+                  var line = new String(bytes, offset, length, StandardCharsets.UTF_8);
                   if (line.contains("\"op\": \"chunk\"")) {
                     out.write(
                         (SyncWire.encode(new SyncWire.Chunk(hash, unsolicited.length)) + "\n")
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                            .getBytes(StandardCharsets.UTF_8));
                     raw = true;
                   } else out.write(bytes, offset, length);
                 }
@@ -624,8 +696,7 @@ class SyncBlobTest {
               new FilterOutputStream(output) {
                 @Override
                 public void write(byte[] bytes, int offset, int length) throws IOException {
-                  var line =
-                      new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8);
+                  var line = new String(bytes, offset, length, StandardCharsets.UTF_8);
                   if (line.contains("\"op\": \"page\"") && changed.compareAndSet(false, true))
                     main.specs.setContent("a", "body landed after page", "");
                   out.write(bytes, offset, length);
@@ -648,6 +719,40 @@ class SyncBlobTest {
     }
   }
 
+  private static InputStream closeRefusing(InputStream input) {
+    return new FilterInputStream(input) {
+      @Override
+      public void close() throws IOException {
+        super.close();
+        throw new IOException("already gone");
+      }
+    };
+  }
+
+  private static UnaryOperator<OutputStream> corruptChunk(int number) {
+    var chunks = new AtomicInteger();
+    return output ->
+        new FilterOutputStream(output) {
+          private int raw;
+
+          @Override
+          public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (raw > 0) {
+              if (chunks.get() == number) bytes[offset] ^= 1;
+              raw -= length;
+            } else if (length > 1 && bytes[offset] == '{') {
+              var message =
+                  YamlUtil.parseMap(new String(bytes, offset, length, StandardCharsets.UTF_8));
+              if ("chunk".equals(message.get("op"))) {
+                raw = ((Number) message.get("size")).intValue();
+                chunks.incrementAndGet();
+              }
+            }
+            out.write(bytes, offset, length);
+          }
+        };
+  }
+
   private static UnaryOperator<OutputStream> cutDuringChunk(int number) {
     var chunks = new AtomicInteger();
     return output ->
@@ -665,8 +770,7 @@ class SyncBlobTest {
               raw -= length;
             } else if (length > 1 && bytes[offset] == '{') {
               var message =
-                  YamlUtil.parseMap(
-                      new String(bytes, offset, length, java.nio.charset.StandardCharsets.UTF_8));
+                  YamlUtil.parseMap(new String(bytes, offset, length, StandardCharsets.UTF_8));
               if ("chunk".equals(message.get("op"))) {
                 raw = ((Number) message.get("size")).intValue();
                 chunks.incrementAndGet();

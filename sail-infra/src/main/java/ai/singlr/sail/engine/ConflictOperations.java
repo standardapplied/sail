@@ -16,6 +16,8 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,10 +184,10 @@ public final class ConflictOperations {
         if (read == -1) break;
         offset += read;
       }
-      return new String(buffer, 0, offset, java.nio.charset.StandardCharsets.UTF_8)
+      return new String(buffer, 0, offset, StandardCharsets.UTF_8)
           + (size > buffer.length ? "\n… (preview; " + size + " bytes total)" : "");
     } catch (java.io.IOException e) {
-      throw new java.io.UncheckedIOException(e);
+      throw new UncheckedIOException(e);
     }
   }
 

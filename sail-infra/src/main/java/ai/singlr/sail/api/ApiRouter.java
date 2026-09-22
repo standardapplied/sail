@@ -319,7 +319,7 @@ public final class ApiRouter implements HttpHandler {
       var etag = "\"" + row.contentHash() + "\"";
       var condition = exchange.getRequestHeaders().getFirst("If-None-Match");
       if (condition != null
-          && java.util.Arrays.stream(condition.split(","))
+          && Arrays.stream(condition.split(","))
               .map(String::strip)
               .anyMatch(
                   value -> value.equals("*") || value.equals(etag) || value.equals("W/" + etag))) {

@@ -357,8 +357,8 @@ public final class Sqlite implements AutoCloseable {
     @Override
     public byte[] bytes(int col) {
       try {
-        var length = (int) lib.columnBytes.invokeExact(stmt, col);
         var ptr = (MemorySegment) lib.columnBlob.invokeExact(stmt, col);
+        var length = (int) lib.columnBytes.invokeExact(stmt, col);
         return length == 0 ? new byte[0] : ptr.reinterpret(length).toArray(ValueLayout.JAVA_BYTE);
       } catch (Throwable t) {
         throw new SqliteException("Failed to read blob column " + col, t);

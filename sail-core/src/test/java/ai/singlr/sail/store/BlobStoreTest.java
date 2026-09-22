@@ -69,6 +69,29 @@ class BlobStoreTest {
   }
 
   @Test
+  void aManifestCannotBeCheaperThanItsChunksAllow() {
+    var hash = "0".repeat(64);
+    var one = List.of(hash);
+    var two = List.of(hash, hash);
+
+    assertThrows(IllegalArgumentException.class, () -> new BlobStore.Manifest(hash, 1, List.of()));
+    assertThrows(IllegalArgumentException.class, () -> new BlobStore.Manifest(hash, 0, one));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BlobStore.Manifest(hash, (long) FastCdc.MAX + 1, one),
+        "one chunk cannot hold more than MAX");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BlobStore.Manifest(hash, FastCdc.MIN, two),
+        "every chunk but the last is at least MIN");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BlobStore.Manifest(hash, BlobStore.MAX_SIZE + 1, two));
+    assertEquals(2, new BlobStore.Manifest(hash, FastCdc.MIN + 1, two).chunkHashes().size());
+    assertEquals(1, new BlobStore.Manifest(hash, FastCdc.MAX, one).chunkHashes().size());
+  }
+
+  @Test
   void gcKeepsSharedChunksAndDeletesOnlyUnreferencedContent() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();

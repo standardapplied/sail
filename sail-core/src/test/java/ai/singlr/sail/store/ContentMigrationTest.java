@@ -14,6 +14,7 @@ import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,6 +34,19 @@ class ContentMigrationTest {
       var row = new FileStore(db).find("proj", "file").orElseThrow();
       assertEquals(4, row.size());
       assertEquals("binary", row.kind());
+      assertEquals(0644, row.mode());
+      assertEquals(0755, new FileStore(db).find("proj", "hook.sh").orElseThrow().mode());
+      for (var snapshot :
+          db.query("SELECT snapshot FROM change_log WHERE entity_type = 'file'", r -> r.text(0))) {
+        assertFalse(
+            YamlUtil.parseMap(snapshot).containsKey("mode"),
+            "a legacy revision recorded no mode: " + snapshot);
+      }
+      assertTrue(new FileStore(db).isKnownVersion("proj/file", row.contentHash(), 0664));
+      assertEquals(
+          List.of("body_hash"),
+          new SyncConflicts(db).pending().getFirst().fields(),
+          "the clashing field follows its content into the hash column");
       assertEquals(
           "body",
           new BlobStore(db)
@@ -49,7 +63,7 @@ class ContentMigrationTest {
           assertTrue(blobs.has(hash));
         }
       }
-      blobs.gc(java.util.Set.of());
+      blobs.gc(Set.of());
       assertEquals(0, migration.apply(db, null, prompter()).applied());
       assertTrue(
           db.query(
@@ -84,6 +98,31 @@ class ContentMigrationTest {
       assertEquals("body", new SpecStore(second).getContent("a").orElseThrow().body());
       assertEquals("", new SpecStore(second).getContent("z").orElseThrow().body());
     }
+  }
+
+  @Test
+  void theLegacyColumnIsDroppedOnlyOnceEveryRowHasItsHash() {
+    try (var db = Sqlite.openMemory()) {
+      legacy(db);
+      db.execute(
+          "INSERT INTO project_files (id, project, path, content, updated_at) VALUES ('proj/raced', 'proj', 'raced', 'AAECAw==', 'now')");
+
+      var refused =
+          assertThrows(IllegalStateException.class, () -> ContentMigration.dropLegacyContent(db));
+
+      assertTrue(refused.getMessage().contains("sail migrate"), refused.getMessage());
+      assertTrue(hasContentColumn(db), "an irreversible drop waits for the stragglers");
+      new ContentMigration().apply(db, null, prompter());
+      assertFalse(hasContentColumn(db));
+      ContentMigration.dropLegacyContent(db);
+    }
+  }
+
+  private static boolean hasContentColumn(Sqlite db) {
+    return db.queryOne(
+            "SELECT 1 FROM pragma_table_info('project_files') WHERE name = 'content'",
+            r -> r.integer(0))
+        .isPresent();
   }
 
   @Test
@@ -229,6 +268,8 @@ class ContentMigrationTest {
     db.execute("ALTER TABLE project_files ADD COLUMN content TEXT");
     db.execute(
         "INSERT INTO project_files (id, project, path, content, updated_at) VALUES ('proj/file', 'proj', 'file', 'AAECAw==', 'now')");
+    db.execute(
+        "INSERT INTO project_files (id, project, path, content, updated_at) VALUES ('proj/hook.sh', 'proj', 'hook.sh', 'AAECAw==', 'now')");
     new ChangeLog(db)
         .append(
             "file",
