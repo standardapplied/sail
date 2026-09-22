@@ -80,7 +80,12 @@ class SpecJournalTest {
     assertEquals(4, history.size());
     assertEquals(
         List.of(1L, 2L, 3L, 4L), history.stream().map(e -> Revisions.counterOf(e.rev())).toList());
-    assertTrue(history.getLast().snapshot().contains("\"the body\""));
+    assertFalse(history.getLast().snapshot().contains("the body"));
+    assertEquals(
+        "the body",
+        new BlobStore(db)
+            .text(
+                (String) store.comparableAtRev("auth", history.getLast().rev()).get("body_hash")));
     assertTrue(history.getLast().snapshot().contains("in_progress"));
   }
 
@@ -94,7 +99,12 @@ class SpecJournalTest {
     assertTrue(store.findById("auth").isEmpty());
     var history = store.history("auth");
     assertTrue(history.getLast().deleted());
-    assertTrue(history.getLast().snapshot().contains("important work"), "work survives the delete");
+    assertFalse(history.getLast().snapshot().contains("important work"));
+    assertEquals(
+        "important work",
+        new BlobStore(db)
+            .text(
+                (String) store.comparableAtRev("auth", history.getLast().rev()).get("body_hash")));
   }
 
   @Test

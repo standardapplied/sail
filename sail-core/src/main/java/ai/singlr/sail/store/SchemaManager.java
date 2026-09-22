@@ -488,7 +488,31 @@ public final class SchemaManager {
               PRIMARY KEY (peer, entity_type)
           )""",
           "DROP TABLE sync_state",
-          "ALTER TABLE sync_state_v2 RENAME TO sync_state");
+          "ALTER TABLE sync_state_v2 RENAME TO sync_state",
+          """
+          CREATE TABLE chunks (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              bytes BLOB NOT NULL
+          )""",
+          """
+          CREATE TABLE blobs (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              chunks TEXT NOT NULL,
+              created_at TEXT NOT NULL
+          )""",
+          "ALTER TABLE specs ADD COLUMN body_hash TEXT",
+          "ALTER TABLE specs ADD COLUMN plan_hash TEXT",
+          "ALTER TABLE project_files ADD COLUMN content_hash TEXT",
+          "ALTER TABLE project_files ADD COLUMN size INTEGER",
+          "ALTER TABLE project_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 420",
+          "ALTER TABLE project_files ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
+          """
+          CREATE INDEX idx_change_log_file_version ON change_log (
+              entity_id, json_extract(snapshot, '$.content_hash'), json_extract(snapshot, '$.mode')
+          ) WHERE entity_type = 'file'
+          """);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
@@ -843,8 +867,10 @@ public final class SchemaManager {
     if (current == 0) {
       db.transaction(
           () -> {
+            if (currentVersion() != 0) return;
             BASELINE.forEach(db::execute);
             MIGRATIONS.forEach(db::execute);
+            db.execute("ALTER TABLE project_files DROP COLUMN content");
             stamp(CURRENT_VERSION);
           });
       return;
@@ -884,6 +910,7 @@ public final class SchemaManager {
         var statement = MIGRATIONS.get(version - V1_VERSION - 1);
         db.transaction(
             () -> {
+              if (currentVersion() >= version) return;
               db.execute(statement);
               stamp(version);
             });
@@ -906,7 +933,9 @@ public final class SchemaManager {
     try {
       db.transaction(
           () -> {
-            ON_RAMP.subList(current - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
+            var lockedVersion = currentVersion();
+            if (lockedVersion >= V1_VERSION) return;
+            ON_RAMP.subList(lockedVersion - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
             stamp(V1_VERSION);
           });
       requireForeignKeysIntact();

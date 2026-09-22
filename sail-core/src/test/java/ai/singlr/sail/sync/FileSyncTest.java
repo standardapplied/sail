@@ -72,70 +72,77 @@ class FileSyncTest {
   }
 
   private void sync(Box box) {
-    engine.reconcile(box.replica, main.replica);
+    SyncBox.round(main.db, box.db, "file");
   }
 
   @Test
   void aFileCreatedOnOneBoxPropagatesToTheOther() {
-    node.files.put("acme", "scripts/deploy.sh", "ZGVwbG95");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "scripts/deploy.sh", "ZGVwbG95");
 
     sync(node);
-    assertEquals("ZGVwbG95", main.files.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        "ZGVwbG95",
+        ai.singlr.sail.store.ContentFixtures.text(main.files, "acme", "scripts/deploy.sh"));
 
     sync(other);
-    assertEquals("ZGVwbG95", other.files.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        "ZGVwbG95",
+        ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "scripts/deploy.sh"));
   }
 
   @Test
   void editsToDifferentFilesAutoConvergeWithoutConflict() {
-    node.files.put("acme", "a.txt", "AAA");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "a.txt", "AAA");
     sync(node);
     sync(other);
 
-    node.files.put("acme", "a.txt", "AAA2");
-    other.files.put("acme", "b.txt", "BBB");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "a.txt", "AAA2");
+    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "b.txt", "BBB");
 
     sync(node);
     sync(other);
     sync(node);
 
-    assertEquals("AAA2", node.files.find("acme", "a.txt").orElseThrow().content());
-    assertEquals("BBB", node.files.find("acme", "b.txt").orElseThrow().content());
-    assertEquals("BBB", other.files.find("acme", "b.txt").orElseThrow().content());
+    assertEquals("AAA2", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "a.txt"));
+    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "b.txt"));
+    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "b.txt"));
     assertTrue(node.conflicts.pending().isEmpty());
     assertTrue(other.conflicts.pending().isEmpty());
   }
 
   @Test
   void editsToTheSameFileConflictAndLeaveTheLocalCopyUntouched() {
-    node.files.put("acme", "shared.conf", "v1");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "v1");
     sync(node);
     sync(other);
 
-    node.files.put("acme", "shared.conf", "from-node");
-    other.files.put("acme", "shared.conf", "from-other");
-
-    sync(node);
-    var report = sync2(other);
-
-    assertEquals(1, report.conflicts());
-    assertEquals("from-node", main.files.find("acme", "shared.conf").orElseThrow().content());
-    var pending = other.conflicts.pendingFor("file", FileStore.idOf("acme", "shared.conf"));
-    assertEquals(List.of("content"), pending.orElseThrow().fields());
-    assertEquals("from-other", other.files.find("acme", "shared.conf").orElseThrow().content());
-  }
-
-  @Test
-  void twoBoxesCreatingTheSameFilePathConflictWithNoCommonBase() {
-    node.files.put("acme", "shared.conf", "from-node");
-    other.files.put("acme", "shared.conf", "from-other");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
+    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
 
     sync(node);
     var report = sync2(other);
 
     assertEquals(1, report.conflicts());
     assertEquals(
-        List.of("content"),
+        "from-node", ai.singlr.sail.store.ContentFixtures.text(main.files, "acme", "shared.conf"));
+    var pending = other.conflicts.pendingFor("file", FileStore.idOf("acme", "shared.conf"));
+    assertEquals(List.of("content_hash"), pending.orElseThrow().fields());
+    assertEquals(
+        "from-other",
+        ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "shared.conf"));
+  }
+
+  @Test
+  void twoBoxesCreatingTheSameFilePathConflictWithNoCommonBase() {
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
+    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
+
+    sync(node);
+    var report = sync2(other);
+
+    assertEquals(1, report.conflicts());
+    assertEquals(
+        List.of("content_hash"),
         other
             .conflicts
             .pendingFor("file", FileStore.idOf("acme", "shared.conf"))
@@ -145,7 +152,7 @@ class FileSyncTest {
 
   @Test
   void aDeleteOnOneBoxPropagates() {
-    node.files.put("acme", "old.txt", "x");
+    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "old.txt", "x");
     sync(node);
     sync(other);
 
@@ -160,15 +167,18 @@ class FileSyncTest {
   @Test
   void aStaleCommitOnTheFileReplicaIsRejected() {
     var id = FileStore.idOf("acme", "a.txt");
-    node.files.applyRevision(id, java.util.Map.of("content", "AAA"), "1-base");
+    node.files.applyRevision(
+        id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "AAA"), "1-base");
 
-    var outcome = node.replica.commit(id, java.util.Map.of("content", "BBB"), "9-stale");
+    var outcome =
+        node.replica.commit(
+            id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "BBB"), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
-    assertEquals("AAA", node.files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "a.txt"));
   }
 
   private SyncEngine.Report sync2(Box box) {
-    return engine.reconcile(box.replica, main.replica);
+    return SyncBox.round(main.db, box.db, "file");
   }
 }

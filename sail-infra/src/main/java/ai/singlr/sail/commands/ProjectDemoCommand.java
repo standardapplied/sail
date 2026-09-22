@@ -198,7 +198,7 @@ public final class ProjectDemoCommand implements Runnable {
         Files.createDirectories(localPath.getParent());
       }
       Files.writeString(localPath, entry.getValue());
-      WorkspaceFiles.setExecutableIfNeeded(localPath);
+      WorkspaceFiles.mode(localPath, localPath.toString().endsWith(".sh") ? 0755 : 0644);
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ files/" + entry.getKey()));
       }

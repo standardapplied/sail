@@ -15,7 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -228,59 +227,13 @@ class WorkspaceFilesTest {
   }
 
   @Test
-  void isExecutableReturnsTrueForShExtension() {
-    assertTrue(WorkspaceFiles.isExecutable("setup.sh"));
-    assertTrue(WorkspaceFiles.isExecutable("path/to/install.sh"));
-    assertTrue(WorkspaceFiles.isExecutable("DEPLOY.SH"));
-  }
-
-  @Test
-  void isExecutableReturnsFalseForNonExecutableFiles() {
-    assertFalse(WorkspaceFiles.isExecutable(".env"));
-    assertFalse(WorkspaceFiles.isExecutable("config.yaml"));
-    assertFalse(WorkspaceFiles.isExecutable("readme.txt"));
-    assertFalse(WorkspaceFiles.isExecutable("app.sh.bak"));
-  }
-
-  @Test
-  void isExecutableReturnsFalseForNull() {
-    assertFalse(WorkspaceFiles.isExecutable(null));
-  }
-
-  @Test
-  void setExecutableIfNeededSetsPermissionsOnShFile() throws IOException {
-    var script = tempDir.resolve("setup.sh");
-    Files.writeString(script, "#!/bin/bash");
-
-    WorkspaceFiles.setExecutableIfNeeded(script);
-
-    var perms = Files.getPosixFilePermissions(script);
-    assertTrue(perms.contains(PosixFilePermission.OWNER_EXECUTE));
-    assertTrue(perms.contains(PosixFilePermission.GROUP_EXECUTE));
-    assertTrue(perms.contains(PosixFilePermission.OTHERS_EXECUTE));
-  }
-
-  @Test
-  void setExecutableIfNeededSkipsNonShFile() throws IOException {
-    var envFile = tempDir.resolve(".env");
-    Files.writeString(envFile, "KEY=VALUE");
-
-    WorkspaceFiles.setExecutableIfNeeded(envFile);
-
-    var perms = Files.getPosixFilePermissions(envFile);
-    assertFalse(perms.contains(PosixFilePermission.OWNER_EXECUTE));
-  }
-
-  @Test
-  void setExecutableIfNeededPreservesExistingPermissions() throws IOException {
-    var script = tempDir.resolve("run.sh");
-    Files.writeString(script, "#!/bin/bash");
-
-    WorkspaceFiles.setExecutableIfNeeded(script);
-
-    var perms = Files.getPosixFilePermissions(script);
-    assertTrue(perms.contains(PosixFilePermission.OWNER_READ));
-    assertTrue(perms.contains(PosixFilePermission.OWNER_WRITE));
-    assertTrue(perms.contains(PosixFilePermission.OWNER_EXECUTE));
+  void preservesActualModeRegardlessOfExtension() throws IOException {
+    for (var name : java.util.List.of("run", "data.sh")) {
+      var file = Files.writeString(tempDir.resolve(name), "content");
+      for (var mode : java.util.List.of(0750, 0640, 0600)) {
+        WorkspaceFiles.mode(file, mode);
+        assertEquals(mode, WorkspaceFiles.mode(file));
+      }
+    }
   }
 }

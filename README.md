@@ -24,9 +24,10 @@ a full host. macOS (arm64) runs as a thin client that drives a remote host over 
 
 ### Upgrade compatibility
 
-Version 0.15.0 is the v1 upgrade floor. Upgrade every main and node box to 0.15.0 before
-installing any later v1 release. A mixed fleet below that floor is refused before sync touches
-data, with an error naming the required version.
+Content-addressed sync requires version 0.45.0 on main and every node. Upgrade main first,
+then nodes; older peers are refused before sync touches data, with an error naming the remedy.
+The content migration resumes after an interruption, and startup finishes it before serving
+requests or syncing.
 
 ## The model: one main, many nodes
 
@@ -39,6 +40,16 @@ There is no GitHub in this loop and no separate board. The database is the board
 `sail sync` moves it over a locked-down SSH gateway using public-key auth, with three-way
 conflict resolution so no one's work is overwritten. Compute is never scheduled across
 boxes. The star coordinates state, not execution.
+
+Spec bodies, plans, and shared files use verified SHA-256 blobs in SQLite. Content-defined
+chunks are deduplicated across projects and revisions; interrupted transfers resume with only
+the missing chunks. Shared files retain their permission bits and stream through ingest,
+sync, and materialization. `sail sync status` reports bytes fetched and sent, and `sail sync gc`
+collects content unreferenced by live rows, retained history, or open conflicts.
+
+Each box defaults to a 1 GiB shared-file cap. Set `limits.file_max` in `host.yaml` to an integer
+number of bytes; main enforces its own cap on uploads. The maximum setting is 8 GiB because
+a blob's manifest must fit in one sync frame.
 
 ## Quick start
 

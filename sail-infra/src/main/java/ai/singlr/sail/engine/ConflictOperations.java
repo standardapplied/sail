@@ -10,11 +10,15 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -29,7 +33,7 @@ public final class ConflictOperations {
   }
 
   public List<SyncConflicts.Conflict> list() {
-    return conflicts.pending();
+    return conflicts.pending().stream().map(this::display).toList();
   }
 
   /**
@@ -38,10 +42,15 @@ public final class ConflictOperations {
    * only while the id names a single conflict; several are refused by name, never guessed.
    */
   public SyncConflicts.Conflict find(String entityType, String entityId) {
+    var raw = findRaw(entityType, entityId);
+    return raw == null ? null : display(raw);
+  }
+
+  private SyncConflicts.Conflict findRaw(String entityType, String entityId) {
     if (Strings.isNotBlank(entityType)) {
       return conflicts.pendingFor(entityType, entityId).orElse(null);
     }
-    var matches = list().stream().filter(c -> c.entityId().equals(entityId)).toList();
+    var matches = conflicts.pending().stream().filter(c -> c.entityId().equals(entityId)).toList();
     if (matches.size() > 1) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
@@ -63,7 +72,7 @@ public final class ConflictOperations {
   public SyncConflicts.Conflict resolve(String entityType, String entityId, Resolution resolution) {
     return db.transaction(
         () -> {
-          var conflict = find(entityType, entityId);
+          var conflict = findRaw(entityType, entityId);
           if (conflict == null) {
             throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
           }
@@ -77,7 +86,18 @@ public final class ConflictOperations {
                     throw new IllegalArgumentException(
                         "Field-level --merge isn't available for this conflict; use --mine or --theirs.");
                   }
-                  yield ConflictMerge.parseTemplate(resolution.merged());
+                  var merged =
+                      new LinkedHashMap<>(ConflictMerge.parseTemplate(resolution.merged()));
+                  var blobs = new BlobStore(db);
+                  for (var field :
+                      SyncedEntities.require(conflict.entityType()).store(db).contentFields()) {
+                    var text = merged.remove(displayField(field));
+                    if (!(text instanceof String))
+                      throw new IllegalArgumentException(
+                          "Merged " + displayField(field) + " must be text");
+                    merged.put(field, blobs.putText((String) text));
+                  }
+                  yield merged;
                 }
               };
           var rev =
@@ -85,17 +105,18 @@ public final class ConflictOperations {
                   .resolver(db)
                   .resolveConflict(conflict.entityId(), chosen, parse(conflict.remoteSnapshot()));
           conflicts.resolve(conflict.id(), rev);
-          return new SyncConflicts.Conflict(
-              conflict.id(),
-              conflict.entityType(),
-              conflict.entityId(),
-              conflict.baseSnapshot(),
-              conflict.localSnapshot(),
-              conflict.remoteSnapshot(),
-              conflict.fields(),
-              conflict.detectedAt(),
-              "resolved",
-              rev);
+          return display(
+              new SyncConflicts.Conflict(
+                  conflict.id(),
+                  conflict.entityType(),
+                  conflict.entityId(),
+                  conflict.baseSnapshot(),
+                  conflict.localSnapshot(),
+                  conflict.remoteSnapshot(),
+                  conflict.fields(),
+                  conflict.detectedAt(),
+                  "resolved",
+                  rev));
         });
   }
 
@@ -112,8 +133,71 @@ public final class ConflictOperations {
           """
           '%s' changed on this box after this conflict was recorded (%s).
           Run 'sail sync' to refresh it, then resolve."""
-              .formatted(conflict.entityId(), String.join(", ", drift)));
+              .formatted(
+                  conflict.entityId(),
+                  drift.stream()
+                      .map(ConflictOperations::displayField)
+                      .collect(Collectors.joining(", "))));
     }
+  }
+
+  private SyncConflicts.Conflict display(SyncConflicts.Conflict conflict) {
+    var fields = SyncedEntities.require(conflict.entityType()).store(db).contentFields();
+    return new SyncConflicts.Conflict(
+        conflict.id(),
+        conflict.entityType(),
+        conflict.entityId(),
+        displaySnapshot(conflict.baseSnapshot(), fields),
+        displaySnapshot(conflict.localSnapshot(), fields),
+        displaySnapshot(conflict.remoteSnapshot(), fields),
+        conflict.fields().stream().map(ConflictOperations::displayField).toList(),
+        conflict.detectedAt(),
+        conflict.status(),
+        conflict.resolvedRev());
+  }
+
+  private String displaySnapshot(String json, java.util.Set<String> fields) {
+    if (json == null) return null;
+    var snapshot = new LinkedHashMap<>(parse(json));
+    var blobs = new BlobStore(db);
+    for (var field : fields) {
+      var hash = snapshot.remove(field);
+      if (hash == null) continue;
+      var value = hash.toString();
+      var text =
+          "binary".equals(snapshot.get("kind"))
+              ? "<binary, " + blobs.manifest(value).size() + " bytes>"
+              : field.equals("content_hash") ? preview(blobs, value) : blobs.text(value);
+      snapshot.put(
+          displayField(field), field.equals("content_hash") ? text + "\nSHA-256: " + value : text);
+    }
+    return YamlUtil.dumpJson(snapshot);
+  }
+
+  private static String preview(BlobStore blobs, String hash) {
+    var size = blobs.manifest(hash).size();
+    var buffer = new byte[(int) Math.min(size, 64 * 1024)];
+    try (var input = blobs.open(hash)) {
+      var offset = 0;
+      while (offset < buffer.length) {
+        var read = input.read(buffer, offset, buffer.length - offset);
+        if (read == -1) break;
+        offset += read;
+      }
+      return new String(buffer, 0, offset, StandardCharsets.UTF_8)
+          + (size > buffer.length ? "\n… (preview; " + size + " bytes total)" : "");
+    } catch (java.io.IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static String displayField(String field) {
+    return switch (field) {
+      case "body_hash" -> "body";
+      case "plan_hash" -> "plan";
+      case "content_hash" -> "content";
+      default -> field;
+    };
   }
 
   public static boolean mergeable(SyncConflicts.Conflict conflict) {

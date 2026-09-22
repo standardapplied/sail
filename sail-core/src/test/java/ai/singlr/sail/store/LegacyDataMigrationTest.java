@@ -157,6 +157,7 @@ class LegacyDataMigrationTest {
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
         VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
+    new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
     var legacyStore = new SpecStore(db);
     legacyStore.recordRevision("shared", "local", false);
     var legacyRev = legacyStore.latestRev("shared");
@@ -191,6 +192,7 @@ class LegacyDataMigrationTest {
           INSERT INTO specs (id, title, status, created_at, updated_at, project)
           VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
       new SchemaManager(other).migrate();
+      new ContentMigration().apply(other, projects, DataMigration.Prompter.NON_INTERACTIVE);
       new DataMigrator(other, List.of(new LegacyDataMigration(() -> "node-b")))
           .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
 
@@ -200,6 +202,7 @@ class LegacyDataMigrationTest {
 
   private List<DataMigrator.Run> migrate(ProjectRegistry projects) {
     new SchemaManager(db).migrate();
+    new ContentMigration().apply(db, projects, DataMigration.Prompter.NON_INTERACTIVE);
     return new DataMigrator(db, List.of(new LegacyDataMigration(() -> "node-a")))
         .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
   }

@@ -9,7 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public record ApiResponse(
-    int status, Map<String, Object> body, Map<String, String> headers, byte[] content) {
+    int status,
+    Map<String, Object> body,
+    Map<String, String> headers,
+    java.io.InputStream content) {
 
   public ApiResponse {
     headers = Map.copyOf(headers);
@@ -23,9 +26,18 @@ public record ApiResponse(
     this(status, body, headers, null);
   }
 
-  public static ApiResponse file(byte[] content) {
+  public static ApiResponse file(java.io.InputStream content, long size, String hash) {
     return new ApiResponse(
-        200, Map.of(), Map.of("Content-Type", "application/octet-stream"), content);
+        200,
+        Map.of(),
+        Map.of(
+            "Content-Type",
+            "application/octet-stream",
+            "Content-Length",
+            Long.toString(size),
+            "ETag",
+            "\"" + hash + "\""),
+        content);
   }
 
   public ApiResponse withHeader(String name, String value) {

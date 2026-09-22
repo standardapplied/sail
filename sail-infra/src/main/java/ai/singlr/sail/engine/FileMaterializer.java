@@ -5,12 +5,14 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 
@@ -21,7 +23,7 @@ import java.util.Objects;
  *
  * <ul>
  *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it matches a
- *       revision this box itself wrote ({@link FileStore#isKnownContent}); a file a human edited
+ *       revision's content and mode ({@link FileStore#isKnownVersion}); a file a human edited
  *       locally without {@code sail project files add} matches nothing in history, so it is left
  *       alone and reported as skipped.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
@@ -49,6 +51,7 @@ public final class FileMaterializer {
   }
 
   public Report materialize(String project) throws IOException {
+    NameValidator.requireValidProjectName(project);
     var filesDir = projectsDir.resolve(project).resolve("files").normalize();
     var written = 0;
     var deleted = 0;
@@ -56,21 +59,26 @@ public final class FileMaterializer {
 
     for (var id : files.idsForProject(project)) {
       var path = id.substring(project.length() + 1);
-      var target = files.comparableSnapshot(id);
-      var targetContent = target == null ? null : (String) target.get("content");
+      var target = files.find(project, path).orElse(null);
+      var targetContent = target == null ? null : target.contentHash();
 
       var destination = filesDir.resolve(path).normalize();
-      if (!destination.startsWith(filesDir)) {
+      if (!destination.startsWith(filesDir) || hasSymlinkBelow(filesDir, destination)) {
         skipped.add(path);
         continue;
       }
 
-      var onDisk = readBase64(destination);
-      switch (decide(targetContent, onDisk, onDisk != null && files.isKnownContent(id, onDisk))) {
-        case IN_SYNC -> {}
+      var onDisk = diskHash(destination);
+      switch (decide(
+          targetContent,
+          onDisk,
+          onDisk != null && files.isKnownVersion(id, onDisk, WorkspaceFiles.mode(destination)))) {
+        case IN_SYNC -> {
+          if (target != null) WorkspaceFiles.mode(destination, target.mode());
+        }
         case SKIP_DIRTY -> skipped.add(path);
         case WRITE -> {
-          writeFile(destination, targetContent);
+          writeFile(destination, target);
           written++;
         }
         case DELETE -> {
@@ -88,24 +96,44 @@ public final class FileMaterializer {
    * never lost.
    */
   static Action decide(String targetContent, String onDisk, boolean onDiskIsKnown) {
-    if (Objects.equals(onDisk, targetContent)) {
-      return Action.IN_SYNC;
-    }
     if (onDisk != null && !onDiskIsKnown) {
       return Action.SKIP_DIRTY;
+    }
+    if (Objects.equals(onDisk, targetContent)) {
+      return Action.IN_SYNC;
     }
     return targetContent == null ? Action.DELETE : Action.WRITE;
   }
 
-  private static String readBase64(Path file) throws IOException {
-    if (!Files.isRegularFile(file)) {
-      return null;
+  private static boolean hasSymlinkBelow(Path root, Path path) {
+    for (var current = path;
+        current != null && !current.equals(root);
+        current = current.getParent()) {
+      if (Files.isSymbolicLink(current)) return true;
     }
-    return Base64.getEncoder().encodeToString(Files.readAllBytes(file));
+    return false;
   }
 
-  private static void writeFile(Path file, String base64) throws IOException {
+  private static String diskHash(Path file) throws IOException {
+    if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return null;
+    try (var input = Files.newInputStream(file)) {
+      return BlobStore.hash(input);
+    }
+  }
+
+  private void writeFile(Path file, FileStore.FileRow row) throws IOException {
     Files.createDirectories(file.getParent());
-    Files.write(file, Base64.getDecoder().decode(base64));
+    var temporary = Files.createTempFile(file.getParent(), ".sail-", ".tmp");
+    try {
+      try (var input = files.open(row);
+          var output = Files.newOutputStream(temporary)) {
+        input.transferTo(output);
+      }
+      WorkspaceFiles.mode(temporary, row.mode());
+      Files.move(
+          temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(temporary);
+    }
   }
 }

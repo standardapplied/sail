@@ -27,6 +27,8 @@ public final class SyncViews {
   static Map<String, Object> round(SyncReport round) {
     var map = new LinkedHashMap<>(report(round.report()));
     map.put("message", round.message());
+    map.put("bytes_fetched", round.fetchedBytes());
+    map.put("bytes_sent", round.sentBytes());
     map.put("types", round.types().stream().map(SyncViews::type).toList());
     return map;
   }
@@ -39,6 +41,8 @@ public final class SyncViews {
     map.put("entries", type.entries());
     map.put("skipped", type.skipped());
     map.put("failure", type.failure());
+    map.put("bytes_fetched", type.fetchedBytes());
+    map.put("bytes_sent", type.sentBytes());
     return map;
   }
 
@@ -53,6 +57,8 @@ public final class SyncViews {
     map.put("last_error_kind", status.lastErrorKind());
     map.put("last_error", status.lastError());
     map.put("stale_since", status.staleSince());
+    map.put("bytes_fetched", status.fetchedBytes());
+    map.put("bytes_sent", status.sentBytes());
     map.put("last_report", status.lastReport() == null ? null : report(status.lastReport()));
     return map;
   }

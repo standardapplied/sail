@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -63,8 +64,38 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(2, report.imported());
-    assertEquals(b64("hello"), files.find("acme", "scripts/deploy.sh").orElseThrow().content());
-    assertEquals(b64("docs"), files.find("acme", "README.md").orElseThrow().content());
+    assertEquals(
+        b64("hello"),
+        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(
+        b64("docs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "README.md"));
+  }
+
+  @Test
+  void importsSymlinkTargetPermissionsAndPreservesThemAcrossSync() throws Exception {
+    var source = Files.writeString(tempDir.resolve("restricted.txt"), "private");
+    WorkspaceFiles.mode(source, 0600);
+    var link = projectsDir.resolve("acme/files/linked.txt");
+    Files.createDirectories(link.getParent());
+    Files.createSymbolicLink(link, source);
+
+    var report = importer.importAll();
+
+    assertEquals(1, report.imported());
+    assertTrue(report.notes().isEmpty());
+    assertEquals(0600, files.find("acme", "linked.txt").orElseThrow().mode());
+    try (var node = new SyncBox(tempDir, "node")) {
+      SyncBox.round(db, node.db, "file");
+      var nodeProjects = tempDir.resolve("node-projects");
+      var materialized =
+          new FileMaterializer(new FileStore(node.db), nodeProjects).materialize("acme");
+      var copy = nodeProjects.resolve("acme/files/linked.txt");
+      assertEquals(1, materialized.written());
+      assertEquals("private", Files.readString(copy));
+      assertEquals(0600, WorkspaceFiles.mode(copy));
+    }
+    assertEquals(0, importer.importAll().imported());
+    assertEquals(0600, WorkspaceFiles.mode(source));
   }
 
   @Test
@@ -99,7 +130,7 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(1, report.imported());
-    assertEquals(b64("A2"), files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
   }
 
   @Test

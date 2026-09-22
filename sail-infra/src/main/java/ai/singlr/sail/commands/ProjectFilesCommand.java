@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerFileSource;
@@ -19,12 +20,13 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.TerminalFilePicker;
+import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.store.FileStore;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -38,10 +40,10 @@ import picocli.CommandLine.Parameters;
 
 /**
  * Shares arbitrary workspace files across every FDE on a project through the same sync engine as
- * specs — no git, no specific repo. {@code add} stores a file's bytes (base64) keyed by its
- * relative path; the next {@code sail sync} replicates it and {@link FileMaterializer} drops it
- * onto every other box. {@code export} runs that materialization on demand, for the main box that
- * never calls {@code sail sync}. Removal tombstones the row so the deletion propagates too.
+ * specs — no git, no specific repo. {@code add} stores a file's content hash keyed by its relative
+ * path; the next {@code sail sync} replicates it and {@link FileMaterializer} drops it onto every
+ * other box. {@code export} runs that materialization on demand, for the main box that never calls
+ * {@code sail sync}. Removal tombstones the row so the deletion propagates too.
  */
 @Command(
     name = "files",
@@ -67,13 +69,6 @@ public final class ProjectFilesCommand implements Runnable {
           "Share files with every FDE on the project. Give a file, or omit it to browse and pick.",
       mixinStandardHelpOptions = true)
   static final class Add implements Callable<Integer> {
-
-    /**
-     * Cap on a single shared file. Shared files are configs, scripts, and docs replicated through
-     * SQLite as base64 — large binaries belong in a real artifact store, and bulk-grabbing one
-     * would bloat every FDE's synced database. 5 MiB is far above any legitimate workspace file.
-     */
-    static final long MAX_SHARE_BYTES = 5L * 1024 * 1024;
 
     /**
      * A bulk share above this many files asks for confirmation — a guard against a stray folder.
@@ -128,10 +123,13 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Not a file: " + source, Ansi.AUTO));
         return 1;
       }
-      if (Files.size(source) > MAX_SHARE_BYTES) {
+      if (Files.size(source) > FileLimits.load().fileMax()) {
         System.err.println(
             Banner.errorLine(
-                source + " is larger than " + (MAX_SHARE_BYTES / (1024 * 1024)) + " MiB.",
+                source
+                    + " is larger than "
+                    + (FileLimits.load().fileMax() / (1024 * 1024))
+                    + " MiB.",
                 Ansi.AUTO));
         return 1;
       }
@@ -141,7 +139,9 @@ public final class ProjectFilesCommand implements Runnable {
       }
       try (var operations = OperationsFactory.open()) {
         var files = operations.projectFiles(project);
-        files.put(path, Files.readAllBytes(source));
+        try (var input = Files.newInputStream(source)) {
+          files.put(path, input, Files.size(source), WorkspaceFiles.mode(source));
+        }
         files.materialize();
         System.out.println(
             Ansi.AUTO.string(
@@ -244,7 +244,11 @@ public final class ProjectFilesCommand implements Runnable {
             skipped.add(path + " (" + problem + ")");
             continue;
           }
-          files.put(path, fileSource.read(file));
+          var size = fileSource.size(file);
+          FileLimits.load().check(size);
+          try (var input = fileSource.open(file)) {
+            files.put(path, input, size, fileSource.mode(file));
+          }
           shared++;
         }
         if (shared > 0) {
@@ -275,8 +279,8 @@ public final class ProjectFilesCommand implements Runnable {
         return "unsafe path";
       }
       try {
-        if (fileSource.size(file) > MAX_SHARE_BYTES) {
-          return "larger than " + (MAX_SHARE_BYTES / (1024 * 1024)) + " MiB";
+        if (fileSource.size(file) > FileLimits.load().fileMax()) {
+          return "larger than " + (FileLimits.load().fileMax() / (1024 * 1024)) + " MiB";
         }
       } catch (IOException e) {
         return "unreadable";
@@ -286,7 +290,8 @@ public final class ProjectFilesCommand implements Runnable {
 
     /** Stores {@code bytes} at {@code path} (no materialization); re-checks the guards. */
     static String store(FileStore files, String project, String path, byte[] bytes) {
-      return new SharedProjectFiles(files, SailPaths.projectsDir(), project).put(path, bytes);
+      return new SharedProjectFiles(files, SailPaths.projectsDir(), project)
+          .put(path, new ByteArrayInputStream(bytes), bytes.length, 0644);
     }
   }
 
@@ -328,7 +333,10 @@ public final class ProjectFilesCommand implements Runnable {
                     r -> {
                       var map = new LinkedHashMap<String, Object>();
                       map.put("path", r.path());
-                      map.put("bytes", decodedSize(r.content()));
+                      map.put("bytes", r.size());
+                      map.put("mode", r.mode());
+                      map.put("kind", r.kind());
+                      map.put("content_hash", r.contentHash());
                       return (Object) map;
                     })
                 .toList();
@@ -363,13 +371,15 @@ public final class ProjectFilesCommand implements Runnable {
               Banner.errorLine("No shared file '" + path + "' on " + project + ".", Ansi.AUTO));
           return 1;
         }
-        System.out.write(bytes);
+        try (bytes) {
+          bytes.transferTo(System.out);
+        }
         System.out.flush();
         return 0;
       }
     }
 
-    static Optional<byte[]> read(FileStore files, String project, String path) {
+    static Optional<java.io.InputStream> read(FileStore files, String project, String path) {
       return new SharedProjectFiles(files, SailPaths.projectsDir(), project).get(path);
     }
   }
@@ -484,10 +494,6 @@ public final class ProjectFilesCommand implements Runnable {
       }
       return new ExportReport(written, deleted, List.copyOf(skipped));
     }
-  }
-
-  private static int decodedSize(String base64) {
-    return Base64.getDecoder().decode(base64).length;
   }
 
   /** A leading-space propagation hint, or empty on a standalone box where sync does not apply. */

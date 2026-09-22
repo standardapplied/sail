@@ -54,8 +54,33 @@ import picocli.CommandLine.Option;
     name = "sync",
     description = "Reconcile this box's specs with the main devbox.",
     mixinStandardHelpOptions = true,
-    subcommands = SyncCommand.Status.class)
+    subcommands = {SyncCommand.Status.class, SyncCommand.Gc.class})
 public final class SyncCommand implements Callable<Integer> {
+
+  @Command(
+      name = "gc",
+      description = "Collect unreferenced sync content.",
+      mixinStandardHelpOptions = true)
+  static final class Gc implements Callable<Integer> {
+    private final Supplier<HostOperations> operations;
+
+    Gc() {
+      this(OperationsFactory::open);
+    }
+
+    Gc(Supplier<HostOperations> operations) {
+      this.operations = operations;
+    }
+
+    @Override
+    public Integer call() {
+      try (var ops = operations.get()) {
+        var freed = ops.schema().collectContent();
+        System.out.println("Freed " + freed + " bytes of unreferenced content.");
+      }
+      return 0;
+    }
+  }
 
   @Command(
       name = "status",
@@ -97,6 +122,13 @@ public final class SyncCommand implements Callable<Integer> {
           default ->
               main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
         };
+    if (status.get("last_report") != null)
+      health +=
+          " — "
+              + status.getOrDefault("bytes_fetched", 0)
+              + " bytes fetched, "
+              + status.getOrDefault("bytes_sent", 0)
+              + " bytes sent";
     return status.get("pending_conflicts") instanceof Integer pending && pending > 0
         ? health + " — " + pending + " conflict(s) need your decision: sail conflicts"
         : health;
@@ -221,6 +253,8 @@ public final class SyncCommand implements Callable<Integer> {
       map.put("pushed", report.pushed());
       map.put("merged", report.merged());
       map.put("conflicts", report.conflicts());
+      map.put("bytes_fetched", round.fetchedBytes());
+      map.put("bytes_sent", round.sentBytes());
       map.put("types", round.types().stream().map(SyncViews::type).toList());
       return YamlUtil.dumpJson(map);
     }

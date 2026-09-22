@@ -43,6 +43,11 @@ public interface ShellExec {
   Result exec(List<String> command, Path workDir, Duration timeout)
       throws IOException, InterruptedException, TimeoutException;
 
+  /** Streams raw stdout; closing the stream also closes the child process. */
+  default java.io.InputStream stream(List<String> command) throws IOException {
+    throw new UnsupportedOperationException("This executor does not support streaming output");
+  }
+
   /** Returns true if this executor is in dry-run mode (prints commands instead of executing). */
   boolean isDryRun();
 }

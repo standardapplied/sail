@@ -58,7 +58,7 @@ class ParkedConflictSyncTest {
   }
 
   private SyncSession.TypeReport round() throws IOException {
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), "node-box")) {
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
       return link.reconcile("run", nodeReplica);
     }
   }

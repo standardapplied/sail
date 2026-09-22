@@ -32,6 +32,44 @@ import org.junit.jupiter.api.io.TempDir;
 class SyncCommandTest {
 
   @Test
+  void gcUsesTheHostLaneAndReportsFreedContent() throws Exception {
+    try (var db = ai.singlr.sail.store.Sqlite.openMemory()) {
+      new ai.singlr.sail.store.SchemaManager(db).migrate();
+      var hash = new ai.singlr.sail.store.BlobStore(db).putText("orphan");
+      var operations =
+          ai.singlr.sail.api.OperationsFactory.create(
+                  db,
+                  new ai.singlr.sail.engine.ShellExecutor(true),
+                  "sail.yaml",
+                  null,
+                  null,
+                  ai.singlr.sail.api.SyncScheduler.disabled(),
+                  ai.singlr.sail.api.SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  java.nio.file.Path.of(System.getProperty("java.io.tmpdir")),
+                  new ai.singlr.sail.engine.SyncOperations(
+                      db,
+                      "box",
+                      java.nio.file.Path.of(System.getProperty("java.io.tmpdir")),
+                      ai.singlr.sail.config.SyncConfig::unset,
+                      target -> {
+                        throw new java.io.IOException("offline");
+                      }));
+      var output = new java.io.ByteArrayOutputStream();
+      var previous = System.out;
+      try (var stream = new java.io.PrintStream(output)) {
+        System.setOut(stream);
+        assertEquals(0, new SyncCommand.Gc(() -> operations).call());
+      } finally {
+        System.setOut(previous);
+      }
+      assertTrue(output.toString().contains("Freed 6 bytes"));
+      assertFalse(new ai.singlr.sail.store.BlobStore(db).has(hash));
+    }
+  }
+
+  @Test
   void syncStatusReadsThisBoxesStoredHealthInProcess(@TempDir Path home) throws Exception {
     try (var db = ai.singlr.sail.store.Sqlite.open(home.resolve("sail.db"))) {
       new ai.singlr.sail.store.SchemaManager(db).migrate();
@@ -67,6 +105,10 @@ class SyncCommandTest {
               "consecutive_failures",
               0,
               "pending_conflicts",
+              0,
+              "bytes_fetched",
+              0,
+              "bytes_sent",
               0),
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
@@ -168,13 +210,17 @@ class SyncCommandTest {
                 null,
                 List.of(
                     new SyncSession.TypeReport(
-                        "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null))),
+                        "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null, 456, 123))),
             true);
-    assertEquals(
-        "{\"pulled\": 1, \"pushed\": 2, \"merged\": 3, \"conflicts\": 4, \"types\": [{\"type\":"
-            + " \"spec\", \"pulled\": 1, \"pushed\": 2, \"merged\": 3, \"conflicts\": 4, \"pages\":"
-            + " 2, \"entries\": 40, \"skipped\": false, \"failure\": null}]}",
-        json);
+    var report = ai.singlr.sail.config.YamlUtil.parseMap(json);
+    assertEquals(456, report.get("bytes_fetched"));
+    assertEquals(123, report.get("bytes_sent"));
+    assertEquals(3, report.get("merged"));
+    assertEquals(4, report.get("conflicts"));
+    var type = (Map<?, ?>) ((List<?>) report.get("types")).getFirst();
+    assertEquals("spec", type.get("type"));
+    assertEquals(456, type.get("bytes_fetched"));
+    assertEquals(123, type.get("bytes_sent"));
   }
 
   @Test

@@ -6,9 +6,10 @@
 package ai.singlr.sail.sync;
 
 import java.io.IOException;
-import java.io.Reader;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 
 /**
  * The node's side of one framed request/response over a sync channel, so the encode/flush/read/
@@ -20,7 +21,7 @@ final class Rpc {
 
   private Rpc() {}
 
-  static SyncWire.Response exchange(Reader in, Writer out, SyncWire.Request request) {
+  static SyncWire.Response exchange(InputStream in, OutputStream out, SyncWire.Request request) {
     var context = SyncWire.context(request);
     var line = exchange(in, out, SyncWire.encode(request), context);
     try {
@@ -31,7 +32,7 @@ final class Rpc {
   }
 
   /** Sends one encoded line and returns main's raw answer, or fails naming {@code context}. */
-  static String exchange(Reader in, Writer out, String line, String context) {
+  static String exchange(InputStream in, OutputStream out, String line, String context) {
     try {
       send(out, line);
       var answer = SyncWire.readFramed(in);
@@ -47,9 +48,24 @@ final class Rpc {
     }
   }
 
-  static void send(Writer out, String line) {
+  static SyncWire.Response receive(InputStream in, String context) {
     try {
-      out.write(line);
+      var line = SyncWire.readLine(in);
+      if (line == null)
+        throw new SyncTransportException("unreachable", context + ": channel closed", null);
+      return SyncWire.decodeResponse(line);
+    } catch (IOException e) {
+      throw new SyncTransportException("unreachable", context + ": " + e.getMessage(), e);
+    } catch (SyncTransportException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
+    }
+  }
+
+  static void send(OutputStream out, String line) {
+    try {
+      out.write(line.getBytes(StandardCharsets.UTF_8));
       out.write('\n');
       out.flush();
     } catch (IOException e) {

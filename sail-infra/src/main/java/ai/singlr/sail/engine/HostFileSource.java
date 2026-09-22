@@ -56,8 +56,13 @@ public final class HostFileSource implements FileSource {
   }
 
   @Override
-  public byte[] read(Path file) throws IOException {
-    return Files.readAllBytes(file);
+  public java.io.InputStream open(Path file) throws IOException {
+    return Files.newInputStream(file);
+  }
+
+  @Override
+  public int mode(Path file) throws IOException {
+    return WorkspaceFiles.mode(file);
   }
 
   private record CollectingVisitor(List<Path> files) implements FileVisitor<Path> {

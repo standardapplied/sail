@@ -21,7 +21,6 @@ import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -672,7 +671,7 @@ public final class Banner {
       List<FileStore.FileRow> rows, String project, PrintStream out, Ansi ansi) {
     var table = new TableFormatter(" Files: " + project + " ", List.of("PATH", "SIZE"));
     for (var row : rows) {
-      table.addRow(row.path(), Base64.getDecoder().decode(row.content()).length + " B");
+      table.addRow(row.path(), row.size() + " B");
     }
     table.render(out, ansi);
   }

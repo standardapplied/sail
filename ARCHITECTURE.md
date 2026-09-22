@@ -179,6 +179,20 @@ one-way roster pull:
 | runs and reviews | Bidirectional; a run is pushed only by the box that executes it | Execution provenance |
 | FDE roster | One-way, main-authoritative pull | Handle, name, email, role, status, and never keys or tokens |
 
+Content — a spec's body and plan, a shared file's bytes — is not in any row or snapshot. A
+synced store names its content fields (`SyncedStore.contentFields`), a snapshot carries a
+SHA-256 in their place, and the bytes live once in the `BlobStore`: content-defined chunks
+(`FastCdc`, 64 KiB–1 MiB) under a manifest per blob, every chunk hashed before it is written
+and every blob assembled only when each chunk is present and the whole hashes right. The
+materialized text stays where reads find it (`spec_content`, a file's row carries hash, size,
+mode and kind), so no read path opens a blob to answer a listing. History therefore grows by a
+hash per revision, an edit to a large file moves only the chunks it touched, two projects
+sharing a file store it once, and nothing on any path holds a whole file: ingest, sync,
+materialization and download all stream. `sail sync gc` frees what no live row, retained
+history row or open conflict references; a session or an ingest holds a shared lease
+(`BlobRetention`, one file lock beside the database) that GC's exclusive lease waits for, so
+a chunk that just arrived is never collected under a round.
+
 One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over any synced
 store, so the same box acts as the node when it syncs up and as the authority when another
 node syncs to it. Every synced store keeps a `change_log` of full snapshots and, beside it, a
@@ -199,8 +213,19 @@ the page and only to what the node has actually seen, so a round that dies mid-p
 and re-adopts nothing. After the
 pages the node asks `need` for main's current rows of whatever it changed itself, so the
 engine sees main's real state for a local edit, and `push`es its offers in batches. Every
-message is one JSON line under a single 16 MiB frame bound (`SyncWire.MAX_FRAME`), the size
-of a shared file with room to spare. Every protocol-4 message names an `op` and no earlier
+message is one JSON line under a single 16 MiB frame bound (`SyncWire.MAX_FRAME`). Content
+crosses as bytes announced by a line: the wire is a byte stream with one reader (`readLine`,
+strict UTF-8; `readBytes(n)`), and only `chunk { hash, size }` is followed by raw bytes. Before
+a page or a `need` answer reaches the engine the node brings each blob it lacks home in turn —
+`fetch` → `manifest`, `fetch_chunks` in frame-bounded batches → `chunk`s, assemble — so a page's
+content costs one manifest of memory however many files it names, a chunk is stored the moment
+it verifies, and a round that dies mid-transfer resumes at the chunk it lost. Before each push
+batch the node `announce`s the blob hashes the batch references and main answers `lack`; the
+node sends those manifests, main validates every one against its own `limits.file_max` and
+answers `lack` again with the chunks it does not hold; the node sends exactly those and main
+assembles. `lack` has one meaning in both replies — of what you just named, I hold none of these
+— and a commit naming a hash main does not hold is refused. A read-only principal is refused at
+`announce`, before main stores a byte. Every protocol-4 message names an `op` and no earlier
 protocol did, so a main that answers `hello` with a message naming none is on an older protocol
 and the node fails naming the remedy: upgrade main. Anything on the channel that is not a
 message at all is reported as that, never blamed on main's version.

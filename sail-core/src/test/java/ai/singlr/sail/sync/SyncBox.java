@@ -13,13 +13,13 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.PipedReader;
-import java.io.PipedWriter;
-import java.io.StringWriter;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
-import java.io.Writer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,7 +85,11 @@ public final class SyncBox implements AutoCloseable {
   }
 
   /** A protocol-4 session over a pipe to {@code server}, plus the wire log and the notices. */
-  public record Link(SyncSession session, StringWriter log, List<String> notices, Thread server)
+  public record Link(
+      SyncSession session,
+      ai.singlr.sail.sync.ByteStreams.Output log,
+      List<String> notices,
+      Thread server)
       implements AutoCloseable {
 
     public SyncSession.TypeReport reconcile(String type, LocalReplica local) {
@@ -118,7 +122,7 @@ public final class SyncBox implements AutoCloseable {
     }
   }
 
-  public static Link connect(SyncRpcServer server, String box) throws IOException {
+  public static Link connect(SyncRpcServer server, SyncBox box) throws IOException {
     return connect(server, box, SyncWire.MAX_FRAME, out -> out);
   }
 
@@ -127,19 +131,86 @@ public final class SyncBox implements AutoCloseable {
    * with {@code serverOut} so a test can cut the channel or interleave a write mid-round.
    */
   public static Link connect(
-      SyncRpcServer server, String box, int frame, UnaryOperator<Writer> serverOut)
+      SyncRpcServer server, SyncBox box, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
-    var log = new StringWriter();
+    return connect(server, box.db, box.id, frame, serverOut);
+  }
+
+  public static Link connect(
+      SyncRpcServer server, Sqlite db, String box, int frame, UnaryOperator<OutputStream> serverOut)
+      throws IOException {
+    return connect(server, db, box, frame, serverOut, output -> output);
+  }
+
+  public static Link connect(
+      SyncRpcServer server,
+      SyncBox box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
+    return connect(server, box.db, box.id, frame, serverOut, nodeOut);
+  }
+
+  private static Link connect(
+      SyncRpcServer server,
+      Sqlite db,
+      String box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
+    return connect(server, db, box, frame, serverOut, nodeOut, input -> input);
+  }
+
+  static Link connect(
+      SyncRpcServer server,
+      Sqlite db,
+      String box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut,
+      UnaryOperator<InputStream> clientInput)
+      throws IOException {
+    var toServer = new PipedOutputStream();
+    var serverIn = new BufferedInputStream(new PipedInputStream(toServer, 1024 * 1024));
+    var toClient = new PipedOutputStream();
+    var clientIn = new BufferedInputStream(new PipedInputStream(toClient, 1024 * 1024));
+    var log = new ai.singlr.sail.sync.ByteStreams.Output();
     var tee =
-        new Writer() {
+        new OutputStream() {
+          private final java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
+          private int remaining;
+
           @Override
-          public void write(char[] buffer, int offset, int length) throws IOException {
-            toServer.write(buffer, offset, length);
-            log.write(buffer, offset, length);
+          public void write(int value) throws IOException {
+            toServer.write(value);
+            if (remaining > 0) {
+              remaining--;
+              return;
+            }
+            line.write(value);
+            if (value == '\n') {
+              var announcing = line.toString(java.nio.charset.StandardCharsets.UTF_8);
+              log.write(announcing);
+              var parsed = YamlUtil.parseMap(announcing);
+              if ("chunk".equals(parsed.get("op")))
+                remaining = ((Number) parsed.get("size")).intValue();
+              line.reset();
+            }
+          }
+
+          @Override
+          public void write(byte[] buffer, int offset, int length) throws IOException {
+            var end = offset + length;
+            while (offset < end) {
+              if (remaining > 0) {
+                var count = Math.min(remaining, end - offset);
+                toServer.write(buffer, offset, count);
+                offset += count;
+                remaining -= count;
+              } else write(buffer[offset++] & 255);
+            }
           }
 
           @Override
@@ -172,8 +243,28 @@ public final class SyncBox implements AutoCloseable {
     var notices = new ArrayList<String>();
     var session =
         SyncSession.open(
-            clientIn, tee, SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box), notices::add);
+            clientInput.apply(clientIn),
+            nodeOut.apply(tee),
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
+            notices::add,
+            db);
     return new Link(session, log, notices, thread);
+  }
+
+  public static SyncEngine.Report round(Sqlite main, Sqlite node, String type) {
+    var server =
+        SyncRpcServer.over(
+            main,
+            "main",
+            new SyncPrincipal("node", true),
+            FdeRoster.EMPTY,
+            SyncTransitionSink.NONE,
+            SyncWire.UPGRADE_FLOOR);
+    try (var link = connect(server, node, "node", SyncWire.MAX_FRAME, out -> out)) {
+      return link.reconcile(type, SyncedEntities.replicas(node, "node", "node").get(type)).report();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   @Override

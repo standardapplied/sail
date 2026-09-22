@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -24,7 +23,6 @@ import org.junit.jupiter.api.Timeout;
 class NativeFleetIT {
 
   private static final int BODY_BYTES = 48_000;
-  private static final int SPECS_PAST_ONE_FRAME = 370;
   private static final int CUT_AFTER_BYTES = 3_000_000;
 
   @Test
@@ -32,7 +30,18 @@ class NativeFleetIT {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.released());
       var mady = fleet.node("mady", fleet.released());
-      main.serving(() -> main.createSpecs("seed", 5, BODY_BYTES));
+      main.serving(
+          () -> {
+            main.createSpecs("seed", 5, BODY_BYTES);
+            main.shOk(
+                "dd if=/dev/urandom of=/tmp/shared.bin bs=1M count=3 status=none && chmod 644 /tmp/shared.bin");
+            main.sailOk(
+                "project", "files", "add", "-p", "demo", "/tmp/shared.bin", "--as", "shared.bin");
+          });
+      var sharedHash = main.shOk("sha256sum /tmp/shared.bin").split(" ")[0];
+      var sharedMode =
+          Integer.parseInt(
+              main.shOk("stat -c %a \"$HOME/.sail/projects/demo/files/shared.bin\"").strip(), 8);
       mady.sailOk("sync");
       fleet.assertConverged(mady);
 
@@ -72,6 +81,15 @@ class NativeFleetIT {
       assertEquals(List.of(), pendingConflicts(mady));
       assertEquals("edited on the node", main.title("seed-1"));
       fleet.assertConverged(mady);
+      assertEquals(
+          sharedHash,
+          mady.shOk("sail project files cat -p demo shared.bin | sha256sum").split(" ")[0]);
+      assertEquals(
+          Integer.toString(sharedMode),
+          mady.query("SELECT mode FROM project_files WHERE path = 'shared.bin'").strip());
+      assertEquals(
+          main.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"),
+          mady.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"));
     }
   }
 
@@ -79,7 +97,14 @@ class NativeFleetIT {
   void aFreshNodePullsPastOneFrameAndACutTransportLosesNothing() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.candidate());
-      main.serving(() -> main.createSpecs("bulk", SPECS_PAST_ONE_FRAME, BODY_BYTES));
+      main.serving(
+          () -> {
+            main.shOk(
+                "dd if=/dev/urandom of=/tmp/large.bin bs=1M count=40 status=none && chmod 750 /tmp/large.bin");
+            main.sailOk(
+                "project", "files", "add", "-p", "demo", "/tmp/large.bin", "--as", "large.bin");
+          });
+      var expectedHash = main.shOk("sha256sum /tmp/large.bin").split(" ")[0];
       var rejesh = fleet.node("rejesh", fleet.candidate());
       rejesh.shOk(
           """
@@ -102,9 +127,19 @@ class NativeFleetIT {
               .strip(),
           "a cut round left a spec without its content");
 
+      var heldBytes =
+          Long.parseLong(rejesh.query("SELECT COALESCE(sum(size), 0) FROM chunks").strip());
+      assertTrue(heldBytes > 0);
+      var totalBytes =
+          Long.parseLong(main.query("SELECT COALESCE(sum(size), 0) FROM chunks").strip());
       var round = NativeFleet.json(rejesh.sailOk("sync", "--json"));
 
-      assertTrue(pagesOf(round, "spec") >= 2, () -> "the pull never left one frame: " + round);
+      assertEquals(totalBytes - heldBytes, ((Number) round.get("bytes_fetched")).longValue());
+      assertEquals(
+          expectedHash,
+          rejesh.shOk("sail project files cat -p demo large.bin | sha256sum").split(" ")[0]);
+      assertEquals(
+          "488", rejesh.query("SELECT mode FROM project_files WHERE path = 'large.bin'").strip());
       fleet.assertConverged(rejesh);
       assertEquals(0, NativeFleet.json(rejesh.sailOk("sync", "--json")).get("pulled"));
     }
@@ -138,14 +173,5 @@ class NativeFleetIT {
     return NativeFleet.jsonList(box.sailOk("conflicts", "--json")).stream()
         .map(conflict -> (String) conflict.get("entity"))
         .toList();
-  }
-
-  @SuppressWarnings("unchecked")
-  private static int pagesOf(Map<String, Object> round, String type) {
-    return ((List<Map<String, Object>>) round.get("types"))
-        .stream()
-            .filter(report -> type.equals(report.get("type")))
-            .mapToInt(report -> (Integer) report.get("pages"))
-            .sum();
   }
 }

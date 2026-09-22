@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.sync;
 
-import java.io.Reader;
-import java.io.Writer;
+import ai.singlr.sail.store.Sqlite;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -30,7 +31,19 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       int pages,
       int entries,
       boolean skipped,
-      String failure) {
+      String failure,
+      long fetchedBytes,
+      long sentBytes) {
+    public TypeReport(
+        String type,
+        SyncEngine.Report report,
+        int pages,
+        int entries,
+        boolean skipped,
+        String failure) {
+      this(type, report, pages, entries, skipped, failure, 0, 0);
+    }
+
     public static TypeReport failed(String type, String failure) {
       return new TypeReport(type, SyncEngine.Report.NONE, 0, 0, false, failure);
     }
@@ -56,7 +69,13 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * protocol before 4 put on the wire, so it fails naming the remedy — upgrade main. Anything that
    * is not a message at all is reported as what it is, never blamed on main's version.
    */
-  static SyncSession open(Reader in, Writer out, SyncWire.Hello hello, Consumer<String> notice) {
+  static SyncSession open(
+      InputStream in, OutputStream out, SyncWire.Hello hello, Consumer<String> notice, Sqlite db) {
+    return ((PagedSyncSession) open(in, out, hello, notice)).content(db);
+  }
+
+  static SyncSession open(
+      InputStream in, OutputStream out, SyncWire.Hello hello, Consumer<String> notice) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
     if (SyncWire.predatesOps(line)) {

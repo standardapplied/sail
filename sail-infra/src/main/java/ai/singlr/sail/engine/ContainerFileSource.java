@@ -8,7 +8,6 @@ package ai.singlr.sail.engine;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
@@ -18,7 +17,7 @@ import java.util.concurrent.TimeoutException;
  * the container — rather than whatever directory the engineer happens to be standing in.
  *
  * <p>Listings use {@code find -printf} with a tab separator (robust for spaces in names); content
- * is pulled as {@code base64} so binary files survive the text stdout boundary.
+ * streams as raw bytes from the container process.
  */
 public final class ContainerFileSource implements FileSource {
 
@@ -65,7 +64,7 @@ public final class ContainerFileSource implements FileSource {
 
   @Override
   public long size(Path file) throws IOException {
-    return parseLong(run(List.of("stat", "-c", "%s", file.toString())).strip());
+    return parseLong(run(List.of("stat", "-L", "-c", "%s", "--", file.toString())).strip());
   }
 
   @Override
@@ -91,8 +90,15 @@ public final class ContainerFileSource implements FileSource {
   }
 
   @Override
-  public byte[] read(Path file) throws IOException {
-    return Base64.getMimeDecoder().decode(run(List.of("base64", file.toString())).strip());
+  public java.io.InputStream open(Path file) throws IOException {
+    return shell.stream(ContainerExec.asDevUser(project, List.of("cat", "--", file.toString())));
+  }
+
+  @Override
+  public int mode(Path file) throws IOException {
+    return Integer.parseInt(
+            run(List.of("stat", "-L", "-c", "%a", "--", file.toString())).strip(), 8)
+        & 0777;
   }
 
   private static long parseLong(String value) {

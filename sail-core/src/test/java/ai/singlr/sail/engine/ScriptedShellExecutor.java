@@ -117,6 +117,14 @@ public final class ScriptedShellExecutor implements ShellExec {
   }
 
   @Override
+  public java.io.InputStream stream(List<String> command) throws IOException {
+    var result = exec(command);
+    if (!result.ok()) throw new IOException(result.stderr());
+    return new java.io.ByteArrayInputStream(
+        result.stdout().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
+  @Override
   public boolean isDryRun() {
     return false;
   }

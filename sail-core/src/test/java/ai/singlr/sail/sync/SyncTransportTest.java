@@ -12,15 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncState;
 import java.io.IOException;
-import java.io.Writer;
+import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,14 +64,33 @@ class SyncTransportTest {
     return SyncBox.spec(id, title, status);
   }
 
-  private SyncBox.Link connect(SyncBox node) throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node.id + "-box");
+  private static SpecStore.SpecRow specBy(String id, String title, String author) {
+    return new SpecStore.SpecRow(
+        id,
+        "proj",
+        title,
+        SpecStatus.fromWire("pending"),
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        author,
+        "",
+        "",
+        author,
+        List.of(),
+        List.of());
   }
 
-  private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<Writer> serverOut)
+  private SyncBox.Link connect(SyncBox node) throws IOException {
+    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node);
+  }
+
+  private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    return SyncBox.connect(
-        main.server(new SyncPrincipal(node.id, true)), node.id + "-box", frame, serverOut);
+    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node, frame, serverOut);
   }
 
   private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
@@ -83,8 +108,176 @@ class SyncTransportTest {
   }
 
   private void bigSpec(SyncBox box, String id) {
-    box.specs.create(spec(id, "Spec " + id, "pending"));
-    box.specs.setContent(id, id.repeat(600 / id.length()), "");
+    box.specs.create(spec(id, id.repeat(600 / id.length()), "pending"));
+  }
+
+  @Test
+  void replayingAnAlreadyAdoptedRenameTombstoneDoesNotJournalItAgain() throws Exception {
+    var projects = new ProjectStore(main.db);
+    projects.upsert("old", "name: old\n", "uday");
+    projects.rename("old", "new", "name: new\n");
+    try (var link = connect(nodeA)) {
+      link.reconcile(
+          "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"));
+    }
+    var before = new ChangeLog(nodeA.db).maxSeq("project");
+    nodeA.db.execute("DELETE FROM sync_state WHERE peer = 'main' AND entity_type = 'project'");
+
+    try (var link = connect(nodeA)) {
+      var report =
+          link.reconcile(
+              "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"));
+      assertEquals(0, report.report().total());
+    }
+    assertEquals(before, new ChangeLog(nodeA.db).maxSeq("project"));
+    assertTrue(new ProjectStore(nodeA.db).findByName("old").isEmpty());
+  }
+
+  @Test
+  void anUnbasedLocalRenameConflictsWithMainsExistingProject() throws Exception {
+    new ProjectStore(main.db).upsert("old", "name: old\n", "uday");
+    var projects = new ProjectStore(nodeA.db);
+    projects.upsert("old", "name: old\n", "uday");
+    projects.rename("old", "new", "name: new\n");
+
+    try (var link = connect(nodeA)) {
+      assertEquals(
+          1,
+          link.reconcile(
+                  "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"))
+              .report()
+              .conflicts());
+    }
+    assertEquals(
+        List.of(ConflictDetector.DELETED_FIELD),
+        nodeA.conflicts.pendingFor("project", "old").orElseThrow().fields());
+    assertTrue(new ProjectStore(main.db).findByName("old").isPresent());
+    assertTrue(projects.findByName("old").isEmpty());
+  }
+
+  @Test
+  void aReaderAdoptsMainInsteadOfOfferingAMergeOfAForeignRun() throws Exception {
+    var runs = new RunStore(main.db);
+    var id = ai.singlr.sail.common.DateTimeUtils.newId().toString();
+    runs.create(
+        id,
+        "project",
+        "auth",
+        "owner",
+        "owner",
+        "build",
+        "codex",
+        "original",
+        "task",
+        123,
+        null,
+        "/tmp/agent.log",
+        "sail-agent-" + id);
+    var replica = SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("run");
+    try (var link = connect(nodeA)) {
+      link.reconcile("run", replica);
+    }
+    new RunStore(nodeA.db).complete(id, "stopped", 0);
+    var changed = new LinkedHashMap<>(runs.comparableSnapshot(id));
+    changed.put("branch", "from-main");
+    runs.commitRevision(id, changed, runs.latestRev(id));
+    var mainRev = runs.latestRev(id);
+
+    try (var link = connect(nodeA)) {
+      var report = link.reconcile("run", replica).report();
+      assertEquals(1, report.pulled());
+      assertEquals(0, report.pushed());
+      assertEquals(0, report.conflicts());
+    }
+    assertEquals(mainRev, runs.latestRev(id));
+    var adopted = new RunStore(nodeA.db).findById(id).orElseThrow();
+    assertEquals("from-main", adopted.branch());
+    assertEquals("running", adopted.status());
+  }
+
+  @Test
+  void localEditsThroughoutEveryAdoptionRetryParkAConflictWithoutOverwritingThem()
+      throws Exception {
+    main.specs.create(spec("auth", "Auth", "pending"));
+    syncToMain(nodeA);
+    main.specs.update(spec("auth", "Remote title", "pending"));
+    var writes = new AtomicInteger();
+    var racing =
+        new EditingReplica(
+            SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("spec"),
+            () -> {
+              assertTrue(writes.incrementAndGet() <= 10, "adoption retries must be bounded");
+              nodeA.specs.update(spec("auth", "Auth", "in_progress"));
+            });
+
+    try (var link = connect(nodeA)) {
+      assertEquals(
+          1, link.reconcile("spec", racing.scopedTo(racing.entityIds())).report().conflicts());
+    }
+    assertEquals(
+        List.of("<stale>"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
+    assertEquals("Auth", nodeA.specs.findById("auth").orElseThrow().title());
+    assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
+  }
+
+  private record EditingReplica(LocalReplica inner, Runnable afterTransaction)
+      implements LocalReplica {
+    @Override
+    public Set<String> entityIds() {
+      return inner.entityIds();
+    }
+
+    @Override
+    public Set<String> dirtyIds() {
+      return inner.dirtyIds();
+    }
+
+    @Override
+    public <T> T atomically(Supplier<T> work) {
+      var result = inner.atomically(work);
+      afterTransaction.run();
+      return result;
+    }
+
+    @Override
+    public Map<String, Object> current(String id) {
+      return inner.current(id);
+    }
+
+    @Override
+    public Map<String, Object> base(String id) {
+      return inner.base(id);
+    }
+
+    @Override
+    public String currentRev(String id) {
+      return inner.currentRev(id);
+    }
+
+    @Override
+    public void adopt(String id, Map<String, Object> snapshot, String rev) {
+      inner.adopt(id, snapshot, rev);
+    }
+
+    @Override
+    public void recordConflict(
+        String id,
+        Map<String, Object> base,
+        Map<String, Object> local,
+        Map<String, Object> remote,
+        List<String> fields) {
+      inner.recordConflict(id, base, local, remote, fields);
+    }
+
+    @Override
+    public long checkpoint(String peer) {
+      return inner.checkpoint(peer);
+    }
+
+    @Override
+    public void advanceCheckpoint(String peer, long seq) {
+      inner.advanceCheckpoint(peer, seq);
+    }
   }
 
   @Test
@@ -97,6 +290,28 @@ class SyncTransportTest {
     assertEquals(1, pulled.report().pulled());
     assertEquals(1, pulled.entries());
     assertEquals("Auth", nodeB.specs.findById("auth").orElseThrow().title());
+  }
+
+  @Test
+  void authorsReachEveryReplicaOnCreateAndEdit() throws Exception {
+    nodeA.specs.create(specBy("auth", "Auth", "ada"));
+    syncToMain(nodeA);
+    syncToMain(nodeB);
+    assertEquals("ada", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("ada", nodeB.specs.findById("auth").orElseThrow().updatedBy());
+    nodeB.specs.update(specBy("auth", "Revised", "bob"));
+    syncToMain(nodeB);
+    syncToMain(nodeA);
+    assertEquals("bob", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("bob", nodeA.specs.findById("auth").orElseThrow().updatedBy());
+  }
+
+  @Test
+  void aDeletedSpecThatNeverReachedMainConvergesQuietly() throws Exception {
+    nodeA.specs.create(spec("local", "Local", "pending"));
+    nodeA.specs.delete("local");
+    assertEquals(0, syncToMain(nodeA).report().total());
+    assertTrue(main.specs.findById("local").isEmpty());
   }
 
   @Test
@@ -189,7 +404,9 @@ class SyncTransportTest {
       var first = link.reconcile("spec", nodeA.replica);
       assertEquals(1, first.report().pushed());
       assertEquals(0, first.pages());
-      assertEquals(List.of("hello", "heads", "need", "push"), link.ops());
+      assertEquals(
+          List.of("hello", "heads", "need", "announce", "manifest", "done", "done", "push"),
+          link.ops());
     }
     assertEquals(0L, nodeA.syncState.checkpoint("main", "spec"), "an own push is not a seen entry");
 
@@ -219,11 +436,11 @@ class SyncTransportTest {
       bigSpec(main, id);
     }
     var pages = new AtomicInteger();
-    UnaryOperator<Writer> killAfterTwoPages =
+    UnaryOperator<OutputStream> killAfterTwoPages =
         out ->
-            new Writer() {
+            new java.io.FilterOutputStream(out) {
               @Override
-              public void write(char[] buffer, int offset, int length) throws IOException {
+              public void write(byte[] buffer, int offset, int length) throws IOException {
                 if (new String(buffer, offset, length).contains("\"op\": \"page\"")
                     && pages.incrementAndGet() > 2) {
                   throw new IOException("channel cut");
@@ -289,18 +506,18 @@ class SyncTransportTest {
       assertEquals(1, round.report().pulled());
       assertEquals(1, round.report().pushed());
       assertEquals(1, round.entries(), "the page carried only main's edit");
-      assertEquals(List.of("hello", "heads", "pull", "need", "push"), link.ops());
+      assertEquals(List.of("hello", "heads", "pull", "need", "announce", "push"), link.ops());
     }
     assertEquals("Y from A", main.specs.findById("y").orElseThrow().title());
     assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
   }
 
-  private UnaryOperator<Writer> afterTheFirstPage(Runnable action) {
+  private UnaryOperator<OutputStream> afterTheFirstPage(Runnable action) {
     var done = new AtomicInteger();
     return out ->
-        new Writer() {
+        new java.io.FilterOutputStream(out) {
           @Override
-          public void write(char[] buffer, int offset, int length) throws IOException {
+          public void write(byte[] buffer, int offset, int length) throws IOException {
             if (new String(buffer, offset, length).contains("\"op\": \"page\"")
                 && done.getAndIncrement() == 0) {
               action.run();
@@ -369,6 +586,24 @@ class SyncTransportTest {
   }
 
   @Test
+  void needBatchesCountUtf8BytesAndEscapeCharacters() throws Exception {
+    var path = String.join("/", java.util.Collections.nCopies(6, "界".repeat(40)));
+    var files = new FileStore(nodeA.db);
+    for (var i = 0; i < 3; i++)
+      files.put("proj", path + i, new java.io.ByteArrayInputStream(new byte[] {1}), 0644);
+    try (var link = connect(nodeA, SMALL_FRAME, out -> out)) {
+      var session = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
+      assertEquals(
+          3,
+          session
+              .reconcile("file", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("file"))
+              .report()
+              .pushed());
+      assertEquals(3, link.count("need"));
+    }
+  }
+
+  @Test
   void aPushIsSplitIntoBatchesAtTheFrameBound() throws Exception {
     for (var id : List.of("p1", "p2", "p3", "p4")) {
       bigSpec(nodeA, id);
@@ -391,7 +626,7 @@ class SyncTransportTest {
           assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
       assertEquals("protocol", failure.kind());
       assertTrue(failure.getMessage().contains("toobig"), failure.getMessage());
-      assertTrue(failure.getMessage().contains("chars"), failure.getMessage());
+      assertTrue(failure.getMessage().contains("bytes"), failure.getMessage());
     }
     bigSpec(nodeB, "mine");
     try (var link = connect(nodeB)) {
@@ -408,12 +643,12 @@ class SyncTransportTest {
   void aReadOnlyFdeMayPullButItsPushIsRefused() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
     var readOnly = main.server(new SyncPrincipal("A", false));
-    try (var link = SyncBox.connect(readOnly, "A-box")) {
+    try (var link = SyncBox.connect(readOnly, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
     }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
     nodeA.specs.create(spec("mine", "Local only", "pending"));
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), "A-box")) {
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), nodeA)) {
       var failure =
           assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
       assertEquals("refused", failure.kind());
@@ -429,7 +664,7 @@ class SyncTransportTest {
         new StoreReplica(
             "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
     nodeA.specs.create(spec("auth", "Auth", "pending"));
-    nodeFiles.put("acme", "scripts/deploy.sh", "ZGVwbG95");
+    ai.singlr.sail.store.ContentFixtures.put(nodeFiles, "acme", "scripts/deploy.sh", "ZGVwbG95");
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
     var server =
         SyncRpcServer.over(
@@ -439,14 +674,16 @@ class SyncTransportTest {
             () -> roster,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR);
-    try (var link = SyncBox.connect(server, "A-box")) {
+    try (var link = SyncBox.connect(server, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pushed());
       assertEquals(1, link.reconcile("file", nodeFileReplica).report().pushed());
       assertEquals("ada", link.session().fetchFdes().getFirst().get("handle"));
       assertEquals(1, link.count("heads"), "tips are read once per session");
     }
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
-    assertEquals("ZGVwbG95", mainFiles.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        "ZGVwbG95",
+        ai.singlr.sail.store.ContentFixtures.text(mainFiles, "acme", "scripts/deploy.sh"));
     assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
   }
 }

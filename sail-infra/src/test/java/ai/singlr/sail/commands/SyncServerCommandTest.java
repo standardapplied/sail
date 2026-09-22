@@ -32,10 +32,10 @@ import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.PipedReader;
-import java.io.PipedWriter;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -129,10 +129,10 @@ class SyncServerCommandTest {
   private SyncEngine.Report syncWithToken(
       String token, String entityType, LocalReplica replica, SyncTransitionSink sink)
       throws Exception {
-    var toServer = new PipedWriter();
-    var serverIn = new BufferedReader(new PipedReader(toServer));
-    var toClient = new PipedWriter();
-    var clientIn = new BufferedReader(new PipedReader(toClient));
+    var toServer = new PipedOutputStream();
+    var serverIn = new BufferedInputStream(new PipedInputStream(toServer));
+    var toClient = new PipedOutputStream();
+    var clientIn = new BufferedInputStream(new PipedInputStream(toClient));
 
     var serverThread =
         Thread.ofVirtual()
@@ -146,7 +146,12 @@ class SyncServerCommandTest {
                 });
 
     try (var session =
-        SyncSession.open(clientIn, toServer, SyncWire.Hello.of("0.44.0", "node-box"), n -> {})) {
+        SyncSession.open(
+            clientIn,
+            toServer,
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            n -> {},
+            nodeDb)) {
       return session.reconcile(entityType, replica).report();
     } finally {
       serverThread.join();

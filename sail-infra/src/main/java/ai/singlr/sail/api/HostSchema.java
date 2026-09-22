@@ -13,5 +13,7 @@ public interface HostSchema {
 
   void prepareSync();
 
+  long collectContent();
+
   record Migration(int before, int after) {}
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -17,6 +18,9 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.SharedProjectFiles;
+import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -25,17 +29,24 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.Base64;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ApiRouterTest {
 
@@ -146,7 +157,38 @@ class ApiRouterTest {
   }
 
   @Test
-  void fileRoutesCarryRawBytesAndEnforceTheFiveMiBCap() throws Exception {
+  void fileListingsUseMetadataAndConditionalDownloadsNeverOpenTheBlob() throws Exception {
+    var operations = new SeamOperations();
+    operations.files.put("data", new byte[] {1, 2, 3});
+    try (var server = serverWith(operations, true)) {
+      var listed = get(server, "/v1/projects/acme/files", "token");
+      assertTrue(listed.body().contains("content_hash"));
+      assertTrue(listed.body().contains("mode"));
+      assertTrue(listed.body().contains("kind"));
+      assertEquals(0, operations.openedFiles);
+      var download = get(server, "/v1/projects/acme/files/data", "token");
+      assertEquals("3", download.headers().firstValue("content-length").orElseThrow());
+      var etag = download.headers().firstValue("etag").orElseThrow();
+      assertEquals("\"" + ai.singlr.sail.store.BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
+      var request =
+          java.net.http.HttpRequest.newBuilder(
+                  java.net.URI.create(
+                      "http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
+              .header("Authorization", "Bearer token")
+              .header("If-None-Match", etag)
+              .GET()
+              .build();
+      try (var client = java.net.http.HttpClient.newHttpClient()) {
+        var cached = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertEquals(304, cached.statusCode());
+        assertEquals("", cached.body());
+      }
+      assertEquals(1, operations.openedFiles);
+    }
+  }
+
+  @Test
+  void fileRoutesCarryRawBytesAndEnforceTheHostCap() throws Exception {
     var operations = new SeamOperations();
     try (var server = serverWith(operations, true)) {
       assertEquals(200, get(server, "/v1/projects/acme/files", "token").statusCode());
@@ -162,17 +204,10 @@ class ApiRouterTest {
       assertEquals(200, put(server, "/v1/projects/acme/files/empty", "token", "").statusCode());
       assertEquals("", get(server, "/v1/projects/acme/files/empty", "token").body());
       assertEquals(
-          200,
-          put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(ProjectFiles.MAX_BYTES))
-              .statusCode());
+          200, put(server, "/v1/projects/acme/files/cap", "token", "x".repeat(1024)).statusCode());
       assertEquals(
           413,
-          put(
-                  server,
-                  "/v1/projects/acme/files/large",
-                  "token",
-                  "x".repeat(ProjectFiles.MAX_BYTES + 1))
-              .statusCode());
+          put(server, "/v1/projects/acme/files/large", "token", "x".repeat(1024 + 1)).statusCode());
       assertTrue(get(server, "/v1/projects/acme/files", "token").body().contains("dir/config"));
       assertEquals(
           200,
@@ -187,6 +222,90 @@ class ApiRouterTest {
       assertEquals(405, post(server, "/v1/projects/acme/files/config", "token", "{}").statusCode());
       assertEquals(
           422, put(server, "/v1/projects/acme/files/../outside", "token", content).statusCode());
+    }
+  }
+
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(ints = {0600, 0750})
+  void filePutsPreserveExistingPermissionsAndDefaultNewFilesAcrossSync(
+      Integer existingMode, @TempDir Path directory) throws Exception {
+    try (var main = new SyncBox(directory, "main");
+        var node = new SyncBox(directory, "node")) {
+      var mainFiles =
+          new SharedProjectFiles(
+              new FileStore(main.db), directory.resolve("main-projects"), "acme");
+      var nodeFiles =
+          new SharedProjectFiles(
+              new FileStore(node.db), directory.resolve("node-projects"), "acme");
+      var path = "dir/config";
+      if (existingMode != null) {
+        var original = "original\n".getBytes(StandardCharsets.UTF_8);
+        mainFiles.put(path, new ByteArrayInputStream(original), original.length, existingMode);
+        mainFiles.materialize();
+        SyncBox.round(main.db, node.db, "file");
+        nodeFiles.materialize();
+      }
+      var operations =
+          new TestOperations() {
+            @Override
+            public ProjectFiles projectFiles(String project) {
+              return mainFiles;
+            }
+          };
+      var updated = "updated\u0000bytes\n";
+      try (var server = serverWith(operations, true)) {
+        var response = put(server, "/v1/projects/acme/files/" + path, "token", updated);
+        assertEquals(200, response.statusCode(), response.body());
+      }
+      SyncBox.round(main.db, node.db, "file");
+      assertEquals(new FileMaterializer.Report(1, 0, List.of()), nodeFiles.materialize());
+
+      var expectedMode = existingMode == null ? 0644 : existingMode;
+      var updatedHash = BlobStore.hash(updated.getBytes(StandardCharsets.UTF_8));
+      for (var files : List.of(mainFiles, nodeFiles)) {
+        var row = files.find(path).orElseThrow();
+        var materialized = files.projectsDir().resolve("acme/files").resolve(path);
+        assertAll(
+            () -> assertEquals(expectedMode, row.mode()),
+            () -> assertEquals(updatedHash, row.contentHash()),
+            () -> assertEquals(expectedMode, WorkspaceFiles.mode(materialized)),
+            () -> assertEquals(updated, Files.readString(materialized)));
+      }
+    }
+  }
+
+  @Test
+  void aSharedFileNeedsADeclaredLengthAndAnOversizedHeaderIsRejectedWithoutABody()
+      throws Exception {
+    var operations = new SeamOperations();
+    try (var server = serverWith(operations, true)) {
+      var request =
+          HttpRequest.newBuilder(uri(server, "/v1/projects/acme/files/data"))
+              .header("Authorization", "Bearer token")
+              .PUT(
+                  HttpRequest.BodyPublishers.ofInputStream(
+                      () -> new java.io.ByteArrayInputStream(new byte[] {1})))
+              .build();
+      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      assertEquals(422, response.statusCode());
+      assertTrue(response.body().contains("Content-Length is required"));
+      try (var socket = new java.net.Socket("127.0.0.1", server.port())) {
+        socket.setSoTimeout(5000);
+        socket
+            .getOutputStream()
+            .write(
+                ("PUT /v1/projects/acme/files/large HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer token\r\nContent-Length: 1025\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+        socket.getOutputStream().flush();
+        var line =
+            new java.io.BufferedReader(
+                    new java.io.InputStreamReader(
+                        socket.getInputStream(), StandardCharsets.US_ASCII))
+                .readLine();
+        assertTrue(line.contains("413"), line);
+      }
+      assertTrue(operations.files.isEmpty());
     }
   }
 
@@ -210,6 +329,7 @@ class ApiRouterTest {
   }
 
   private static final class SeamOperations extends TestOperations {
+    private int openedFiles;
     private SyncRequest request;
     private Resolution resolution;
     private final Map<String, byte[]> files = new LinkedHashMap<>();
@@ -254,16 +374,32 @@ class ApiRouterTest {
                       new FileStore.FileRow(
                           project,
                           entry.getKey(),
-                          Base64.getEncoder().encodeToString(entry.getValue())))
+                          ai.singlr.sail.store.BlobStore.hash(entry.getValue()),
+                          entry.getValue().length,
+                          0644,
+                          "binary"))
               .toList();
         }
 
-        public Optional<byte[]> get(String path) {
-          return Optional.ofNullable(files.get(path));
+        public ai.singlr.sail.config.FileLimits limits() {
+          return new ai.singlr.sail.config.FileLimits(1024);
         }
 
-        public String put(String path, byte[] bytes) {
-          files.put(path, bytes);
+        public Optional<FileStore.FileRow> find(String path) {
+          return list().stream().filter(row -> row.path().equals(path)).findFirst();
+        }
+
+        public java.io.InputStream open(FileStore.FileRow row) {
+          openedFiles++;
+          return new java.io.ByteArrayInputStream(files.get(row.path()));
+        }
+
+        public String put(String path, java.io.InputStream bytes, long size, int mode) {
+          try {
+            files.put(path, bytes.readAllBytes());
+          } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+          }
           return path;
         }
 

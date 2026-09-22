@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -35,6 +36,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
 final class HostLanes {
@@ -241,6 +243,12 @@ final class HostLanes {
     @Override
     public void prepareSync() {
       sync.prepare();
+    }
+
+    @Override
+    public long collectContent() {
+      prepareSync();
+      return new BlobStore(db).gc(Set.of());
     }
   }
 }

@@ -87,9 +87,9 @@ class FleetSyncTest {
   }
 
   private void syncFromMain() {
-    engine.reconcile(node.specReplica, main.specReplica);
-    engine.reconcile(node.fileReplica, main.fileReplica);
-    engine.reconcile(node.projectReplica, main.projectReplica);
+    SyncBox.round(main.db, node.db, "spec");
+    SyncBox.round(main.db, node.db, "file");
+    SyncBox.round(main.db, node.db, "project");
     pullRoster();
   }
 
@@ -127,7 +127,7 @@ class FleetSyncTest {
   private void seedRealisticMain() {
     main.specs.create(spec("oauth", "OAuth flow", "done", List.of()));
     main.specs.create(spec("billing", "Billing", "pending", List.of("oauth")));
-    main.files.put("acme", "scripts/deploy.sh", b64("deploy"));
+    ai.singlr.sail.store.ContentFixtures.put(main.files, "acme", "scripts/deploy.sh", "deploy");
     main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
     main.projects.upsert("outline", "name: outline\n", "uday");
     main.fdes.add("uday", "Alex Morgan", "uday@example.com", "admin");
@@ -185,7 +185,7 @@ class FleetSyncTest {
     assertEquals(1, main.projects.canonicalizeDefinitions());
     assertEquals(1, node.projects.canonicalizeDefinitions());
 
-    var report = engine.reconcile(node.projectReplica, main.projectReplica);
+    var report = SyncBox.round(main.db, node.db, "project");
 
     assertEquals(0, report.conflicts(), "identical redacted content converges, never conflicts");
     assertTrue(
@@ -213,7 +213,7 @@ class FleetSyncTest {
         "the synced row keeps its real author, not the literal 'sync'");
   }
 
-  private static String decode(FileStore.FileRow row) {
-    return new String(Base64.getDecoder().decode(row.content()));
+  private String decode(FileStore.FileRow row) {
+    return node.files.blobs().text(row.contentHash());
   }
 }

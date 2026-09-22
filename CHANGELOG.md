@@ -2,6 +2,23 @@
 
 ## 0.45.0
 
+- **Content syncs by hash, in chunks, never as base64.** Spec bodies and plans and shared files
+  live once in a content-addressed blob store (SHA-256, content-defined chunks of 64 KiB–1 MiB,
+  every chunk verified before it is written); rows and history carry hashes, so an edit to a
+  title no longer re-journals the body and history grows by a hash per revision. The sync wire
+  is a byte stream — a JSON line announces, raw bytes follow only a `chunk` — and content is
+  deduplicated and resumable in both directions: a 1 KiB edit moves one chunk, an interrupted
+  transfer resumes at the chunk it lost, and a node pulls a page's content one blob at a time so
+  a page of many large files costs one manifest of memory. Shared files keep their permission
+  bits end to end (a symlink's target, a local `chmod` the sync never recorded, an HTTP update of
+  an existing file) and stream through ingest, sync, materialization and download; downloads
+  send `Content-Length` and an `ETag` (the content hash) and answer `If-None-Match` with `304`.
+  One cap replaces the 5 MiB limit: `limits.file_max` in `host.yaml`, 1 GiB by default, at most
+  8 GiB, enforced from the declared length before a byte is read and by main on every upload.
+  `sail sync status` reports bytes fetched and sent; `sail sync gc` frees content no live row,
+  retained history or open conflict references. Upgrading migrates existing content one entity
+  per transaction — resumable if interrupted, safe when two processes run it — and the fleet
+  floor moves to 0.45.0: a 0.44 box cannot read a hash-only snapshot, and is told so.
 - **The sync protocol-3 fallback is gone.** 0.44.0 let a node upgraded ahead of its main keep
   syncing over the whole-table protocol-3 wire for one release; that release is over. A node that
   meets a main still on 0.43 or older now fails the round saying main is on a sync protocol it

@@ -28,9 +28,9 @@ import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
-import java.io.Reader;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -52,9 +52,9 @@ import picocli.CommandLine.Help.Ansi;
  */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
-    Reader reader();
+    InputStream reader();
 
-    Writer writer();
+    OutputStream writer();
 
     @Override
     void close() throws IOException;
@@ -142,7 +142,7 @@ public final class SyncOperations {
       ProjectStore projects)
       throws Exception {
     try (var session =
-        SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice)) {
+        SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice, db)) {
       var types = new ArrayList<SyncSession.TypeReport>();
       var failures = new ArrayList<SyncTransportException>();
       var knownMessages = messages.syncEntityIds();

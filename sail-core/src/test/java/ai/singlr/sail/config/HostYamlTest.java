@@ -11,9 +11,46 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class HostYamlTest {
+
+  @ParameterizedTest
+  @ValueSource(longs = {10485760, 2147483648L})
+  void incusVersionChangePreservesConfigurationThroughSerialization(long fileMax) {
+    var host =
+        HostYaml.fromMap(
+            YamlUtil.parseMap(
+                """
+        storage_backend: dir
+        pool: devpool
+        bridge: incusbr0
+        base_profile: singlr-base
+        image: ubuntu/24.04
+        incus_version: "6.8"
+        server_ip: 192.0.2.1
+        initialized_at: "2026-01-01T00:00:00Z"
+        webauthn:
+          rp_id: sail.example.com
+        sync:
+          role: main
+          box_id: main-box
+        limits:
+          file_max: %d
+        """
+                    .formatted(fileMax)));
+    var expected = new LinkedHashMap<>(host.toMap());
+    expected.put("incus_version", "6.9");
+
+    var updated = host.withIncusVersion("6.9");
+    var reloaded = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(updated.toMap())));
+
+    assertEquals(expected, reloaded.toMap());
+    assertEquals(fileMax, reloaded.limits().fileMax());
+  }
 
   @Test
   void parsesHostYaml() throws Exception {

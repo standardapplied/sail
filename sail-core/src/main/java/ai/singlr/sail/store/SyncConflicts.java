@@ -62,7 +62,7 @@ public final class SyncConflicts {
               baseSnapshot,
               localSnapshot,
               remoteSnapshot,
-              String.join("\n", fields),
+              encodeFields(fields),
               DateTimeUtils.now().toString(),
               PENDING);
           return db.queryOne("SELECT last_insert_rowid()", row -> row.integer(0)).orElseThrow();
@@ -119,6 +119,15 @@ public final class SyncConflicts {
         PENDING);
   }
 
+  /** The column encoding of a conflict's clashing field names: one per line. */
+  public static String encodeFields(List<String> fields) {
+    return String.join("\n", fields);
+  }
+
+  public static List<String> decodeFields(String encoded) {
+    return encoded == null || encoded.isEmpty() ? List.of() : List.of(encoded.split("\n"));
+  }
+
   private static final String SELECT =
       "SELECT id, entity_type, entity_id, base_snapshot, local_snapshot, remote_snapshot, fields,"
           + " detected_at, status, resolved_rev FROM sync_conflicts";
@@ -132,7 +141,7 @@ public final class SyncConflicts {
         row.text(3),
         row.text(4),
         row.text(5),
-        fields.isEmpty() ? List.of() : List.of(fields.split("\n")),
+        decodeFields(fields),
         row.text(7),
         row.text(8),
         row.text(9));

@@ -12,9 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CyclicBarrier;
 import org.junit.jupiter.api.AfterEach;
@@ -46,16 +47,16 @@ class FileStoreTest {
 
   @Test
   void reprojectJournalsATombstoneAndAFreshRevisionSoCheckpointedPeersSeeTheMove() {
-    files.put("old", "a.txt", "AAA");
-    files.put("old", "dir/b.txt", "BBB");
+    ContentFixtures.put(files, "old", "a.txt", "AAA");
+    ContentFixtures.put(files, "old", "dir/b.txt", "BBB");
     var log = new ChangeLog(db);
     var checkpoint = log.maxSeq("file");
 
     files.reproject("old", "renamed");
 
     assertTrue(files.find("old", "a.txt").isEmpty(), "nothing left under the old project");
-    assertEquals("AAA", files.find("renamed", "a.txt").orElseThrow().content());
-    assertEquals("BBB", files.find("renamed", "dir/b.txt").orElseThrow().content());
+    assertEquals("AAA", ContentFixtures.text(files, "renamed", "a.txt"));
+    assertEquals("BBB", ContentFixtures.text(files, "renamed", "dir/b.txt"));
     assertTrue(log.head("file", "old/a.txt").orElseThrow().deleted(), "old id tombstoned");
     assertFalse(log.head("file", "renamed/a.txt").orElseThrow().deleted(), "new id live");
     assertEquals(
@@ -69,7 +70,7 @@ class FileStoreTest {
 
   @Test
   void reprojectToTheSameNameJournalsNothing() {
-    files.put("old", "a.txt", "AAA");
+    ContentFixtures.put(files, "old", "a.txt", "AAA");
     var before = new ChangeLog(db).maxSeq("file");
 
     files.reproject("old", "old");
@@ -78,11 +79,56 @@ class FileStoreTest {
   }
 
   @Test
-  void putAndFindAndList() {
-    files.put("acme", "a.txt", "AAA");
-    files.put("acme", "dir/b.txt", "BBB");
+  void invalidPermissionBitsCannotWrapIntoValidPermissions() {
+    var snapshot = new java.util.LinkedHashMap<>(ContentFixtures.snapshot(files, "data"));
+    snapshot.put("mode", 0x1_0000_01a4L);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> files.applyRevision(id("wrapped"), snapshot, "1-test"));
+    assertTrue(files.find("acme", "wrapped").isEmpty());
+  }
 
-    assertEquals("AAA", files.find("acme", "a.txt").orElseThrow().content());
+  @Test
+  void aRevisionRecordedWithoutAModeIsKnownAtAnyMode() {
+    ContentFixtures.put(files, "acme", "legacy.sh", "first");
+    var hash = files.find("acme", "legacy.sh").orElseThrow().contentHash();
+    var stripped =
+        new LinkedHashMap<>(
+            YamlUtil.parseMap(
+                new ChangeLog(db).head("file", id("legacy.sh")).orElseThrow().snapshot()));
+    stripped.remove("mode");
+    db.execute(
+        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+        YamlUtil.dumpJson(stripped),
+        id("legacy.sh"));
+
+    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0664), "umask 002 on the old box");
+    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0755));
+    assertFalse(files.isKnownVersion(id("legacy.sh"), files.blobs().putText("edited"), 0644));
+  }
+
+  @Test
+  void knownVersionsMatchContentAndModeFromTheSameRevisionOfTheSameFile() {
+    var first = files.blobs().putText("first");
+    var second = files.blobs().putText("second");
+    files.put(new FileStore.FileRow("acme", "known", first, 5, 0644, "text"));
+    files.put(new FileStore.FileRow("acme", "known", second, 6, 0600, "text"));
+    files.delete("acme", "known");
+
+    assertTrue(files.isKnownVersion(id("known"), first, 0644));
+    assertTrue(files.isKnownVersion(id("known"), second, 0600));
+    assertFalse(files.isKnownVersion(id("known"), first, 0600));
+    assertFalse(files.isKnownVersion(id("known"), second, 0644));
+    assertFalse(files.isKnownVersion(id("other"), first, 0644));
+    assertFalse(files.isKnownVersion(id("known"), files.blobs().putText("unknown"), 0644));
+  }
+
+  @Test
+  void putAndFindAndList() {
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
+
+    assertEquals("AAA", ContentFixtures.text(files, "acme", "a.txt"));
     assertEquals(
         List.of("a.txt", "dir/b.txt"),
         files.list("acme").stream().map(FileStore.FileRow::path).toList());
@@ -91,25 +137,27 @@ class FileStoreTest {
   @Test
   void deleteReturnsFalseWhenAbsentAndTrueWhenPresent() {
     assertFalse(files.delete("acme", "missing"));
-    files.put("acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     assertTrue(files.delete("acme", "a.txt"));
     assertTrue(files.find("acme", "a.txt").isEmpty());
   }
 
   @Test
   void comparableSnapshotAndAtRev() {
-    files.put("acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     var rev = files.latestRev(id("a.txt"));
 
-    assertEquals("AAA", files.comparableSnapshot(id("a.txt")).get("content"));
-    assertEquals("AAA", files.comparableAtRev(id("a.txt"), rev).get("content"));
+    assertEquals(
+        files.blobs().putText("AAA"), files.comparableSnapshot(id("a.txt")).get("content_hash"));
+    assertEquals(
+        files.blobs().putText("AAA"), files.comparableAtRev(id("a.txt"), rev).get("content_hash"));
     assertNull(files.comparableAtRev(id("a.txt"), null));
     assertNull(files.comparableSnapshot(id("missing")));
   }
 
   @Test
   void baseRevOfRecoversTheTombstoneBaseForADeletedFile() {
-    files.applyRevision(id("a.txt"), Map.of("content", "AAA"), "1-base");
+    files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "AAA"), "1-base");
     assertEquals("1-base", files.baseRevOf(id("a.txt")));
 
     files.delete("acme", "a.txt");
@@ -118,24 +166,26 @@ class FileStoreTest {
 
   @Test
   void commitAcceptsWhenExpectedRevMatches() {
-    files.applyRevision(id("a.txt"), Map.of("content", "AAA"), "1-base");
+    files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "AAA"), "1-base");
 
-    var outcome = files.commitRevision(id("a.txt"), Map.of("content", "BBB"), "1-base");
+    var outcome =
+        files.commitRevision(id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "1-base");
 
     assertInstanceOf(PushOutcome.Accepted.class, outcome);
-    assertEquals("BBB", files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals("BBB", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
   void commitRejectsAStalePushAndLeavesTheFileUntouched() {
-    files.applyRevision(id("a.txt"), Map.of("content", "AAA"), "1-base");
+    files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "AAA"), "1-base");
 
-    var outcome = files.commitRevision(id("a.txt"), Map.of("content", "BBB"), "9-stale");
+    var outcome =
+        files.commitRevision(id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "9-stale");
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals("1-base", stale.currentRev());
-    assertEquals("AAA", stale.currentSnapshot().get("content"));
-    assertEquals("AAA", files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals(files.blobs().putText("AAA"), stale.currentSnapshot().get("content_hash"));
+    assertEquals("AAA", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
@@ -151,7 +201,7 @@ class FileStoreTest {
 
   @Test
   void baseRevOfADeletedLocalFileIsNull() {
-    files.put("acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
     files.delete("acme", "a.txt");
     assertNull(files.baseRevOf(id("a.txt")), "a locally-created file has no synced base");
   }
@@ -165,9 +215,9 @@ class FileStoreTest {
 
   @Test
   void idsForProjectIncludesTombstonedFiles() {
-    files.put("acme", "a.txt", "AAA");
-    files.put("acme", "dir/b.txt", "BBB");
-    files.put("globex", "c.txt", "CCC");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "acme", "dir/b.txt", "BBB");
+    ContentFixtures.put(files, "globex", "c.txt", "CCC");
     files.delete("acme", "a.txt");
 
     assertEquals(
@@ -177,48 +227,63 @@ class FileStoreTest {
 
   @Test
   void projectsWithFilesSpansEveryProjectTouched() {
-    files.put("acme", "a.txt", "AAA");
-    files.put("globex", "c.txt", "CCC");
+    ContentFixtures.put(files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(files, "globex", "c.txt", "CCC");
     files.delete("globex", "c.txt");
 
     assertEquals(java.util.Set.of("acme", "globex"), files.projectsWithFiles());
   }
 
   @Test
-  void isKnownContentRecognizesAnyRevisionThisBoxWrote() {
-    files.put("acme", "a.txt", "v1");
-    files.put("acme", "a.txt", "v2");
+  void isKnownVersionRecognizesAnyRevisionThisBoxWroteAtItsRecordedMode() {
+    ContentFixtures.put(files, "acme", "a.txt", "v1");
+    ContentFixtures.put(files, "acme", "a.txt", "v2");
+    var recorded = files.find("acme", "a.txt").orElseThrow().mode();
 
-    assertTrue(files.isKnownContent(id("a.txt"), "v1"), "a superseded revision is still ours");
-    assertTrue(files.isKnownContent(id("a.txt"), "v2"));
-    assertFalse(files.isKnownContent(id("a.txt"), "a local human edit"));
+    assertTrue(
+        files.isKnownVersion(id("a.txt"), files.blobs().putText("v1"), recorded),
+        "a superseded revision is still ours");
+    assertTrue(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded));
+    assertFalse(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded ^ 0111));
+    assertFalse(
+        files.isKnownVersion(id("a.txt"), files.blobs().putText("a local human edit"), recorded));
   }
 
   @Test
   void resolveTakeTheirsAdoptsMainAndCannotReRaise() {
-    files.put("acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     var rev =
         files.resolveConflict(
-            id("a.txt"), Map.of("content", "theirs"), Map.of("content", "theirs"));
+            id("a.txt"),
+            ContentFixtures.snapshot(files, "theirs"),
+            ContentFixtures.snapshot(files, "theirs"));
 
-    assertEquals("theirs", files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals("theirs", ContentFixtures.text(files, "acme", "a.txt"));
     assertEquals(rev, files.baseRevOf(id("a.txt")), "base now equals theirs, so no re-raise");
   }
 
   @Test
   void resolveKeepMineRebasesOntoTheirsAndPushesMineForward() {
-    files.put("acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
-    files.resolveConflict(id("a.txt"), Map.of("content", "mine"), Map.of("content", "theirs"));
+    files.resolveConflict(
+        id("a.txt"),
+        ContentFixtures.snapshot(files, "mine"),
+        ContentFixtures.snapshot(files, "theirs"));
 
-    assertEquals("mine", files.find("acme", "a.txt").orElseThrow().content());
-    assertTrue(files.isKnownContent(id("a.txt"), "theirs"), "theirs is journaled as the base");
+    assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
+    assertTrue(
+        files.isKnownVersion(
+            id("a.txt"),
+            files.blobs().putText("theirs"),
+            files.find("acme", "a.txt").orElseThrow().mode()),
+        "theirs is journaled as the base");
   }
 
   @Test
   void resolveTakeTheirsWhereTheirsIsADeleteRemovesTheRow() {
-    files.put("acme", "a.txt", "mine");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
     files.resolveConflict(id("a.txt"), null, null);
 
@@ -227,19 +292,19 @@ class FileStoreTest {
 
   @Test
   void resolveKeepMineWhereTheirsIsADeleteRestoresMine() {
-    files.applyRevision(id("a.txt"), Map.of("content", "base"), "1-base");
-    files.put("acme", "a.txt", "mine");
+    files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "base"), "1-base");
+    ContentFixtures.put(files, "acme", "a.txt", "mine");
 
-    files.resolveConflict(id("a.txt"), Map.of("content", "mine"), null);
+    files.resolveConflict(id("a.txt"), ContentFixtures.snapshot(files, "mine"), null);
 
-    assertEquals("mine", files.find("acme", "a.txt").orElseThrow().content());
+    assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
   }
 
   @Test
   void resolveDeleteMineWhereTheirsEditsTombstonesTheRow() {
-    files.applyRevision(id("a.txt"), Map.of("content", "base"), "1-base");
+    files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "base"), "1-base");
 
-    files.resolveConflict(id("a.txt"), null, Map.of("content", "theirs"));
+    files.resolveConflict(id("a.txt"), null, ContentFixtures.snapshot(files, "theirs"));
 
     assertTrue(files.find("acme", "a.txt").isEmpty());
   }
@@ -251,7 +316,7 @@ class FileStoreTest {
       for (var i = 0; i < 64; i++) {
         var fid = id("race-" + i + ".txt");
         var base = i + "-base";
-        files.applyRevision(fid, Map.of("content", "BASE"), base);
+        files.applyRevision(fid, ContentFixtures.snapshot(files, "BASE"), base);
 
         var gate = new CyclicBarrier(2);
         var outcomes = new ConcurrentLinkedQueue<PushOutcome>();
@@ -289,10 +354,23 @@ class FileStoreTest {
         () -> {
           try {
             gate.await();
-            outcomes.add(store.commitRevision(fid, Map.of("content", content), base));
+            outcomes.add(store.commitRevision(fid, ContentFixtures.snapshot(store, content), base));
           } catch (Throwable t) {
             errors.add(t);
           }
         });
+  }
+
+  @Test
+  void aFileRowMustBeOwnerReadable() {
+    var hash = files.blobs().putText("x");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FileStore.FileRow("acme", "dark", hash, 1, 0000, "text"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new FileStore.FileRow("acme", "dark", hash, 1, 0200, "text"));
+    assertEquals(0400, new FileStore.FileRow("acme", "lit", hash, 1, 0400, "text").mode());
   }
 }

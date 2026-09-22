@@ -347,9 +347,7 @@ public final class ProjectApplier {
     for (var entry : entries) {
       var cmd =
           new ArrayList<>(List.of("incus", "file", "push", "-p", "--uid", "1000", "--gid", "1000"));
-      if (WorkspaceFiles.isExecutable(entry.relativePath())) {
-        cmd.addAll(List.of("--mode", "0755"));
-      }
+      cmd.addAll(List.of("--mode", String.format("%04o", WorkspaceFiles.mode(entry.hostPath()))));
       cmd.add(entry.hostPath().toString());
       cmd.add(name + workspace + entry.relativePath());
       var pushResult = shell.exec(cmd);

@@ -33,5 +33,7 @@ public interface FileSource {
   List<Path> walkFiles(Path dir) throws IOException;
 
   /** Reads a file's bytes. */
-  byte[] read(Path file) throws IOException;
+  java.io.InputStream open(Path file) throws IOException;
+
+  int mode(Path file) throws IOException;
 }

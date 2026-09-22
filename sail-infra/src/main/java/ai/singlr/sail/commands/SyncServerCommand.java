@@ -24,12 +24,13 @@ import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,8 +65,8 @@ public final class SyncServerCommand implements Callable<Integer> {
       return 1;
     }
     try (mainDb) {
-      var in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-      var out = new OutputStreamWriter(System.out, StandardCharsets.UTF_8);
+      var in = new BufferedInputStream(System.in);
+      var out = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
       return serve(
           mainDb,
           boxId,
@@ -77,7 +78,7 @@ public final class SyncServerCommand implements Callable<Integer> {
   }
 
   static int serve(
-      SyncDatabase converged, String mainId, String token, BufferedReader in, Writer out)
+      SyncDatabase converged, String mainId, String token, InputStream in, OutputStream out)
       throws IOException {
     return serve(converged, mainId, token, in, out, SyncTransitionSink.NONE);
   }
@@ -86,8 +87,8 @@ public final class SyncServerCommand implements Callable<Integer> {
       SyncDatabase converged,
       String mainId,
       String token,
-      BufferedReader in,
-      Writer out,
+      InputStream in,
+      OutputStream out,
       SyncTransitionSink transitionSink)
       throws IOException {
     var db = converged.db();

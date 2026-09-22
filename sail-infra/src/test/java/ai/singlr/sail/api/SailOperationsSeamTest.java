@@ -43,10 +43,10 @@ import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
-import java.io.PipedReader;
-import java.io.PipedWriter;
-import java.io.Reader;
-import java.io.Writer;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -56,7 +56,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -231,7 +230,9 @@ class SailOperationsSeamTest {
               "consecutive_failures",
               "last_error_kind",
               "last_error",
-              "stale_since"),
+              "stale_since",
+              "bytes_fetched",
+              "bytes_sent"),
           YamlUtil.parseMap(stale.body()).keySet());
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -628,7 +629,12 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(remote),
           List.of("title"));
       var body =
-          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpJson(remote)));
+          YamlUtil.dumpJson(
+              Map.of(
+                  "strategy",
+                  strategy,
+                  "merged",
+                  operations.conflict("spec", "auth").remoteSnapshot()));
       for (var handle : List.of("uday", "other")) {
         var member = credential(box.db, handle, "member", lane);
         assertEquals(200, send(server, "GET", "/v1/conflicts/auth", member, "").statusCode());
@@ -674,16 +680,11 @@ class SailOperationsSeamTest {
         var server = server(operations, box.db)) {
       var files = new FileStore(box.db);
       for (var path : List.of("dir/ /config", "dir/config")) {
-        files.put(
-            "proj",
-            path,
-            Base64.getEncoder().encodeToString("local".getBytes(StandardCharsets.UTF_8)));
+        ai.singlr.sail.store.ContentFixtures.put(files, "proj", path, "local");
         var id = "proj/" + path;
         var local = files.comparableSnapshot(id);
         var remote = new LinkedHashMap<>(local);
-        remote.put(
-            "content",
-            Base64.getEncoder().encodeToString("remote".getBytes(StandardCharsets.UTF_8)));
+        remote.put("content_hash", files.blobs().putText("remote"));
         box.conflicts.record(
             "file",
             id,
@@ -700,12 +701,12 @@ class SailOperationsSeamTest {
       assertNotNull(operations.conflict("file", "proj/dir/config"));
       assertArrayEquals(
           "local".getBytes(StandardCharsets.UTF_8),
-          operations.projectFiles("proj").get("dir/config").orElseThrow());
+          operations.projectFiles("proj").get("dir/config").orElseThrow().readAllBytes());
       if (method.equals("POST")) {
         assertNull(operations.conflict(null, "proj/dir/ /config"));
         assertArrayEquals(
             "remote".getBytes(StandardCharsets.UTF_8),
-            operations.projectFiles("proj").get("dir/ /config").orElseThrow());
+            operations.projectFiles("proj").get("dir/ /config").orElseThrow().readAllBytes());
       }
     }
   }
@@ -749,8 +750,9 @@ class SailOperationsSeamTest {
       assertTrue(files.list().isEmpty());
       assertTrue(files.get("missing").isEmpty());
       var bytes = new byte[] {0, 1, 2, -1};
-      assertEquals("dir/config", files.put("dir/config", bytes));
-      assertArrayEquals(bytes, files.get("dir/config").orElseThrow());
+      assertEquals(
+          "dir/config", ai.singlr.sail.engine.ProjectFileFixtures.put(files, "dir/config", bytes));
+      assertArrayEquals(bytes, files.get("dir/config").orElseThrow().readAllBytes());
       assertEquals(List.of("acme"), operations.catalog().projectsWithFiles());
       assertEquals("dir/config", files.list().getFirst().path());
       assertEquals(1, files.materialize().written());
@@ -758,7 +760,7 @@ class SailOperationsSeamTest {
       assertArrayEquals(bytes, Files.readAllBytes(local));
       assertEquals(0, files.materialize().written());
       Files.writeString(local, "local edit");
-      files.put("dir/config", new byte[] {5});
+      ai.singlr.sail.engine.ProjectFileFixtures.put(files, "dir/config", new byte[] {5});
       assertEquals(List.of("dir/config"), files.materialize().skipped());
       Files.delete(local);
       assertEquals(1, files.materialize().written());
@@ -766,12 +768,25 @@ class SailOperationsSeamTest {
       assertFalse(Files.exists(local));
       assertFalse(files.remove("dir/config"));
       assertTrue(files.list().isEmpty());
-      assertThrows(IllegalArgumentException.class, () -> files.put("../escape", bytes));
       assertThrows(
           IllegalArgumentException.class,
-          () -> files.put("large", new byte[ProjectFiles.MAX_BYTES + 1]));
+          () -> ai.singlr.sail.engine.ProjectFileFixtures.put(files, "../escape", bytes));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              files.put(
+                  "large",
+                  java.io.InputStream.nullInputStream(),
+                  ai.singlr.sail.config.FileLimits.DEFAULT_MAX + 1,
+                  0644));
       assertThrows(IllegalArgumentException.class, () -> operations.projectFiles("../escape"));
-      assertEquals("cap", files.put("cap", new byte[ProjectFiles.MAX_BYTES]));
+      assertEquals(
+          "cap",
+          files.put(
+              "cap",
+              java.io.InputStream.nullInputStream(),
+              ai.singlr.sail.config.FileLimits.DEFAULT_MAX,
+              0644));
     }
   }
 
@@ -824,7 +839,9 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
-      var merged = new LinkedHashMap<>(local);
+      var merged =
+          new LinkedHashMap<>(
+              YamlUtil.parseMap(operations.conflict("spec", "auth").localSnapshot()));
       merged.put("title", "merged");
       operations.resolveConflict(
           "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
@@ -851,7 +868,7 @@ class SailOperationsSeamTest {
         var operations = operations(node.db)) {
       main.specs.create(SyncBox.spec("auth", "main spec", "pending"));
       var content = "shared config".getBytes(StandardCharsets.UTF_8);
-      new FileStore(main.db).put("proj", "config", Base64.getEncoder().encodeToString(content));
+      new FileStore(main.db).put("proj", "config", new java.io.ByteArrayInputStream(content), 0644);
       var targets = new ArrayList<String>();
       operations.useControlPlane(
           node.db,
@@ -901,12 +918,13 @@ class SailOperationsSeamTest {
               target ->
                   channel(
                       new SyncRpcServer(
-                          replicas,
-                          new SyncPrincipal("node", true),
-                          List::of,
-                          SyncTransitionSink.NONE,
-                          new ChangeLog(main.db)::headsAfter,
-                          SyncWire.UPGRADE_FLOOR)),
+                              replicas,
+                              new SyncPrincipal("node", true),
+                              List::of,
+                              SyncTransitionSink.NONE,
+                              new ChangeLog(main.db)::headsAfter,
+                              SyncWire.UPGRADE_FLOOR)
+                          .content(main.db, ai.singlr.sail.config.FileLimits.defaults())),
               events::add));
       operations.schema().prepareSync();
       java.util.function.Supplier<List<String>> posted =
@@ -968,7 +986,8 @@ class SailOperationsSeamTest {
       var projects = new ProjectStore(db);
       var definition = "name: old\n";
       projects.upsert("old", definition, "owner");
-      operations.projectFiles("old").put("config", new byte[] {1});
+      ai.singlr.sail.engine.ProjectFileFixtures.put(
+          operations.projectFiles("old"), "config", new byte[] {1});
       assertFalse(operations.catalog().destroy("old", false).purged());
       var renamed = operations.catalog().rename("old", "new");
       assertTrue(operations.catalog().project("old").isEmpty());
@@ -1095,10 +1114,10 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {
-    var toServer = new PipedWriter();
-    var serverIn = new PipedReader(toServer);
-    var serverOut = new PipedWriter();
-    var fromServer = new PipedReader(serverOut);
+    var toServer = new PipedOutputStream();
+    var serverIn = new PipedInputStream(toServer);
+    var serverOut = new PipedOutputStream();
+    var fromServer = new PipedInputStream(serverOut);
     var error = new AtomicReference<Throwable>();
     var thread =
         Thread.ofVirtual()
@@ -1112,11 +1131,11 @@ class SailOperationsSeamTest {
                   }
                 });
     return new SyncOperations.Channel() {
-      public Reader reader() {
+      public InputStream reader() {
         return fromServer;
       }
 
-      public Writer writer() {
+      public OutputStream writer() {
         return toServer;
       }
 

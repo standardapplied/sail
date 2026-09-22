@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -24,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,8 +88,51 @@ class ProjectFilesCommandTest {
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
-    assertEquals(b64("echo hi"), files.find("acme", "scripts/deploy.sh").orElseThrow().content());
+    assertEquals(
+        b64("echo hi"),
+        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals("echo hi", Files.readString(filesDir("acme").resolve("scripts/deploy.sh")));
+  }
+
+  @Test
+  void addSymlinkPreservesTargetPermissions() throws Exception {
+    var data = Files.createDirectories(tempDir.resolve("isolated"));
+    var output = tempDir.resolve("add-output.txt");
+    var builder =
+        new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Duser.home=" + tempDir,
+                "--enable-native-access=ALL-UNNAMED",
+                "-cp",
+                System.getProperty("java.class.path"),
+                ProjectFilesCommandTest.class.getName())
+            .redirectErrorStream(true)
+            .redirectOutput(output.toFile());
+    builder.environment().put("SAIL_DATA_DIR", data.toString());
+    var process = builder.start();
+    try {
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated add timed out");
+      assertEquals(0, process.exitValue(), Files.readString(output));
+    } finally {
+      process.destroyForcibly();
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    var source =
+        Files.writeString(Path.of(System.getProperty("user.home"), "restricted.txt"), "private");
+    WorkspaceFiles.mode(source, 0600);
+    var link = Files.createSymbolicLink(source.resolveSibling("linked.txt"), source);
+    try (var database = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(database).migrate();
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", link.toString()));
+      assertEquals(0600, new FileStore(database).find("acme", "linked.txt").orElseThrow().mode());
+      var copy = SailPaths.projectsDir().resolve("acme/files/linked.txt");
+      assertEquals("private", Files.readString(copy));
+      assertEquals(0600, WorkspaceFiles.mode(copy));
+      assertEquals(0600, WorkspaceFiles.mode(source));
+    }
   }
 
   @Test
@@ -125,18 +171,12 @@ class ProjectFilesCommandTest {
     var host = new ai.singlr.sail.engine.HostFileSource();
     var big = tempDir.resolve("big.bin");
     try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
-      raf.setLength(ProjectFilesCommand.Add.MAX_SHARE_BYTES + 1);
+      raf.setLength(ai.singlr.sail.config.FileLimits.DEFAULT_MAX + 1);
     }
 
     assertTrue(ProjectFilesCommand.Add.shareProblem(host, big, "big.bin").contains("larger than"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ProjectFilesCommand.Add.store(
-                files,
-                "acme",
-                "big.bin",
-                new byte[(int) ProjectFilesCommand.Add.MAX_SHARE_BYTES + 1]));
+    assertEquals(
+        1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
   }
 
   @Test
@@ -148,8 +188,8 @@ class ProjectFilesCommandTest {
 
   @Test
   void lsRendersHumanTableAndJson() {
-    files.put("acme", "a.txt", b64("AAAA"));
-    files.put("acme", "b.txt", b64("B"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAAA");
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "b.txt", "B");
 
     var captured = new ByteArrayOutputStream();
     Banner.printProjectFilesTable(
@@ -173,11 +213,12 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void catDecodesContentAndIsEmptyWhenAbsent() {
-    files.put("acme", "a.txt", b64("payload"));
+  void catStreamsContentAndIsEmptyWhenAbsent() throws Exception {
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "payload");
 
     assertArrayEquals(
-        "payload".getBytes(), ProjectFilesCommand.Cat.read(files, "acme", "a.txt").orElseThrow());
+        "payload".getBytes(),
+        ProjectFilesCommand.Cat.read(files, "acme", "a.txt").orElseThrow().readAllBytes());
     assertTrue(ProjectFilesCommand.Cat.read(files, "acme", "missing").isEmpty());
   }
 
@@ -203,12 +244,12 @@ class ProjectFilesCommandTest {
 
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
-    files.put("acme", "a.txt", b64("A"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A");
     var report = ProjectFilesCommand.Export.export(files, projectsDir, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
-    files.put("acme", "a.txt", b64("A2"));
+    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A2");
     var second = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
 
     assertEquals(0, second.written());

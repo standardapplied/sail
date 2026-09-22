@@ -21,7 +21,9 @@ import java.util.List;
  * migration as pending and double-apply it, with the loser failing on the marker's primary key
  * after its partial effects committed. Taking the write lock up front means the loser re-checks the
  * marker after the winner commits and skips cleanly, and a failing migration rolls back whole:
- * nested store transactions join this scope, so no partial migration ever persists.
+ * nested store transactions join this scope. Resumable migrations instead own per-entity write
+ * transactions and recheck each entity under the lock, retaining earlier commits after
+ * interruption. Their completion marker is recorded only after every entity has been converted.
  */
 public final class DataMigrator {
 
@@ -42,6 +44,21 @@ public final class DataMigrator {
   public List<Run> run(ProjectRegistry projects, DataMigration.Prompter prompter) {
     var runs = new ArrayList<Run>();
     for (var migration : migrations) {
+      if (migration.resumable()) {
+        if (isApplied(migration.name())) {
+          runs.add(new Run(migration.name(), true, DataMigration.Report.empty()));
+        } else {
+          var report = migration.apply(db, projects, prompter);
+          db.transaction(
+              () ->
+                  db.execute(
+                      "INSERT OR IGNORE INTO data_migrations (name, applied_at) VALUES (?, ?)",
+                      migration.name(),
+                      DateTimeUtils.now().toString()));
+          runs.add(new Run(migration.name(), false, report));
+        }
+        continue;
+      }
       runs.add(
           db.transaction(
               () -> {

@@ -6,9 +6,13 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.engine.SemVer;
-import java.io.Reader;
-import java.io.Writer;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +21,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * The protocol-4 session: main's change log arrives one bounded page at a time and each page is its
@@ -34,7 +39,7 @@ import java.util.function.Consumer;
  * <p>A page's view of main answers the engine from the page alone; a checkpoint only ever advances
  * to a seq whose entries this node has actually seen, never to main's high-water after its own
  * pushes, so a change another node lands between two exchanges can never be skipped. The view
- * weighs every offer as its chars on the wire and budgets the engine one frame of them, so a first
+ * weighs every offer as its bytes on the wire and budgets the engine one frame of them, so a first
  * upload of a large table holds one batch of snapshots at a time, never the whole table.
  */
 public final class PagedSyncSession implements SyncSession {
@@ -42,30 +47,47 @@ public final class PagedSyncSession implements SyncSession {
   /** Entries asked for per pull; the frame bound, not this, is what caps a page's size. */
   static final int PAGE_LIMIT = 2000;
 
-  private final Reader in;
-  private final Writer out;
+  private final InputStream in;
+  private final OutputStream out;
   private final String mainId;
   private final int frame;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
+  private BlobStore blobs;
+  private Map<String, Set<String>> contentFields = Map.of();
+  private long fetchedBytes;
+  private long sentBytes;
+  private boolean sawTombstone;
+  private String broken;
 
-  PagedSyncSession(Reader in, Writer out, String mainId, int frame) {
+  PagedSyncSession content(Sqlite db) {
+    blobs = new BlobStore(db);
+    var fields = new LinkedHashMap<String, Set<String>>();
+    for (var entity : SyncedEntities.all())
+      fields.put(entity.type(), entity.store(db).contentFields());
+    contentFields = Map.copyOf(fields);
+    return this;
+  }
+
+  PagedSyncSession(InputStream in, OutputStream out, String mainId, int frame) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
     this.mainId = Objects.requireNonNull(mainId, "mainId");
     this.frame = frame;
   }
 
-  /** This session with pushes and need requests cut at {@code frame} chars; a test seam. */
+  /** This session with pushes and need requests cut at {@code frame} bytes; a test seam. */
   PagedSyncSession frame(int frame) {
     var copy = new PagedSyncSession(in, out, mainId, frame);
     copy.tips = tips;
+    copy.blobs = blobs;
+    copy.contentFields = contentFields;
     return copy;
   }
 
   static PagedSyncSession open(
-      Reader in,
-      Writer out,
+      InputStream in,
+      OutputStream out,
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
       Consumer<String> notice) {
@@ -99,6 +121,50 @@ public final class PagedSyncSession implements SyncSession {
 
   @Override
   public TypeReport reconcile(String type, LocalReplica local) {
+    return onLiveChannel(
+        () -> {
+          if (blobs == null) return reconcileType(type, local);
+          TypeReport report;
+          try (var scope = blobs.retain()) {
+            report = reconcileType(type, local);
+          }
+          if (sawTombstone) blobs.gc(Set.of());
+          return report;
+        });
+  }
+
+  /**
+   * Every exchange on this channel after it broke fails naming why. The channel breaks when a
+   * failure escapes while main still owes, or is still reading, part of a reply ({@link #owed}): a
+   * chunk refused with its bytes and the run's {@code done} unread, main left waiting for
+   * manifests, a line that never arrived. The next request would then read another type's answer as
+   * its own. A failure that arrives as a complete reply — main refusing a type or an upload — or
+   * one raised before anything was sent leaves the channel where it was, and the round, which
+   * reports each type separately, carries on over it.
+   */
+  private <T> T onLiveChannel(Supplier<T> exchange) {
+    if (broken != null) {
+      throw new SyncTransportException(
+          "unreachable",
+          "channel unusable after an earlier failure (" + broken + "); run sail sync again",
+          null);
+    }
+    return exchange.get();
+  }
+
+  private <T> T owed(Supplier<T> reply) {
+    try {
+      return reply.get();
+    } catch (RuntimeException e) {
+      broken = e.getMessage();
+      throw e;
+    }
+  }
+
+  private TypeReport reconcileType(String type, LocalReplica local) {
+    var fetchedBefore = fetchedBytes;
+    var sentBefore = sentBytes;
+    sawTombstone = false;
     var tip = tips().get(type);
     if (tip == null) {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
@@ -118,6 +184,7 @@ public final class PagedSyncSession implements SyncSession {
               type + ": main paged nothing past seq " + since + " yet is not done",
               null);
         }
+        fetchContent(type, page.entries());
         var ids = ids(page);
         seen.addAll(ids);
         report =
@@ -132,7 +199,15 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
-    return new TypeReport(type, report, pages, entries, pages == 0 && dirty.isEmpty(), null);
+    return new TypeReport(
+        type,
+        report,
+        pages,
+        entries,
+        pages == 0 && dirty.isEmpty(),
+        null,
+        fetchedBytes - fetchedBefore,
+        sentBytes - sentBefore);
   }
 
   /**
@@ -147,12 +222,12 @@ public final class PagedSyncSession implements SyncSession {
     need(
         type,
         ids,
-        (consumed, entries) ->
-            reports.add(
-                reconcile(
-                    local,
-                    new LinkedHashSet<>(consumed),
-                    new PageView(type, entries, checkpoint))));
+        (consumed, entries) -> {
+          fetchContent(type, entries);
+          reports.add(
+              reconcile(
+                  local, new LinkedHashSet<>(consumed), new PageView(type, entries, checkpoint)));
+        });
     return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
   }
 
@@ -177,11 +252,149 @@ public final class PagedSyncSession implements SyncSession {
     }
   }
 
+  private void fetchContent(String type, List<SyncWire.Entry> entries) {
+    sawTombstone |= entries.stream().anyMatch(SyncWire.Entry::deleted);
+    var fields = contentFields.getOrDefault(type, Set.of());
+    if (fields.isEmpty()) return;
+    var hashes =
+        BlobStore.referenced(entries.stream().map(SyncWire.Entry::snapshot).toList(), fields);
+    for (var hash : blobs.missing(hashes)) {
+      fetchBlob(type, hash);
+    }
+  }
+
+  /**
+   * Brings one blob home end to end — its manifest, the chunks this box lacks, the assembled whole
+   * — before the next is asked for, so what a page's content costs in memory is one manifest,
+   * however many files the page names and however many chunks each has. A chunk two blobs share
+   * crosses once: the second blob's lookup finds it already held.
+   */
+  private void fetchBlob(String type, String hash) {
+    var context = type + " blob " + hash;
+    var manifest = receiveManifest(hash, context);
+    var pending = List.copyOf(blobs.missingChunks(manifest.chunkHashes()));
+    var remainingBytes = manifest.size();
+    for (var offset = 0; offset < pending.size(); ) {
+      var batch = askable(pending, offset);
+      remainingBytes = receiveChunks(batch, remainingBytes, context);
+      offset += batch.size();
+    }
+    try {
+      blobs.assemble(manifest);
+    } catch (RuntimeException e) {
+      throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
+    }
+  }
+
+  private BlobStore.Manifest receiveManifest(String hash, String context) {
+    return owed(() -> receiveManifestRun(hash, context));
+  }
+
+  private BlobStore.Manifest receiveManifestRun(String hash, String context) {
+    Rpc.send(out, SyncWire.encode(new SyncWire.Fetch(List.of(hash))));
+    BlobStore.Manifest manifest = null;
+    while (true) {
+      var response = Rpc.receive(in, context);
+      if (response instanceof SyncWire.Done) break;
+      if (!(response instanceof SyncWire.Manifest m))
+        throw unexpected(context, "manifest", response);
+      if (!hash.equals(m.manifest().hash()) || manifest != null) {
+        throw new SyncTransportException(
+            "Unexpected manifest " + m.manifest().hash() + " for " + context);
+      }
+      manifest = m.manifest();
+    }
+    if (manifest == null) throw new SyncTransportException("Missing manifest for " + context);
+    return manifest;
+  }
+
+  private long receiveChunks(List<String> batch, long remainingBytes, String context) {
+    return owed(() -> receiveChunksRun(batch, remainingBytes, context));
+  }
+
+  private long receiveChunksRun(List<String> batch, long remainingBytes, String context) {
+    var needed = new LinkedHashSet<>(batch);
+    Rpc.send(out, SyncWire.encode(new SyncWire.FetchChunks(batch)));
+    while (true) {
+      var response = Rpc.receive(in, context);
+      if (response instanceof SyncWire.Done) break;
+      if (!(response instanceof SyncWire.Chunk chunk)) throw unexpected(context, "chunk", response);
+      if (!needed.remove(chunk.hash()))
+        throw new SyncTransportException("Unexpected chunk " + chunk.hash() + " for " + context);
+      if (chunk.size() > remainingBytes)
+        throw new SyncTransportException(
+            "Chunk " + chunk.hash() + " exceeds declared content size for " + context);
+      remainingBytes -= chunk.size();
+      try {
+        blobs.putChunk(chunk.hash(), SyncWire.readBytes(in, chunk.size()));
+        fetchedBytes += chunk.size();
+      } catch (IOException e) {
+        throw new SyncTransportException(
+            "unreachable", context + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
+      } catch (SyncTransportException e) {
+        throw new SyncTransportException(
+            e.kind(), context + ", chunk " + chunk.hash() + ": " + e.getMessage(), e);
+      } catch (IllegalArgumentException e) {
+        throw new SyncTransportException("protocol", context + ": " + e.getMessage(), e);
+      }
+    }
+    if (!needed.isEmpty()) throw new SyncTransportException(context + " missing chunks " + needed);
+    return remainingBytes;
+  }
+
+  private void sendContent(String type, List<MainReplica.Offer> offers) {
+    var fields = contentFields.getOrDefault(type, Set.of());
+    if (fields.isEmpty()) return;
+    var hashes =
+        BlobStore.referenced(offers.stream().map(MainReplica.Offer::snapshot).toList(), fields);
+    if (hashes.isEmpty()) return;
+    var context = type + " " + offers.stream().map(MainReplica.Offer::id).toList();
+    var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Announce(List.copyOf(hashes))));
+    if (!(response instanceof SyncWire.Lack lack)) throw unexpected(context, "lack", response);
+    if (!hashes.containsAll(lack.hashes())
+        || new LinkedHashSet<>(lack.hashes()).size() != lack.hashes().size())
+      throw new SyncTransportException("Unexpected missing blobs " + lack.hashes());
+    if (lack.hashes().isEmpty()) return;
+    owed(
+        () -> {
+          uploadRun(lack.hashes(), context);
+          return null;
+        });
+  }
+
+  private void uploadRun(List<String> lacked, String context) {
+    var chunks = new LinkedHashSet<String>();
+    for (var hash : lacked) {
+      var manifest = blobs.manifest(hash);
+      Rpc.send(out, SyncWire.encode(new SyncWire.Manifest(manifest)));
+      chunks.addAll(manifest.chunkHashes());
+    }
+    Rpc.send(out, SyncWire.encode(new SyncWire.Done()));
+    var ready = Rpc.receive(in, context + " blobs " + lacked);
+    if (!(ready instanceof SyncWire.Lack requested)) throw unexpected(context, "lack", ready);
+    if (!chunks.containsAll(requested.hashes())
+        || new LinkedHashSet<>(requested.hashes()).size() != requested.hashes().size())
+      throw new SyncTransportException(
+          context + ": unexpected missing chunks " + requested.hashes());
+    for (var hash : requested.hashes()) {
+      var bytes = blobs.chunk(hash);
+      try {
+        SyncWire.writeChunk(out, hash, bytes);
+      } catch (IOException e) {
+        throw new SyncTransportException("unreachable", "chunk " + hash + ": " + e.getMessage(), e);
+      }
+      sentBytes += bytes.length;
+    }
+    Rpc.send(out, SyncWire.encode(new SyncWire.Done()));
+    var accepted = Rpc.receive(in, context + " blobs " + lacked);
+    if (!(accepted instanceof SyncWire.Done)) throw unexpected(context, "done", accepted);
+  }
+
   private List<String> askable(List<String> ids, int offset) {
     var budget = new SyncWire.Frame(frame);
     var asked = new ArrayList<String>();
     for (var i = offset; i < ids.size(); i++) {
-      var length = ids.get(i).length() + 2;
+      var length = SyncWire.encodedLength(ids.get(i));
       if (!asked.isEmpty() && !budget.admits(length)) {
         break;
       }
@@ -205,7 +418,7 @@ public final class PagedSyncSession implements SyncSession {
 
   private Map<String, Long> tips() {
     if (tips == null) {
-      var response = Rpc.exchange(in, out, new SyncWire.Heads());
+      var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Heads()));
       if (response instanceof SyncWire.Tips t) {
         tips = t.tips();
       } else {
@@ -216,7 +429,7 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   private SyncWire.Page page(SyncWire.Request request, String type) {
-    var response = Rpc.exchange(in, out, request);
+    var response = owed(() -> Rpc.exchange(in, out, request));
     if (response instanceof SyncWire.Page page) {
       return page;
     }
@@ -236,16 +449,36 @@ public final class PagedSyncSession implements SyncSession {
 
   @Override
   public List<Map<String, Object>> fetchFdes() {
-    var response = Rpc.exchange(in, out, new SyncWire.FetchFdes());
-    if (response instanceof SyncWire.Fdes roster) {
-      return roster.fdes();
-    }
-    throw unexpected("fde", "fde roster", response);
+    return onLiveChannel(
+        () -> {
+          var response = owed(() -> Rpc.exchange(in, out, new SyncWire.FetchFdes()));
+          if (response instanceof SyncWire.Fdes roster) {
+            return roster.fdes();
+          }
+          throw unexpected("fde", "fde roster", response);
+        });
   }
 
+  /**
+   * Ends the session: {@code bye} on a channel whose position is known; on one that is not, both
+   * streams are closed. A {@code bye} written into the middle of a message would be read as that
+   * message's bytes, and main may be blocked writing the rest of a reply this side stopped reading
+   * — closing the input is what unblocks it, exactly as a dead ssh child does. A stream that cannot
+   * even be closed was reported when the channel broke; there is nothing left to say.
+   */
   @Override
   public void close() {
-    Rpc.send(out, SyncWire.encode(new SyncWire.Bye()));
+    if (broken == null) {
+      Rpc.send(out, SyncWire.encode(new SyncWire.Bye()));
+      return;
+    }
+    for (var stream : List.of(in, out)) {
+      try {
+        stream.close();
+      } catch (IOException alreadyBroken) {
+        continue;
+      }
+    }
   }
 
   /**
@@ -300,7 +533,13 @@ public final class PagedSyncSession implements SyncSession {
 
     @Override
     public long weigh(Offer offer) {
-      return SyncWire.encodedLength(offer);
+      var hashes =
+          BlobStore.referenced(
+              Collections.singletonList(offer.snapshot()),
+              contentFields.getOrDefault(type, Set.of()));
+      var inventory = 0L;
+      for (var hash : hashes) inventory += SyncWire.inventoryWeight(blobs.manifest(hash)) + 2L;
+      return Math.max(SyncWire.encodedLength(offer), inventory);
     }
 
     @Override
@@ -319,18 +558,18 @@ public final class PagedSyncSession implements SyncSession {
       var batch = new ArrayList<Offer>();
       var budget = new SyncWire.Frame(frame);
       for (var offer : offers) {
-        var length = SyncWire.encodedLength(offer);
+        var length = Math.toIntExact(weigh(offer));
         if (!budget.canEverAdmit(length)) {
           throw new SyncTransportException(
               "protocol",
               type
                   + " "
                   + offer.id()
-                  + ": snapshot of "
+                  + ": snapshot or content inventory of "
                   + length
-                  + " chars exceeds the frame of "
+                  + " bytes exceeds the frame of "
                   + frame
-                  + " chars",
+                  + " bytes",
               null);
         }
         if (!budget.admits(length)) {
@@ -348,7 +587,8 @@ public final class PagedSyncSession implements SyncSession {
     }
 
     private List<CommitOutcome> push(List<Offer> batch) {
-      var response = Rpc.exchange(in, out, new SyncWire.Push(type, List.copyOf(batch)));
+      sendContent(type, batch);
+      var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Push(type, List.copyOf(batch))));
       if (!(response instanceof SyncWire.Results results)) {
         throw unexpected(type, "results", response);
       }
@@ -396,6 +636,7 @@ public final class PagedSyncSession implements SyncSession {
           type,
           ids,
           (consumed, fetched) -> {
+            fetchContent(type, fetched);
             consumed.forEach(entries::remove);
             fetched.forEach(entry -> entries.put(entry.id(), entry));
           });
