@@ -12,15 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncState;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,6 +109,175 @@ class SyncTransportTest {
 
   private void bigSpec(SyncBox box, String id) {
     box.specs.create(spec(id, id.repeat(600 / id.length()), "pending"));
+  }
+
+  @Test
+  void replayingAnAlreadyAdoptedRenameTombstoneDoesNotJournalItAgain() throws Exception {
+    var projects = new ProjectStore(main.db);
+    projects.upsert("old", "name: old\n", "uday");
+    projects.rename("old", "new", "name: new\n");
+    try (var link = connect(nodeA)) {
+      link.reconcile(
+          "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"));
+    }
+    var before = new ChangeLog(nodeA.db).maxSeq("project");
+    nodeA.db.execute("DELETE FROM sync_state WHERE peer = 'main' AND entity_type = 'project'");
+
+    try (var link = connect(nodeA)) {
+      var report =
+          link.reconcile(
+              "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"));
+      assertEquals(0, report.report().total());
+    }
+    assertEquals(before, new ChangeLog(nodeA.db).maxSeq("project"));
+    assertTrue(new ProjectStore(nodeA.db).findByName("old").isEmpty());
+  }
+
+  @Test
+  void anUnbasedLocalRenameConflictsWithMainsExistingProject() throws Exception {
+    new ProjectStore(main.db).upsert("old", "name: old\n", "uday");
+    var projects = new ProjectStore(nodeA.db);
+    projects.upsert("old", "name: old\n", "uday");
+    projects.rename("old", "new", "name: new\n");
+
+    try (var link = connect(nodeA)) {
+      assertEquals(
+          1,
+          link.reconcile(
+                  "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"))
+              .report()
+              .conflicts());
+    }
+    assertEquals(
+        List.of(ConflictDetector.DELETED_FIELD),
+        nodeA.conflicts.pendingFor("project", "old").orElseThrow().fields());
+    assertTrue(new ProjectStore(main.db).findByName("old").isPresent());
+    assertTrue(projects.findByName("old").isEmpty());
+  }
+
+  @Test
+  void aReaderAdoptsMainInsteadOfOfferingAMergeOfAForeignRun() throws Exception {
+    var runs = new RunStore(main.db);
+    var id = ai.singlr.sail.common.DateTimeUtils.newId().toString();
+    runs.create(
+        id,
+        "project",
+        "auth",
+        "owner",
+        "owner",
+        "build",
+        "codex",
+        "original",
+        "task",
+        123,
+        null,
+        "/tmp/agent.log",
+        "sail-agent-" + id);
+    var replica = SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("run");
+    try (var link = connect(nodeA)) {
+      link.reconcile("run", replica);
+    }
+    new RunStore(nodeA.db).complete(id, "stopped", 0);
+    var changed = new LinkedHashMap<>(runs.comparableSnapshot(id));
+    changed.put("branch", "from-main");
+    runs.commitRevision(id, changed, runs.latestRev(id));
+    var mainRev = runs.latestRev(id);
+
+    try (var link = connect(nodeA)) {
+      var report = link.reconcile("run", replica).report();
+      assertEquals(1, report.pulled());
+      assertEquals(0, report.pushed());
+      assertEquals(0, report.conflicts());
+    }
+    assertEquals(mainRev, runs.latestRev(id));
+    var adopted = new RunStore(nodeA.db).findById(id).orElseThrow();
+    assertEquals("from-main", adopted.branch());
+    assertEquals("running", adopted.status());
+  }
+
+  @Test
+  void localEditsThroughoutEveryAdoptionRetryParkAConflictWithoutOverwritingThem()
+      throws Exception {
+    main.specs.create(spec("auth", "Auth", "pending"));
+    syncToMain(nodeA);
+    main.specs.update(spec("auth", "Remote title", "pending"));
+    var writes = new AtomicInteger();
+    var racing =
+        new EditingReplica(
+            SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("spec"),
+            () -> {
+              assertTrue(writes.incrementAndGet() <= 10, "adoption retries must be bounded");
+              nodeA.specs.update(spec("auth", "Auth", "in_progress"));
+            });
+
+    try (var link = connect(nodeA)) {
+      assertEquals(
+          1, link.reconcile("spec", racing.scopedTo(racing.entityIds())).report().conflicts());
+    }
+    assertEquals(
+        List.of("<stale>"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
+    assertEquals("Auth", nodeA.specs.findById("auth").orElseThrow().title());
+    assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
+  }
+
+  private record EditingReplica(LocalReplica inner, Runnable afterTransaction)
+      implements LocalReplica {
+    @Override
+    public Set<String> entityIds() {
+      return inner.entityIds();
+    }
+
+    @Override
+    public Set<String> dirtyIds() {
+      return inner.dirtyIds();
+    }
+
+    @Override
+    public <T> T atomically(Supplier<T> work) {
+      var result = inner.atomically(work);
+      afterTransaction.run();
+      return result;
+    }
+
+    @Override
+    public Map<String, Object> current(String id) {
+      return inner.current(id);
+    }
+
+    @Override
+    public Map<String, Object> base(String id) {
+      return inner.base(id);
+    }
+
+    @Override
+    public String currentRev(String id) {
+      return inner.currentRev(id);
+    }
+
+    @Override
+    public void adopt(String id, Map<String, Object> snapshot, String rev) {
+      inner.adopt(id, snapshot, rev);
+    }
+
+    @Override
+    public void recordConflict(
+        String id,
+        Map<String, Object> base,
+        Map<String, Object> local,
+        Map<String, Object> remote,
+        List<String> fields) {
+      inner.recordConflict(id, base, local, remote, fields);
+    }
+
+    @Override
+    public long checkpoint(String peer) {
+      return inner.checkpoint(peer);
+    }
+
+    @Override
+    public void advanceCheckpoint(String peer, long seq) {
+      inner.advanceCheckpoint(peer, seq);
+    }
   }
 
   @Test

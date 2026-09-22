@@ -15,6 +15,7 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -159,6 +160,18 @@ public final class SyncBox implements AutoCloseable {
       UnaryOperator<OutputStream> serverOut,
       UnaryOperator<OutputStream> nodeOut)
       throws IOException {
+    return connect(server, db, box, frame, serverOut, nodeOut, input -> input);
+  }
+
+  static Link connect(
+      SyncRpcServer server,
+      Sqlite db,
+      String box,
+      int frame,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut,
+      UnaryOperator<InputStream> clientInput)
+      throws IOException {
     var toServer = new PipedOutputStream();
     var serverIn = new BufferedInputStream(new PipedInputStream(toServer, 1024 * 1024));
     var toClient = new PipedOutputStream();
@@ -230,7 +243,7 @@ public final class SyncBox implements AutoCloseable {
     var notices = new ArrayList<String>();
     var session =
         SyncSession.open(
-            clientIn,
+            clientInput.apply(clientIn),
             nodeOut.apply(tee),
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
             notices::add,

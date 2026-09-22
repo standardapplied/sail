@@ -13,6 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -20,10 +21,51 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class SyncContentFailureTest {
+  @Test
+  void aReadFailureInsideAChunkNamesTheHashAndStoresNothing() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node")) {
+      var files = new FileStore(main.db);
+      files.put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
+      var hash = files.find("project", "file").orElseThrow().contentHash();
+      var failure =
+          assertThrows(
+              SyncTransportException.class,
+              () -> {
+                try (var link =
+                    SyncBox.connect(
+                        main.server(new SyncPrincipal("node", true)),
+                        node.db,
+                        node.id,
+                        SyncWire.MAX_FRAME,
+                        output -> output,
+                        output -> output,
+                        input ->
+                            new FilterInputStream(input) {
+                              @Override
+                              public int read(byte[] bytes, int offset, int length)
+                                  throws IOException {
+                                throw new IOException("link reset");
+                              }
+                            })) {
+                  link.reconcile(
+                      "file", SyncedEntities.replicas(node.db, node.id, node.id).get("file"));
+                }
+              });
+      assertEquals("unreachable", failure.kind());
+      assertTrue(failure.getMessage().contains(hash));
+      assertTrue(failure.getMessage().contains("link reset"));
+      assertEquals(
+          0L, node.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      assertEquals(0L, node.syncState.checkpoint("main", "file"));
+    }
+  }
+
   enum AnswerFault {
     BAD_BLOB_INVENTORY,
     BAD_CHUNK_INVENTORY,
