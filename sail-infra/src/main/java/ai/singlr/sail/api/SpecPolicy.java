@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.store.SpecStore;
 
 /**
  * Resource-scoped authorization for the spec aggregate, shared by every lane (the HTTP API a member
@@ -37,7 +38,7 @@ public final class SpecPolicy {
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    var owner = Strings.isNotBlank(assignee) ? assignee : createdBy;
+    var owner = SpecStore.ownerOf(assignee, createdBy);
     if (Strings.isNotBlank(owner) && actor.actsFor(owner)) {
       return AccessDecision.allowed();
     }

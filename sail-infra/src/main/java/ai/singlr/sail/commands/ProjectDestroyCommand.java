@@ -119,9 +119,9 @@ public final class ProjectDestroyCommand implements Runnable {
         deleteDirectory(projectDir);
       }
     }
-    var purged = purge ? purgeFromCatalog(erases) : null;
+    var destroyed = purge ? purgeFromCatalog(erases) : null;
 
-    emitResult(containerPresent, dirPresent, purged);
+    emitResult(containerPresent, dirPresent, destroyed);
   }
 
   static String confirmPrompt(String name, boolean purge) {
@@ -165,16 +165,16 @@ public final class ProjectDestroyCommand implements Runnable {
   }
 
   private void emitResult(
-      boolean containerPresent, boolean dirPresent, HostCatalog.Destroyed purged) {
+      boolean containerPresent, boolean dirPresent, HostCatalog.Destroyed destroyed) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("destroyed", name);
       if (!containerPresent) {
         map.put("status", dirPresent ? "state_cleaned" : "catalog_only");
       }
-      if (purged != null) {
-        map.put("purged", purged.purged());
-        map.put("requested", purged.requested());
+      if (destroyed != null) {
+        map.put("purged", destroyed.purged());
+        map.put("requested", destroyed.requested());
       }
       System.out.println(YamlUtil.dumpJson(map));
       return;
@@ -187,14 +187,14 @@ public final class ProjectDestroyCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|faint Container '" + name + "' already absent — cleaned up stale state.|@"));
     }
-    if (purged != null && purged.requested()) {
+    if (destroyed != null && destroyed.requested()) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Asked main to erase '"
                   + name
                   + "' with its specs, rooms, runs, files and history — it goes on this box's"
                   + " next sync."));
-    } else if (purged != null && purged.purged()) {
+    } else if (destroyed != null && destroyed.purged()) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Erased '"

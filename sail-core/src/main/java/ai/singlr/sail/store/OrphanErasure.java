@@ -58,7 +58,7 @@ public final class OrphanErasure implements DataMigration {
   private final BooleanSupplier authoritative;
 
   public OrphanErasure() {
-    this(() -> !NodeIdentity.config().isNode());
+    this(NodeIdentity::authoritative);
   }
 
   OrphanErasure(BooleanSupplier authoritative) {

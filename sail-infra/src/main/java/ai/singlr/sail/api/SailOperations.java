@@ -82,18 +82,11 @@ public final class SailOperations implements HostOperations {
     this.controlPlane = Objects.requireNonNull(db, "db");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
-    this.globalSpecOps =
-        new GlobalSpecOperations(
-            specStore,
-            reviewStore,
-            eventBus,
-            runStore,
-            () -> roomStore,
-            new GlobalSpecOperations.Pruning(
-                db, () -> !syncOperations.configuration().isNode(), DateTimeUtils::now));
+    this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
     this.schema = new HostLanes.Schema(db, syncOperations);
     this.catalog =
-        new HostLanes.Catalog(db, projectStore, specStore, roomStore, schema, globalSpecOps);
+        new HostLanes.Catalog(
+            db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, fdeStore);
     this.pty = new HostLanes.Pty(db, eventStore);
     return this;
@@ -106,10 +99,32 @@ public final class SailOperations implements HostOperations {
   public RetentionSweeper retentionSweeper() {
     requireHost(controlPlane);
     return new RetentionSweeper(
-        globalSpecOps,
-        RetentionConfig::load,
-        new BlobStore(controlPlane),
-        () -> !syncOperations.configuration().isNode());
+        pruner, RetentionConfig::load, new BlobStore(controlPlane), this::authoritative);
+  }
+
+  /** Whether this box authors erasures and sweeps retention: main, or a box that syncs nobody. */
+  private boolean authoritative() {
+    return !syncOperations.configuration().isNode();
+  }
+
+  /**
+   * The operator of this box's root CLI: the box's owner, an admin, on main or a standalone box; on
+   * a node, its FDE with the role main's roster gives it, so a node never promises what main then
+   * refuses.
+   */
+  private Actor cliOperator() {
+    var handle = syncOperations.configuration().handle();
+    if (authoritative()) {
+      return Actor.cliOperator(handle);
+    }
+    var role =
+        Strings.isBlank(handle)
+            ? Role.VIEWER
+            : fdeStore
+                .byHandle(handle)
+                .map(fde -> Role.fromAttribute(fde.role()))
+                .orElse(Role.VIEWER);
+    return new Actor(handle, role, Actor.Lane.CLI);
   }
 
   @Override
@@ -298,7 +313,8 @@ public final class SailOperations implements HostOperations {
   private SyncScheduler syncScheduler;
   private final ProjectLoader projects;
   private final SnapshotOperations snapshotOps;
-  private GlobalSpecOperations globalSpecOps;
+  private final GlobalSpecOperations globalSpecOps;
+  private SpecPruner pruner;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
@@ -1914,7 +1930,16 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
-    return safeWrite(() -> globalSpecOps.prune(request, actor));
+    return safeWrite(
+        () -> {
+          if (pruner == null) {
+            throw new ApiException(
+                ErrorCode.INTERNAL,
+                "This box keeps no erasure log, so nothing can be pruned here.",
+                "Start the server with 'sail server start'.");
+          }
+          return pruner.prune(request, actor);
+        });
   }
 
   @Override

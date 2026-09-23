@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,7 +101,10 @@ class ApiSpecPruneCommandTest {
     var run = run("prune", "old", "--apply");
 
     assertEquals(0, run.exit(), run.err());
-    assertTrue(run.out().indexOf("Would erase") < run.out().indexOf("Erased 1 specs"), run.out());
+    var erasing = run.out().indexOf("Erasing 1 specs");
+    var erased = run.out().indexOf("Erased 1 specs");
+    assertTrue(erasing >= 0 && erased > erasing, run.out());
+    assertFalse(run.out().contains("re-run with --apply"), run.out());
     assertTrue(run.out().contains("Other boxes erase it on their next sync"), run.out());
     assertTrue(specs.findById("old").isEmpty());
   }

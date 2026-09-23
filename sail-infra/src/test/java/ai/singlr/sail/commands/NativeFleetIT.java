@@ -208,7 +208,11 @@ class NativeFleetIT {
       assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
       mady.install(fleet.candidate());
 
-      main.serving(() -> main.apiOk("spec", "prune", "doomed-1", "--apply"));
+      main.serving(
+          () -> {
+            main.apiOk("spec", "update", "doomed-1", "--status", "archived");
+            main.apiOk("spec", "prune", "doomed-1", "--apply");
+          });
       main.shOk(
           "printf '#!/bin/sh\\necho \"[]\"\\n' > /usr/local/bin/incus && chmod 755 /usr/local/bin/incus");
       main.sailOk("project", "destroy", "scratch", "--purge", "--yes", "--json");

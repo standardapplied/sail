@@ -77,12 +77,7 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return succeeded(peer, at, report, 0, 0);
-  }
-
-  public boolean succeeded(
-      String peer, Instant at, SyncEngine.Report report, long fetchedBytes, long sentBytes) {
-    return succeeded(peer, at, report, fetchedBytes, sentBytes, 0);
+    return succeeded(peer, at, report, 0, 0, 0);
   }
 
   public boolean succeeded(

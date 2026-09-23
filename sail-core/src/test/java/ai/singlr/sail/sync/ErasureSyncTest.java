@@ -184,6 +184,59 @@ class ErasureSyncTest {
   }
 
   @Test
+  void aProjectANodeAsksMainToPruneLeavesNothingOfItInAnyTypeAfterOneRound() throws IOException {
+    seedArchivedSpec(main, "old", "node");
+    var admin = new SyncPrincipal("node", true, true);
+    round(admin);
+    new EraseRequests(node.db).request(Erasure.PROJECT, "proj", "node");
+
+    round(admin);
+
+    for (var box : List.of(main, node)) {
+      assertEquals(0, count(box.db, "SELECT count(*) FROM specs"), box.id);
+      assertEquals(0, count(box.db, "SELECT count(*) FROM runs"), box.id);
+      assertEquals(0, count(box.db, "SELECT count(*) FROM reviews"), box.id);
+      assertEquals(0, count(box.db, "SELECT count(*) FROM rooms"), box.id);
+      assertEquals(0, count(box.db, "SELECT count(*) FROM room_messages"), box.id);
+      assertEquals(
+          0, count(box.db, "SELECT count(*) FROM change_log WHERE kind <> 'erasure'"), box.id);
+    }
+  }
+
+  @Test
+  void aRoundThatOnlyAppliesErasuresReportsThemPulledSoTheBoardRefreshes() throws IOException {
+    seedArchivedSpec(main, "old", "node");
+    round(NODE);
+    prune(main, "old", "uday");
+
+    var reports = round(NODE);
+
+    assertEquals(
+        1,
+        reports.stream()
+            .filter(report -> report.type().equals(Erasure.SPEC))
+            .findFirst()
+            .orElseThrow()
+            .report()
+            .pulled());
+  }
+
+  @Test
+  void aSpecOnlyThisNodeEverHeldIsDiscardedHereAndNeverReachesMain() throws IOException {
+    node.specs.create(owned("draft", "Mine alone", "archived", "node"));
+    new MessageStore(node.db).append("draft", "node", "never pushed", null);
+
+    new Erasure(node.db).discard(List.of(new Erasure.Target(Erasure.SPEC, "draft")));
+    round(NODE);
+
+    for (var box : List.of(main, node)) {
+      assertEquals(
+          0, count(box.db, "SELECT count(*) FROM change_log WHERE entity_id = 'draft'"), box.id);
+      assertEquals(0, count(box.db, "SELECT count(*) FROM room_messages"), box.id);
+    }
+  }
+
+  @Test
   void mainRefusesANodesPruneOfASpecThatIsNotItsOwnAndTheAskIsDropped() throws IOException {
     seedArchivedSpec(main, "theirs", "uday");
     round(NODE);
@@ -311,7 +364,12 @@ class ErasureSyncTest {
       assertTrue(refused.getMessage().contains("main holds no spec 'lobby'"), refused.getMessage());
     }
     new EraseRequests(node.db).request(Erasure.SPEC, "lobby", "node");
-    round(new SyncPrincipal("node", true, true));
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true, true)), node)) {
+      var refused =
+          assertThrows(
+              SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
+      assertTrue(refused.getMessage().contains("main holds no spec 'lobby'"), refused.getMessage());
+    }
 
     for (var box : List.of(main, node)) {
       assertTrue(new RoomStore(box.db).findById("lobby").isPresent(), box.id + " lost the room");
@@ -434,21 +492,11 @@ class ErasureSyncTest {
     var messages = new MessageStore(box.db);
     var first = messages.append(id, owner, "the first word", null);
     messages.append(id, owner, "a reply to it", first.id());
-    new RunStore(box.db)
-        .create(
-            DateTimeUtils.newId().toString(),
-            "proj",
-            id,
-            "node",
-            "node",
-            "build",
-            "claude",
-            "b",
-            "t",
-            null,
-            null,
-            "/log",
-            "u");
+    var runs = new RunStore(box.db);
+    var run = DateTimeUtils.newId().toString();
+    runs.create(
+        run, "proj", id, "node", "node", "build", "claude", "b", "t", null, null, "/log", "u");
+    runs.complete(run, "completed", 0);
     var reviews = new ReviewStore(box.db);
     var review = reviews.createReview(id, 1);
     var stage = reviews.createStage(review, "security", "agent");

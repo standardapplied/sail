@@ -327,9 +327,7 @@ public final class ServerStartCommand implements Runnable {
       server.start();
       sweeper.start();
       eventSweeper.start();
-      if (!HostSync.isNode(HostSync.config())) {
-        retentionSweeper.start();
-      }
+      retentionSweeper.start();
       ptyEventBridge.start(PtyEventBridge.INTERVAL);
       reconciler.start();
       var replayed = missedStops.sweep();

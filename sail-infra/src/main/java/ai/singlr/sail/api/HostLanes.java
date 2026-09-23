@@ -11,7 +11,6 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -37,6 +36,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
 final class HostLanes {
@@ -115,7 +115,8 @@ final class HostLanes {
       SpecStore specs,
       RoomStore rooms,
       HostSchema schema,
-      GlobalSpecOperations globalSpecs)
+      SpecPruner pruner,
+      Supplier<Actor> operator)
       implements HostCatalog {
     @Override
     public Optional<ProjectStore.ProjectRow> project(String project) {
@@ -171,10 +172,7 @@ final class HostLanes {
       if (!purge) {
         return new Destroyed(name, false, false);
       }
-      schema.initialize();
-      var report =
-          globalSpecs.prune(
-              PruneRequest.project(name, false), Actor.cliOperator(NodeIdentity.handle()));
+      var report = purge(name, false);
       return new Destroyed(
           name, report.requested() || !report.entries().isEmpty(), report.requested());
     }
@@ -182,10 +180,12 @@ final class HostLanes {
     @Override
     public String purgeSummary(String name) {
       NameValidator.requireValidProjectName(name);
+      return purge(name, true).summary();
+    }
+
+    private PruneReport purge(String name, boolean dryRun) {
       schema.initialize();
-      return globalSpecs
-          .prune(PruneRequest.project(name, true), Actor.cliOperator(NodeIdentity.handle()))
-          .summary();
+      return pruner.prune(PruneRequest.project(name, dryRun), operator.get());
     }
 
     @Override

@@ -6,10 +6,14 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -108,8 +112,21 @@ public final class ChangeLog {
   }
 
   /**
+   * A write this journal refuses because it touches what was pruned: an erased id, which is spent
+   * for good, or a state that would belong to an erased entity, which never comes back. Thrown
+   * inside the writer's transaction, so nothing of the write lands.
+   */
+  public static final class Pruned extends IllegalArgumentException {
+    Pruned(String message) {
+      super(message);
+    }
+  }
+
+  /**
    * Appends a revision and moves the entity's head to it, as one transaction. {@code snapshot} is
-   * the entity's full state as JSON at this revision. An erased entity is refused: its id is spent.
+   * the entity's full state as JSON at this revision. Refused ({@link Pruned}) for an erased id,
+   * and for a revision whose state names an erased owner through a link {@link Erasure} declares:
+   * every writer — a local create, an import, main's commit of a push — meets the same rule here.
    */
   public void append(
       String entityType,
@@ -121,12 +138,15 @@ public final class ChangeLog {
       String snapshot) {
     db.transaction(
         () -> {
-          if (head(entityType, entityId).filter(head -> head.kind() == Kind.ERASURE).isPresent()) {
-            throw new IllegalArgumentException(
+          if (isErased(entityType, entityId)) {
+            throw new Pruned(
                 entityType
                     + " '"
                     + entityId
                     + "' was pruned, and a pruned id is never used again; choose a new one.");
+          }
+          if (!deleted) {
+            requireNoErasedOwner(entityType, entityId, snapshot);
           }
           insert(
               entityType,
@@ -179,6 +199,65 @@ public final class ChangeLog {
               entityType,
               entityId);
         });
+  }
+
+  /** The erasure that is an entity's latest entry here, if it was erased. */
+  public Optional<Entry> erasure(String entityType, String entityId) {
+    return head(entityType, entityId).filter(head -> head.kind() == Kind.ERASURE);
+  }
+
+  /** Whether the latest entry of an entity here is its erasure. */
+  public boolean isErased(String entityType, String entityId) {
+    return erasure(entityType, entityId).isPresent();
+  }
+
+  private void requireNoErasedOwner(String entityType, String entityId, String snapshot) {
+    for (var owner : Erasure.ownersOf(entityType)) {
+      var erased =
+          db.queryOne(
+              """
+              SELECT h.entity_id FROM change_heads h JOIN change_log l ON l.seq = h.seq
+              WHERE h.entity_type = ? AND h.entity_id = json_extract(?, ?)
+              AND l.kind = 'erasure'""",
+              row -> row.text(0),
+              owner.type(),
+              snapshot,
+              "$." + owner.column());
+      if (erased.isPresent()) {
+        throw new Pruned(
+            entityType
+                + " '"
+                + entityId
+                + "' belongs to "
+                + owner.type()
+                + " '"
+                + erased.get()
+                + "', which was pruned");
+      }
+    }
+  }
+
+  /**
+   * The entities of {@code entityType} whose latest entry is a tombstone, grouped by the id their
+   * last state names in {@code field} (blank when it names none). Read through the tombstone index,
+   * so it costs what the deletions of the type cost, however many live entities it has.
+   */
+  public Map<String, List<String>> tombstonedBy(String entityType, String field) {
+    var byOwner = new HashMap<String, List<String>>();
+    for (var tombstone :
+        db.query(
+            """
+            SELECT l.entity_id, json_extract(l.snapshot, ?) FROM change_log l
+            JOIN change_heads h ON h.seq = l.seq
+            WHERE l.entity_type = ? AND l.kind = 'tombstone'""",
+            row -> Map.entry(row.text(0), Objects.toString(row.text(1), "")),
+            "$." + field,
+            entityType)) {
+      byOwner
+          .computeIfAbsent(tombstone.getValue(), owner -> new ArrayList<>())
+          .add(tombstone.getKey());
+    }
+    return byOwner;
   }
 
   /** Whether this box holds the erasure of an entity recorded at {@code rev}. */

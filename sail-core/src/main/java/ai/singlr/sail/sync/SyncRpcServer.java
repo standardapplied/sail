@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -64,6 +65,7 @@ public final class SyncRpcServer {
   private Sqlite db;
   private BlobStore blobs;
   private FileLimits limits = FileLimits.defaults();
+  private ChangeLog changeLog;
   private Erasure erasure;
   private EraseAuthority authority;
   private boolean erasedInSession;
@@ -133,6 +135,7 @@ public final class SyncRpcServer {
     this.db = db;
     this.blobs = new BlobStore(db);
     this.limits = limits;
+    this.changeLog = new ChangeLog(db);
     this.erasure = new Erasure(db);
     this.authority = new EraseAuthority(db);
     return this;
@@ -499,14 +502,16 @@ public final class SyncRpcServer {
 
   /**
    * Main's answer to a request to erase: refused, naming why, unless the principal may erase what
-   * main holds; otherwise the entity and what belongs to it are erased as the principal and the
-   * erasure's rev is the answer. Decided and erased in one transaction, so what the decision read
-   * is what the erasure removes. Asking again for an erased entity answers the erasure it has.
+   * main holds and nothing in it is still running; otherwise the entity and what belongs to it are
+   * erased as the principal and the erasure's rev is the answer. Decided and erased in one
+   * transaction, so what the decision read is what the erasure removes. Asking again for an erased
+   * entity answers the erasure it has.
    */
   private SyncWire.Result erased(String type, MainReplica.Offer offer) {
     if (erasure == null) {
       return new SyncWire.Refused(offer.id(), "this main keeps no erasure log");
     }
+    var root = new Erasure.Target(type, offer.id());
     return SyncPeer.with(
         principal.handle(),
         () ->
@@ -516,11 +521,18 @@ public final class SyncRpcServer {
                   if (refusal.isPresent()) {
                     return new SyncWire.Refused(offer.id(), refusal.get());
                   }
-                  var rev =
-                      erasure.eraseClosure(
-                          new Erasure.Target(type, offer.id()), principal.handle(), "sync");
-                  erasedInSession = true;
-                  return new SyncWire.Accepted(offer.id(), rev);
+                  if (!erasure.isErased(root)) {
+                    var plan = erasure.closure(List.of(root));
+                    var busy =
+                        Erasure.SPEC.equals(type) ? authority.busy(plan) : Optional.<String>empty();
+                    if (busy.isPresent()) {
+                      return new SyncWire.Refused(offer.id(), busy.get());
+                    }
+                    erasure.erase(plan, principal.handle(), "sync");
+                    erasedInSession = true;
+                  }
+                  return new SyncWire.Accepted(
+                      offer.id(), changeLog.erasure(type, offer.id()).orElseThrow().rev());
                 }));
   }
 
@@ -543,7 +555,7 @@ public final class SyncRpcServer {
           SyncPeer.with(
               principal.handle(),
               () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
-    } catch (BlobStore.NotHeld | Erasure.Orphaned e) {
+    } catch (BlobStore.NotHeld | ChangeLog.Pruned e) {
       return new SyncWire.Refused(offer.id(), e.getMessage());
     }
     return switch (outcome) {

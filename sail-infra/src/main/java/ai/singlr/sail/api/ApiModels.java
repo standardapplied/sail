@@ -1030,16 +1030,12 @@ record SpecRevisionView(
  * report it. Specs are chosen by {@code ids}, or by a {@code policy} — {@code archived} or {@code
  * cancelled} for longer than {@code older_than_days}, optionally in one {@code project} — or a
  * whole {@code project} goes with everything in it. {@code dry_run} is true unless the body says
- * {@code false}: a prune reports before it erases. The two retention ages — messages older than
- * one, finished runs older than another — are set only by main's sweeper, never on the wire.
+ * {@code false}: a prune reports before it erases.
  */
-record PruneRequest(
-    List<String> ids,
-    PruneRequest.Policy policy,
-    String project,
-    Duration messagesOlderThan,
-    Duration runsFinishedOlderThan,
-    boolean dryRun) {
+record PruneRequest(List<String> ids, PruneRequest.Policy policy, String project, boolean dryRun) {
+
+  /** The longest age a policy names: a century, well past anything a box has kept. */
+  static final long MAX_DAYS = 36_500;
 
   /** Specs in one of {@code statuses} for longer than {@code olderThan}, in {@code project}. */
   record Policy(List<SpecStatus> statuses, Duration olderThan, String project) {
@@ -1074,11 +1070,7 @@ record PruneRequest(
     if (project != null) {
       NameValidator.requireValidProjectName(project);
     }
-    var chosen =
-        policy != null
-            || project != null
-            || messagesOlderThan != null
-            || runsFinishedOlderThan != null;
+    var chosen = policy != null || project != null;
     if (ids.isEmpty() && !chosen) {
       throw new IllegalArgumentException(
           "Name the specs to prune (ids), a policy (statuses and older_than_days), or a project.");
@@ -1087,17 +1079,20 @@ record PruneRequest(
       throw new IllegalArgumentException(
           "Prune either the specs named by ids or by a policy or project, not both at once.");
     }
+    if (policy != null && project != null) {
+      throw new IllegalArgumentException(
+          "A policy names its own project; prune a whole project on its own.");
+    }
   }
 
   static PruneRequest ids(List<String> ids, boolean dryRun) {
-    return new PruneRequest(ids, null, null, null, null, dryRun);
+    return new PruneRequest(ids, null, null, dryRun);
   }
 
   static PruneRequest project(String project, boolean dryRun) {
-    return new PruneRequest(List.of(), null, project, null, null, dryRun);
+    return new PruneRequest(List.of(), null, project, dryRun);
   }
 
-  @SuppressWarnings("unchecked")
   static PruneRequest fromMap(Map<String, Object> map) {
     var ids = map.get("ids");
     if (ids != null && !(ids instanceof List<?>)) {
@@ -1112,26 +1107,38 @@ record PruneRequest(
       throw new IllegalArgumentException("dry_run must be true or false.");
     }
     return new PruneRequest(
-        ids == null ? List.of() : ((List<Object>) ids).stream().map(String::valueOf).toList(),
-        policy == null ? null : policyFrom((Map<String, Object>) policy),
-        (String) map.get("project"),
-        null,
-        null,
+        ids == null ? List.of() : texts((List<?>) ids, "ids"),
+        policy == null ? null : policyFrom((Map<?, ?>) policy),
+        text(map.get("project"), "project"),
         !Boolean.FALSE.equals(dryRun));
   }
 
-  @SuppressWarnings("unchecked")
-  private static Policy policyFrom(Map<String, Object> map) {
+  private static Policy policyFrom(Map<?, ?> map) {
     if (!(map.get("statuses") instanceof List<?> statuses)) {
       throw new IllegalArgumentException("policy.statuses must be an array of statuses.");
     }
-    if (!(map.get("older_than_days") instanceof Number days) || days.longValue() < 0) {
-      throw new IllegalArgumentException("policy.older_than_days must be a whole number of days.");
+    if (!(map.get("older_than_days") instanceof Number days)
+        || days.longValue() < 0
+        || days.longValue() > MAX_DAYS
+        || days.doubleValue() != days.longValue()) {
+      throw new IllegalArgumentException(
+          "policy.older_than_days must be a whole number of days from 0 to " + MAX_DAYS + ".");
     }
     return new Policy(
-        ((List<Object>) statuses).stream().map(String::valueOf).map(SpecStatus::fromWire).toList(),
+        texts(statuses, "policy.statuses").stream().map(SpecStatus::fromWire).toList(),
         Duration.ofDays(days.longValue()),
-        (String) map.get("project"));
+        text(map.get("project"), "policy.project"));
+  }
+
+  private static List<String> texts(List<?> values, String field) {
+    return values.stream().map(value -> text(value, field)).toList();
+  }
+
+  private static String text(Object value, String field) {
+    if (value != null && !(value instanceof String)) {
+      throw new IllegalArgumentException(field + " must be text, not " + value + ".");
+    }
+    return (String) value;
   }
 }
 
@@ -1173,6 +1180,13 @@ record PruneReport(
         result.events(),
         blobBytes,
         result.entities());
+  }
+
+  /** This rehearsal's counts as the report of the prune it became: applied, or asked of main. */
+  PruneReport applied(boolean requested) {
+    return new PruneReport(
+        false, requested, specs, rooms, messages, runs, reviews, files, projects, events, blobBytes,
+        entries);
   }
 
   /** The counts as one line, for a prompt or a dry run: {@code 2 specs, 2 rooms, …}. */

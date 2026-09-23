@@ -231,24 +231,7 @@ public final class Sqlite implements AutoCloseable {
       if (transactionDepth > 0) {
         throw new IllegalStateException("A rehearsal must be the outermost transaction");
       }
-      execute("BEGIN IMMEDIATE");
-      transactionDepth = 1;
-      writeLocked = true;
-      T result;
-      try {
-        result = work.get();
-      } catch (RuntimeException e) {
-        try {
-          execute("ROLLBACK");
-        } catch (RuntimeException rollbackEx) {
-          e.addSuppressed(rollbackEx);
-        }
-        throw e;
-      } finally {
-        transactionDepth = 0;
-      }
-      execute("ROLLBACK");
-      return result;
+      return transaction("BEGIN IMMEDIATE", work, false);
     } finally {
       lock.unlock();
     }
@@ -264,6 +247,10 @@ public final class Sqlite implements AutoCloseable {
   }
 
   private <T> T transaction(String begin, Supplier<T> work) {
+    return transaction(begin, work, true);
+  }
+
+  private <T> T transaction(String begin, Supplier<T> work, boolean commit) {
     lock.lock();
     try {
       if (transactionDepth > 0) {
@@ -279,7 +266,7 @@ public final class Sqlite implements AutoCloseable {
       writeLocked = begin.equals("BEGIN IMMEDIATE");
       try {
         var result = work.get();
-        execute("COMMIT");
+        execute(commit ? "COMMIT" : "ROLLBACK");
         return result;
       } catch (Exception e) {
         try {

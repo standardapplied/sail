@@ -84,7 +84,7 @@ public final class ApiSpecPruneCommand implements Runnable {
         return;
       }
       if (!json) {
-        print(rehearsal);
+        System.out.println(Ansi.AUTO.string("  @|bold Erasing|@ " + summary(rehearsal) + "."));
       }
       print(client.post(ROUTE, withDryRun(body, false)));
     }
@@ -147,13 +147,7 @@ public final class ApiSpecPruneCommand implements Runnable {
 
   /** The report as the terminal shows it: what goes, then what happened or what to do next. */
   static String render(Map<String, Object> report) {
-    var counts =
-        List.of("specs", "rooms", "messages", "runs", "reviews", "files", "projects", "events")
-            .stream()
-            .map(key -> number(report, key) + " " + key)
-            .toList();
-    var summary =
-        String.join(", ", counts) + ", " + number(report, "blob_bytes") + " bytes of content";
+    var summary = summary(report);
     if (Boolean.TRUE.equals(report.get("dry_run"))) {
       return Ansi.AUTO.string(
           """
@@ -173,6 +167,16 @@ public final class ApiSpecPruneCommand implements Runnable {
           @|green ✓|@ Erased %s.
           @|faint Other boxes erase it on their next sync.|@"""
             .formatted(summary));
+  }
+
+  /** What a report counts, as one line: {@code 1 specs, 1 rooms, …, 2048 bytes of content}. */
+  static String summary(Map<String, Object> report) {
+    var counts =
+        List.of("specs", "rooms", "messages", "runs", "reviews", "files", "projects", "events")
+            .stream()
+            .map(key -> number(report, key) + " " + key)
+            .toList();
+    return String.join(", ", counts) + ", " + number(report, "blob_bytes") + " bytes of content";
   }
 
   private static long number(Map<String, Object> report, String key) {

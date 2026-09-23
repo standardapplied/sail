@@ -23,6 +23,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -1001,7 +1002,7 @@ class SailOperationsSeamTest {
               .value().specs().stream().map(GlobalSpecView::id).toList(),
           "the board reads the same stores the prune erased from");
       try (var sweeper = operations.retentionSweeper()) {
-        assertNotNull(sweeper.sweep().collected());
+        assertNull(sweeper.retain(), "a box with no retention block erases nothing on its own");
       }
     }
   }
@@ -1011,6 +1012,8 @@ class SailOperationsSeamTest {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
       new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
+      new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
           OperationsFactory.create(
                   db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -1031,7 +1034,36 @@ class SailOperationsSeamTest {
         assertTrue(destroyed.requested());
         assertTrue(
             operations.catalog().project("old").isPresent(), "main erases; this box follows");
-        assertEquals(List.of("old"), new ai.singlr.sail.store.EraseRequests(db).pending("project"));
+        assertEquals(List.of("old"), new EraseRequests(db).pending("project"));
+      }
+    }
+  }
+
+  @Test
+  void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      new FdeStore(db).add("node", "Node", "node@example.com", "member");
+      try (var operations =
+          OperationsFactory.create(
+                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "node",
+                      tempDir,
+                      () -> new SyncConfig("node", "main", "node", "node-box"),
+                      target -> {
+                        throw new IOException("main unavailable");
+                      }))) {
+        var refused =
+            assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
+
+        assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+        assertEquals(List.of(), new EraseRequests(db).pending("project"));
       }
     }
   }

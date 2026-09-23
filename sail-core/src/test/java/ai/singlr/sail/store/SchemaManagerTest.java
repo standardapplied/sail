@@ -16,6 +16,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -131,6 +132,46 @@ class SchemaManagerTest {
                     + " snapshot, kind) VALUES ('spec', 'x', '1', 'now', 'local', '{}', 'bogus')"));
     assertEquals(
         0, db.queryOne("SELECT count(*) FROM erase_requests", row -> row.integer(0)).orElseThrow());
+  }
+
+  @Test
+  void aDeletionTheOldServerWritesDuringTheUpgradeIsStillATombstone() {
+    new SchemaManager(db).migrate();
+
+    db.execute(
+        """
+        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
+        VALUES ('spec', 'gone', '2-old', 'now', 'local', 1, '{}')""");
+    db.execute(
+        """
+        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
+        VALUES ('spec', 'kept', '1-old', 'now', 'local', 0, '{}')""");
+
+    assertEquals(
+        List.of("gone|tombstone", "kept|revision"),
+        db.query(
+            "SELECT entity_id || '|' || kind FROM change_log ORDER BY entity_id",
+            row -> row.text(0)));
+  }
+
+  @Test
+  void theLinksAPruneWalksAreIndexed() {
+    new SchemaManager(db).migrate();
+
+    for (var probe :
+        List.of(
+            "SELECT id FROM room_messages WHERE reply_to IN ('x')",
+            "SELECT id FROM runs WHERE room_id IN ('x')",
+            "SELECT id FROM rooms WHERE project IN ('x')",
+            "SELECT id FROM specs WHERE room_id = 'x'",
+            "SELECT run_id FROM run_delivered_messages WHERE message_id = 'x'",
+            "SELECT entity_id FROM change_log WHERE entity_type = 'spec' AND kind = 'tombstone'")) {
+      var plan =
+          String.join(
+              " ",
+              db.query("EXPLAIN QUERY PLAN " + probe, row -> Objects.toString(row.text(3), "")));
+      assertTrue(plan.contains("USING") && plan.contains("INDEX"), probe + " → " + plan);
+    }
   }
 
   @Test

@@ -59,8 +59,9 @@ sail spec prune old-spec --apply                           # erase it on every b
 sail spec prune --status archived,cancelled --older-than 90d --apply   # admin: by policy
 ```
 
-Main authors every erasure. A prune on a node is sent to main, and each box erases on its next
-sync. `sail project destroy --purge` prunes a whole project the same way. History keeps each
+Only archived, cancelled or deleted specs are pruned, and a pruned spec id or project name is
+never used again. Main authors every erasure. A prune on a node is sent to main, and each box
+erases on its next sync. `sail project destroy --purge` prunes a whole project the same way. History keeps each
 entity's newest 20 revisions, its synced base, and every deletion. Nothing is erased
 automatically unless main's `host.yaml` sets a `retention` block, for example
 `prune_archived_after: 90d`, `messages: 365d`, `runs_after_finished: 180d`.

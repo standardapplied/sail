@@ -141,6 +141,19 @@ public final class SchemaManager {
           WHERE id = NEW.id;
       END""";
 
+  /**
+   * A deletion a release before {@code change_log.kind} writes — the old server keeps running while
+   * the upgrade migrates, and the column's default reads it as a revision — is recorded as the
+   * tombstone it is, so it still reaches main.
+   */
+  static final String KIND_FROM_DELETED =
+      """
+      CREATE TRIGGER change_log_kind_from_deleted AFTER INSERT ON change_log
+      WHEN NEW.deleted = 1 AND NEW.kind = 'revision'
+      BEGIN
+          UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
+      END""";
+
   static final List<String> MIGRATIONS =
       List.of(
           "ALTER TABLE runs ADD COLUMN principal TEXT",
@@ -562,7 +575,14 @@ public final class SchemaManager {
               actor TEXT,
               requested_at TEXT NOT NULL,
               PRIMARY KEY (entity_type, entity_id)
-          )""");
+          )""",
+          KIND_FROM_DELETED,
+          "CREATE INDEX idx_change_log_tombstones ON change_log(entity_type) WHERE kind = 'tombstone'",
+          "CREATE INDEX idx_room_messages_reply ON room_messages(reply_to)",
+          "CREATE INDEX idx_runs_room ON runs(room_id)",
+          "CREATE INDEX idx_rooms_project ON rooms(project)",
+          "CREATE INDEX idx_specs_room ON specs(room_id)",
+          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

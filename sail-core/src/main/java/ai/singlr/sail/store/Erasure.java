@@ -7,35 +7,36 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /**
  * What pruning removes, and the one place it is removed. A prune names roots — specs, a project,
  * or, for retention, single messages and runs — and {@link #closure} extends them to every
- * replicated entity that belongs to them: a spec's runs and reviews and the identity room it minted
- * (a room it was born into outlives it), a room's messages and runs, a message's replies, a
- * project's specs, rooms, files and runs. Those links between entities are declared here ({@link
- * #LINKS}) and nowhere else; the rows that belong to one entity (a spec's content and dependencies,
- * a run's principals and delivery ledger, a review's stages and findings) go with it through the
- * database's own cascades. The same links refuse a push that would make an entity belong to one
- * already erased ({@link #erasedOwner}).
+ * replicated entity that belongs to them: a spec's runs and reviews, a room's messages and runs, a
+ * message's replies, a project's specs, rooms, files and runs, and the room a spec minted once no
+ * spec left behind still converses in it (a room a spec was born into outlives it while its minter
+ * does). Those links between entities are declared here ({@link #LINKS}) and nowhere else; the
+ * journal refuses a state that would belong to an erased entity through the same links ({@link
+ * #ownersOf}), and the rows that belong to one entity (a spec's content and dependencies, a run's
+ * principals and delivery ledger, a review's stages and findings) go with it through the database's
+ * own cascades.
  *
  * <p>{@link #erase} is main's side — the only author of an erasure: for every entity it removes the
- * live row, the open conflicts and every history entry, and records one erasure row naming who and
- * when; the events of an erased spec or room and of an erased project go too. {@link #adopt} is a
- * node applying one of main's erasure rows: it records main's row and removes everything that
- * belongs to the entity here, including children main never saw, whose own erasure rows — for the
- * ones main held — arrive in their own pages. Both are atomic, and adopting an erasure this box
- * already holds changes nothing.
+ * live row, the open conflicts, the box-local rows keyed by it and every history entry, and records
+ * one erasure row naming who and when. {@link #adopt} is a node applying one of main's erasure
+ * rows: it records main's row and removes the entity with what belongs to it that main never
+ * acknowledged — everything main held gets an erasure row of its own, decided on main's copy, and
+ * arrives in its own page. Both are atomic, and adopting an erasure this box already holds changes
+ * nothing.
  */
 public final class Erasure {
 
@@ -47,6 +48,8 @@ public final class Erasure {
   public static final String REVIEW = "review";
   public static final String MESSAGE = "message";
 
+  private static final int BATCH = 500;
+
   /** One replicated entity, by its {@code change_log} type and id. */
   public record Target(String type, String id) {
     public Target {
@@ -55,23 +58,10 @@ public final class Erasure {
     }
   }
 
-  /** A push that would make {@code child} belong to {@code owner}, which was erased for good. */
-  public static final class Orphaned extends IllegalStateException {
-    public Orphaned(Target child, Target owner) {
-      super(
-          child.type()
-              + " '"
-              + child.id()
-              + "' belongs to "
-              + owner.type()
-              + " '"
-              + owner.id()
-              + "', which was pruned");
-    }
-  }
-
   /** What one erasure removed: the entities, per type, and the events that went with them. */
   public record Result(List<Target> entities, int events) {
+    public static final Result NONE = new Result(List.of(), 0);
+
     public Result {
       entities = List.copyOf(entities);
     }
@@ -79,28 +69,43 @@ public final class Erasure {
     public int count(String type) {
       return (int) entities.stream().filter(target -> target.type().equals(type)).count();
     }
+
+    public Result plus(Result other) {
+      var all = new ArrayList<>(entities);
+      all.addAll(other.entities);
+      return new Result(all, events + other.events);
+    }
   }
 
-  /** A {@code child} belongs to the {@code parent} its {@code column} names. */
-  private record Link(String parent, String child, String table, String column) {}
+  /** The entity type a state belongs to through {@code column}, which names its id. */
+  public record Owner(String type, String column) {}
+
+  /**
+   * A {@code child} belongs to the {@code parent} its {@code column} names. A {@code bound} child
+   * cannot outlive its parent's row — the database refuses it — so every box follows the link.
+   */
+  private record Link(String parent, String child, String table, String column, boolean bound) {}
 
   private static final List<Link> LINKS =
       List.of(
-          new Link(SPEC, RUN, "runs", "spec_id"),
-          new Link(SPEC, REVIEW, "reviews", "spec_id"),
-          new Link(ROOM, MESSAGE, "room_messages", "room_id"),
-          new Link(ROOM, RUN, "runs", "room_id"),
-          new Link(MESSAGE, MESSAGE, "room_messages", "reply_to"),
-          new Link(PROJECT, SPEC, "specs", "project"),
-          new Link(PROJECT, ROOM, "rooms", "project"),
-          new Link(PROJECT, FILE, "project_files", "project"),
-          new Link(PROJECT, RUN, "runs", "project"));
+          new Link(SPEC, RUN, "runs", "spec_id", false),
+          new Link(SPEC, REVIEW, "reviews", "spec_id", false),
+          new Link(ROOM, MESSAGE, "room_messages", "room_id", false),
+          new Link(ROOM, RUN, "runs", "room_id", false),
+          new Link(MESSAGE, MESSAGE, "room_messages", "reply_to", true),
+          new Link(PROJECT, SPEC, "specs", "project", false),
+          new Link(PROJECT, ROOM, "rooms", "project", false),
+          new Link(PROJECT, FILE, "project_files", "project", false),
+          new Link(PROJECT, RUN, "runs", "project", false));
 
   private final Sqlite db;
   private final ChangeLog changeLog;
   private final SyncConflicts conflicts;
   private final EventStore events;
   private final EraseRequests requests;
+  private final SpecStore specs;
+  private final RunStore runs;
+  private final SlackThreadStore slackThreads;
   private final Map<String, SyncedStore> stores = new LinkedHashMap<>();
 
   public Erasure(Sqlite db) {
@@ -109,70 +114,61 @@ public final class Erasure {
     this.conflicts = new SyncConflicts(db);
     this.events = new EventStore(db);
     this.requests = new EraseRequests(db);
+    this.specs = new SpecStore(db);
+    this.runs = new RunStore(db);
+    this.slackThreads = new SlackThreadStore(db);
     for (var entity : SyncedEntities.all()) {
       stores.put(entity.type(), entity.store(db));
     }
   }
 
-  /**
-   * Every entity erasing {@code roots} removes, each once, roots first and then what belongs to
-   * them. Reads this box as it is now: a spec's runs are the rows naming it and the tombstoned runs
-   * whose last state named it.
-   */
-  public List<Target> closure(List<Target> roots) {
-    var closure = new LinkedHashSet<Target>();
-    for (var root : roots) {
-      requireKnownType(root.type());
-      extend(root, closure);
-    }
-    return List.copyOf(closure);
+  /** The owners a state of {@code type} names through a declared link. */
+  public static List<Owner> ownersOf(String type) {
+    return LINKS.stream()
+        .filter(link -> link.child().equals(type))
+        .map(link -> new Owner(link.parent(), link.column()))
+        .toList();
   }
 
   /**
-   * Erases {@code entities} as main: one transaction that removes each live row, its conflicts and
-   * its history, records one erasure row per entity attributed to {@code actor}, and drops the
-   * events of every erased spec, room and project. An entity already erased keeps the erasure it
-   * has and is not counted again.
+   * Every entity erasing {@code roots} removes, each once, roots first and then what belongs to
+   * them, as main decides it: a spec's runs are the rows naming it and the tombstoned runs whose
+   * last state named it.
+   */
+  public List<Target> closure(List<Target> roots) {
+    return closure(roots, false);
+  }
+
+  /**
+   * Erases {@code entities} as main: one transaction that removes each live row, its conflicts, its
+   * box-local rows and its history, and records one erasure row per entity attributed to {@code
+   * actor}. An entity already erased keeps the erasure it has and is not counted again.
    */
   public Result erase(List<Target> entities, String actor, String origin) {
     return db.transaction(
         () -> {
           deferReplyConstraint();
           var erased = new ArrayList<Target>();
+          var dropped = 0;
           for (var target : entities) {
             requireKnownType(target.type());
             if (isErased(target)) {
               continue;
             }
-            remove(target);
+            dropped += remove(target);
             changeLog.erase(target.type(), target.id(), erasureRev(target), actor, origin);
             erased.add(target);
           }
-          return new Result(erased, dropEvents(erased));
-        });
-  }
-
-  /**
-   * Erases {@code root} and everything that belongs to it as main, in one transaction, and answers
-   * the root's erasure rev — the one it already carries when it was erased before, without reading
-   * what belongs to it again.
-   */
-  public String eraseClosure(Target root, String actor, String origin) {
-    return db.transaction(
-        () -> {
-          if (!isErased(root)) {
-            erase(closure(List.of(root)), actor, origin);
-          }
-          return changeLog.head(root.type(), root.id()).map(ChangeLog.Entry::rev).orElseThrow();
+          return new Result(erased, dropped);
         });
   }
 
   /**
    * Applies main's erasure of one entity on this box: records main's erasure row at {@code rev} and
-   * removes the entity and everything that belongs to it here. The entities that belong to it leave
-   * no erasure row of their own — main's arrive with their pages. Returns whether anything changed;
-   * an erasure this box already holds changes nothing, and one of an entity this box never held
-   * records only the erasure row.
+   * removes the entity with what belongs to it that main never acknowledged. What main held leaves
+   * with its own erasure row, in its own page. Returns whether anything changed; an erasure this
+   * box already holds changes nothing, and one of an entity this box never held records only the
+   * row.
    */
   public boolean adopt(String type, String id, String rev) {
     requireKnownType(type);
@@ -184,8 +180,7 @@ public final class Erasure {
           }
           deferReplyConstraint();
           var root = new Target(type, id);
-          var closure = closure(List.of(root));
-          for (var target : closure) {
+          for (var target : closure(List.of(root), true)) {
             remove(target);
             if (target.equals(root)) {
               changeLog.erase(type, id, rev, null, "sync");
@@ -193,129 +188,168 @@ public final class Erasure {
               changeLog.purge(target.type(), target.id());
             }
           }
-          dropEvents(closure);
           return true;
         });
   }
 
+  /**
+   * Removes {@code roots} and what belongs to them that main never acknowledged, leaving no erasure
+   * row: how a node prunes what it alone ever held, so there is nothing to ask of main and the ids
+   * stay free. Returns what went.
+   */
+  public Result discard(List<Target> roots) {
+    return db.transaction(
+        () -> {
+          deferReplyConstraint();
+          var discarded = closure(roots, true);
+          var dropped = 0;
+          for (var target : discarded) {
+            dropped += remove(target);
+            changeLog.purge(target.type(), target.id());
+          }
+          return new Result(discarded, dropped);
+        });
+  }
+
+  /** Whether this box holds anything of {@code target}: a history of it, or what belongs to it. */
+  public boolean holds(Target target) {
+    return changeLog.head(target.type(), target.id()).isPresent()
+        || closure(List.of(target)).size() > 1;
+  }
+
   /** Whether the latest word on {@code target} here is an erasure. */
   public boolean isErased(Target target) {
-    return changeLog
-        .head(target.type(), target.id())
-        .map(head -> head.kind() == ChangeLog.Kind.ERASURE)
-        .orElse(false);
+    return changeLog.isErased(target.type(), target.id());
+  }
+
+  /** Whether main never acknowledged {@code target}: it has no synced base on this box. */
+  public boolean unacknowledged(Target target) {
+    return stores.get(target.type()).baseRevOf(target.id()) == null;
   }
 
   /**
-   * The erased entity a pushed {@code snapshot} of {@code type} would belong to through a declared
-   * link, if any. A parent this box does not hold, or only holds deleted, is no reason to refuse —
-   * sync never depends on the order entities arrive in — but an erased one never comes back, so
-   * nothing may belong to it again.
+   * The closure, walked one level at a time with each link queried once per level, so its cost is
+   * linear in what it finds. A node ({@code asNode}) follows only children main never acknowledged,
+   * and bound ones.
    */
-  public static Optional<Target> erasedOwner(
-      ChangeLog changeLog, String type, Map<String, Object> snapshot) {
-    for (var link : LINKS) {
-      var parentId = link.child().equals(type) ? Snapshots.text(snapshot, link.column()) : null;
-      if (Strings.isNotBlank(parentId)
-          && changeLog
-              .head(link.parent(), parentId)
-              .filter(head -> head.kind() == ChangeLog.Kind.ERASURE)
-              .isPresent()) {
-        return Optional.of(new Target(link.parent(), parentId));
+  private List<Target> closure(List<Target> roots, boolean asNode) {
+    var closure = new LinkedHashSet<Target>();
+    var frontier = new ArrayList<Target>();
+    for (var root : roots) {
+      requireKnownType(root.type());
+      if (closure.add(root)) {
+        frontier.add(root);
       }
     }
-    return Optional.empty();
-  }
-
-  /**
-   * Adds {@code target} and everything linked to it. A spec's identity room is followed whether or
-   * not this box holds a row of it: messages are posted to a spec's room before any room row is
-   * minted.
-   */
-  private void extend(Target target, Set<Target> closure) {
-    if (!closure.add(target)) {
-      return;
-    }
-    for (var link : LINKS) {
-      if (link.parent().equals(target.type())) {
-        heldBy(link, target.id()).forEach(id -> extend(new Target(link.child(), id), closure));
+    var tombstoned = new HashMap<Link, Map<String, List<String>>>();
+    while (!frontier.isEmpty()) {
+      var next = new ArrayList<Target>();
+      for (var link : LINKS) {
+        var owners = idsOf(frontier, link.parent());
+        if (owners.isEmpty()) {
+          continue;
+        }
+        for (var id : heldBy(link, owners, tombstoned)) {
+          var child = new Target(link.child(), id);
+          if ((!asNode || link.bound() || unacknowledged(child)) && closure.add(child)) {
+            next.add(child);
+          }
+        }
       }
+      if (next.isEmpty()) {
+        for (var room : roomsLeftBehind(closure, asNode)) {
+          closure.add(room);
+          next.add(room);
+        }
+      }
+      frontier = next;
     }
-    if (SPEC.equals(target.type()) && mintedItsRoom(target.id())) {
-      extend(new Target(ROOM, target.id()), closure);
-    }
+    return List.copyOf(closure);
   }
 
   /**
-   * The ids of {@code link}'s child that belong to {@code owner}: the live rows naming it, then the
-   * entities whose latest entry here is a tombstone whose last state named it — a deleted child
+   * The rooms of specs in {@code closure} that nothing left behind converses in: a room goes when
+   * the spec that minted it is erased or going and no spec outside the closure — live, or deleted
+   * and restorable — lives in it. A spec this box holds neither a row nor a tombstone of minted
+   * nothing here, so a room that merely shares its id is not its to take.
+   */
+  private List<Target> roomsLeftBehind(Set<Target> closure, boolean asNode) {
+    var rooms = new ArrayList<Target>();
+    for (var target : closure) {
+      if (!SPEC.equals(target.type())) {
+        continue;
+      }
+      var roomId =
+          specs.lastKnown(target.id()).map(SpecStore.LastKnown::roomIdOrIdentity).orElse(null);
+      if (roomId == null) {
+        continue;
+      }
+      var room = new Target(ROOM, roomId);
+      var minter = new Target(SPEC, roomId);
+      if (closure.contains(room)
+          || rooms.contains(room)
+          || (!closure.contains(minter) && !isErased(minter))
+          || (asNode && !unacknowledged(room))
+          || specs.inRoom(roomId).stream()
+              .anyMatch(id -> !closure.contains(new Target(SPEC, id)))) {
+        continue;
+      }
+      rooms.add(room);
+    }
+    return rooms;
+  }
+
+  /**
+   * The ids of {@code link}'s child that belong to one of {@code owners}: the live rows naming it,
+   * then the entities whose latest entry is a tombstone whose last state named it — a deleted child
    * still belongs to its parent, and its history must not outlive the parent's erasure.
    */
-  private List<String> heldBy(Link link, String owner) {
-    var ids =
-        new LinkedHashSet<>(
-            db.query(
-                "SELECT id FROM "
-                    + link.table()
-                    + " WHERE "
-                    + link.column()
-                    + " = ? ORDER BY rowid",
-                row -> row.text(0),
-                owner));
-    ids.addAll(
-        db.query(
-            """
-            SELECT h.entity_id FROM change_heads h JOIN change_log l ON l.seq = h.seq
-            WHERE h.entity_type = ? AND l.kind = 'tombstone'
-            AND json_extract(l.snapshot, '$.' || ?) = ?
-            ORDER BY h.seq""",
-            row -> row.text(0),
-            link.child(),
-            link.column(),
-            owner));
-    return List.copyOf(ids);
-  }
-
-  /**
-   * Whether spec {@code id} minted the room that shares its id — the identity room it is erased
-   * with — rather than being born into a room it only borrows. Read from the live row, or from the
-   * last state a tombstone kept; a spec this box holds neither of minted nothing here, so a room
-   * that happens to share its id is not its to take.
-   */
-  private boolean mintedItsRoom(String id) {
-    var live =
-        db.queryOne("SELECT COALESCE(room_id, id) FROM specs WHERE id = ?", row -> row.text(0), id);
-    if (live.isPresent()) {
-      return live.get().equals(id);
+  private Set<String> heldBy(
+      Link link, List<String> owners, Map<Link, Map<String, List<String>>> tombstoned) {
+    var ids = new LinkedHashSet<String>();
+    for (var from = 0; from < owners.size(); from += BATCH) {
+      var batch = owners.subList(from, Math.min(owners.size(), from + BATCH));
+      ids.addAll(
+          db.query(
+              "SELECT id FROM "
+                  + link.table()
+                  + " WHERE "
+                  + link.column()
+                  + " IN ("
+                  + String.join(", ", batch.stream().map(owner -> "?").toList())
+                  + ") ORDER BY rowid",
+              row -> row.text(0),
+              batch.toArray()));
     }
-    return changeLog
-        .head(SPEC, id)
-        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
-        .map(head -> identity(id, Snapshots.text(YamlUtil.parseMap(head.snapshot()), "room_id")))
-        .orElse(false);
+    var byOwner =
+        tombstoned.computeIfAbsent(link, key -> changeLog.tombstonedBy(key.child(), key.column()));
+    for (var owner : owners) {
+      ids.addAll(byOwner.getOrDefault(owner, List.of()));
+    }
+    return ids;
   }
 
-  private static boolean identity(String specId, String roomId) {
-    return Strings.isBlank(roomId) || roomId.equals(specId);
+  private static List<String> idsOf(Collection<Target> targets, String type) {
+    return targets.stream().filter(target -> target.type().equals(type)).map(Target::id).toList();
   }
 
-  private void remove(Target target) {
+  /** Removes one entity's live row and every box-local row keyed by it; returns events dropped. */
+  private int remove(Target target) {
     stores.get(target.type()).eraseRow(target.id());
     conflicts.erase(target.type(), target.id());
     requests.drop(target.type(), target.id());
-  }
-
-  private int dropEvents(List<Target> erased) {
-    var dropped = 0;
-    for (var target : erased) {
-      dropped +=
-          switch (target.type()) {
-            case SPEC, ROOM -> events.eraseBySpec(target.id());
-            case PROJECT -> events.eraseByProject(target.id());
-            default -> 0;
-          };
-    }
-    return dropped;
+    return switch (target.type()) {
+      case SPEC -> {
+        slackThreads.eraseBySpec(target.id());
+        yield events.eraseBySpec(target.id());
+      }
+      case ROOM -> events.eraseBySpec(target.id());
+      case PROJECT -> {
+        runs.eraseLeases(target.id());
+        yield events.eraseByProject(target.id());
+      }
+      default -> 0;
+    };
   }
 
   /** A rev no other entry of the entity carries: one past its latest counter, hashed anew. */

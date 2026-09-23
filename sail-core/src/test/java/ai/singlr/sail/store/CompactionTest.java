@@ -96,7 +96,7 @@ class CompactionTest {
   }
 
   @Test
-  void anOpenConflictsBaseSurvivesCompaction() {
+  void theBaseAParkedConflictMergesAgainstIsTheSyncedBaseSoItSurvives() {
     specs.create(spec("parked"));
     var base = specs.latestRev("parked");
     db.execute("UPDATE specs SET base_rev = ? WHERE id = 'parked'", base);
@@ -107,7 +107,9 @@ class CompactionTest {
 
     new BlobStore(db).gc(BlobStore.Compaction.of("spec", List.of("parked")), false);
 
+    assertEquals(base, specs.baseRevOf("parked"));
     assertTrue(changes.at("spec", "parked", base).isPresent());
+    assertEquals(ChangeLog.HISTORY_REVISIONS + 1, changes.history("spec", "parked").size());
   }
 
   @Test
@@ -179,7 +181,6 @@ class CompactionTest {
         var node = new SyncBox(dir, "node")) {
       main.specs.create(spec("busy"));
       SyncBox.round(main.db, node.db, "spec");
-      var base = node.specs.baseRevOf("busy");
       for (var i = 1; i <= 30; i++) {
         node.specs.update(titled("busy", "node " + i));
       }
@@ -188,11 +189,13 @@ class CompactionTest {
       SyncBox.round(main.db, node.db, "spec");
 
       var history = new ChangeLog(node.db).history("spec", "busy");
-      assertTrue(history.size() <= ChangeLog.HISTORY_REVISIONS + 1, history.size() + " entries");
+      assertEquals(ChangeLog.HISTORY_REVISIONS, history.size());
       assertEquals("node 30", main.specs.findById("busy").orElseThrow().title());
-      assertEquals(
-          node.specs.latestRev("busy"), node.specs.baseRevOf("busy"), "the push was adopted");
-      assertTrue(base != null);
+      var base = node.specs.baseRevOf("busy");
+      assertEquals(node.specs.latestRev("busy"), base, "the push was adopted");
+      assertTrue(
+          history.stream().anyMatch(entry -> entry.rev().equals(base)),
+          "the base the node now syncs from survived");
     }
   }
 

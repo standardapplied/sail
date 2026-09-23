@@ -13,7 +13,6 @@ import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -24,6 +23,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -37,14 +37,16 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class RetentionSweeperTest {
 
+  private static final Instant NOW = Instant.parse("2026-09-23T00:00:00Z");
+
   @TempDir Path dir;
   private Sqlite db;
   private SpecStore specs;
   private final AtomicBoolean main = new AtomicBoolean(true);
-  private final AtomicReference<Instant> clock =
-      new AtomicReference<>(Instant.parse("2026-09-23T00:00:00Z"));
+  private final AtomicReference<Instant> clock = new AtomicReference<>(NOW);
   private final AtomicReference<RetentionConfig> policy =
       new AtomicReference<>(RetentionConfig.none());
+  private final ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
   private RetentionSweeper sweeper;
 
   @BeforeEach
@@ -52,15 +54,13 @@ class RetentionSweeperTest {
     db = Sqlite.open(dir.resolve("main.db"));
     new SchemaManager(db).migrate();
     specs = new SpecStore(db);
-    var ops =
-        new GlobalSpecOperations(
-            specs,
-            null,
-            null,
-            null,
-            () -> new RoomStore(db),
-            new GlobalSpecOperations.Pruning(db, main::get, clock::get));
-    sweeper = new RetentionSweeper(ops, policy::get, new BlobStore(db), main::get);
+    sweeper =
+        new RetentionSweeper(
+            new SpecPruner(db, null, main::get, clock::get),
+            policy::get,
+            new BlobStore(db),
+            main::get,
+            scheduler);
   }
 
   @AfterEach
@@ -71,85 +71,116 @@ class RetentionSweeperTest {
 
   @Test
   void withNoRetentionBlockNothingIsErasedAndHistoryIsStillCompacted() {
-    archivedLongAgo("old");
-    for (var i = 0; i < 25; i++) {
-      specs.update(row("busy", "edit " + i, SpecStatus.PENDING));
-    }
+    archived("old", NOW.minus(Duration.ofDays(400)));
+    busyHistory();
 
-    var swept = sweeper.sweep();
+    assertNull(sweeper.retain(), "no policy, no prune");
+    var collected = sweeper.collect();
 
-    assertNull(swept.pruned(), "no policy, no prune");
     assertTrue(specs.findById("old").isPresent());
-    assertTrue(swept.collected().compacted() > 0, "compaction is a constant, not a policy");
+    assertEquals(6, collected.compacted(), "compaction is a constant, not a policy");
     assertEquals(ChangeLog.HISTORY_REVISIONS, new ChangeLog(db).history("spec", "busy").size());
   }
 
   @Test
   void aBlockTurnsArchivedPastItsAgeIntoErasuresOnMainAsRetention() {
-    archivedLongAgo("old");
-    specs.create(row("recent", "Recent", SpecStatus.ARCHIVED));
+    archived("old", NOW.minus(Duration.ofDays(200)));
+    archived("recent", NOW.minus(Duration.ofDays(10)));
     policy.set(new RetentionConfig(Duration.ofDays(90), null, null));
 
-    var swept = sweeper.sweep();
-
-    assertEquals(1, swept.pruned().specs());
+    assertEquals(1, sweeper.retain().specs());
     assertTrue(specs.findById("old").isEmpty());
-    assertTrue(specs.findById("recent").isPresent(), "archived today is inside the age");
+    assertTrue(specs.findById("recent").isPresent(), "archived ten days ago is inside the age");
     assertEquals(
         "sail-retention",
         new ChangeLog(db).head("spec", "old").orElseThrow().actor(),
         "the erasure row names retention as who pruned");
 
-    clock.set(clock.get().plus(Duration.ofDays(400)));
-    assertEquals(1, sweeper.sweep().pruned().specs(), "the same policy, later, takes the rest");
+    clock.set(NOW.plus(Duration.ofDays(400)));
+    assertEquals(1, sweeper.retain().specs(), "the same policy, later, takes the rest");
   }
 
   @Test
   void aBlockWithoutAnArchivedAgePrunesNoSpecs() {
-    archivedLongAgo("old");
+    archived("old", NOW.minus(Duration.ofDays(400)));
     policy.set(new RetentionConfig(null, Duration.ofDays(30), Duration.ofDays(30)));
 
-    var swept = sweeper.sweep();
-
-    assertEquals(0, swept.pruned().specs());
+    assertEquals(0, sweeper.retain().specs());
     assertTrue(specs.findById("old").isPresent(), "only prune_archived_after erases specs");
   }
 
   @Test
   void nothingRunsOnANode() {
-    archivedLongAgo("old");
+    archived("old", NOW.minus(Duration.ofDays(400)));
+    busyHistory();
     policy.set(new RetentionConfig(Duration.ofDays(1), Duration.ofDays(1), Duration.ofDays(1)));
     main.set(false);
 
-    var swept = sweeper.sweep();
+    var out = capture(false, sweeper::sweepQuietly);
 
-    assertEquals(RetentionSweeper.Swept.NOTHING, swept);
+    assertEquals("", out);
     assertTrue(specs.findById("old").isPresent());
+    assertEquals(26, new ChangeLog(db).history("spec", "busy").size(), "nor any compaction");
   }
 
   @Test
-  void aQuietSweepReportsWhatItDidAndSurvivesAFailure() {
-    archivedLongAgo("old");
-    for (var i = 0; i < 25; i++) {
-      specs.update(row("busy", "edit " + i, SpecStatus.PENDING));
-    }
+  void aQuietSweepReportsWhatItDidAndAFailedPolicyStillCompacts() {
+    archived("old", NOW.minus(Duration.ofDays(400)));
+    busyHistory();
     policy.set(new RetentionConfig(Duration.ofDays(90), null, null));
 
     var out = capture(false, sweeper::sweepQuietly);
-    policy.set(null);
-    var err = capture(true, sweeper::sweepQuietly);
+    busyHistory();
+    var failing =
+        new RetentionSweeper(
+            new SpecPruner(db, null, main::get, clock::get),
+            () -> {
+              throw new IllegalStateException("host.yaml: retention.messages is not an age");
+            },
+            new BlobStore(db),
+            main::get,
+            scheduler);
+    var err = capture(true, () -> capture(false, failing::sweepQuietly));
 
-    assertTrue(out.contains("sail retention: pruned 1 specs, 0 messages and 0 runs"), out);
-    assertTrue(out.contains("sail retention: compacted"), out);
-    assertTrue(err.contains("this sweep failed and the next one retries"), err);
-    sweeper.start();
+    assertTrue(out.contains("sail retention: erased 1 specs"), out);
+    assertTrue(out.contains("sail retention: compacted 6 history entries"), out);
+    assertTrue(err.contains("retention failed and the next sweep retries"), err);
+    assertTrue(err.contains("retention.messages is not an age"), err);
+    assertEquals(
+        ChangeLog.HISTORY_REVISIONS,
+        new ChangeLog(db).history("spec", "busy").size(),
+        "the failed policy did not skip the compaction");
   }
 
-  private void archivedLongAgo(String id) {
+  @Test
+  void aSweepWithNothingToDoSaysNothingAndAFailedCollectionIsReportedNotThrown() {
+    assertEquals("", capture(false, sweeper::sweepQuietly));
+
+    var err = capture(true, () -> db.transaction(() -> capture(false, sweeper::sweepQuietly)));
+
+    assertTrue(err.contains("compaction failed and the next sweep retries"), err);
+  }
+
+  @Test
+  void startingSchedulesOneDailySweepAndClosingStopsIt() {
+    sweeper.start();
+
+    assertEquals(1, scheduler.getQueue().size());
+    sweeper.close();
+    assertTrue(scheduler.isShutdown());
+  }
+
+  private void archived(String id, Instant since) {
     specs.create(row(id, id, SpecStatus.ARCHIVED));
-    db.execute("UPDATE specs SET archived_at = '2026-01-01T00:00:00Z' WHERE id = ?", id);
+    db.execute("UPDATE specs SET archived_at = ? WHERE id = ?", since.toString(), id);
+  }
+
+  private void busyHistory() {
     if (specs.findById("busy").isEmpty()) {
       specs.create(row("busy", "busy", SpecStatus.PENDING));
+    }
+    for (var i = 0; i < 25; i++) {
+      specs.update(row("busy", "edit " + i + " " + System.nanoTime(), SpecStatus.PENDING));
     }
   }
 

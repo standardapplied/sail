@@ -180,23 +180,38 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return journal.comparableSnapshot(id);
   }
 
-  /** Every file id this box has touched for a project, including tombstoned ones. */
-  public List<String> idsForProject(String project) {
-    return db.query(
-        "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ? AND entity_id LIKE ?",
-        row -> row.text(0),
-        ENTITY,
-        project + "/%");
+  /**
+   * Whether {@code project} was pruned: its files are erased everywhere, and none is added again.
+   */
+  public boolean projectPruned(String project) {
+    return changeLog.isErased(Erasure.PROJECT, project);
   }
 
-  /** Projects this box has any file for, current or tombstoned — drives materialization. */
+  /**
+   * Every file id this box has touched for a project, tombstoned ones included, erased ones not.
+   */
+  public List<String> idsForProject(String project) {
+    return db.query(
+        MATERIALIZABLE + " AND h.entity_id LIKE ?", row -> row.text(0), ENTITY, project + "/%");
+  }
+
+  /**
+   * Projects this box has any file for, current or tombstoned — drives materialization. An erased
+   * file is not one: it left no history to tell a copy this box wrote from one a person edited, so
+   * whatever of it is on disk stays as it is, with the project's container.
+   */
   public LinkedHashSet<String> projectsWithFiles() {
     var projects = new LinkedHashSet<String>();
-    for (var id : syncEntityIds()) {
+    for (var id : db.query(MATERIALIZABLE, row -> row.text(0), ENTITY)) {
       projects.add(id.substring(0, id.indexOf('/')));
     }
     return projects;
   }
+
+  private static final String MATERIALIZABLE =
+      """
+      SELECT h.entity_id FROM change_heads h JOIN change_log l ON l.seq = h.seq
+      WHERE h.entity_type = ? AND l.kind <> 'erasure'""";
 
   /**
    * Whether this content-and-mode pair is a recorded version of the file. A revision the content

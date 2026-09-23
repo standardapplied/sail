@@ -291,6 +291,10 @@ public final class BlobStore {
 
     public Compaction {
       ids = List.copyOf(ids);
+      if (all ? type != null || !ids.isEmpty() : type == null && !ids.isEmpty()) {
+        throw new IllegalArgumentException(
+            "A compaction names every entity, or ids of one type, or nothing");
+      }
     }
 
     public static Compaction of(String type, Collection<String> ids) {

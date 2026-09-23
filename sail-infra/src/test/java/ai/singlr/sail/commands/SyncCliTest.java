@@ -165,6 +165,15 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("DROP TRIGGER change_log_kind_from_deleted");
+    for (var index :
+        List.of(
+            "idx_change_log_tombstones",
+            "idx_room_messages_reply",
+            "idx_runs_room",
+            "idx_rooms_project",
+            "idx_specs_room",
+            "idx_run_delivered_message")) db.execute("DROP INDEX " + index);
     db.execute("DROP TABLE erase_requests");
     db.execute("DROP TRIGGER specs_status_since_insert");
     db.execute("DROP TRIGGER specs_status_since_update");

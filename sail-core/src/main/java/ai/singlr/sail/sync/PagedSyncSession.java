@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,6 +64,7 @@ public final class PagedSyncSession implements SyncSession {
   private final int frame;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
+  private Map<String, Asked> asked;
   private BlobStore blobs;
   private Erasure erasure;
   private EraseRequests eraseRequests;
@@ -70,7 +72,7 @@ public final class PagedSyncSession implements SyncSession {
   private long fetchedBytes;
   private long sentBytes;
   private boolean sawTombstone;
-  private boolean sawErasure;
+  private int adopted;
   private Set<String> touched = Set.of();
   private String broken;
 
@@ -99,6 +101,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.blobs = blobs;
     copy.erasure = erasure;
     copy.eraseRequests = eraseRequests;
+    copy.asked = asked;
     copy.contentFields = contentFields;
     return copy;
   }
@@ -146,19 +149,26 @@ public final class PagedSyncSession implements SyncSession {
           try (var scope = blobs.retain()) {
             report = reconcileType(type, local);
           }
-          var collected =
-              blobs.gc(BlobStore.Compaction.of(type, touched), sawTombstone || sawErasure);
-          return new TypeReport(
-              report.type(),
-              report.report(),
-              report.pages(),
-              report.entries(),
-              report.skipped(),
-              report.failure(),
-              report.fetchedBytes(),
-              report.sentBytes(),
-              collected.freed());
+          return report.withFreedBytes(collect(type));
         });
+  }
+
+  /**
+   * Compacts what the type's round touched and, after a deletion or an erasure, collects the
+   * content left unreferenced. Housekeeping on data already synced: a failure here is reported and
+   * left to the next round or {@code sail sync gc}, never charged to the type.
+   */
+  private long collect(String type) {
+    try {
+      return blobs.gc(BlobStore.Compaction.of(type, touched), sawTombstone || adopted > 0).freed();
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [sync] "
+              + type
+              + ": could not collect content; 'sail sync gc' frees it: "
+              + e.getMessage());
+      return 0;
+    }
   }
 
   /**
@@ -193,13 +203,17 @@ public final class PagedSyncSession implements SyncSession {
     var fetchedBefore = fetchedBytes;
     var sentBefore = sentBytes;
     sawTombstone = false;
-    sawErasure = false;
     touched = Set.of();
+    var ask = askedFor(type);
+    adopted = ask.adopted();
     var tip = tips().get(type);
     if (tip == null) {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
     }
-    var asked = askErasures(type);
+    if (!ask.refusals().isEmpty()) {
+      throw new SyncTransportException(
+          "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
+    }
     var since = local.checkpoint(mainId);
     var report = SyncEngine.Report.NONE;
     var pages = 0;
@@ -234,28 +248,49 @@ public final class PagedSyncSession implements SyncSession {
     touched = reconciled;
     return new TypeReport(
         type,
-        report,
+        report.plus(new SyncEngine.Report(adopted, 0, 0, 0)),
         pages,
         entries,
-        pages == 0 && dirty.isEmpty() && asked == 0,
+        pages == 0 && dirty.isEmpty() && ask.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore);
   }
 
+  /** What asking main to erase one type's pending prunes came to. */
+  private record Asked(int count, int adopted, List<String> refusals) {
+    static final Asked NONE = new Asked(0, 0, List.of());
+  }
+
   /**
-   * Offers main every prune this node asked for of {@code type}, in frame-bounded batches, and
-   * applies each erasure main answers at its rev. A refusal drops its request — main decided on its
-   * own copy — and fails the type naming the reason, once every answer of the batch is applied.
-   * Returns how many were asked.
+   * What asking main to erase {@code type}'s pending prunes came to. The first type of a session
+   * asks for every type, before main's tips are read, so the erasure rows main writes for them —
+   * and for everything that belongs to them, in other types — page in this same round.
    */
-  private int askErasures(String type) {
-    if (eraseRequests == null) {
-      return 0;
+  private Asked askedFor(String type) {
+    if (asked == null) {
+      asked = new HashMap<>();
+      for (var entity :
+          eraseRequests == null ? List.<SyncedEntities.Entity>of() : SyncedEntities.all()) {
+        var ids = eraseRequests.pending(entity.type());
+        if (!ids.isEmpty()) {
+          asked.put(entity.type(), askErasures(entity.type(), ids));
+          tips = null;
+        }
+      }
     }
-    var ids = eraseRequests.pending(type);
+    return asked.getOrDefault(type, Asked.NONE);
+  }
+
+  /**
+   * Offers main the prunes this node asked for of {@code type}, in frame-bounded batches, and
+   * applies each erasure main answers at its rev. A refusal drops its request — main decided on its
+   * own copy — and fails the type's reconcile, naming the reason, once every answer is applied.
+   */
+  private Asked askErasures(String type, List<String> ids) {
     var asks = ids.stream().map(MainReplica.Offer::erasure).toList();
     var refusals = new ArrayList<String>();
+    var applied = 0;
     for (var offset = 0; offset < asks.size(); ) {
       var offers = fitting(asks, offset, SyncWire::encodedLength);
       var batch = offers.stream().map(MainReplica.Offer::id).toList();
@@ -268,8 +303,7 @@ public final class PagedSyncSession implements SyncSession {
         var id = batch.get(i);
         switch (results.results().get(i)) {
           case SyncWire.Accepted accepted when accepted.id().equals(id) -> {
-            erasure.adopt(type, id, accepted.rev());
-            sawErasure = true;
+            if (erasure.adopt(type, id, accepted.rev())) applied++;
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
             eraseRequests.drop(type, id);
@@ -284,11 +318,7 @@ public final class PagedSyncSession implements SyncSession {
       }
       offset += batch.size();
     }
-    if (!refusals.isEmpty()) {
-      throw new SyncTransportException(
-          "refused", type + ": main refused to prune " + String.join("; ", refusals), null);
-    }
-    return ids.size();
+    return new Asked(ids.size(), applied, List.copyOf(refusals));
   }
 
   /**
@@ -311,7 +341,7 @@ public final class PagedSyncSession implements SyncSession {
             null);
       }
       if (erasure.adopt(type, entry.id(), entry.rev())) {
-        sawErasure = true;
+        adopted++;
       } else {
         remaining.add(entry);
       }

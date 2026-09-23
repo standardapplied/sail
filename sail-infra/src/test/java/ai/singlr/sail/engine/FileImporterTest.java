@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -16,6 +17,7 @@ import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -109,6 +111,25 @@ class FileImporterTest {
     assertEquals(2, report.imported());
     assertTrue(files.find("acme", "a.txt").isPresent());
     assertTrue(files.find("globex", "b.txt").isPresent());
+  }
+
+  @Test
+  void aPrunedProjectsFilesLeftOnDiskAreNeverImportedAndTheOthersStillAre() throws Exception {
+    writeOnDisk("acme", "a.txt", "A");
+    importer.importAll();
+    var erasure = new Erasure(db);
+    erasure.erase(
+        erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "uday", "local");
+    writeOnDisk("globex", "b.txt", "B");
+
+    var report = importer.importAll();
+
+    assertEquals(1, report.imported());
+    assertTrue(files.find("acme", "a.txt").isEmpty());
+    assertTrue(
+        report.notes().stream()
+            .anyMatch(note -> note.contains("'acme'") && note.contains("pruned")),
+        report.notes().toString());
   }
 
   @Test

@@ -5,32 +5,35 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
-import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.util.Objects;
+import java.util.List;
 import java.util.Optional;
 
 /**
  * Main's decision on a node's request to erase, made against main's own copy — never the node's. A
- * spec is erased by an admin or by its owner: the assignee, or its creator when it is unassigned,
- * read from the live row or from the last state its tombstone kept. One main has already erased has
+ * spec is erased once it is archived, cancelled or deleted, by an admin or by its owner ({@link
+ * SpecStore#ownerOf}), and never while a run of it is unfinished. One main has already erased has
  * nothing left to protect, so asking again only answers the erasure it has; one main holds nothing
- * of has no owner main can establish, so only an admin may erase it. A whole project is erased only
- * by an admin, and nothing else is erased on request: messages and runs go with what they belong
+ * of has no owner main can establish. A whole project is erased only by an admin, and only one main
+ * holds something of; nothing else is erased on request: messages and runs go with what they belong
  * to, or by main's own retention.
  */
 final class EraseAuthority {
 
-  private final Sqlite db;
   private final ChangeLog changeLog;
+  private final SpecStore specs;
+  private final RunStore runs;
+  private final Erasure erasure;
 
   EraseAuthority(Sqlite db) {
-    this.db = Objects.requireNonNull(db, "db");
     this.changeLog = new ChangeLog(db);
+    this.specs = new SpecStore(db);
+    this.runs = new RunStore(db);
+    this.erasure = new Erasure(db);
   }
 
   /** Why {@code principal} may not erase {@code type} {@code id}; empty when it may. */
@@ -41,50 +44,51 @@ final class EraseAuthority {
     if (!Erasure.SPEC.equals(type) && !Erasure.PROJECT.equals(type)) {
       return Optional.of("only specs and projects are pruned on request, not a " + type);
     }
-    if (principal.admin() || erased(type, id)) {
+    if (changeLog.isErased(type, id)) {
       return Optional.empty();
     }
     if (Erasure.PROJECT.equals(type)) {
-      return Optional.of("pruning a whole project is admin-only");
+      if (!principal.admin()) {
+        return Optional.of("pruning a whole project is admin-only");
+      }
+      return erasure.holds(new Erasure.Target(type, id))
+          ? Optional.empty()
+          : Optional.of("main holds no project '" + id + "'");
     }
-    var owner = owner(id);
-    if (owner.isEmpty()) {
+    var spec = specs.lastKnown(id);
+    if (spec.isEmpty()) {
       return Optional.of(
           "main holds no spec '" + id + "', so it cannot tell whose it is; sync it before pruning");
     }
-    if (owner.get().equals(principal.handle())) {
+    if (!spec.get().prunable()) {
+      return Optional.of(
+          "spec '"
+              + id
+              + "' is "
+              + spec.get().status().wire()
+              + " on main; archive or cancel it before pruning");
+    }
+    var owner = spec.get().owner();
+    if (principal.admin() || owner.equals(principal.handle())) {
       return Optional.empty();
     }
-    if (owner.get().isBlank()) {
+    if (owner.isBlank()) {
       return Optional.of("spec '" + id + "' has no owner; only an admin can prune it");
     }
-    return Optional.of("spec '" + id + "' belongs to '" + owner.get() + "'; ask them or an admin");
+    return Optional.of("spec '" + id + "' belongs to '" + owner + "'; ask them or an admin");
   }
 
-  private boolean erased(String type, String id) {
-    return changeLog
-        .head(type, id)
-        .filter(head -> head.kind() == ChangeLog.Kind.ERASURE)
-        .isPresent();
-  }
-
-  private Optional<String> owner(String specId) {
-    var live =
-        db.queryOne(
-            "SELECT assignee, created_by FROM specs WHERE id = ?",
-            row -> ownerOf(row.text(0), row.text(1)),
-            specId);
-    if (live.isPresent()) {
-      return live;
-    }
-    return changeLog
-        .head(Erasure.SPEC, specId)
-        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
-        .map(head -> YamlUtil.parseMap(head.snapshot()))
-        .map(last -> ownerOf(Snapshots.text(last, "assignee"), Snapshots.text(last, "created_by")));
-  }
-
-  private static String ownerOf(String assignee, String createdBy) {
-    return Strings.isNotBlank(assignee) ? assignee : Objects.toString(createdBy, "");
+  /** Why erasing {@code plan} must wait: a run in it has not finished. Empty when none is live. */
+  Optional<String> busy(List<Erasure.Target> plan) {
+    var unfinished =
+        runs.unfinished(
+            plan.stream()
+                .filter(target -> Erasure.RUN.equals(target.type()))
+                .map(Erasure.Target::id)
+                .toList());
+    return unfinished.isEmpty()
+        ? Optional.empty()
+        : Optional.of(
+            "run '" + unfinished.getFirst() + "' has not finished; stop it before pruning");
   }
 }

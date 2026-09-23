@@ -11,15 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,7 +32,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +58,7 @@ class SpecPruneTest {
   private final AtomicBoolean authoritative = new AtomicBoolean(true);
   private final AtomicReference<Instant> clock = new AtomicReference<>(NOW);
   private EventBus bus;
+  private SpecPruner pruner;
   private GlobalSpecOperations ops;
 
   @BeforeEach
@@ -63,14 +68,8 @@ class SpecPruneTest {
     specs = new SpecStore(db);
     rooms = new RoomStore(db);
     bus = new EventBus();
-    ops =
-        new GlobalSpecOperations(
-            specs,
-            null,
-            bus,
-            new RunStore(db),
-            () -> rooms,
-            new GlobalSpecOperations.Pruning(db, authoritative::get, clock::get));
+    pruner = new SpecPruner(db, bus, authoritative::get, clock::get);
+    ops = new GlobalSpecOperations(specs, null, bus, new RunStore(db), () -> rooms);
   }
 
   @AfterEach
@@ -84,10 +83,10 @@ class SpecPruneTest {
     archived("old", "uday");
     specs.create(row("kept", "uday", SpecStatus.PENDING));
 
-    var rehearsed = ops.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    var rehearsed = pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
     assertTrue(specs.findById("old").isPresent(), "a dry run erases nothing");
     var published = bus.publishedCount();
-    var erased = ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var erased = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
     assertTrue(rehearsed.dryRun());
     assertFalse(erased.dryRun());
@@ -113,21 +112,21 @@ class SpecPruneTest {
 
     assertRefused(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        () -> ops.prune(PruneRequest.ids(List.of("theirs"), true), MADY));
+        () -> pruner.prune(PruneRequest.ids(List.of("theirs"), true), MADY));
     assertRefused(
         ErrorCode.READ_ONLY_CREDENTIAL,
         () ->
-            ops.prune(
+            pruner.prune(
                 PruneRequest.ids(List.of("theirs"), true),
                 new Actor("uday", Role.VIEWER, Actor.Lane.API)));
     assertRefused(
         ErrorCode.AGENT_LANE_FORBIDDEN,
         () ->
-            ops.prune(
+            pruner.prune(
                 PruneRequest.ids(List.of("theirs"), false),
                 Actor.agentPrincipal("claude/r", "uday")));
     assertTrue(specs.findById("theirs").isPresent());
-    assertEquals(1, ops.prune(PruneRequest.ids(List.of("theirs"), true), ADMIN).specs());
+    assertEquals(1, pruner.prune(PruneRequest.ids(List.of("theirs"), true), ADMIN).specs());
   }
 
   @Test
@@ -136,9 +135,10 @@ class SpecPruneTest {
 
     assertRefused(
         ErrorCode.FORBIDDEN_ADMIN_ONLY,
-        () -> ops.prune(new PruneRequest(List.of(), policy, null, null, null, true), UDAY));
+        () -> pruner.prune(new PruneRequest(List.of(), policy, null, true), UDAY));
     assertRefused(
-        ErrorCode.FORBIDDEN_ADMIN_ONLY, () -> ops.prune(PruneRequest.project("acme", true), UDAY));
+        ErrorCode.FORBIDDEN_ADMIN_ONLY,
+        () -> pruner.prune(PruneRequest.project("acme", true), UDAY));
   }
 
   @Test
@@ -153,23 +153,19 @@ class SpecPruneTest {
     db.execute("UPDATE specs SET cancelled_at = '2026-01-01T00:00:00Z'");
 
     var archivedOnly =
-        ops.prune(
+        pruner.prune(
             new PruneRequest(
                 List.of(),
                 new PruneRequest.Policy(List.of(SpecStatus.ARCHIVED), Duration.ofDays(90), "proj"),
                 null,
-                null,
-                null,
                 true),
             ADMIN);
     var both =
-        ops.prune(
+        pruner.prune(
             new PruneRequest(
                 List.of(),
                 new PruneRequest.Policy(
                     List.of(SpecStatus.ARCHIVED, SpecStatus.CANCELLED), Duration.ofDays(90), null),
-                null,
-                null,
                 null,
                 true),
             ADMIN);
@@ -182,13 +178,69 @@ class SpecPruneTest {
   @Test
   void aWholeProjectGoesWithEverythingInIt() {
     archived("old", "uday");
-    new ai.singlr.sail.store.ProjectStore(db).upsert("proj", "name: proj\n", "uday");
+    run(new RunStore(db), "running", null, "old");
+    new ProjectStore(db).upsert("proj", "name: proj\n", "uday");
 
-    var report = ops.prune(PruneRequest.project("proj", false), ADMIN);
+    var report = pruner.prune(PruneRequest.project("proj", false), ADMIN);
 
     assertEquals(1, report.projects());
     assertEquals(1, report.specs());
-    assertTrue(new ai.singlr.sail.store.ProjectStore(db).findByName("proj").isEmpty());
+    assertEquals(2, report.runs(), "a purge takes a project's runs, going or not");
+    assertTrue(new ProjectStore(db).findByName("proj").isEmpty());
+  }
+
+  @Test
+  void anErasureWhoseCollectionCannotRunStillErasesAndSaysHowToFreeTheContent() {
+    archived("old", "uday");
+    var err = new ByteArrayOutputStream();
+    var original = System.err;
+    PruneReport report;
+    try (var capture = new PrintStream(err, true, StandardCharsets.UTF_8)) {
+      System.setErr(capture);
+      report = db.transaction(() -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
+    } finally {
+      System.setErr(original);
+    }
+
+    assertEquals(1, report.specs());
+    assertEquals(0, report.blobBytes());
+    assertTrue(specs.findById("old").isEmpty());
+    assertTrue(
+        err.toString(StandardCharsets.UTF_8).contains("'sail sync gc' frees it"),
+        err.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aProjectThisBoxHoldsNothingOfIsNeverSpent() {
+    var report = pruner.prune(PruneRequest.project("typo", false), ADMIN);
+
+    assertEquals(List.of(), report.entries());
+    assertEquals(0, count("SELECT count(*) FROM change_log"));
+  }
+
+  @Test
+  void onlyAnArchivedCancelledOrDeletedSpecIsPrunedAndNeverWhileARunOfItGoesOn() {
+    specs.create(row("live", "uday", SpecStatus.IN_PROGRESS));
+    specs.create(row("dropped", "uday", SpecStatus.CANCELLED));
+    specs.create(row("deleted", "uday", SpecStatus.PENDING));
+    specs.delete("deleted");
+    archived("busy", "uday");
+    var going = run(new RunStore(db), "running", null, "busy");
+
+    var live =
+        assertThrows(
+            ApiException.class, () -> pruner.prune(PruneRequest.ids(List.of("live"), true), ADMIN));
+    assertEquals(ErrorCode.SPEC_NOT_PRUNABLE, live.failure().errorCode());
+    assertTrue(live.getMessage().contains("is in_progress"), live.getMessage());
+    var busy =
+        assertThrows(
+            ApiException.class, () -> pruner.prune(PruneRequest.ids(List.of("busy"), false), UDAY));
+    assertEquals(ErrorCode.SPEC_NOT_PRUNABLE, busy.failure().errorCode());
+    assertTrue(busy.getMessage().contains(going), busy.getMessage());
+    assertTrue(specs.findById("busy").isPresent());
+
+    assertEquals(
+        2, pruner.prune(PruneRequest.ids(List.of("dropped", "deleted"), false), UDAY).specs());
   }
 
   @Test
@@ -209,55 +261,76 @@ class SpecPruneTest {
     var running = run(runs, "running", null);
     var recent = run(runs, "failed", "2026-09-22T00:00:00Z");
 
+    var question = messages.append("lobby", "claude/r1", "old, and still waiting", null, true);
+    db.execute(
+        "UPDATE room_messages SET created_at = '2025-01-01T00:00:00Z' WHERE id = ?", question.id());
+
     var report =
-        ops.prune(
-            new PruneRequest(
-                List.of(), null, null, Duration.ofDays(180), Duration.ofDays(30), false),
-            ADMIN);
+        pruner.retain(new RetentionConfig(null, Duration.ofDays(180), Duration.ofDays(30)));
 
     assertEquals(
         List.of("message:" + oldAlone.id(), "run:" + finished),
         report.entries().stream().map(target -> target.type() + ":" + target.id()).toList());
     assertTrue(messages.findById(oldParent.id()).isPresent());
     assertTrue(messages.findById(youngReply.id()).isPresent());
+    assertTrue(messages.findById(question.id()).isPresent(), "an open question is never swept");
     assertTrue(runs.findById(running).isPresent());
     assertTrue(runs.findById(recent).isPresent());
   }
 
   @Test
-  void aChildWrittenBetweenTheRehearsalAndTheErasureGoesWithItsParent() {
+  void aChildWrittenAfterTheDryRunGoesWithItsParentWhenTheApplyErases() {
     archived("old", "uday");
-    var late = new AtomicReference<String>();
+    pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    var late = run(new RunStore(db), "completed", "2026-09-22T00:00:00Z", "old");
 
-    var report =
-        racing(() -> late.set(run(new RunStore(db), "running", null, "old")))
-            .prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var report = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
-    assertTrue(report.entries().contains(new Erasure.Target(Erasure.RUN, late.get())));
+    assertTrue(report.entries().contains(new Erasure.Target(Erasure.RUN, late)));
     assertEquals(0, count("SELECT count(*) FROM runs WHERE spec_id = 'old'"));
     assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind <> 'erasure'"));
   }
 
   @Test
-  void anOwnerChangedBetweenTheRehearsalAndTheErasureIsTheOneChecked() {
+  void theApplyChecksTheOwnerAgainNeverTrustingTheDryRun() {
     archived("old", "uday");
+    pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    specs.update(row("old", "mady", SpecStatus.ARCHIVED));
 
     assertRefused(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        () ->
-            racing(() -> specs.update(row("old", "mady", SpecStatus.ARCHIVED)))
-                .prune(PruneRequest.ids(List.of("old"), false), UDAY));
+        () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
     assertTrue(specs.findById("old").isPresent());
+  }
+
+  @Test
+  void aLargePolicyIsErasedInBoundedBatchesThatStillTakeEverything() {
+    for (var i = 0; i < 450; i++) {
+      specs.create(row("old-" + i, "uday", SpecStatus.ARCHIVED));
+    }
+    db.execute("UPDATE specs SET archived_at = '2026-01-01T00:00:00Z'");
+    var policy =
+        new PruneRequest(
+            List.of(),
+            new PruneRequest.Policy(List.of(SpecStatus.ARCHIVED), Duration.ofDays(90), null),
+            null,
+            false);
+
+    var report = pruner.prune(policy, ADMIN);
+
+    assertEquals(450, report.specs());
+    assertEquals(0, count("SELECT count(*) FROM specs"));
   }
 
   @Test
   void anUnknownSpecIsNotFoundAndAPrunedOneIsNothingToDo() {
     archived("old", "uday");
-    ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
     assertRefused(
-        ErrorCode.SPEC_NOT_FOUND, () -> ops.prune(PruneRequest.ids(List.of("never"), true), UDAY));
-    var again = ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+        ErrorCode.SPEC_NOT_FOUND,
+        () -> pruner.prune(PruneRequest.ids(List.of("never"), true), UDAY));
+    var again = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
     assertEquals(List.of(), again.entries());
     assertFalse(again.dryRun());
@@ -268,8 +341,9 @@ class SpecPruneTest {
   void onANodeAnApplyIsAskedOfMainAndNothingIsErasedHereYet() {
     authoritative.set(false);
     archived("old", "uday");
+    db.execute("UPDATE specs SET base_rev = rev WHERE id = 'old'");
 
-    var report = ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var report = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
     assertTrue(report.requested());
     assertFalse(report.dryRun());
@@ -279,16 +353,30 @@ class SpecPruneTest {
     assertRefused(
         ErrorCode.INVALID_REQUEST,
         () ->
-            ops.prune(
-                new PruneRequest(List.of(), null, null, Duration.ofDays(1), null, false), ADMIN));
+            pruner.prune(
+                new PruneRequest(
+                    List.of(),
+                    new PruneRequest.Policy(List.of(SpecStatus.ARCHIVED), Duration.ofDays(1), null),
+                    null,
+                    false),
+                ADMIN));
+    assertThrows(
+        IllegalStateException.class,
+        () -> pruner.retain(new RetentionConfig(Duration.ofDays(1), null, null)));
   }
 
   @Test
-  void aBoxWithoutAnErasureLogCannotPrune() {
-    var bare = new GlobalSpecOperations(specs);
+  void onANodeASpecMainNeverSawIsDiscardedHereNotAskedOfMainAndItsIdStaysFree() {
+    authoritative.set(false);
+    archived("draft", "uday");
 
-    assertRefused(
-        ErrorCode.INTERNAL, () -> bare.prune(PruneRequest.ids(List.of("x"), true), ADMIN));
+    var report = pruner.prune(PruneRequest.ids(List.of("draft"), false), UDAY);
+
+    assertFalse(report.requested(), "nothing was asked of main");
+    assertEquals(1, report.specs());
+    assertTrue(specs.findById("draft").isEmpty());
+    assertEquals(List.of(), new EraseRequests(db).pending(Erasure.SPEC));
+    assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind = 'erasure'"));
   }
 
   @Test
@@ -316,7 +404,7 @@ class SpecPruneTest {
     archived("old", "uday");
     var rev = specs.latestRev("old");
     specs.create(row("kept", "uday", SpecStatus.PENDING));
-    ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
 
     var pruned =
         assertThrows(
@@ -363,7 +451,16 @@ class SpecPruneTest {
             Map.of("policy", Map.of("statuses", List.of("archived"), "older_than_days", -1)),
             Map.of("policy", Map.of("statuses", List.of(), "older_than_days", 1)),
             Map.of("policy", Map.of("statuses", List.of("done"), "older_than_days", 1)),
-            Map.of("dry_run", "yes", "ids", List.of("a")))) {
+            Map.of("dry_run", "yes", "ids", List.of("a")),
+            Map.of("project", 7),
+            Map.of("ids", List.of(7)),
+            Map.of("policy", Map.of("statuses", List.of("archived"), "older_than_days", 36_501)),
+            Map.of("policy", Map.of("statuses", List.of("archived"), "older_than_days", 1.5)),
+            Map.of(
+                "policy",
+                Map.of("statuses", List.of("archived"), "older_than_days", 1),
+                "project",
+                "p"))) {
       assertThrows(
           IllegalArgumentException.class,
           () -> PruneRequest.fromMap(new HashMap<>(bad)),
@@ -405,35 +502,11 @@ class SpecPruneTest {
 
   @Test
   void pruningNeedsARequestAndAnActor() {
-    assertThrows(NullPointerException.class, () -> ops.prune(null, ADMIN));
+    assertThrows(NullPointerException.class, () -> pruner.prune(null, ADMIN));
     assertThrows(
-        NullPointerException.class, () -> ops.prune(PruneRequest.ids(List.of("a"), true), null));
+        NullPointerException.class, () -> pruner.prune(PruneRequest.ids(List.of("a"), true), null));
     assertThrows(
-        NullPointerException.class,
-        () -> new GlobalSpecOperations.Pruning(null, () -> true, DateTimeUtils::now));
-  }
-
-  /**
-   * Operations over the same box whose second authority check — the one between the rehearsal and
-   * the erasure — first runs {@code between}, the way a concurrent writer lands in that gap.
-   */
-  private GlobalSpecOperations racing(Runnable between) {
-    var checks = new AtomicInteger();
-    return new GlobalSpecOperations(
-        specs,
-        null,
-        bus,
-        new RunStore(db),
-        () -> rooms,
-        new GlobalSpecOperations.Pruning(
-            db,
-            () -> {
-              if (checks.incrementAndGet() == 2) {
-                between.run();
-              }
-              return true;
-            },
-            clock::get));
+        NullPointerException.class, () -> new SpecPruner(null, bus, () -> true, clock::get));
   }
 
   private void archived(String id, String owner) {

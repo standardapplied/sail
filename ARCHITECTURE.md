@@ -283,32 +283,35 @@ Three verbs remove work, and each makes a different promise.
 
 - **Archive** takes a spec off the board and keeps everything. It is a status. `archived_at` and `cancelled_at` record when a spec entered those statuses, which is the time retention ages on.
 - **Delete** writes a tombstone that keeps the entity's last state. The spec's runs, reviews and room stay, so a restore from any retained revision, including the tombstone, brings the spec back with the identity room it minted.
-- **Prune** erases the entity everywhere, for good.
+- **Prune** erases the entity everywhere, for good. A spec is pruned from archived, cancelled or deleted, never from work still on the board, and never while a run of it is unfinished.
 
-An erasure is a kind of change-log entry, next to revision and tombstone. One transaction removes the live row, its open conflicts and every history entry, and records one erasure row: an empty snapshot plus a fresh rev naming who pruned and when. The head then points at that row.
+An erasure is a kind of change-log entry, next to revision and tombstone. One transaction removes the live row, its open conflicts, the box-local rows keyed by it (events, Slack threads, run credentials, container leases) and every history entry, and records one erasure row: an empty snapshot plus a fresh rev naming who pruned and when. The head then points at that row, and an erasure is terminal: the journal (`ChangeLog.append`) refuses any later write to the id, so a pruned spec id or project name is never used again, and every node pages the erasure as the entity's last word however long it was offline.
 
-What a prune takes with it is declared once, in `Erasure.closure`:
+What a prune takes with it is declared once, in `Erasure.LINKS`:
 
-- a spec takes its runs, its reviews, and the identity room it minted (a room it was born into outlives it);
-- a room takes its messages and runs;
-- a project takes its specs, rooms, files and runs.
+- a spec takes its runs and its reviews;
+- a room takes its messages and runs, and a message takes its replies;
+- a project takes its specs, rooms, files and runs;
+- the room a spec minted goes once that spec is erased or going and no spec left behind, live or restorable, still converses in it, so a room other specs were born into outlives the spec that minted it.
 
-Rows that belong to a single entity go with it through the database's own cascades: a spec's content and dependencies, a run's principals and delivery ledger, a review's stages and findings. There are deliberately no foreign keys between synced entities. A tombstone deletes its row, so such a key would cascade a delete through dependents without a log entry. It would also make adopting a child depend on its parent's page and on the parent's parked conflicts.
+The journal reads the same links: a revision whose state names an erased owner is refused, whoever writes it (a local create, a file import, main's commit of a push). Rows that belong to a single entity go with it through the database's own cascades: a spec's content and dependencies, a run's principals and delivery ledger, a review's stages and findings. There are deliberately no foreign keys between synced entities. A tombstone deletes its row, so such a key would cascade a delete through dependents without a log entry. It would also make adopting a child depend on its parent's page and on the parent's parked conflicts.
 
-Main is the only author of erasures. Main's own prune (`GlobalSpecOperations.prune`, which serves the CLI, the API, Mast and `project destroy --purge`) erases and then collects content. A node's prune is recorded in `erase_requests`, and the next round sends it as an `erase` offer. Main decides that offer against its own copy (`EraseAuthority`), erases, and answers the erasure's rev.
+Main is the only author of erasures. `SpecPruner.prune` serves the CLI, the API, Mast and `project destroy --purge`: on main it erases in bounded transactions, each selecting, authorizing and reading what belongs to its targets inside its own write transaction, and then collects content. A node discards on the spot what main never acknowledged (nothing to ask, and asking would publish it), and records the rest in `erase_requests`. The first type of its next session offers every pending request as an `erase` offer before main's tips are read, so the erasure rows main writes for them and for everything that belongs to them page in that same round. Main decides each offer against its own copy (`EraseAuthority`), erases, and answers the erasure's rev.
 
-A node applies an erasure the moment it arrives, whether in a page, a `need` answer or the refresh after a stale push. It does this outside the engine, so no conflict is ever parked against one.
+A node applies an erasure the moment it arrives, whether in a page, a `need` answer or the refresh after a stale push. It does this outside the engine, so no conflict is ever parked against one, and it counts as pulled, so the board hears of it.
 
 - An erasure the node already holds changes nothing.
 - An entity the node never held gets only the erasure row.
-- Children main never saw are removed with their parent, leaving no row of their own.
-- Main commits an erased entity only against the erasure's rev. A node that has not yet heard of the erasure cannot bring it back, while one that saw it may create the id anew.
+- The node removes with the entity only what main never acknowledged, and replies, which cannot outlive their message. Everything main held gets an erasure row of its own, decided on main's copy, so a link that differs between the boxes (a spec main moved to another project) never takes what main kept.
+- Main answers every commit to an erased id as stale against its erasure, so a stale push cannot bring it back.
 
-A dry run is the erasure itself, rehearsed in a transaction that is rolled back (`Sqlite.rehearse`), so it reports exactly what the real run does.
+A dry run is the erasure itself, rehearsed in a transaction that is rolled back (`Sqlite.rehearse`), so it reports what the real run does on this box's copy; on a node, main decides the apply on its own.
 
-Retention is opt-in. A `retention` block in main's `host.yaml` sets the ages: archived specs, messages, and finished runs. With the block, main's daily `RetentionSweeper` prunes by that policy through the same method. Without it the sweeper only compacts and collects. Nodes never evaluate retention.
+Retention is opt-in. A `retention` block in main's `host.yaml` sets the ages: archived specs, messages, and finished runs. With the block, main's daily `RetentionSweeper` erases by that policy through `SpecPruner.retain`, in bounded transactions; it never takes a spec with an unfinished run, an agent's question still awaiting its answer, or a message a younger reply main holds still needs. A reply written offline to a message retention then retires cannot outlive it and goes with it when the node adopts the erasure. Without the block the sweeper only compacts and collects. Nodes never evaluate retention.
 
 History compaction never crosses the wire. It is a compiled constant (`ChangeLog.HISTORY_REVISIONS`), so no two boxes can disagree. Every box keeps each entity's newest 20 entries, its synced base (the merge base of an open conflict included), and every tombstone and erasure. A node compacts what each round touched; main compacts daily and from `sail sync gc`. Protocol 4 pages the latest entry per entity, so a node whose checkpoint predates main's compaction still converges. Compaction runs under the exclusive content lease and is refused inside a transaction. Once a revision's row is gone its blob is unreferenced, and the collection that follows frees it.
+
+A purge erases a project's rows everywhere, not other boxes' containers: their project directories and materialized files stay on disk with the container, and neither `sail migrate`'s import nor the materializer touches the files of a pruned project again.
 
 ### The transport: pure SSH keys, no network enroll
 

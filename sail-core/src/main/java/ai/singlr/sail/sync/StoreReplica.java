@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -141,8 +140,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   /**
    * Main's compare-and-set commit. An erased entity takes no commit at all — every offer is stale
    * against its erasure, so the node adopts it and nothing brings the entity back — and a state
-   * that would belong to an erased entity is refused ({@link Erasure.Orphaned}), decided in the
-   * same transaction as the commit so a prune cannot slip between the two.
+   * that would belong to an erased entity is refused by the journal ({@link ChangeLog.Pruned}),
+   * inside the commit's own transaction, so a prune cannot slip between the two.
    */
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
@@ -151,13 +150,6 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           var erased = erasure(entityId);
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
-          }
-          if (snapshot != null) {
-            var owner = Erasure.erasedOwner(changeLog, store.entityType(), snapshot);
-            if (owner.isPresent()) {
-              throw new Erasure.Orphaned(
-                  new Erasure.Target(store.entityType(), entityId), owner.get());
-            }
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
             case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
@@ -193,9 +185,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   private Optional<ChangeLog.Entry> erasure(String entityId) {
-    return changeLog
-        .head(store.entityType(), entityId)
-        .filter(head -> head.kind() == ChangeLog.Kind.ERASURE);
+    return changeLog.erasure(store.entityType(), entityId);
   }
 
   private static String json(Map<String, Object> snapshot) {

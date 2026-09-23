@@ -10,12 +10,15 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -479,13 +482,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       return "No revision '" + rev + "' recorded for spec '" + id + "'.";
     }
     if (head.kind() == ChangeLog.Kind.ERASURE) {
-      return "Spec '"
-          + id
-          + "' was pruned"
-          + (head.actor() == null ? "" : " by " + head.actor())
-          + " at "
-          + head.recordedAt()
-          + ": it is erased everywhere with its history, so nothing is left to restore.";
+      return pruned(id);
     }
     return "Revision '"
         + rev
@@ -496,6 +493,139 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         + " revisions of each spec and every deletion. Pick one of those from 'sail spec history "
         + id
         + "'.";
+  }
+
+  /** Why pruned spec {@code id} is gone for good: who pruned it and when. */
+  public String pruned(String id) {
+    var erasure = changeLog.erasure(ENTITY, id).orElseThrow();
+    return "Spec '"
+        + id
+        + "' was pruned"
+        + (erasure.actor() == null ? "" : " by " + erasure.actor())
+        + " at "
+        + erasure.recordedAt()
+        + ": it is erased everywhere with its history, so nothing is left to restore.";
+  }
+
+  /**
+   * A spec as this box last knew it: its live row, or the state its tombstone kept. What deciding
+   * who owns it, whether it may be pruned and which room it lives in reads, the same way for a
+   * deleted spec as for a live one.
+   */
+  public record LastKnown(
+      String id,
+      SpecStatus status,
+      String assignee,
+      String createdBy,
+      String roomId,
+      boolean live) {
+
+    /** Its owner: the assignee, or the creator while unassigned; blank when neither is known. */
+    public String owner() {
+      return ownerOf(assignee, createdBy);
+    }
+
+    public String roomIdOrIdentity() {
+      return Strings.isBlank(roomId) ? id : roomId;
+    }
+
+    /**
+     * Archive keeps, delete restores, prune erases: a spec is pruned from archived, cancelled or
+     * deleted, never from work still on the board.
+     */
+    public boolean prunable() {
+      return !live || status == SpecStatus.ARCHIVED || status == SpecStatus.CANCELLED;
+    }
+  }
+
+  /** The one rule for who owns a spec: its assignee, or its creator while it is unassigned. */
+  public static String ownerOf(String assignee, String createdBy) {
+    return Strings.isNotBlank(assignee) ? assignee : Objects.toString(createdBy, "");
+  }
+
+  /** Spec {@code id} as this box last knew it, live or deleted; empty when it holds neither. */
+  public Optional<LastKnown> lastKnown(String id) {
+    var live =
+        db.queryOne(
+            "SELECT status, assignee, created_by, room_id FROM specs WHERE id = ?",
+            row ->
+                new LastKnown(
+                    id,
+                    SpecStatus.fromWire(row.text(0)),
+                    row.text(1),
+                    row.text(2),
+                    row.text(3),
+                    true),
+            id);
+    if (live.isPresent()) {
+      return live;
+    }
+    return changeLog
+        .head(ENTITY, id)
+        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .map(head -> YamlUtil.parseMap(head.snapshot()))
+        .map(
+            last ->
+                new LastKnown(
+                    id,
+                    SpecStatus.fromWire(Snapshots.text(last, "status")),
+                    Snapshots.text(last, "assignee"),
+                    Snapshots.text(last, "created_by"),
+                    Snapshots.text(last, "room_id"),
+                    false));
+  }
+
+  /**
+   * Up to {@code limit} specs a prune policy selects: in one of {@code statuses} since before
+   * {@code cutoff} (when this box saw the spec enter it), in {@code project} when one is named, and
+   * with no run still going — a spec still at work is never swept away.
+   */
+  public List<String> prunableSince(
+      List<SpecStatus> statuses, String project, Instant cutoff, int limit) {
+    var unfinished = RunStore.unfinishedStatuses();
+    var parameters = new ArrayList<Object>(statuses.stream().map(SpecStatus::wire).toList());
+    parameters.add(project);
+    parameters.add(project);
+    parameters.add(cutoff.toString());
+    parameters.addAll(unfinished);
+    parameters.add(limit);
+    return db.query(
+        "SELECT id FROM specs s WHERE status IN ("
+            + placeholders(statuses.size())
+            + ") AND (? IS NULL OR project = ?)"
+            + " AND julianday(CASE status WHEN 'archived' THEN archived_at"
+            + " ELSE cancelled_at END) < julianday(?)"
+            + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.spec_id = s.id AND r.status IN ("
+            + placeholders(unfinished.size())
+            + ")) ORDER BY id LIMIT ?",
+        row -> row.text(0),
+        parameters.toArray());
+  }
+
+  private static String placeholders(int count) {
+    return String.join(", ", Collections.nCopies(count, "?"));
+  }
+
+  /**
+   * The specs, live or deleted and restorable, that converse in room {@code roomId}: the one that
+   * minted it and every one born into it.
+   */
+  public List<String> inRoom(String roomId) {
+    var ids =
+        new LinkedHashSet<>(
+            db.query(
+                """
+                SELECT id FROM specs
+                WHERE room_id = ? OR (id = ? AND (room_id IS NULL OR room_id = ''))""",
+                row -> row.text(0),
+                roomId,
+                roomId));
+    var deleted = changeLog.tombstonedBy(ENTITY, "room_id");
+    ids.addAll(deleted.getOrDefault(roomId, List.of()));
+    if (deleted.getOrDefault("", List.of()).contains(roomId)) {
+      ids.add(roomId);
+    }
+    return List.copyOf(ids);
   }
 
   /** The latest entry of spec {@code id} — a revision, its tombstone, or its erasure — if any. */
