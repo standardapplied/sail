@@ -9,13 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
@@ -83,36 +81,6 @@ class SnapsPruneCommandTest {
   }
 
   @Test
-  void parseAgeDays() {
-    assertEquals(Duration.ofDays(7), SnapsPruneCommand.parseAge("7d"));
-  }
-
-  @Test
-  void parseAgeHours() {
-    assertEquals(Duration.ofHours(24), SnapsPruneCommand.parseAge("24h"));
-  }
-
-  @Test
-  void parseAgeMinutes() {
-    assertEquals(Duration.ofMinutes(30), SnapsPruneCommand.parseAge("30m"));
-  }
-
-  @Test
-  void parseAgeRejectsInvalidFormat() {
-    assertThrows(IllegalArgumentException.class, () -> SnapsPruneCommand.parseAge("7x"));
-  }
-
-  @Test
-  void parseAgeRejectsEmpty() {
-    assertThrows(IllegalArgumentException.class, () -> SnapsPruneCommand.parseAge(""));
-  }
-
-  @Test
-  void parseAgeTrimsWhitespace() {
-    assertEquals(Duration.ofDays(3), SnapsPruneCommand.parseAge("  3d  "));
-  }
-
-  @Test
   void projectNameIsOptional() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
@@ -151,18 +119,5 @@ class SnapsPruneCommandTest {
   @Test
   void parseSnapshotTimeReturnsNullForGarbage() {
     assertNull(SnapsPruneCommand.parseSnapshotTime("not-a-date"));
-  }
-
-  @Test
-  void parseAgeLargeValues() {
-    assertEquals(Duration.ofDays(365), SnapsPruneCommand.parseAge("365d"));
-  }
-
-  @Test
-  void parseAgeErrorMessageIsHelpful() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> SnapsPruneCommand.parseAge("abc"));
-
-    assertTrue(ex.getMessage().contains("Invalid age format"));
-    assertTrue(ex.getMessage().contains("Examples"));
   }
 }

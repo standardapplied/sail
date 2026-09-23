@@ -119,6 +119,12 @@ public final class SyncConflicts {
         PENDING);
   }
 
+  /** Drops every conflict, open or settled, recorded for an erased entity. */
+  public void erase(String entityType, String entityId) {
+    db.execute(
+        "DELETE FROM sync_conflicts WHERE entity_type = ? AND entity_id = ?", entityType, entityId);
+  }
+
   /** The column encoding of a conflict's clashing field names: one per line. */
   public static String encodeFields(List<String> fields) {
     return String.join("\n", fields);

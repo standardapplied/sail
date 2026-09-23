@@ -664,6 +664,11 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     revisions.applyRevision(id, snapshot, rev);
   }
 
+  @Override
+  public void eraseRow(String id) {
+    revisions.eraseRow(id);
+  }
+
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
     return revisions.commitRevision(id, snapshot, expectedRev);

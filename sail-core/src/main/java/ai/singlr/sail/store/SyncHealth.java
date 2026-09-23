@@ -36,7 +36,8 @@ public final class SyncHealth {
       String state,
       Instant staleSince,
       long fetchedBytes,
-      long sentBytes) {}
+      long sentBytes,
+      long freedBytes) {}
 
   public Optional<Health> find(String peer) {
     return db.queryOne(
@@ -56,7 +57,8 @@ public final class SyncHealth {
                 row.text(7),
                 instant(row.text(8)),
                 bytes(row.text(6), "bytes_fetched"),
-                bytes(row.text(6), "bytes_sent")),
+                bytes(row.text(6), "bytes_sent"),
+                bytes(row.text(6), "bytes_freed")),
         peer);
   }
 
@@ -75,11 +77,16 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return succeeded(peer, at, report, 0, 0);
+    return succeeded(peer, at, report, 0, 0, 0);
   }
 
   public boolean succeeded(
-      String peer, Instant at, SyncEngine.Report report, long fetchedBytes, long sentBytes) {
+      String peer,
+      Instant at,
+      SyncEngine.Report report,
+      long fetchedBytes,
+      long sentBytes,
+      long freedBytes) {
     return db.transaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
@@ -104,7 +111,9 @@ public final class SyncHealth {
                       "bytes_fetched",
                       fetchedBytes,
                       "bytes_sent",
-                      sentBytes)),
+                      sentBytes,
+                      "bytes_freed",
+                      freedBytes)),
               peer);
           return recovered;
         });

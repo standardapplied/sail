@@ -23,6 +23,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -32,6 +33,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.MainReplica;
@@ -232,7 +234,8 @@ class SailOperationsSeamTest {
               "last_error",
               "stale_since",
               "bytes_fetched",
-              "bytes_sent"),
+              "bytes_sent",
+              "bytes_freed"),
           YamlUtil.parseMap(stale.body()).keySet());
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -979,7 +982,122 @@ class SailOperationsSeamTest {
   }
 
   @Test
-  void renameAndPurgeOnlyChangeTheCatalogAndRenameCanBeCompensated() {
+  void pruneAndTheRetentionSweeperWorkOnTheHostsOneDatabase() {
+    try (var box = new SyncBox("main");
+        var operations = operations(box.db)) {
+      box.specs.create(SyncBox.spec("old", "Old", "archived"));
+      box.specs.create(SyncBox.spec("kept", "Kept", "pending"));
+      var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
+
+      var rehearsed = operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin);
+      var erased = operations.pruneSpecs(PruneRequest.ids(List.of("old"), false), admin);
+
+      assertEquals(1, ((Result.Success<PruneReport>) rehearsed).value().specs());
+      assertEquals(1, ((Result.Success<PruneReport>) erased).value().specs());
+      assertTrue(box.specs.findById("old").isEmpty(), "a standalone box authors the erasure");
+      assertEquals(
+          List.of("kept"),
+          ((Result.Success<GlobalSpecsListResponse>)
+                  operations.globalSpecs(SpecStore.SpecFilter.all()))
+              .value().specs().stream().map(GlobalSpecView::id).toList(),
+          "the board reads the same stores the prune erased from");
+      try (var sweeper = operations.retentionSweeper()) {
+        assertNull(sweeper.retain(), "a box with no retention block erases nothing on its own");
+      }
+    }
+  }
+
+  @Test
+  void aNodesPurgeIsAskedOfMainAndErasesNothingHereYet() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
+      new FdeStore(db).add("node", "Node", "node@example.com", "admin");
+      try (var operations =
+          OperationsFactory.create(
+                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "node",
+                      tempDir,
+                      () -> new SyncConfig("node", "main", "node", "node-box"),
+                      target -> {
+                        throw new IOException("main unavailable");
+                      }))) {
+        var destroyed = operations.catalog().destroy("old", true);
+
+        assertTrue(destroyed.purged());
+        assertTrue(destroyed.requested());
+        assertTrue(
+            operations.catalog().project("old").isPresent(), "main erases; this box follows");
+        assertEquals(List.of("old"), new EraseRequests(db).pending("project"));
+      }
+    }
+  }
+
+  @Test
+  void aNodeThatHasNotSyncedItsRosterSaysSoInsteadOfGuessingARole() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      try (var operations =
+          OperationsFactory.create(
+                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "node",
+                      tempDir,
+                      () -> new SyncConfig("node", "main", "node", "node-box"),
+                      target -> {
+                        throw new IOException("main unavailable");
+                      }))) {
+        var refused =
+            assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
+
+        assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+        assertTrue(refused.getMessage().contains("does not know its FDE's role yet"));
+      }
+    }
+  }
+
+  @Test
+  void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      new FdeStore(db).add("node", "Node", "node@example.com", "member");
+      try (var operations =
+          OperationsFactory.create(
+                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "node",
+                      tempDir,
+                      () -> new SyncConfig("node", "main", "node", "node-box"),
+                      target -> {
+                        throw new IOException("main unavailable");
+                      }))) {
+        var refused =
+            assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
+
+        assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+        assertEquals(List.of(), new EraseRequests(db).pending("project"));
+      }
+    }
+  }
+
+  @Test
+  void renameChangesOnlyTheCatalogAndPurgeErasesTheProjectWithItsFiles() {
     try (var db = Sqlite.openMemory();
         var operations = operations(db)) {
       new SchemaManager(db).migrate();
@@ -996,7 +1114,20 @@ class SailOperationsSeamTest {
       operations.catalog().undoRename(renamed);
       assertEquals(definition, operations.catalog().project("old").orElseThrow().definition());
       assertEquals(1, operations.catalog().projects().size());
+      assertEquals(
+          "0 specs, 0 rooms, 0 messages, 0 runs, 0 reviews, 1 files, 1 projects, 0 events and 0"
+              + " bytes of content",
+          operations.catalog().purgeSummary("old"),
+          "the purge is rehearsed first; the rename's history still holds the file's content");
+      assertEquals("config", operations.projectFiles("old").list().getFirst().path());
       assertTrue(operations.catalog().destroy("old", true).purged());
+      assertTrue(operations.projectFiles("old").list().isEmpty(), "its files go with it");
+      assertEquals(
+          List.of("erasure"),
+          db.query(
+              "SELECT kind FROM change_log WHERE entity_type = 'project' AND entity_id = 'old'",
+              row -> row.text(0)),
+          "a purge leaves only the audit row of the project");
       assertFalse(operations.catalog().destroy("old", true).purged());
     }
   }

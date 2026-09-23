@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.46.0
+
+- **Archive keeps, delete restores, prune erases everywhere.**
+  - `sail spec prune <id...>` erases specs with everything that belongs to them: the identity room (a shared room outlives the spec), the room's messages, the spec's runs and reviews, its events, every history entry, and the content only they referenced.
+  - `--status archived,cancelled --older-than 90d [-p project]` is the admin's policy form.
+  - A spec is pruned from archived, cancelled or deleted, and never while a run of it is unfinished.
+  - A prune always reports first. The report comes from rehearsing the erasure in a transaction that is then rolled back, so it is what the real run does on this box's copy. Only `--apply` erases.
+  - An erasure is terminal: a pruned spec id or project name is never used again. Creating one, or provisioning a project under a pruned name, is refused before anything is written.
+  - The same method serves `POST /v1/specs:prune`, Mast's **Prune…** on an archived spec, and `sail project destroy --purge`, which now erases the whole project instead of tombstoning one row. It prints what it will erase before it confirms.
+  - Authority: an owner (the assignee, or the creator when unassigned) or an admin. A policy or project prune is admin-only. Agents and read-only roles are refused.
+- **Erasure is a kind of change-log entry.**
+  - `change_log.kind` is `revision`, `tombstone` or `erasure`, backfilled from `deleted`. Every page entry carries it.
+  - Main is the only author of erasures. A node's prune is an `erase` offer, and main decides it against its own copy; one round later every type on every box has converged. What main never saw is discarded on the node, never published. A policy prune runs on main only.
+  - The journal refuses any write that would belong to an erased entity, on every box and every path.
+  - A node applying an erasure removes only what main never acknowledged; what main held follows with its own erasure row.
+  - Every box applies an erasure the moment a page, a need answer or a stale-push refresh brings it. It never reaches the conflict engine, so the erasure wins over an unsynced local edit and a stale push cannot resurrect the entity.
+  - One erasure row per entity names who pruned and when. Erasure rows are never compacted, and a restore of a pruned spec is refused with that reason.
+  - A room other specs were born into outlives the spec that minted it until the last of them goes.
+  - The links between entities are declared once, in `Erasure`, not as foreign keys. Deleting a spec still keeps its runs, reviews and room so a restore brings them back, and sync never depends on the order entities arrive in.
+  - The upgrade erases, on main only, what earlier releases orphaned (runs and reviews whose spec, and messages whose room, left no trace). It works one entity per transaction and resumes if interrupted.
+- **History is bounded, content follows.**
+  - Every box keeps each entity's newest 20 revisions, its synced base, and every tombstone and erasure. This is a compiled constant.
+  - A node compacts what each round touched. Main compacts daily. `sail sync gc` compacts and then collects under the exclusive content lease, refusing inside a transaction.
+  - `sail sync status` reports bytes freed.
+  - A deleted spec can now be restored from any retained revision, including its tombstone, and brings back the identity room it minted.
+  - `archived_at` and `cancelled_at` record when a spec entered those statuses.
+- **Retention is opt-in.** A `retention` block in main's `host.yaml` (`prune_archived_after`, `messages`, `runs_after_finished`) makes main's daily sweeper prune by that policy, in bounded transactions, never taking an open agent question or a message a younger reply needs. Without the block nothing is erased that a person did not ask for, and nodes never evaluate retention.
+- A deletion the old server writes while `sail upgrade` migrates is still recorded as a tombstone.
+- **The fleet floor moves to 0.46.0.** A 0.45 box would read an erasure as a revision with an empty snapshot, so it is refused and told to run `sail upgrade`. Upgrade main first, then nodes.
+
 ## 0.45.0
 
 - **Content syncs by hash, in chunks, never as base64.** Spec bodies and plans and shared files

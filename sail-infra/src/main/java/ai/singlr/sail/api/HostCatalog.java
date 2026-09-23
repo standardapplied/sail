@@ -29,11 +29,18 @@ public interface HostCatalog {
 
   Destroyed destroy(String name, boolean purge);
 
+  /** What purging project {@code name} would erase, rehearsed and rolled back, as one line. */
+  String purgeSummary(String name);
+
   Renamed rename(String from, String to);
 
   void undoRename(Renamed renamed);
 
-  record Destroyed(String name, boolean purged) {}
+  /**
+   * What a destroy did to the catalog: whether the project was purged and, on a node, whether that
+   * purge was asked of main rather than applied here yet.
+   */
+  record Destroyed(String name, boolean purged, boolean requested) {}
 
   record Renamed(String from, String to, String previousDefinition) {}
 }

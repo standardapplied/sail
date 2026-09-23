@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -210,6 +211,34 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return open;
   }
 
+  /**
+   * Up to {@code limit} messages message retention erases: posted before {@code cutoff}, and never
+   * one a thread still needs — a parent a younger reply points at, directly or down its thread, an
+   * agent's question still waiting for its answer, or the messages that question replies to.
+   */
+  public List<String> retiredBefore(Instant cutoff, int limit) {
+    var open = YamlUtil.dumpJson(List.copyOf(openQuestions().values()));
+    return db.query(
+        """
+        WITH RECURSIVE kept(id) AS (
+            SELECT reply_to FROM room_messages
+            WHERE (julianday(created_at) >= julianday(?1)
+                OR id IN (SELECT value FROM json_each(?2)))
+            AND reply_to IS NOT NULL
+            UNION
+            SELECT m.reply_to FROM room_messages m JOIN kept k ON m.id = k.id
+            WHERE m.reply_to IS NOT NULL)
+        SELECT id FROM room_messages
+        WHERE julianday(created_at) < julianday(?1)
+        AND id NOT IN (SELECT id FROM kept)
+        AND id NOT IN (SELECT value FROM json_each(?2))
+        ORDER BY id LIMIT ?3""",
+        row -> row.text(0),
+        cutoff.toString(),
+        open,
+        limit);
+  }
+
   /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
   public Map<String, String> latestByRoom() {
     var latest = new LinkedHashMap<String, String>();
@@ -301,6 +330,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                 YamlUtil.dumpJson(snapshot));
           }
         });
+  }
+
+  /**
+   * The one way a message leaves this box: erased with its room or by retention, never edited or
+   * deleted on its own. A reply erased with it may go first; {@link Erasure} defers the reply
+   * constraint to its commit.
+   */
+  @Override
+  public void eraseRow(String id) {
+    db.execute("DELETE FROM room_messages WHERE id = ?", id);
   }
 
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {

@@ -175,6 +175,7 @@ public final class SyncServerCommand implements Callable<Integer> {
   }
 
   private static SyncPrincipal principalOf(FdeStore.Fde fde) {
-    return new SyncPrincipal(fde.handle(), Role.fromAttribute(fde.role()).allows(Capability.WRITE));
+    var role = Role.fromAttribute(fde.role());
+    return new SyncPrincipal(fde.handle(), role.allows(Capability.WRITE), role == Role.ADMIN);
   }
 }

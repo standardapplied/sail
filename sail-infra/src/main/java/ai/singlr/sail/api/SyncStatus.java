@@ -19,7 +19,8 @@ public record SyncStatus(
     String lastError,
     Instant staleSince,
     long fetchedBytes,
-    long sentBytes) {
+    long sentBytes,
+    long freedBytes) {
   public SyncStatus(
       String role,
       String main,
@@ -42,6 +43,7 @@ public record SyncStatus(
         lastErrorKind,
         lastError,
         staleSince,
+        0,
         0,
         0);
   }

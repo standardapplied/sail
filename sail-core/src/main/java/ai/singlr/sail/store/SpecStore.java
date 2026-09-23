@@ -10,12 +10,16 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -450,16 +454,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * Restores a spec to a prior revision's content, recorded as a NEW revision (origin {@code
    * restore}) — the current state is never discarded, it becomes part of history too, so a restore
-   * is itself reversible. Re-creates the spec if it had been deleted.
+   * is itself reversible. Re-creates the spec if it had been deleted, from any revision history
+   * still keeps — its tombstone included. A pruned spec has no history left to restore from, and
+   * says so; a revision compaction dropped says that too.
    */
   public void restore(String id, String rev) {
     var entry =
         changeLog
             .at(ENTITY, id, rev)
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "No revision '" + rev + "' recorded for spec '" + id + "'."));
+            .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
+            .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev)));
     var snapshot = YamlUtil.parseMap(entry.snapshot());
     db.transaction(
         () -> {
@@ -470,6 +474,186 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   String recordRevision(String id, String origin, boolean deleted) {
     return journal.recordRevision(id, origin, deleted);
+  }
+
+  /** Why {@code rev} of spec {@code id} cannot be restored, naming what can be done instead. */
+  public String unrestorable(String id, String rev) {
+    var head = changeLog.head(ENTITY, id).orElse(null);
+    if (head == null) {
+      return "No revision '" + rev + "' recorded for spec '" + id + "'.";
+    }
+    if (head.kind() == ChangeLog.Kind.ERASURE) {
+      return pruned(id);
+    }
+    return "Revision '"
+        + rev
+        + "' of spec '"
+        + id
+        + "' is not in its retained history: history keeps the newest "
+        + ChangeLog.HISTORY_REVISIONS
+        + " revisions of each spec and every deletion. Pick one of those from 'sail spec history "
+        + id
+        + "'.";
+  }
+
+  /** Why pruned spec {@code id} is gone for good: who pruned it and when. */
+  public String pruned(String id) {
+    var erasure = changeLog.erasure(ENTITY, id).orElseThrow();
+    return "Spec '"
+        + id
+        + "' was pruned"
+        + (erasure.actor() == null ? "" : " by " + erasure.actor())
+        + " at "
+        + erasure.recordedAt()
+        + ": it is erased everywhere with its history, so nothing is left to restore.";
+  }
+
+  /**
+   * A spec as this box last knew it: its live row, or the state its tombstone kept. What deciding
+   * who owns it, whether it may be pruned and which room it lives in reads, the same way for a
+   * deleted spec as for a live one. The tombstone of a spec this box only heard was deleted keeps
+   * nothing, so every field but the id may be null.
+   */
+  public record LastKnown(
+      String id,
+      SpecStatus status,
+      String assignee,
+      String createdBy,
+      String roomId,
+      boolean live) {
+
+    /** Its owner: the assignee, or the creator while unassigned; blank when neither is known. */
+    public String owner() {
+      return ownerOf(assignee, createdBy);
+    }
+
+    public String roomIdOrIdentity() {
+      return Strings.isBlank(roomId) ? id : roomId;
+    }
+
+    /**
+     * Archive keeps, delete restores, prune erases: a spec is pruned from archived, cancelled or
+     * deleted, never from work still on the board.
+     */
+    public boolean prunable() {
+      return !live || status == SpecStatus.ARCHIVED || status == SpecStatus.CANCELLED;
+    }
+  }
+
+  /** A tombstone of a spec this box never held as a row keeps no state, so no status. */
+  private static SpecStatus statusOf(String wire) {
+    return wire == null ? null : SpecStatus.fromWire(wire);
+  }
+
+  /** The one rule for who owns a spec: its assignee, or its creator while it is unassigned. */
+  public static String ownerOf(String assignee, String createdBy) {
+    return Strings.isNotBlank(assignee) ? assignee : Objects.toString(createdBy, "");
+  }
+
+  /** Spec {@code id} as this box last knew it, live or deleted; empty when it holds neither. */
+  public Optional<LastKnown> lastKnown(String id) {
+    var live =
+        db.queryOne(
+            "SELECT status, assignee, created_by, room_id FROM specs WHERE id = ?",
+            row ->
+                new LastKnown(
+                    id,
+                    SpecStatus.fromWire(row.text(0)),
+                    row.text(1),
+                    row.text(2),
+                    row.text(3),
+                    true),
+            id);
+    if (live.isPresent()) {
+      return live;
+    }
+    return changeLog
+        .head(ENTITY, id)
+        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .map(head -> YamlUtil.parseMap(head.snapshot()))
+        .map(
+            last ->
+                new LastKnown(
+                    id,
+                    statusOf(Snapshots.text(last, "status")),
+                    Snapshots.text(last, "assignee"),
+                    Snapshots.text(last, "created_by"),
+                    Snapshots.text(last, "room_id"),
+                    false));
+  }
+
+  /**
+   * Up to {@code limit} specs a prune policy selects: in one of {@code statuses} since before
+   * {@code cutoff} (when this box saw the spec enter it), in {@code project} when one is named, and
+   * with no run still going in it or its room — a spec still at work is never swept away.
+   */
+  public List<String> prunableSince(
+      List<SpecStatus> statuses, String project, Instant cutoff, int limit) {
+    var unfinished = RunStore.unfinishedStatuses();
+    var parameters = new ArrayList<Object>(statuses.stream().map(SpecStatus::wire).toList());
+    parameters.add(project);
+    parameters.add(project);
+    parameters.add(cutoff.toString());
+    parameters.addAll(unfinished);
+    parameters.add(limit);
+    return db.query(
+        "SELECT id FROM specs s WHERE status IN ("
+            + placeholders(statuses.size())
+            + ") AND (? IS NULL OR project = ?)"
+            + " AND julianday(CASE status WHEN 'archived' THEN archived_at"
+            + " ELSE cancelled_at END) < julianday(?)"
+            + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE (r.spec_id = s.id OR r.room_id = s.id)"
+            + " AND r.status IN ("
+            + placeholders(unfinished.size())
+            + ")) ORDER BY id LIMIT ?",
+        row -> row.text(0),
+        parameters.toArray());
+  }
+
+  private static String placeholders(int count) {
+    return String.join(", ", Collections.nCopies(count, "?"));
+  }
+
+  /**
+   * For each of {@code roomIds}, the specs, live or deleted and restorable, that converse in it:
+   * the one that minted it and every one born into it. One read of the deletions, however many
+   * rooms.
+   */
+  public Map<String, Set<String>> inRooms(Collection<String> roomIds) {
+    var rooms = List.copyOf(new LinkedHashSet<>(roomIds));
+    var conversing = new LinkedHashMap<String, Set<String>>();
+    rooms.forEach(room -> conversing.put(room, new LinkedHashSet<>()));
+    for (var from = 0; from < rooms.size(); from += 500) {
+      var batch = rooms.subList(from, Math.min(rooms.size(), from + 500));
+      var marks = placeholders(batch.size());
+      var parameters = new ArrayList<Object>(batch);
+      parameters.addAll(batch);
+      for (var row :
+          db.query(
+              "SELECT COALESCE(NULLIF(room_id, ''), id), id FROM specs WHERE room_id IN ("
+                  + marks
+                  + ") OR (id IN ("
+                  + marks
+                  + ") AND (room_id IS NULL OR room_id = ''))",
+              r -> Map.entry(r.text(0), r.text(1)),
+              parameters.toArray())) {
+        conversing.get(row.getKey()).add(row.getValue());
+      }
+    }
+    for (var deleted : changeLog.tombstonedBy(ENTITY, "room_id").entrySet()) {
+      for (var id : deleted.getValue()) {
+        var room = deleted.getKey().isBlank() ? id : deleted.getKey();
+        if (conversing.containsKey(room)) {
+          conversing.get(room).add(id);
+        }
+      }
+    }
+    return conversing;
+  }
+
+  /** The latest entry of spec {@code id} — a revision, its tombstone, or its erasure — if any. */
+  public Optional<ChangeLog.Entry> head(String id) {
+    return changeLog.head(ENTITY, id);
   }
 
   private Map<String, Object> snapshotMap(SpecRow spec) {
@@ -729,6 +913,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     journal.applyRevision(id, snapshot, rev);
+  }
+
+  @Override
+  public void eraseRow(String id) {
+    journal.eraseRow(id);
   }
 
   /**

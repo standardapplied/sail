@@ -539,6 +539,7 @@ public final class ProjectApplyCommand implements Runnable {
       ProvisionTracker<ProjectPhase> tracker)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
+    ProjectCatalog.requireUnpruned(config.name());
     persistCanonicalBundle(config.name(), sailYamlPath, dryRun);
 
     var hostYamlPath = SailPaths.hostConfigPath();

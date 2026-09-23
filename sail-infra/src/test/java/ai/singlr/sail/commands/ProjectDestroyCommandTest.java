@@ -20,9 +20,11 @@ class ProjectDestroyCommandTest {
   }
 
   @Test
-  void purgeConfirmWarnsItPropagatesToEveryBox() {
+  void purgeConfirmWarnsItErasesEverythingOnEveryBox() {
     var prompt = ProjectDestroyCommand.confirmPrompt("acme", true);
-    assertTrue(prompt.contains("org catalog"));
+    assertTrue(prompt.contains("erase it everywhere"));
+    assertTrue(prompt.contains("specs, rooms, runs, files and history"));
     assertTrue(prompt.contains("every box"));
+    assertTrue(prompt.contains("cannot be undone"));
   }
 }

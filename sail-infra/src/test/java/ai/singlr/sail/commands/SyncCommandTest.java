@@ -64,7 +64,9 @@ class SyncCommandTest {
       } finally {
         System.setOut(previous);
       }
-      assertTrue(output.toString().contains("Freed 6 bytes"));
+      assertTrue(
+          output.toString().contains("Compacted 0 history entries; freed 6 bytes"),
+          output.toString());
       assertFalse(new ai.singlr.sail.store.BlobStore(db).has(hash));
     }
   }
@@ -109,6 +111,8 @@ class SyncCommandTest {
               "bytes_fetched",
               0,
               "bytes_sent",
+              0,
+              "bytes_freed",
               0),
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
@@ -145,6 +149,23 @@ class SyncCommandTest {
         "In sync with main", SyncCommand.renderStatus(Map.of("state", "in_sync", "main", "main")));
     assertEquals("No sync round yet with main", SyncCommand.renderStatus(Map.of("main", "main")));
     assertEquals("Not a node: nothing to sync with.", SyncCommand.renderStatus(Map.of()));
+    assertEquals(
+        "In sync with main — 10 bytes fetched, 2 bytes sent, 4096 bytes freed",
+        SyncCommand.renderStatus(
+            Map.of(
+                "state",
+                "in_sync",
+                "main",
+                "main",
+                "last_report",
+                Map.of(),
+                "bytes_fetched",
+                10,
+                "bytes_sent",
+                2,
+                "bytes_freed",
+                4096L)),
+        "a round whose collection freed content says how much");
   }
 
   private static Map<String, Object> capture(Runnable command) {

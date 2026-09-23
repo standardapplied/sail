@@ -35,6 +35,23 @@ public final class NodeIdentity {
     }
   }
 
+  /**
+   * Whether this box authors erasures: main, or a box that syncs with nobody. A {@code host.yaml}
+   * that cannot be read answers no — a node mistaken for main would erase what it merely has not
+   * pulled yet.
+   */
+  public static boolean authoritative() {
+    var path = SailPaths.hostConfigPath();
+    if (!Files.exists(path)) {
+      return true;
+    }
+    try {
+      return !HostYaml.fromMap(YamlUtil.parseFile(path)).sync().isNode();
+    } catch (IOException | RuntimeException e) {
+      return false;
+    }
+  }
+
   /** This box's FDE handle — the assignee dispatch matches a spec against — or null when unset. */
   public static String handle() {
     return config().handle();

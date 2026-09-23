@@ -22,7 +22,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -38,8 +37,6 @@ import picocli.CommandLine.Parameters;
     description = "Delete snapshots by age and/or retention count.",
     mixinStandardHelpOptions = true)
 public final class SnapsPruneCommand implements Runnable {
-
-  private static final Pattern AGE_PATTERN = Pattern.compile("(\\d+)([dhm])");
 
   @Parameters(
       index = "0",
@@ -81,7 +78,7 @@ public final class SnapsPruneCommand implements Runnable {
     if (keep != null && keep < 0) {
       throw new IllegalArgumentException("--keep must be 0 or greater.");
     }
-    Duration maxAge = olderThan != null ? parseAge(olderThan) : null;
+    Duration maxAge = olderThan != null ? DateTimeUtils.parseAge(olderThan) : null;
     Instant cutoff = maxAge != null ? DateTimeUtils.now().minus(maxAge) : null;
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -224,24 +221,6 @@ public final class SnapsPruneCommand implements Runnable {
   private static Instant sortKey(SnapshotManager.SnapshotInfo s) {
     var t = parseSnapshotTime(s.createdAt());
     return t != null ? t : Instant.MIN;
-  }
-
-  static Duration parseAge(String value) {
-    var matcher = AGE_PATTERN.matcher(value.strip());
-    if (!matcher.matches()) {
-      throw new IllegalArgumentException(
-          "Invalid age format: '"
-              + value
-              + "'. Use a number followed by d (days), h (hours), or m (minutes)."
-              + " Examples: 7d, 24h, 30d");
-    }
-    var amount = Long.parseLong(matcher.group(1));
-    return switch (matcher.group(2)) {
-      case "d" -> Duration.ofDays(amount);
-      case "h" -> Duration.ofHours(amount);
-      case "m" -> Duration.ofMinutes(amount);
-      default -> throw new IllegalArgumentException("Unknown unit: " + matcher.group(2));
-    };
   }
 
   static Instant parseSnapshotTime(String iso) {

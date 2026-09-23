@@ -37,6 +37,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String FDES = "fdes";
   private static final String PROJECTS = "projects";
   private static final String SPECS = "specs";
+  private static final String SPECS_PRUNE = "specs:prune";
   private static final String DISPATCH = "dispatch";
   private static final String AGENT = "agent";
   private static final String CONNECT = "connect";
@@ -194,6 +195,13 @@ public final class ApiRouter implements HttpHandler {
 
     if (request.hasEventsPrefix()) {
       return routeEvents(exchange, request);
+    }
+
+    if (request.segments().equals(List.of(V1, SPECS_PRUNE))) {
+      requireMethod(request, POST);
+      return ApiResponse.from(
+          operations.pruneSpecs(
+              PruneRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
     }
 
     if (request.hasGlobalSpecsPrefix()) {

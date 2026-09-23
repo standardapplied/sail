@@ -44,7 +44,7 @@ final class HostSync {
 
   /** A box that initiates sync: a node points at a main and pushes to it. */
   static boolean isNode(SyncConfig sync) {
-    return Strings.isNotBlank(sync.main());
+    return sync.isNode();
   }
 
   /**

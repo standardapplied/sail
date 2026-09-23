@@ -52,6 +52,13 @@ public final class FileImporter {
     var notes = new ArrayList<String>();
     try (Stream<Path> projects = Files.list(projectsDir)) {
       for (var projectDir : projects.filter(Files::isDirectory).toList()) {
+        if (files.projectPruned(projectDir.getFileName().toString())) {
+          notes.add(
+              "Skipped '"
+                  + projectDir.getFileName()
+                  + "': the project was pruned, so its files on disk are not imported.");
+          continue;
+        }
         imported +=
             importProject(projectDir.getFileName().toString(), projectDir.resolve("files"), cap);
       }

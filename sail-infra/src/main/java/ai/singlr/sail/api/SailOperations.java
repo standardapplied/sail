@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -28,6 +30,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -79,11 +82,49 @@ public final class SailOperations implements HostOperations {
     this.controlPlane = Objects.requireNonNull(db, "db");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
+    this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
     this.schema = new HostLanes.Schema(db, syncOperations);
-    this.catalog = new HostLanes.Catalog(db, projectStore, specStore, roomStore, schema);
+    this.catalog =
+        new HostLanes.Catalog(
+            db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, fdeStore);
     this.pty = new HostLanes.Pty(db, eventStore);
     return this;
+  }
+
+  /**
+   * Main's daily retention and compaction over this box's database, reading the {@code retention}
+   * block of {@code host.yaml} afresh at every sweep.
+   */
+  public RetentionSweeper retentionSweeper() {
+    requireHost(controlPlane);
+    return new RetentionSweeper(
+        pruner, RetentionConfig::load, new BlobStore(controlPlane), this::authoritative);
+  }
+
+  /** Whether this box authors erasures and sweeps retention: main, or a box that syncs nobody. */
+  private boolean authoritative() {
+    return !syncOperations.configuration().isNode();
+  }
+
+  /**
+   * The operator of this box's root CLI: the box's owner, an admin, on main or a standalone box; on
+   * a node, its FDE with the role main's roster gives it, so a node never promises what main then
+   * refuses. A node that has not synced the roster yet cannot tell, and says so.
+   */
+  private Actor cliOperator() {
+    var handle = syncOperations.configuration().handle();
+    if (authoritative()) {
+      return Actor.cliOperator(handle);
+    }
+    var fde = Strings.isBlank(handle) ? Optional.<FdeStore.Fde>empty() : fdeStore.byHandle(handle);
+    if (fde.isEmpty()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "This node does not know its FDE's role yet, so it cannot tell what you may do.",
+          "Run 'sail sync' first, then try again.");
+    }
+    return new Actor(handle, Role.fromAttribute(fde.get().role()), Actor.Lane.CLI);
   }
 
   @Override
@@ -161,7 +202,12 @@ public final class SailOperations implements HostOperations {
       throw e;
     }
     if (health.succeeded(
-        target, syncClock.instant(), round.report(), round.fetchedBytes(), round.sentBytes())) {
+        target,
+        syncClock.instant(),
+        round.report(),
+        round.fetchedBytes(),
+        round.sentBytes(),
+        round.freedBytes())) {
       publishSyncTransition(target, true, null, null);
     }
     return round;
@@ -214,7 +260,8 @@ public final class SailOperations implements HostOperations {
             health.lastError(),
             health.staleSince(),
             health.fetchedBytes(),
-            health.sentBytes());
+            health.sentBytes(),
+            health.freedBytes());
   }
 
   @Override
@@ -267,6 +314,7 @@ public final class SailOperations implements HostOperations {
   private final ProjectLoader projects;
   private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
+  private SpecPruner pruner;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
@@ -1878,6 +1926,20 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return safeRead(() -> globalSpecOps.history(specId));
+  }
+
+  @Override
+  public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
+    return safeWrite(
+        () -> {
+          if (pruner == null) {
+            throw new ApiException(
+                ErrorCode.INTERNAL,
+                "This box keeps no erasure log, so nothing can be pruned here.",
+                "Start the server with 'sail server start'.");
+          }
+          return pruner.prune(request, actor);
+        });
   }
 
   @Override

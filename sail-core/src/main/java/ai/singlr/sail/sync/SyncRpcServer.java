@@ -9,6 +9,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
@@ -22,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -35,6 +37,11 @@ import java.util.Objects;
  * principal's handle additionally binds run offers to execution provenance — a session may create,
  * update, or delete only runs stamped with its own node, so no member can forge run metadata
  * another box would treat as its own execution.
+ *
+ * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
+ * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
+ * erasure's rev; every node then adopts the erasure rows through its ordinary pages. A session that
+ * erased anything collects the content it left unreferenced once the session's lease is released.
  */
 public final class SyncRpcServer {
 
@@ -55,8 +62,13 @@ public final class SyncRpcServer {
   private final ChangeHeads heads;
   private final String version;
   private boolean welcomed;
+  private Sqlite db;
   private BlobStore blobs;
   private FileLimits limits = FileLimits.defaults();
+  private ChangeLog changeLog;
+  private Erasure erasure;
+  private EraseAuthority authority;
+  private boolean erasedInSession;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
@@ -116,9 +128,16 @@ public final class SyncRpcServer {
         .content(db, FileLimits.load());
   }
 
+  /**
+   * Serves content and erasure from main's database {@code db}, uploads bounded by {@code limits}.
+   */
   public SyncRpcServer content(Sqlite db, FileLimits limits) {
+    this.db = db;
     this.blobs = new BlobStore(db);
     this.limits = limits;
+    this.changeLog = new ChangeLog(db);
+    this.erasure = new Erasure(db);
+    this.authority = new EraseAuthority(db);
     return this;
   }
 
@@ -131,8 +150,23 @@ public final class SyncRpcServer {
       serveSession(in, out, frame);
       return;
     }
+    erasedInSession = false;
     try (var scope = blobs.retain()) {
       serveSession(in, out, frame);
+    } finally {
+      if (erasedInSession) {
+        collectAfterErasure();
+      }
+    }
+  }
+
+  private void collectAfterErasure() {
+    try {
+      blobs.gc(BlobStore.Compaction.NONE, true);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [sync] could not collect content after an erasure; 'sail sync gc' frees it: "
+              + rootMessage(e));
     }
   }
 
@@ -435,7 +469,8 @@ public final class SyncRpcServer {
 
   private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
     var state = main.state(id);
-    return new SyncWire.Entry(seq, id, state.rev(), state.snapshot() == null, state.snapshot());
+    return new SyncWire.Entry(
+        seq, id, state.rev(), state.snapshot() == null, state.snapshot(), state.kind());
   }
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {
@@ -444,8 +479,13 @@ public final class SyncRpcServer {
         "protocol");
   }
 
+  /**
+   * Main's verdicts on one push. A read-only principal's push is refused whole — except a batch of
+   * erase requests, each refused on its own, so the node learns the verdict and drops them instead
+   * of asking again every round.
+   */
   private SyncWire.Response results(SyncWire.Push push) {
-    if (!principal.canWrite()) {
+    if (!principal.canWrite() && !push.offers().stream().allMatch(MainReplica.Offer::erase)) {
       return new SyncWire.Failed(
           "Your role is read-only: it can pull the shared board but not push changes.");
     }
@@ -455,9 +495,45 @@ public final class SyncRpcServer {
     }
     var results = new ArrayList<SyncWire.Result>();
     for (var offer : push.offers()) {
-      results.add(result(push.type(), main, offer));
+      results.add(offer.erase() ? erased(push.type(), offer) : result(push.type(), main, offer));
     }
     return new SyncWire.Results(results, main.maxSeq());
+  }
+
+  /**
+   * Main's answer to a request to erase: refused, naming why, unless the principal may erase what
+   * main holds and nothing in it is still running; otherwise the entity and what belongs to it are
+   * erased as the principal and the erasure's rev is the answer. Decided and erased in one
+   * transaction, so what the decision read is what the erasure removes. Asking again for an erased
+   * entity answers the erasure it has.
+   */
+  private SyncWire.Result erased(String type, MainReplica.Offer offer) {
+    if (erasure == null) {
+      return new SyncWire.Refused(offer.id(), "this main keeps no erasure log");
+    }
+    var root = new Erasure.Target(type, offer.id());
+    return SyncPeer.with(
+        principal.handle(),
+        () ->
+            db.<SyncWire.Result>transaction(
+                () -> {
+                  var refusal = authority.refusal(principal, type, offer.id());
+                  if (refusal.isPresent()) {
+                    return new SyncWire.Refused(offer.id(), refusal.get());
+                  }
+                  if (!erasure.isErased(root)) {
+                    var plan = erasure.closure(List.of(root));
+                    var busy =
+                        Erasure.SPEC.equals(type) ? authority.busy(plan) : Optional.<String>empty();
+                    if (busy.isPresent()) {
+                      return new SyncWire.Refused(offer.id(), busy.get());
+                    }
+                    erasure.erase(plan, principal.handle(), "sync");
+                    erasedInSession = true;
+                  }
+                  return new SyncWire.Accepted(
+                      offer.id(), changeLog.erasure(type, offer.id()).orElseThrow().rev());
+                }));
   }
 
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
@@ -479,7 +555,7 @@ public final class SyncRpcServer {
           SyncPeer.with(
               principal.handle(),
               () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
-    } catch (BlobStore.NotHeld e) {
+    } catch (BlobStore.NotHeld | ChangeLog.Pruned e) {
       return new SyncWire.Refused(offer.id(), e.getMessage());
     }
     return switch (outcome) {

@@ -1373,6 +1373,29 @@ class ApiRouterTest {
   }
 
   @Test
+  void pruneIsACollectionVerbThatReportsByDefault() throws Exception {
+    try (var server = server()) {
+      var response = post(server, "/v1/specs:prune", "token", "{\"ids\": [\"auth-flow\"]}");
+      assertEquals(200, response.statusCode());
+      assertTrue(response.body().contains("\"dry_run\": true"), response.body());
+      var applied =
+          post(
+              server, "/v1/specs:prune", "token", "{\"ids\": [\"auth-flow\"], \"dry_run\": false}");
+      assertTrue(applied.body().contains("\"dry_run\": false"), applied.body());
+    }
+  }
+
+  @Test
+  void pruneTakesOnlyAPostWithASelector() throws Exception {
+    try (var server = server()) {
+      assertEquals(405, get(server, "/v1/specs:prune", "token").statusCode());
+      var unselected = post(server, "/v1/specs:prune", "token", "{}");
+      assertEquals(422, unselected.statusCode());
+      assertTrue(unselected.body().contains("Name the specs to prune"), unselected.body());
+    }
+  }
+
+  @Test
   void globalSpecRestoreRejectsNonPost() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/specs/auth-flow/restore", "token");
@@ -2373,7 +2396,7 @@ class ApiRouterTest {
               specId,
               List.of(
                   new SpecRevisionView(
-                      "1-abc", "uday", "2026-06-13T00:00:00Z", "local", false, null))));
+                      "1-abc", "uday", "2026-06-13T00:00:00Z", "local", false, null, "revision"))));
     }
 
     @Override

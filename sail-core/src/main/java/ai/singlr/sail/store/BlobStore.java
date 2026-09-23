@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -283,34 +284,108 @@ public final class BlobStore {
                 YamlUtil.dumpJson(manifest.chunkHashes())));
   }
 
-  public long gc(Set<String> referenced) {
-    requireRetentionBeforeConnection(false);
-    try (var scope = retention.acquireExclusive()) {
-      return collect(referenced);
+  /** Which entities' history a collection first compacts: none, every one, or ids of one type. */
+  public record Compaction(String type, Collection<String> ids, boolean all) {
+    public static final Compaction NONE = new Compaction(null, List.of(), false);
+    public static final Compaction ALL = new Compaction(null, List.of(), true);
+
+    public Compaction {
+      ids = List.copyOf(ids);
+      if (all ? type != null || !ids.isEmpty() : type == null && !ids.isEmpty()) {
+        throw new IllegalArgumentException(
+            "A compaction names every entity, or ids of one type, or nothing");
+      }
+    }
+
+    public static Compaction of(String type, Collection<String> ids) {
+      return new Compaction(Objects.requireNonNull(type, "type"), ids, false);
     }
   }
 
-  private long collect(Set<String> referenced) {
+  /** What one collection did: history entries compacted away, and chunk bytes freed. */
+  public record Collected(long compacted, long freed) {
+    public static final Collected NONE = new Collected(0, 0);
+  }
+
+  /**
+   * The one collection: compacts the history {@code compaction} names ({@link ChangeLog#compact}),
+   * then — when that dropped anything, or {@code collect} asks — frees every blob and chunk nothing
+   * on this box still references. Holds the exclusive retention lease for both, so neither races a
+   * transfer, and takes it only when there is work. Refused inside a transaction scope, like every
+   * other taker of retention.
+   */
+  public Collected gc(Compaction compaction, boolean collect) {
+    requireRetentionBeforeConnection(false);
+    var overflowing = overflowing(compaction);
+    if (overflowing.isEmpty() && !collect) return Collected.NONE;
+    try (var scope = retention.acquireExclusive()) {
+      var compacted = 0L;
+      for (var type : overflowing.entrySet()) {
+        var store = SyncedEntities.require(type.getKey()).store(db);
+        compacted += new ChangeLog(db).compact(type.getKey(), type.getValue(), store::baseRevOf);
+      }
+      var freed = collect || compacted > 0 ? collect() : 0L;
+      return new Collected(compacted, freed);
+    }
+  }
+
+  /** The chunk bytes a collection would free now, read without freeing anything. */
+  public long collectable() {
+    return db.read(
+        () -> {
+          var live = liveChunks(references());
+          var bytes = 0L;
+          for (var chunk : chunkSizes()) {
+            if (!live.contains(chunk.hash())) bytes += chunk.size();
+          }
+          return bytes;
+        });
+  }
+
+  private Map<String, Set<String>> overflowing(Compaction compaction) {
+    var changes = new ChangeLog(db);
+    var overflowing = new LinkedHashMap<String, Set<String>>();
+    if (compaction.all()) {
+      for (var entity : SyncedEntities.all()) {
+        var ids = changes.overflowing(entity.type(), null);
+        if (!ids.isEmpty()) overflowing.put(entity.type(), ids);
+      }
+    } else if (compaction.type() != null) {
+      var ids = changes.overflowing(compaction.type(), compaction.ids());
+      if (!ids.isEmpty()) overflowing.put(compaction.type(), ids);
+    }
+    return overflowing;
+  }
+
+  private long collect() {
     return db.transaction(
         () -> {
-          var retained = new LinkedHashSet<>(referenced);
-          retained.addAll(references());
-          var liveChunks = new LinkedHashSet<String>();
+          var retained = references();
           for (var hash : db.query("SELECT hash FROM blobs", r -> r.text(0))) {
-            if (retained.contains(hash)) liveChunks.addAll(manifest(hash).chunkHashes());
-            else db.execute("DELETE FROM blobs WHERE hash = ?", hash);
+            if (!retained.contains(hash)) db.execute("DELETE FROM blobs WHERE hash = ?", hash);
           }
+          var live = liveChunks(retained);
           var freed = 0L;
-          for (var chunk :
-              db.query(
-                  "SELECT hash, size FROM chunks", r -> new ChunkSize(r.text(0), r.integer(1)))) {
-            if (!liveChunks.contains(chunk.hash())) {
+          for (var chunk : chunkSizes()) {
+            if (!live.contains(chunk.hash())) {
               db.execute("DELETE FROM chunks WHERE hash = ?", chunk.hash());
               freed += chunk.size();
             }
           }
           return freed;
         });
+  }
+
+  private Set<String> liveChunks(Set<String> retained) {
+    var live = new LinkedHashSet<String>();
+    for (var hash : db.query("SELECT hash FROM blobs", r -> r.text(0))) {
+      if (retained.contains(hash)) live.addAll(manifest(hash).chunkHashes());
+    }
+    return live;
+  }
+
+  private List<ChunkSize> chunkSizes() {
+    return db.query("SELECT hash, size FROM chunks", r -> new ChunkSize(r.text(0), r.integer(1)));
   }
 
   /**

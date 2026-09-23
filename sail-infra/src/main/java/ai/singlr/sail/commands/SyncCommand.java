@@ -59,7 +59,7 @@ public final class SyncCommand implements Callable<Integer> {
 
   @Command(
       name = "gc",
-      description = "Collect unreferenced sync content.",
+      description = "Compact history to what every box keeps and free content nothing references.",
       mixinStandardHelpOptions = true)
   static final class Gc implements Callable<Integer> {
     private final Supplier<HostOperations> operations;
@@ -75,8 +75,13 @@ public final class SyncCommand implements Callable<Integer> {
     @Override
     public Integer call() {
       try (var ops = operations.get()) {
-        var freed = ops.schema().collectContent();
-        System.out.println("Freed " + freed + " bytes of unreferenced content.");
+        var collected = ops.schema().collectContent();
+        System.out.println(
+            "Compacted "
+                + collected.compacted()
+                + " history entries; freed "
+                + collected.freed()
+                + " bytes of unreferenced content.");
       }
       return 0;
     }
@@ -128,7 +133,10 @@ public final class SyncCommand implements Callable<Integer> {
               + status.getOrDefault("bytes_fetched", 0)
               + " bytes fetched, "
               + status.getOrDefault("bytes_sent", 0)
-              + " bytes sent";
+              + " bytes sent"
+              + (status.get("bytes_freed") instanceof Number freed && freed.longValue() > 0
+                  ? ", " + freed + " bytes freed"
+                  : "");
     return status.get("pending_conflicts") instanceof Integer pending && pending > 0
         ? health + " — " + pending + " conflict(s) need your decision: sail conflicts"
         : health;
@@ -255,6 +263,7 @@ public final class SyncCommand implements Callable<Integer> {
       map.put("conflicts", report.conflicts());
       map.put("bytes_fetched", round.fetchedBytes());
       map.put("bytes_sent", round.sentBytes());
+      map.put("bytes_freed", round.freedBytes());
       map.put("types", round.types().stream().map(SyncViews::type).toList());
       return YamlUtil.dumpJson(map);
     }

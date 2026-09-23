@@ -24,10 +24,10 @@ a full host. macOS (arm64) runs as a thin client that drives a remote host over 
 
 ### Upgrade compatibility
 
-Content-addressed sync requires version 0.45.0 on main and every node. Upgrade main first,
-then nodes; older peers are refused before sync touches data, with an error naming the remedy.
-The content migration resumes after an interruption, and startup finishes it before serving
-requests or syncing.
+Sync requires version 0.46.0 on main and every node: its change log carries erasures, which
+an older box would misread. Upgrade main first, then nodes; older peers are refused before sync
+touches data, with an error naming the remedy. Migrations resume after an interruption, and
+startup finishes them before serving requests or syncing.
 
 ## The model: one main, many nodes
 
@@ -44,8 +44,27 @@ boxes. The star coordinates state, not execution.
 Spec bodies, plans, and shared files use verified SHA-256 blobs in SQLite. Content-defined
 chunks are deduplicated across projects and revisions; interrupted transfers resume with only
 the missing chunks. Shared files retain their permission bits and stream through ingest,
-sync, and materialization. `sail sync status` reports bytes fetched and sent, and `sail sync gc`
-collects content unreferenced by live rows, retained history, or open conflicts.
+sync, and materialization. `sail sync status` reports bytes fetched, sent, and freed, and `sail
+sync gc` compacts history and collects content unreferenced by live rows, retained history, or
+open conflicts.
+
+Three verbs remove work, with three promises. **Archive** takes a spec off the board and keeps
+everything. **Delete** hides it and keeps its history, so `sail spec restore` brings it back.
+**Prune** erases a spec everywhere, with its room, messages, runs, reviews, events, history, and
+content. It leaves one audit row per erased entity, naming who pruned and when:
+
+```bash
+sail spec prune old-spec                                   # report what would go
+sail spec prune old-spec --apply                           # erase it on every box
+sail spec prune --status archived,cancelled --older-than 90d --apply   # admin: by policy
+```
+
+Only archived, cancelled or deleted specs are pruned, and a pruned spec id or project name is
+never used again. Main authors every erasure. A prune on a node is sent to main, and each box
+erases on its next sync. `sail project destroy --purge` prunes a whole project the same way. History keeps each
+entity's newest 20 revisions, its synced base, and every deletion. Nothing is erased
+automatically unless main's `host.yaml` sets a `retention` block, for example
+`prune_archived_after: 90d`, `messages: 365d`, `runs_after_finished: 180d`.
 
 Each box defaults to a 1 GiB shared-file cap. Set `limits.file_max` in `host.yaml` to an integer
 number of bytes; main enforces its own cap on uploads. The maximum setting is 8 GiB because

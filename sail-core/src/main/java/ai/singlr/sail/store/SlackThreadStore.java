@@ -39,6 +39,11 @@ public final class SlackThreadStore {
         threadTs);
   }
 
+  /** Forgets the threads of an erased spec, in whichever project they were opened. */
+  public void eraseBySpec(String specId) {
+    db.execute("DELETE FROM slack_threads WHERE spec_id = ?", specId);
+  }
+
   public Optional<ThreadRef> find(String project, String specId) {
     return db.queryOne(
         "SELECT channel, thread_ts FROM slack_threads WHERE project = ? AND spec_id = ?",

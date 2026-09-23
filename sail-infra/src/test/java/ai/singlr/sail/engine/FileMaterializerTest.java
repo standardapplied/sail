@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -99,6 +100,21 @@ class FileMaterializerTest {
     assertEquals(0, report.written());
     assertEquals(List.of("x.txt"), report.skipped());
     assertEquals("MY LOCAL EDIT", Files.readString(filesDir.resolve("x.txt")));
+  }
+
+  @Test
+  void aPrunedProjectsFilesAreLeftOnDiskUnreportedAndItIsNoLongerOneWithFiles() throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    materializer.materialize("acme");
+    var erasure = new Erasure(db);
+    erasure.erase(
+        erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "uday", "local");
+
+    var report = materializer.materialize("acme");
+
+    assertEquals(List.of(), report.skipped());
+    assertEquals("A", Files.readString(filesDir.resolve("x.txt")));
+    assertTrue(files.projectsWithFiles().isEmpty());
   }
 
   @Test

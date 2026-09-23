@@ -14,6 +14,8 @@ import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -547,6 +549,58 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString());
           return new ContainerLease.Acquired();
         });
+  }
+
+  /** Up to {@code limit} runs that finished before {@code cutoff}: what run retention erases. */
+  public List<String> finishedBefore(Instant cutoff, int limit) {
+    var terminal =
+        Arrays.stream(RunStatus.values())
+            .filter(RunStatus::isTerminal)
+            .map(RunStatus::wire)
+            .toList();
+    var parameters = new ArrayList<Object>(terminal);
+    parameters.add(cutoff.toString());
+    parameters.add(limit);
+    return db.query(
+        "SELECT id FROM runs WHERE status IN ("
+            + String.join(", ", terminal.stream().map(status -> "?").toList())
+            + ") AND completed_at IS NOT NULL AND julianday(completed_at) < julianday(?)"
+            + " ORDER BY id LIMIT ?",
+        row -> row.text(0),
+        parameters.toArray());
+  }
+
+  /** The stored statuses of a run that has not finished. */
+  static List<String> unfinishedStatuses() {
+    return Arrays.stream(RunStatus.values())
+        .filter(status -> !status.isTerminal())
+        .map(RunStatus::wire)
+        .toList();
+  }
+
+  /** The runs among {@code ids} that have not finished ({@link RunStatus#isTerminal}). */
+  public List<String> unfinished(List<String> ids) {
+    var unfinished = new ArrayList<String>();
+    for (var from = 0; from < ids.size(); from += 500) {
+      var batch = ids.subList(from, Math.min(ids.size(), from + 500));
+      for (var row :
+          db.query(
+              "SELECT id, status FROM runs WHERE id IN ("
+                  + String.join(", ", batch.stream().map(id -> "?").toList())
+                  + ") ORDER BY id",
+              r -> Map.entry(r.text(0), Objects.toString(r.text(1), "")),
+              batch.toArray())) {
+        if (!RunStatus.isTerminal(row.getValue())) {
+          unfinished.add(row.getKey());
+        }
+      }
+    }
+    return unfinished;
+  }
+
+  /** Drops every box's container lease on an erased project. */
+  public void eraseLeases(String project) {
+    db.execute("DELETE FROM container_leases WHERE project = ?", project);
   }
 
   /** Releases the box's container lease on the project. Idempotent. */
@@ -1288,6 +1342,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     journal.applyRevision(id, snapshot, rev);
+  }
+
+  /** Removes an erased run's row, with the box-local credential it was issued. */
+  @Override
+  public void eraseRow(String id) {
+    db.execute("DELETE FROM run_credentials WHERE run_id = ?", id);
+    journal.eraseRow(id);
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */

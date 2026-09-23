@@ -434,25 +434,21 @@ public final class HostConfigSetCommand implements Runnable {
     var webauthn = current.webauthn();
     var sync = current.sync();
     return switch (key) {
-      case "server-ip" -> withServerIp(current, value);
+      case "server-ip" -> current.withServerIp(value);
       case "webauthn-rp-id" ->
-          withWebauthn(
-              current,
+          current.withWebauthn(
               new WebauthnConfig(
                   value, webauthn.rpName(), webauthn.origins(), webauthn.sessionTtlHours()));
       case "webauthn-rp-name" ->
-          withWebauthn(
-              current,
+          current.withWebauthn(
               new WebauthnConfig(
                   webauthn.rpId(), value, webauthn.origins(), webauthn.sessionTtlHours()));
       case "webauthn-origin" ->
-          withWebauthn(
-              current,
+          current.withWebauthn(
               new WebauthnConfig(
                   webauthn.rpId(), webauthn.rpName(), List.of(value), webauthn.sessionTtlHours()));
       case "webauthn-session-ttl-hours" ->
-          withWebauthn(
-              current,
+          current.withWebauthn(
               new WebauthnConfig(
                   webauthn.rpId(),
                   webauthn.rpName(),
@@ -492,37 +488,5 @@ public final class HostConfigSetCommand implements Runnable {
               + " (1 hour to 90 days).");
     }
     return hours;
-  }
-
-  private static HostYaml withServerIp(HostYaml current, String serverIp) {
-    return new HostYaml(
-        current.storageBackend(),
-        current.pool(),
-        current.poolDisk(),
-        current.bridge(),
-        current.baseProfile(),
-        current.image(),
-        current.incusVersion(),
-        serverIp,
-        current.initializedAt(),
-        current.webauthn(),
-        current.sync(),
-        current.limits());
-  }
-
-  private static HostYaml withWebauthn(HostYaml current, WebauthnConfig webauthn) {
-    return new HostYaml(
-        current.storageBackend(),
-        current.pool(),
-        current.poolDisk(),
-        current.bridge(),
-        current.baseProfile(),
-        current.image(),
-        current.incusVersion(),
-        current.serverIp(),
-        current.initializedAt(),
-        webauthn,
-        current.sync(),
-        current.limits());
   }
 }

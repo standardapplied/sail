@@ -7,12 +7,16 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,13 +48,20 @@ class SchemaManagerTest {
         "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
         SchemaManager.V1_VERSION + prior);
     new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
-    var files = new FileStore(db);
-    var hash = files.blobs().putText("content");
-    files.put(new FileStore.FileRow("acme", "known", hash, 7, 0644, "text"));
-    files.put(new FileStore.FileRow("acme", "known", hash, 7, 0600, "text"));
-    files.delete("acme", "known");
+    var hash = new BlobStore(db).putText("content");
+    for (var mode : List.of(0644, 0600)) {
+      db.execute(
+          """
+          INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,
+              snapshot)
+          VALUES ('file', 'acme/known', ?, 'staged', 'local', 0, ?)""",
+          "1-" + mode,
+          YamlUtil.dumpJson(
+              Map.of("project", "acme", "path", "known", "content_hash", hash, "mode", mode)));
+    }
 
     new SchemaManager(db).migrate();
+    var files = new FileStore(db);
 
     assertTrue(files.isKnownVersion("acme/known", hash, 0644));
     assertTrue(files.isKnownVersion("acme/known", hash, 0600));
@@ -69,6 +80,143 @@ class SchemaManagerTest {
     assertTrue(
         plan.stream().anyMatch(step -> step.contains("idx_change_log_file_version")),
         plan.toString());
+  }
+
+  @Test
+  void fromThePriorReleaseTheLogLearnsKindsAndArchivedSpecsTheirStatusTimes() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE change_log ADD COLUMN kind");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    for (var entry :
+        List.of(List.of("kept", "1-a", 0), List.of("gone", "1-b", 0), List.of("gone", "2-c", 1))) {
+      db.execute(
+          """
+          INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,
+              snapshot)
+          VALUES ('spec', ?, ?, 'staged', 'local', ?, '{}')""",
+          entry.get(0),
+          entry.get(1),
+          entry.get(2));
+    }
+    for (var spec :
+        List.of(List.of("a", "archived"), List.of("c", "cancelled"), List.of("p", "pending"))) {
+      db.execute(
+          "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'then',"
+              + " '2026-06-01T00:00:00Z')",
+          spec.get(0),
+          spec.get(0),
+          spec.get(1));
+    }
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(
+        List.of("revision", "revision", "tombstone"),
+        db.query("SELECT kind FROM change_log ORDER BY seq", row -> row.text(0)));
+    assertEquals(
+        List.of("a|2026-06-01T00:00:00Z|", "c||2026-06-01T00:00:00Z", "p||"),
+        db.query(
+            "SELECT id || '|' || COALESCE(archived_at, '') || '|' || COALESCE(cancelled_at, '')"
+                + " FROM specs ORDER BY id",
+            row -> row.text(0)));
+    assertThrows(
+        SqliteException.class,
+        () ->
+            db.execute(
+                "INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin,"
+                    + " snapshot, kind) VALUES ('spec', 'x', '1', 'now', 'local', '{}', 'bogus')"));
+    assertEquals(
+        0, db.queryOne("SELECT count(*) FROM erase_requests", row -> row.integer(0)).orElseThrow());
+  }
+
+  @Test
+  void aDeletionTheOldServerWritesDuringTheUpgradeIsStillATombstone() {
+    new SchemaManager(db).migrate();
+
+    db.execute(
+        """
+        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
+        VALUES ('spec', 'gone', '2-old', 'now', 'local', 1, '{}')""");
+    db.execute(
+        """
+        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
+        VALUES ('spec', 'kept', '1-old', 'now', 'local', 0, '{}')""");
+
+    assertEquals(
+        List.of("gone|tombstone", "kept|revision"),
+        db.query(
+            "SELECT entity_id || '|' || kind FROM change_log ORDER BY entity_id",
+            row -> row.text(0)));
+  }
+
+  @Test
+  void theLinksAPruneWalksAreIndexed() {
+    new SchemaManager(db).migrate();
+
+    for (var probe :
+        List.of(
+            "SELECT id FROM room_messages WHERE reply_to IN ('x')",
+            "SELECT id FROM runs WHERE room_id IN ('x')",
+            "SELECT id FROM rooms WHERE project IN ('x')",
+            "SELECT id FROM specs WHERE room_id = 'x'",
+            "SELECT run_id FROM run_delivered_messages WHERE message_id = 'x'",
+            "SELECT entity_id FROM change_log WHERE entity_type = 'spec' AND kind = 'tombstone'")) {
+      var plan =
+          String.join(
+              " ",
+              db.query("EXPLAIN QUERY PLAN " + probe, row -> Objects.toString(row.text(3), "")));
+      assertTrue(plan.contains("USING") && plan.contains("INDEX"), probe + " → " + plan);
+    }
+  }
+
+  @Test
+  void readingTheDeletionsOfATypeNeverScansTheHeads() {
+    new SchemaManager(db).migrate();
+
+    var plan =
+        String.join(
+            " ",
+            db.query(
+                "EXPLAIN QUERY PLAN " + ChangeLog.TOMBSTONED_BY,
+                row -> Objects.toString(row.text(3), ""),
+                "$.room_id",
+                "spec"));
+
+    assertFalse(plan.contains("SCAN"), plan);
+  }
+
+  @Test
+  void theStatusTimesFollowEveryStatusWriteAndLeavingTheStatusClearsIt() {
+    new SchemaManager(db).migrate();
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('s', 's',"
+            + " 'archived', 'now', 'now')");
+    var born = since("archived_at");
+    assertTrue(born != null && born.endsWith("Z"), "an archived birth is stamped: " + born);
+
+    db.execute("UPDATE specs SET title = 'renamed' WHERE id = 's'");
+    assertEquals(born, since("archived_at"), "an edit that keeps the status keeps its time");
+
+    db.execute("UPDATE specs SET status = 'cancelled' WHERE id = 's'");
+    assertNull(since("archived_at"));
+    assertTrue(since("cancelled_at") != null);
+
+    db.execute("UPDATE specs SET status = 'pending' WHERE id = 's'");
+    assertNull(since("archived_at"));
+    assertNull(since("cancelled_at"));
+  }
+
+  private String since(String column) {
+    var value =
+        db.queryOne(
+                "SELECT COALESCE(" + column + ", '') FROM specs WHERE id = 's'", row -> row.text(0))
+            .orElseThrow();
+    return value.isEmpty() ? null : value;
   }
 
   @Test

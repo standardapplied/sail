@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostCatalog;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -44,8 +45,10 @@ public final class ProjectDestroyCommand implements Runnable {
   @Option(
       names = "--purge",
       description =
-          "Also remove the project from the org catalog. This propagates the deletion to every box"
-              + " on the next sync — by default destroy only tears down this box's container.")
+          "Also erase the project everywhere: its catalog entry, specs, rooms, runs, files and"
+              + " their history, on every box. Irreversible. On a node, main erases it and this"
+              + " box follows on its next sync — by default destroy only tears down this box's"
+              + " container.")
   private boolean purge;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -89,6 +92,10 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println();
       Banner.printContainerStatus(name, state, System.out, Ansi.AUTO);
     }
+    var erases = purge ? rehearsePurge() : null;
+    if (erases != null && !json) {
+      System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
+    }
 
     if ((containerPresent || purge)
         && !yes
@@ -112,30 +119,36 @@ public final class ProjectDestroyCommand implements Runnable {
         deleteDirectory(projectDir);
       }
     }
-    var purged = purge && purgeFromCatalog();
+    var destroyed = purge ? purgeFromCatalog(erases) : null;
 
-    emitResult(containerPresent, dirPresent, purged);
+    emitResult(containerPresent, dirPresent, destroyed);
   }
 
   static String confirmPrompt(String name, boolean purge) {
     if (purge) {
       return "Destroy project "
           + name
-          + " and remove it from the org catalog? It disappears from every box on the next sync,"
-          + " and this cannot be undone.";
+          + " and erase it everywhere — its specs, rooms, runs, files and history, on every box?"
+          + " This cannot be undone.";
     }
     return "Destroy project " + name + "? This cannot be undone.";
   }
 
-  /** Tombstones the project in the catalog so the removal replicates. Idempotent if absent. */
-  private boolean purgeFromCatalog() {
+  /** What the purge will erase, rehearsed through the one prune method before anything goes. */
+  private String rehearsePurge() {
+    try (var operations = OperationsFactory.open()) {
+      return operations.catalog().purgeSummary(name);
+    }
+  }
+
+  /** Prunes the project everywhere, through the one prune method. Idempotent once erased. */
+  private HostCatalog.Destroyed purgeFromCatalog(String erases) {
     if (dryRun) {
-      System.out.println(
-          "[dry-run] remove '" + name + "' from the catalog (propagates to other boxes on sync)");
-      return false;
+      System.out.println("[dry-run] erase '" + name + "' everywhere: " + erases);
+      return new HostCatalog.Destroyed(name, false, false);
     }
     try (var operations = OperationsFactory.open()) {
-      return operations.catalog().destroy(name, true).purged();
+      return operations.catalog().destroy(name, true);
     }
   }
 
@@ -151,15 +164,17 @@ public final class ProjectDestroyCommand implements Runnable {
         Ansi.AUTO.string("  @|faint Project '" + name + "' does not exist. Nothing to do.|@"));
   }
 
-  private void emitResult(boolean containerPresent, boolean dirPresent, boolean purged) {
+  private void emitResult(
+      boolean containerPresent, boolean dirPresent, HostCatalog.Destroyed destroyed) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("destroyed", name);
       if (!containerPresent) {
         map.put("status", dirPresent ? "state_cleaned" : "catalog_only");
       }
-      if (purge) {
-        map.put("purged", purged);
+      if (destroyed != null) {
+        map.put("purged", destroyed.purged());
+        map.put("requested", destroyed.requested());
       }
       System.out.println(YamlUtil.dumpJson(map));
       return;
@@ -172,12 +187,20 @@ public final class ProjectDestroyCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|faint Container '" + name + "' already absent — cleaned up stale state.|@"));
     }
-    if (purged) {
+    if (destroyed != null && destroyed.requested()) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|green ✓|@ Removed '"
+              "  @|green ✓|@ Asked main to erase '"
                   + name
-                  + "' from the org catalog — it disappears from other boxes on the next sync."));
+                  + "' with its specs, rooms, runs, files and history — it goes on this box's"
+                  + " next sync."));
+    } else if (destroyed != null && destroyed.purged()) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Erased '"
+                  + name
+                  + "' with its specs, rooms, runs, files and history — other boxes follow on"
+                  + " their next sync."));
     }
   }
 

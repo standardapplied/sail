@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -123,6 +124,25 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           }
           journal.recordRevision(id, "local", true);
           db.execute("DELETE FROM rooms WHERE id = ?", id);
+          return true;
+        });
+  }
+
+  /**
+   * Brings back a room deleted with the spec that minted it, from the last state its tombstone
+   * kept, as a new revision — the room a restored spec converses in. A no-op unless the room's
+   * latest entry is a tombstone.
+   */
+  public boolean restoreDeleted(String id) {
+    return db.transaction(
+        () -> {
+          var head = changeLog.head(ENTITY, id).orElse(null);
+          if (head == null || head.kind() != ChangeLog.Kind.TOMBSTONE) {
+            return false;
+          }
+          var schema = new RoomSchema();
+          schema.apply(id, schema.comparable(YamlUtil.parseMap(head.snapshot())));
+          journal.recordRevision(id, "restore", false);
           return true;
         });
   }
@@ -276,6 +296,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   @Override
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     journal.applyRevision(id, snapshot, rev);
+  }
+
+  @Override
+  public void eraseRow(String id) {
+    journal.eraseRow(id);
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */

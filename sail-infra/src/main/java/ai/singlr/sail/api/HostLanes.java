@@ -36,7 +36,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
+import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
 final class HostLanes {
@@ -110,7 +110,13 @@ final class HostLanes {
   }
 
   record Catalog(
-      Sqlite db, ProjectStore projectStore, SpecStore specs, RoomStore rooms, HostSchema schema)
+      Sqlite db,
+      ProjectStore projectStore,
+      SpecStore specs,
+      RoomStore rooms,
+      HostSchema schema,
+      SpecPruner pruner,
+      Supplier<Actor> operator)
       implements HostCatalog {
     @Override
     public Optional<ProjectStore.ProjectRow> project(String project) {
@@ -155,14 +161,31 @@ final class HostLanes {
       return List.copyOf(new FileStore(db).projectsWithFiles());
     }
 
+    /**
+     * A purge is a prune of the whole project through the one prune method: its catalog row, specs,
+     * rooms, runs, files and every history of them, erased everywhere. On a node it is asked of
+     * main, which decides it on its own copy, and this box follows on its next sync.
+     */
     @Override
     public Destroyed destroy(String name, boolean purge) {
       NameValidator.requireValidProjectName(name);
       if (!purge) {
-        return new Destroyed(name, false);
+        return new Destroyed(name, false, false);
       }
+      var report = purge(name, false);
+      return new Destroyed(
+          name, report.requested() || !report.entries().isEmpty(), report.requested());
+    }
+
+    @Override
+    public String purgeSummary(String name) {
+      NameValidator.requireValidProjectName(name);
+      return purge(name, true).summary();
+    }
+
+    private PruneReport purge(String name, boolean dryRun) {
       schema.initialize();
-      return new Destroyed(name, projectStore.delete(name));
+      return pruner.prune(PruneRequest.project(name, dryRun), operator.get());
     }
 
     @Override
@@ -246,9 +269,9 @@ final class HostLanes {
     }
 
     @Override
-    public long collectContent() {
+    public BlobStore.Collected collectContent() {
       prepareSync();
-      return new BlobStore(db).gc(Set.of());
+      return new BlobStore(db).gc(BlobStore.Compaction.ALL, true);
     }
   }
 }

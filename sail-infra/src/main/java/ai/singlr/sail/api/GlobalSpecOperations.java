@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -443,31 +444,60 @@ final class GlobalSpecOperations {
    */
   GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
     requireStore();
-    var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    var existing = restorable(specId);
+    SpecPolicy.mutate(actor, specId, existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
     var targetAssignee = revisionAssignee(specId, request.rev());
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), targetAssignee).enforce();
+      SpecPolicy.reassign(actor, specId, existing.assignee(), targetAssignee).enforce();
     }
-    specStore.restore(specId, request.rev());
+    var store = rooms.get();
+    specStore.atomically(
+        () -> {
+          specStore.restore(specId, request.rev());
+          if (store != null && !existing.live()) {
+            var row = specStore.findById(specId).orElseThrow();
+            if (row.roomIdOrIdentity().equals(specId)) {
+              store.restoreDeleted(specId);
+            }
+          }
+          return null;
+        });
     var row = specStore.findById(specId).orElseThrow();
     publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecRestoredResponse(viewOf(row), request.rev());
   }
 
+  /**
+   * The spec a restore targets, live or deleted with its tombstone retained. A pruned spec is gone
+   * with its history, and the refusal says so; an id never recorded is not found.
+   */
+  private SpecStore.LastKnown restorable(String specId) {
+    var head =
+        specStore
+            .head(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    if (head.kind() == ChangeLog.Kind.ERASURE) {
+      throw new ApiException(ErrorCode.SPEC_PRUNED, specStore.pruned(specId));
+    }
+    return specStore.lastKnown(specId).orElseThrow();
+  }
+
   private String revisionAssignee(String specId, String rev) {
     var entry =
         specStore.history(specId).stream()
+            .filter(candidate -> candidate.kind() != ChangeLog.Kind.ERASURE)
             .filter(candidate -> rev.equals(candidate.rev()))
             .findFirst()
             .orElseThrow(
                 () ->
                     new ApiException(
-                        ErrorCode.INVALID_REQUEST,
-                        "No revision '" + rev + "' recorded for spec '" + specId + "'."));
+                        ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
     return Objects.toString(YamlUtil.parseMap(entry.snapshot()).get("assignee"), null);
   }
 

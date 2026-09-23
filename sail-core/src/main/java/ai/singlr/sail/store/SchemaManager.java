@@ -109,6 +109,51 @@ public final class SchemaManager {
               AND r.superseded_at IS NULL
               AND sp.status = 'done')""";
 
+  /**
+   * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
+   * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
+   * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
+   * it. A box-local fact, never part of a snapshot: main's sweeper ages on when main saw it.
+   */
+  static final String STATUS_SINCE_ON_INSERT =
+      """
+      CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
+      WHEN NEW.status IN ('archived', 'cancelled')
+      BEGIN
+          UPDATE specs SET
+              archived_at = CASE WHEN NEW.status = 'archived'
+                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END,
+              cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
+          WHERE id = NEW.id;
+      END""";
+
+  static final String STATUS_SINCE_ON_UPDATE =
+      """
+      CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
+      WHEN NEW.status IS NOT OLD.status
+      BEGIN
+          UPDATE specs SET
+              archived_at = CASE WHEN NEW.status = 'archived'
+                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END,
+              cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
+          WHERE id = NEW.id;
+      END""";
+
+  /**
+   * A deletion a release before {@code change_log.kind} writes — the old server keeps running while
+   * the upgrade migrates, and the column's default reads it as a revision — is recorded as the
+   * tombstone it is, so it still reaches main.
+   */
+  static final String KIND_FROM_DELETED =
+      """
+      CREATE TRIGGER change_log_kind_from_deleted AFTER INSERT ON change_log
+      WHEN NEW.deleted = 1 AND NEW.kind = 'revision'
+      BEGIN
+          UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
+      END""";
+
   static final List<String> MIGRATIONS =
       List.of(
           "ALTER TABLE runs ADD COLUMN principal TEXT",
@@ -512,7 +557,32 @@ public final class SchemaManager {
           CREATE INDEX idx_change_log_file_version ON change_log (
               entity_id, json_extract(snapshot, '$.content_hash'), json_extract(snapshot, '$.mode')
           ) WHERE entity_type = 'file'
-          """);
+          """,
+          """
+          ALTER TABLE change_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'revision'
+              CHECK (kind IN ('revision', 'tombstone', 'erasure'))""",
+          KIND_FROM_DELETED,
+          "UPDATE change_log SET kind = 'tombstone' WHERE deleted = 1",
+          "ALTER TABLE specs ADD COLUMN archived_at TEXT",
+          "ALTER TABLE specs ADD COLUMN cancelled_at TEXT",
+          "UPDATE specs SET archived_at = updated_at WHERE status = 'archived'",
+          "UPDATE specs SET cancelled_at = updated_at WHERE status = 'cancelled'",
+          STATUS_SINCE_ON_INSERT,
+          STATUS_SINCE_ON_UPDATE,
+          """
+          CREATE TABLE erase_requests (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              actor TEXT,
+              requested_at TEXT NOT NULL,
+              PRIMARY KEY (entity_type, entity_id)
+          )""",
+          "CREATE INDEX idx_change_log_tombstones ON change_log(entity_type) WHERE kind = 'tombstone'",
+          "CREATE INDEX idx_room_messages_reply ON room_messages(reply_to)",
+          "CREATE INDEX idx_runs_room ON runs(room_id)",
+          "CREATE INDEX idx_rooms_project ON rooms(project)",
+          "CREATE INDEX idx_specs_room ON specs(room_id)",
+          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
