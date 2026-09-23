@@ -245,6 +245,11 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     journal.applyRevision(id, snapshot, rev);
   }
 
+  @Override
+  public void eraseRow(String id) {
+    journal.eraseRow(id);
+  }
+
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
     return journal.commitRevision(id, snapshot, expectedRev);

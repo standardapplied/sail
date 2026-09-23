@@ -27,12 +27,14 @@ public record HostYaml(
     String initializedAt,
     WebauthnConfig webauthn,
     SyncConfig sync,
-    FileLimits limits) {
+    FileLimits limits,
+    RetentionConfig retention) {
 
   public HostYaml {
     webauthn = webauthn == null ? WebauthnConfig.disabled() : webauthn;
     sync = sync == null ? SyncConfig.unset() : sync;
     limits = limits == null ? FileLimits.defaults() : limits;
+    retention = retention == null ? RetentionConfig.none() : retention;
   }
 
   public HostYaml(
@@ -59,7 +61,8 @@ public record HostYaml(
         initializedAt,
         webauthn,
         sync,
-        FileLimits.defaults());
+        FileLimits.defaults(),
+        RetentionConfig.none());
   }
 
   /** Constructor without a sync role; leaves the box undeclared in the sync star. */
@@ -152,7 +155,8 @@ public record HostYaml(
         (String) map.get("initialized_at"),
         WebauthnConfig.fromMap((Map<String, Object>) map.get("webauthn")),
         SyncConfig.fromMap((Map<String, Object>) map.get("sync")),
-        FileLimits.fromMap((Map<String, Object>) map.get("limits")));
+        FileLimits.fromMap((Map<String, Object>) map.get("limits")),
+        RetentionConfig.fromMap((Map<String, Object>) map.get("retention")));
   }
 
   /** This host with its sync block replaced and everything else kept. */
@@ -169,7 +173,44 @@ public record HostYaml(
         initializedAt,
         webauthn,
         sync,
-        limits);
+        limits,
+        retention);
+  }
+
+  /** This host with its server IP replaced and everything else kept. */
+  public HostYaml withServerIp(String serverIp) {
+    return new HostYaml(
+        storageBackend,
+        pool,
+        poolDisk,
+        bridge,
+        baseProfile,
+        image,
+        incusVersion,
+        serverIp,
+        initializedAt,
+        webauthn,
+        sync,
+        limits,
+        retention);
+  }
+
+  /** This host with its passkey settings replaced and everything else kept. */
+  public HostYaml withWebauthn(WebauthnConfig webauthn) {
+    return new HostYaml(
+        storageBackend,
+        pool,
+        poolDisk,
+        bridge,
+        baseProfile,
+        image,
+        incusVersion,
+        serverIp,
+        initializedAt,
+        webauthn,
+        sync,
+        limits,
+        retention);
   }
 
   /** This host with its recorded Incus version replaced and everything else kept. */
@@ -186,7 +227,8 @@ public record HostYaml(
         initializedAt,
         webauthn,
         sync,
-        limits);
+        limits,
+        retention);
   }
 
   public Map<String, Object> toMap() {
@@ -208,6 +250,9 @@ public record HostYaml(
     }
     if (!limits.equals(FileLimits.defaults()))
       map.put("limits", Map.of("file_max", limits.fileMax()));
+    if (!retention.isEmpty()) {
+      map.put("retention", retention.toMap());
+    }
     return map;
   }
 }

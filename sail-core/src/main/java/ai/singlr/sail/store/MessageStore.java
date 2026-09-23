@@ -303,6 +303,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * The one way a message leaves this box: erased with its room or by retention, never edited or
+   * deleted on its own. A reply erased with it may go first; {@link Erasure} defers the reply
+   * constraint to its commit.
+   */
+  @Override
+  public void eraseRow(String id) {
+    db.execute("DELETE FROM room_messages WHERE id = ?", id);
+  }
+
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
     return db.transaction(
         () -> {

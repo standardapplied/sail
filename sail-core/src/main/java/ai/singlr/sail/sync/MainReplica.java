@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.ChangeLog;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,8 +20,27 @@ import java.util.function.Supplier;
  */
 public interface MainReplica {
 
-  /** One compare-and-set offer: the state to commit against the rev the node last saw. */
-  record Offer(String id, Map<String, Object> snapshot, String expectedRev) {}
+  /**
+   * One compare-and-set offer: the state to commit against the rev the node last saw. An {@code
+   * erase} offer carries no snapshot and asks main to erase the entity and what belongs to it; it
+   * is decided on authority, not on the rev.
+   */
+  record Offer(String id, Map<String, Object> snapshot, String expectedRev, boolean erase) {
+    public Offer {
+      if (erase && snapshot != null) {
+        throw new IllegalArgumentException("An erase offer for " + id + " carries no snapshot");
+      }
+    }
+
+    public Offer(String id, Map<String, Object> snapshot, String expectedRev) {
+      this(id, snapshot, expectedRev, false);
+    }
+
+    /** The offer asking main to erase {@code id}. */
+    public static Offer erasure(String id) {
+      return new Offer(id, null, null, true);
+    }
+  }
 
   /** Stable identity of this main, used as the node's checkpoint key. */
   String id();
@@ -34,8 +54,15 @@ public interface MainReplica {
   /** Main's latest revision for an entity (including a tombstone); {@code null} if unknown. */
   String currentRev(String id);
 
-  /** One entity's current state and its revision, read together. */
-  record State(Map<String, Object> snapshot, String rev) {}
+  /**
+   * One entity's current state and its revision, read together, and the kind of the entry they come
+   * from: an erased entity has no snapshot and its erasure's rev.
+   */
+  record State(Map<String, Object> snapshot, String rev, ChangeLog.Kind kind) {
+    public State(Map<String, Object> snapshot, String rev) {
+      this(snapshot, rev, snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION);
+    }
+  }
 
   /**
    * Samples {@link #current} and {@link #currentRev} as one atomic read. A writer landing between

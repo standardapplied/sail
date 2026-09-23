@@ -561,6 +561,12 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
+    return Result.success(
+        new PruneReport(request.dryRun(), false, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of()));
+  }
+
+  @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request, Actor actor) {
     return Result.success(

@@ -30,7 +30,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -80,7 +79,8 @@ class SyncBlobTest {
               });
       try {
         assertTrue(reading.await(5, TimeUnit.SECONDS));
-        var collecting = executor.submit(() -> new BlobStore(gcDb).gc(Set.of()));
+        var collecting =
+            executor.submit(() -> new BlobStore(gcDb).gc(BlobStore.Compaction.NONE, true).freed());
         assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
         var upload =
             executor.submit(
@@ -134,7 +134,7 @@ class SyncBlobTest {
             executor.submit(
                 () -> {
                   started.countDown();
-                  return new BlobStore(gcDb).gc(Set.of());
+                  return new BlobStore(gcDb).gc(BlobStore.Compaction.NONE, true).freed();
                 });
         assertTrue(started.await(5, TimeUnit.SECONDS));
         assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));

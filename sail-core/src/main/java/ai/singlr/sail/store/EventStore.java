@@ -133,6 +133,28 @@ public final class EventStore {
     return Map.copyOf(typeMap);
   }
 
+  /**
+   * Drops every event of an erased spec or room — the conversation id events carry as {@code
+   * spec_id}. Events are box-local and have no parent to cascade from; this and {@link
+   * #eraseByProject} are the erasure's only hand-written deletes. Returns how many went.
+   */
+  public int eraseBySpec(String specId) {
+    return db.transaction(
+        () -> {
+          db.execute("DELETE FROM events WHERE spec_id = ?", specId);
+          return db.changes();
+        });
+  }
+
+  /** Drops every event of an erased project, as {@link #eraseBySpec} does for a spec. */
+  public int eraseByProject(String project) {
+    return db.transaction(
+        () -> {
+          db.execute("DELETE FROM events WHERE project = ?", project);
+          return db.changes();
+        });
+  }
+
   public int pruneBefore(String before, Set<String> types, int batchSize) {
     if (types.isEmpty()) {
       return 0;

@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -28,6 +30,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -79,11 +82,34 @@ public final class SailOperations implements HostOperations {
     this.controlPlane = Objects.requireNonNull(db, "db");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
+    this.globalSpecOps =
+        new GlobalSpecOperations(
+            specStore,
+            reviewStore,
+            eventBus,
+            runStore,
+            () -> roomStore,
+            new GlobalSpecOperations.Pruning(
+                db, () -> !syncOperations.configuration().isNode(), DateTimeUtils::now));
     this.schema = new HostLanes.Schema(db, syncOperations);
-    this.catalog = new HostLanes.Catalog(db, projectStore, specStore, roomStore, schema);
+    this.catalog =
+        new HostLanes.Catalog(db, projectStore, specStore, roomStore, schema, globalSpecOps);
     this.identity = new HostLanes.Identity(db, fdeStore);
     this.pty = new HostLanes.Pty(db, eventStore);
     return this;
+  }
+
+  /**
+   * Main's daily retention and compaction over this box's database, reading the {@code retention}
+   * block of {@code host.yaml} afresh at every sweep.
+   */
+  public RetentionSweeper retentionSweeper() {
+    requireHost(controlPlane);
+    return new RetentionSweeper(
+        globalSpecOps,
+        RetentionConfig::load,
+        new BlobStore(controlPlane),
+        () -> !syncOperations.configuration().isNode());
   }
 
   @Override
@@ -161,7 +187,12 @@ public final class SailOperations implements HostOperations {
       throw e;
     }
     if (health.succeeded(
-        target, syncClock.instant(), round.report(), round.fetchedBytes(), round.sentBytes())) {
+        target,
+        syncClock.instant(),
+        round.report(),
+        round.fetchedBytes(),
+        round.sentBytes(),
+        round.freedBytes())) {
       publishSyncTransition(target, true, null, null);
     }
     return round;
@@ -214,7 +245,8 @@ public final class SailOperations implements HostOperations {
             health.lastError(),
             health.staleSince(),
             health.fetchedBytes(),
-            health.sentBytes());
+            health.sentBytes(),
+            health.freedBytes());
   }
 
   @Override
@@ -266,7 +298,7 @@ public final class SailOperations implements HostOperations {
   private SyncScheduler syncScheduler;
   private final ProjectLoader projects;
   private final SnapshotOperations snapshotOps;
-  private final GlobalSpecOperations globalSpecOps;
+  private GlobalSpecOperations globalSpecOps;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
@@ -1878,6 +1910,11 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return safeRead(() -> globalSpecOps.history(specId));
+  }
+
+  @Override
+  public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
+    return safeWrite(() -> globalSpecOps.prune(request, actor));
   }
 
   @Override

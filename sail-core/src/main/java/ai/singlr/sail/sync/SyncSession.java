@@ -22,8 +22,9 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
 
   /**
    * How one entity type fared in a round: the engine's counts, how many pages and entries main
-   * served for it, whether nothing at all had to move ({@code skipped}), and the failure that
-   * stopped it, if one did.
+   * served for it, whether nothing at all had to move ({@code skipped}), the failure that stopped
+   * it, if one did, the content bytes it moved each way, and the bytes the collection after it
+   * freed.
    */
   record TypeReport(
       String type,
@@ -33,7 +34,20 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       boolean skipped,
       String failure,
       long fetchedBytes,
-      long sentBytes) {
+      long sentBytes,
+      long freedBytes) {
+    public TypeReport(
+        String type,
+        SyncEngine.Report report,
+        int pages,
+        int entries,
+        boolean skipped,
+        String failure,
+        long fetchedBytes,
+        long sentBytes) {
+      this(type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, 0);
+    }
+
     public TypeReport(
         String type,
         SyncEngine.Report report,

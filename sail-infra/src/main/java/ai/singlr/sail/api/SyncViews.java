@@ -29,6 +29,7 @@ public final class SyncViews {
     map.put("message", round.message());
     map.put("bytes_fetched", round.fetchedBytes());
     map.put("bytes_sent", round.sentBytes());
+    map.put("bytes_freed", round.freedBytes());
     map.put("types", round.types().stream().map(SyncViews::type).toList());
     return map;
   }
@@ -43,6 +44,7 @@ public final class SyncViews {
     map.put("failure", type.failure());
     map.put("bytes_fetched", type.fetchedBytes());
     map.put("bytes_sent", type.sentBytes());
+    map.put("bytes_freed", type.freedBytes());
     return map;
   }
 
@@ -59,6 +61,7 @@ public final class SyncViews {
     map.put("stale_since", status.staleSince());
     map.put("bytes_fetched", status.fetchedBytes());
     map.put("bytes_sent", status.sentBytes());
+    map.put("bytes_freed", status.freedBytes());
     map.put("last_report", status.lastReport() == null ? null : report(status.lastReport()));
     return map;
   }

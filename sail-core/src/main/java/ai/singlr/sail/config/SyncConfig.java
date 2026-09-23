@@ -51,6 +51,11 @@ public record SyncConfig(String role, String main, String handle, String boxId) 
     return ROLE_MAIN.equals(role);
   }
 
+  /** A box that syncs up to a main: it pushes to one and adopts what main decides. */
+  public boolean isNode() {
+    return Strings.isNotBlank(main);
+  }
+
   public static SyncConfig fromMap(Map<String, Object> map) {
     if (map == null) {
       return unset();

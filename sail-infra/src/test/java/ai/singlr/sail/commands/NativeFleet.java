@@ -403,6 +403,18 @@ public final class NativeFleet implements AutoCloseable {
                   count, prefix, prefix, bodyBytes, prefix, server(), prefix, prefix, prefix));
     }
 
+    /** Runs {@code sail} against this box's control-plane server; only inside {@link #serving}. */
+    public String apiOk(String... args) throws Exception {
+      var command = new ArrayList<>(List.of(args));
+      command.addAll(List.of("--server", server()));
+      return sailOk(command.toArray(String[]::new));
+    }
+
+    /** Runs {@code sql} on this box's database, fed on stdin so it may quote freely. */
+    public void execute(String sql) throws Exception {
+      shOk("sqlite3 " + db + " <<'SQL'\n" + sql + "\nSQL");
+    }
+
     public void retitle(String spec, String title) throws Exception {
       sailOk("spec", "update", "--server", server(), spec, "--title", title);
     }

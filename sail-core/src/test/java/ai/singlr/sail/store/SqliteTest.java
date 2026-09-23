@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,44 @@ class SqliteTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+  }
+
+  @Test
+  void aRehearsalSeesItsOwnWritesAndLeavesNone() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+    db.execute("INSERT INTO t (id, name) VALUES (1, 'kept')");
+
+    var seen =
+        db.rehearse(
+            () -> {
+              db.execute("DELETE FROM t");
+              db.transaction(() -> db.execute("INSERT INTO t (id, name) VALUES (2, 'nested')"));
+              return db.query("SELECT name FROM t", row -> row.text(0));
+            });
+
+    assertEquals(List.of("nested"), seen);
+    assertEquals(List.of("kept"), db.query("SELECT name FROM t", row -> row.text(0)));
+    db.execute("INSERT INTO t (id, name) VALUES (3, 'after')");
+    assertEquals(2, db.query("SELECT id FROM t", row -> row.integer(0)).size());
+  }
+
+  @Test
+  void aFailingRehearsalRollsBackAndAnInnerOneIsRefused() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            db.rehearse(
+                () -> {
+                  db.execute("INSERT INTO t (id) VALUES (1)");
+                  throw new IllegalStateException("boom");
+                }));
+    var nested =
+        assertThrows(IllegalStateException.class, () -> db.transaction(() -> db.rehearse(() -> 1)));
+
+    assertTrue(nested.getMessage().contains("outermost"));
+    assertEquals(0, db.query("SELECT id FROM t", row -> row.integer(0)).size());
   }
 
   @Test

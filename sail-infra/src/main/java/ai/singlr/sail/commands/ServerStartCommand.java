@@ -285,6 +285,7 @@ public final class ServerStartCommand implements Runnable {
             reviewController);
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
+    var retentionSweeper = operations.retentionSweeper();
     var ptyEventBridge = new PtyEventBridge(eventStore, bus);
     var reconciler =
         new StuckSpecReconciler(
@@ -316,6 +317,7 @@ public final class ServerStartCommand implements Runnable {
         .register(server)
         .register(sweeper)
         .register(eventSweeper)
+        .register(retentionSweeper)
         .register(ptyEventBridge)
         .register(reconciler)
         .register(missedStops)
@@ -325,6 +327,9 @@ public final class ServerStartCommand implements Runnable {
       server.start();
       sweeper.start();
       eventSweeper.start();
+      if (!HostSync.isNode(HostSync.config())) {
+        retentionSweeper.start();
+      }
       ptyEventBridge.start(PtyEventBridge.INTERVAL);
       reconciler.start();
       var replayed = missedStops.sweep();

@@ -21,6 +21,7 @@ import picocli.CommandLine.Command;
       ApiSpecBoardCommand.class,
       ApiSpecHistoryCommand.class,
       ApiSpecRestoreCommand.class,
+      ApiSpecPruneCommand.class,
       ApiSpecCommentCommand.class,
       ApiSpecCommentsCommand.class,
       ApiSpecEngageCommand.class,

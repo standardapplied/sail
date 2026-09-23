@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,7 +36,10 @@ import java.util.Map;
  * types moved past the node's checkpoints.
  *
  * <p>A {@code null} snapshot is a deletion — it crosses the wire as an explicit JSON {@code null},
- * distinct from an absent key, so a tombstone is never mistaken for a missing row.
+ * distinct from an absent key, so a tombstone is never mistaken for a missing row. Every page entry
+ * names its {@code kind} — a revision, a tombstone, or an erasure, which is terminal: the entity is
+ * gone everywhere, and a node applies it outside the engine. An erasure is authored only by main; a
+ * node asks for one with an offer carrying {@code erase} and no snapshot.
  */
 public final class SyncWire {
 
@@ -43,12 +47,13 @@ public final class SyncWire {
   public static final int PROTOCOL = 4;
 
   /**
-   * The fleet floor both sides must advertise before exchanging rows: the release that introduced
-   * verified content hashes and binary chunks. Bump again only when a change makes older peers
-   * unsafe, never for a routine release; patch releases above the floor are wire-compatible with
-   * each other.
+   * The fleet floor both sides must advertise before exchanging rows: the release whose page
+   * entries name their kind, so an erasure is never read as a revision with an empty snapshot, and
+   * whose offers can ask main to erase. Bump again only when a change makes older peers unsafe,
+   * never for a routine release; patch releases above the floor are wire-compatible with each
+   * other.
    */
-  public static final String UPGRADE_FLOOR = "0.45.0";
+  public static final String UPGRADE_FLOOR = "0.46.0";
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
@@ -83,6 +88,7 @@ public final class SyncWire {
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
   private static final String KIND = "kind";
+  private static final String ERASE = "erase";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -322,9 +328,42 @@ public final class SyncWire {
   /** Main's high-water per entity type. */
   public record Tips(Map<String, Long> tips) implements Response {}
 
-  /** One change of one entity at its head: a tombstone carries {@code deleted} and no snapshot. */
+  /**
+   * One change of one entity at its head. A tombstone and an erasure carry {@code deleted} and no
+   * snapshot; {@code kind} says which, so no reader infers one from the other.
+   */
   public record Entry(
-      long seq, String id, String rev, boolean deleted, Map<String, Object> snapshot) {}
+      long seq,
+      String id,
+      String rev,
+      boolean deleted,
+      Map<String, Object> snapshot,
+      ChangeLog.Kind kind) {
+    public Entry {
+      if (kind == null) {
+        throw new IllegalArgumentException("Entry " + id + " names no kind");
+      }
+      if (deleted != (kind != ChangeLog.Kind.REVISION)) {
+        throw new IllegalArgumentException(
+            "Entry " + id + " is a " + kind.wire() + " yet deleted is " + deleted);
+      }
+    }
+
+    /** A revision, or a tombstone when {@code deleted}. */
+    public Entry(long seq, String id, String rev, boolean deleted, Map<String, Object> snapshot) {
+      this(
+          seq,
+          id,
+          rev,
+          deleted,
+          snapshot,
+          deleted ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION);
+    }
+
+    public boolean erased() {
+      return kind == ChangeLog.Kind.ERASURE;
+    }
+  }
 
   /**
    * One page of changes. {@code next} is the highest seq included (for a pull) or the count of
@@ -586,6 +625,7 @@ public final class SyncWire {
     map.put(ID, entry.id());
     map.put(REV, entry.rev());
     map.put(DELETED, entry.deleted());
+    map.put(KIND, entry.kind().wire());
     if (!entry.deleted()) {
       map.put(SNAPSHOT, entry.snapshot());
     }
@@ -598,7 +638,8 @@ public final class SyncWire {
         string(map, ID),
         string(map, REV),
         bool(map, DELETED),
-        snapshot(map, SNAPSHOT));
+        snapshot(map, SNAPSHOT),
+        ChangeLog.Kind.of(string(map, KIND)));
   }
 
   private static Map<String, Object> offerMap(MainReplica.Offer offer) {
@@ -606,11 +647,15 @@ public final class SyncWire {
     map.put(ID, offer.id());
     map.put(SNAPSHOT, offer.snapshot());
     map.put(EXPECTED, offer.expectedRev());
+    if (offer.erase()) {
+      map.put(ERASE, true);
+    }
     return map;
   }
 
   private static MainReplica.Offer offer(Map<String, Object> map) {
-    return new MainReplica.Offer(string(map, ID), snapshot(map, SNAPSHOT), string(map, EXPECTED));
+    return new MainReplica.Offer(
+        string(map, ID), snapshot(map, SNAPSHOT), string(map, EXPECTED), bool(map, ERASE));
   }
 
   private static Map<String, Object> resultMap(Result result) {

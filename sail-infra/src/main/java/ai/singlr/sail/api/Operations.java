@@ -127,6 +127,12 @@ public interface Operations extends LocalLaneOperations {
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
       String specId, SpecRestoreRequest request, Actor actor);
 
+  /**
+   * Erases specs everywhere, or rehearses doing so; see {@code GlobalSpecOperations#prune}. The
+   * HTTP lane only: no agent reaches it.
+   */
+  Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor);
+
   Result<RoomMembersResponse> roomMembers(String roomId);
 
   Result<SpecMessagesResponse> roomMessages(String roomId, String before, String after, int limit);

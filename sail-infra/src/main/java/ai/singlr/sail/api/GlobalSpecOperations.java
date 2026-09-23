@@ -11,13 +11,23 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.EraseRequests;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -28,11 +38,25 @@ import java.util.function.Supplier;
  */
 final class GlobalSpecOperations {
 
+  /**
+   * What a prune needs beyond the stores: this box's database, whether the box authors erasures —
+   * main, or a standalone box — or asks main for them, as a node does, and the clock ages are
+   * measured against.
+   */
+  record Pruning(Sqlite db, BooleanSupplier authoritative, Supplier<Instant> clock) {
+    Pruning {
+      Objects.requireNonNull(db, "db");
+      Objects.requireNonNull(authoritative, "authoritative");
+      Objects.requireNonNull(clock, "clock");
+    }
+  }
+
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final EventBus eventBus;
   private final RunStore runStore;
   private final Supplier<RoomStore> rooms;
+  private final Pruning pruning;
 
   GlobalSpecOperations(SpecStore specStore) {
     this(specStore, null, null);
@@ -57,11 +81,22 @@ final class GlobalSpecOperations {
       EventBus eventBus,
       RunStore runStore,
       Supplier<RoomStore> rooms) {
+    this(specStore, reviewStore, eventBus, runStore, rooms, null);
+  }
+
+  GlobalSpecOperations(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      RunStore runStore,
+      Supplier<RoomStore> rooms,
+      Pruning pruning) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
     this.runStore = runStore;
     this.rooms = rooms;
+    this.pruning = pruning;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -443,32 +478,303 @@ final class GlobalSpecOperations {
    */
   GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
     requireStore();
-    var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    var existing = restorable(specId);
+    SpecPolicy.mutate(actor, specId, existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
     var targetAssignee = revisionAssignee(specId, request.rev());
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), targetAssignee).enforce();
+      SpecPolicy.reassign(actor, specId, existing.assignee(), targetAssignee).enforce();
     }
-    specStore.restore(specId, request.rev());
+    var store = rooms.get();
+    specStore.atomically(
+        () -> {
+          specStore.restore(specId, request.rev());
+          if (store != null && !existing.live()) {
+            var row = specStore.findById(specId).orElseThrow();
+            if (row.roomIdOrIdentity().equals(specId)) {
+              store.restoreDeleted(specId);
+            }
+          }
+          return null;
+        });
     var row = specStore.findById(specId).orElseThrow();
     publishBoardUpdated(row.project(), specId, Event.SAIL_AGENT);
     return new GlobalSpecRestoredResponse(viewOf(row), request.rev());
   }
 
+  /**
+   * Who owns a spec a restore may bring back: the live row, or the last state its tombstone kept.
+   */
+  private record Restorable(String assignee, String createdBy, boolean live) {}
+
+  /**
+   * The spec a restore targets: live, or deleted with its tombstone retained. A pruned spec is gone
+   * with its history, and the refusal says so; an id never recorded is not found.
+   */
+  private Restorable restorable(String specId) {
+    var live = specStore.findById(specId);
+    if (live.isPresent()) {
+      return new Restorable(live.get().assignee(), live.get().createdBy(), true);
+    }
+    var head =
+        specStore
+            .head(specId)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    if (head.kind() == ChangeLog.Kind.ERASURE) {
+      throw new ApiException(ErrorCode.SPEC_PRUNED, specStore.unrestorable(specId, ""));
+    }
+    var last = YamlUtil.parseMap(head.snapshot());
+    return new Restorable(
+        Objects.toString(last.get("assignee"), null),
+        Objects.toString(last.get("created_by"), null),
+        false);
+  }
+
   private String revisionAssignee(String specId, String rev) {
     var entry =
         specStore.history(specId).stream()
+            .filter(candidate -> candidate.kind() != ChangeLog.Kind.ERASURE)
             .filter(candidate -> rev.equals(candidate.rev()))
             .findFirst()
             .orElseThrow(
                 () ->
                     new ApiException(
-                        ErrorCode.INVALID_REQUEST,
-                        "No revision '" + rev + "' recorded for spec '" + specId + "'."));
+                        ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
     return Objects.toString(YamlUtil.parseMap(entry.snapshot()).get("assignee"), null);
+  }
+
+  /**
+   * Erases specs everywhere, for good: the named ones, or those a policy or a project selects, with
+   * everything that belongs to them ({@link Erasure#closure}). A dry run is the erasure itself,
+   * rehearsed in a transaction that is rolled back, so it reports exactly what the real one then
+   * does. On main, or a standalone box, the real one erases and collects the content it leaves
+   * unreferenced; on a node it records the ask, which the next sync offers to main — main erases,
+   * and this box follows.
+   *
+   * <p>Authority: write capability, never an agent; the owner of every named spec (its assignee, or
+   * its creator when unassigned) or an admin; a policy, a project or retention only an admin.
+   */
+  PruneReport prune(PruneRequest request, Actor actor) {
+    requireStore();
+    Objects.requireNonNull(request, "prune request");
+    if (pruning == null) {
+      throw new ApiException(
+          ErrorCode.INTERNAL,
+          "This box keeps no erasure log, so nothing can be pruned here.",
+          "Start the server with 'sail server start'.");
+    }
+    authorizePrune(request, actor);
+    if (!pruning.authoritative().getAsBoolean()
+        && (request.messagesOlderThan() != null || request.runsFinishedOlderThan() != null)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "Retention runs on main; a node prunes only specs and projects.",
+          "Set the retention block in main's host.yaml.");
+    }
+    var roots = pruneRoots(request, actor);
+    var db = pruning.db();
+    var erasure = new Erasure(db);
+    var blobs = new BlobStore(db);
+    var handle = principal(actor.handle());
+    var plan = erasure.closure(roots);
+    var rehearsed =
+        db.rehearse(
+            () ->
+                PruneReport.of(
+                    erasure.erase(plan, handle, "local"), blobs.collectable(), true, false));
+    if (request.dryRun() || plan.isEmpty()) {
+      return withDryRun(rehearsed, request.dryRun());
+    }
+    if (!pruning.authoritative().getAsBoolean()) {
+      requestFromMain(db, roots, handle);
+      return new PruneReport(
+          false,
+          true,
+          rehearsed.specs(),
+          rehearsed.rooms(),
+          rehearsed.messages(),
+          rehearsed.runs(),
+          rehearsed.reviews(),
+          rehearsed.files(),
+          rehearsed.projects(),
+          rehearsed.events(),
+          rehearsed.blobBytes(),
+          rehearsed.entries());
+    }
+    var projects = projectsOf(plan);
+    var report =
+        db.transaction(
+            () ->
+                PruneReport.of(
+                    erasure.erase(plan, handle, "local"), blobs.collectable(), false, false));
+    blobs.gc(BlobStore.Compaction.NONE, true);
+    projects.forEach(project -> publishBoardUpdated(project, null, handle));
+    return report;
+  }
+
+  private static PruneReport withDryRun(PruneReport report, boolean dryRun) {
+    return new PruneReport(
+        dryRun,
+        false,
+        report.specs(),
+        report.rooms(),
+        report.messages(),
+        report.runs(),
+        report.reviews(),
+        report.files(),
+        report.projects(),
+        report.events(),
+        report.blobBytes(),
+        report.entries());
+  }
+
+  private static void authorizePrune(PruneRequest request, Actor actor) {
+    Objects.requireNonNull(actor, "a prune needs the authenticated actor");
+    if (actor.agentLane()) {
+      throw new ApiException(
+          ErrorCode.AGENT_LANE_FORBIDDEN,
+          "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
+          "Ask the FDE who owns the work to run 'sail spec prune'.");
+    }
+    if (!actor.canWrite()) {
+      throw new ApiException(
+          ErrorCode.READ_ONLY_CREDENTIAL,
+          "Your role is read-only: it cannot prune.",
+          "Ask an admin to prune, or for a member role.");
+    }
+    if (request.ids().isEmpty() && !actor.isAdmin()) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN_ADMIN_ONLY,
+          "Pruning by policy, a whole project or retention is admin-only.",
+          "Name the specs you own by id: sail spec prune <id...>.");
+    }
+  }
+
+  /**
+   * The entities a prune starts from. Named specs must each be the actor's to prune, and every one
+   * this box has ever held is one — live or deleted; one already pruned is nothing to do.
+   */
+  private List<Erasure.Target> pruneRoots(PruneRequest request, Actor actor) {
+    var roots = new LinkedHashSet<Erasure.Target>();
+    for (var id : request.ids()) {
+      var head =
+          specStore
+              .head(id)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found."));
+      if (head.kind() == ChangeLog.Kind.ERASURE) {
+        continue;
+      }
+      var owner = restorable(id);
+      SpecPolicy.mutate(actor, id, owner.assignee(), owner.createdBy()).enforce();
+      roots.add(new Erasure.Target(Erasure.SPEC, id));
+    }
+    var now = pruning.clock().get();
+    if (request.policy() != null) {
+      policySpecs(request.policy(), now.minus(request.policy().olderThan()))
+          .forEach(id -> roots.add(new Erasure.Target(Erasure.SPEC, id)));
+    }
+    if (request.project() != null) {
+      roots.add(new Erasure.Target(Erasure.PROJECT, request.project()));
+    }
+    if (request.messagesOlderThan() != null) {
+      oldMessages(now.minus(request.messagesOlderThan()))
+          .forEach(id -> roots.add(new Erasure.Target(Erasure.MESSAGE, id)));
+    }
+    if (request.runsFinishedOlderThan() != null) {
+      finishedRuns(now.minus(request.runsFinishedOlderThan()))
+          .forEach(id -> roots.add(new Erasure.Target(Erasure.RUN, id)));
+    }
+    return List.copyOf(roots);
+  }
+
+  private List<String> policySpecs(PruneRequest.Policy policy, Instant cutoff) {
+    var statuses = policy.statuses().stream().map(SpecStatus::wire).toList();
+    var placeholders = String.join(", ", statuses.stream().map(status -> "?").toList());
+    var parameters = new ArrayList<Object>(statuses);
+    parameters.add(policy.project());
+    parameters.add(policy.project());
+    parameters.add(cutoff.toString());
+    return pruning
+        .db()
+        .query(
+            "SELECT id FROM specs WHERE status IN ("
+                + placeholders
+                + ") AND (? IS NULL OR project = ?)"
+                + " AND julianday(CASE status WHEN 'archived' THEN archived_at"
+                + " ELSE cancelled_at END) < julianday(?) ORDER BY id",
+            row -> row.text(0),
+            parameters.toArray());
+  }
+
+  /**
+   * Messages older than {@code cutoff} that no younger message replies to, directly or down a
+   * thread: retention takes the old end of a conversation, never a parent a surviving reply points
+   * at.
+   */
+  private List<String> oldMessages(Instant cutoff) {
+    return pruning
+        .db()
+        .query(
+            """
+            WITH RECURSIVE kept(id) AS (
+                SELECT reply_to FROM room_messages
+                WHERE julianday(created_at) >= julianday(?) AND reply_to IS NOT NULL
+                UNION
+                SELECT m.reply_to FROM room_messages m JOIN kept k ON m.id = k.id
+                WHERE m.reply_to IS NOT NULL)
+            SELECT id FROM room_messages
+            WHERE julianday(created_at) < julianday(?) AND id NOT IN (SELECT id FROM kept)
+            ORDER BY id""",
+            row -> row.text(0),
+            cutoff.toString(),
+            cutoff.toString());
+  }
+
+  private List<String> finishedRuns(Instant cutoff) {
+    return pruning
+        .db()
+        .query(
+            """
+            SELECT id FROM runs WHERE status IN ('completed', 'stopped', 'failed')
+            AND completed_at IS NOT NULL AND julianday(completed_at) < julianday(?)
+            ORDER BY id""",
+            row -> row.text(0),
+            cutoff.toString());
+  }
+
+  /**
+   * Records a node's prune for main: the named specs and projects are offered, as erase requests,
+   * at the start of their type's next round; the rest of the closure goes with them on main.
+   */
+  private static void requestFromMain(Sqlite db, List<Erasure.Target> roots, String handle) {
+    var requests = new EraseRequests(db);
+    db.transaction(
+        () -> {
+          for (var root : roots) {
+            requests.request(root.type(), root.id(), handle);
+          }
+          return null;
+        });
+  }
+
+  private Set<String> projectsOf(List<Erasure.Target> plan) {
+    var projects = new LinkedHashSet<String>();
+    for (var target : plan) {
+      if (Erasure.SPEC.equals(target.type())) {
+        specStore.findById(target.id()).map(SpecStore.SpecRow::project).ifPresent(projects::add);
+      } else if (Erasure.PROJECT.equals(target.type())) {
+        projects.add(target.id());
+      }
+    }
+    return projects;
   }
 
   private void publishStatusChanged(

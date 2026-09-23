@@ -7,6 +7,8 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.EraseRequests;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,6 +24,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 /**
  * The protocol-4 session: main's change log arrives one bounded page at a time and each page is its
@@ -41,6 +44,13 @@ import java.util.function.Supplier;
  * pushes, so a change another node lands between two exchanges can never be skipped. The view
  * weighs every offer as its bytes on the wire and budgets the engine one frame of them, so a first
  * upload of a large table holds one batch of snapshots at a time, never the whole table.
+ *
+ * <p>Erasures never reach the engine. The prunes this node asked for go to main first, as erase
+ * offers, and each one main answers is applied here at main's rev; an erasure entry in a page, a
+ * need answer or a refreshed view is applied the moment it arrives ({@link Erasure#adopt}) and
+ * handed to the engine only as the absent entity it now is. After each type the session compacts
+ * the history of what the round touched and, when it adopted a deletion or compacted anything,
+ * collects the content left unreferenced, reporting the bytes freed.
  */
 public final class PagedSyncSession implements SyncSession {
 
@@ -54,14 +64,20 @@ public final class PagedSyncSession implements SyncSession {
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
   private BlobStore blobs;
+  private Erasure erasure;
+  private EraseRequests eraseRequests;
   private Map<String, Set<String>> contentFields = Map.of();
   private long fetchedBytes;
   private long sentBytes;
   private boolean sawTombstone;
+  private boolean sawErasure;
+  private Set<String> touched = Set.of();
   private String broken;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
+    erasure = new Erasure(db);
+    eraseRequests = new EraseRequests(db);
     var fields = new LinkedHashMap<String, Set<String>>();
     for (var entity : SyncedEntities.all())
       fields.put(entity.type(), entity.store(db).contentFields());
@@ -81,6 +97,8 @@ public final class PagedSyncSession implements SyncSession {
     var copy = new PagedSyncSession(in, out, mainId, frame);
     copy.tips = tips;
     copy.blobs = blobs;
+    copy.erasure = erasure;
+    copy.eraseRequests = eraseRequests;
     copy.contentFields = contentFields;
     return copy;
   }
@@ -128,8 +146,18 @@ public final class PagedSyncSession implements SyncSession {
           try (var scope = blobs.retain()) {
             report = reconcileType(type, local);
           }
-          if (sawTombstone) blobs.gc(Set.of());
-          return report;
+          var collected =
+              blobs.gc(BlobStore.Compaction.of(type, touched), sawTombstone || sawErasure);
+          return new TypeReport(
+              report.type(),
+              report.report(),
+              report.pages(),
+              report.entries(),
+              report.skipped(),
+              report.failure(),
+              report.fetchedBytes(),
+              report.sentBytes(),
+              collected.freed());
         });
   }
 
@@ -165,10 +193,13 @@ public final class PagedSyncSession implements SyncSession {
     var fetchedBefore = fetchedBytes;
     var sentBefore = sentBytes;
     sawTombstone = false;
+    sawErasure = false;
+    touched = Set.of();
     var tip = tips().get(type);
     if (tip == null) {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
     }
+    var asked = askErasures(type);
     var since = local.checkpoint(mainId);
     var report = SyncEngine.Report.NONE;
     var pages = 0;
@@ -185,10 +216,9 @@ public final class PagedSyncSession implements SyncSession {
               null);
         }
         fetchContent(type, page.entries());
-        var ids = ids(page);
-        seen.addAll(ids);
-        report =
-            report.plus(reconcile(local, ids, new PageView(type, page.entries(), page.next())));
+        seen.addAll(ids(page.entries()));
+        var live = adoptErasures(type, page.entries());
+        report = report.plus(reconcile(local, ids(live), new PageView(type, live, page.next())));
         pages++;
         entries += page.entries().size();
         since = page.next();
@@ -199,15 +229,94 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
+    var reconciled = new LinkedHashSet<>(seen);
+    reconciled.addAll(dirty);
+    touched = reconciled;
     return new TypeReport(
         type,
         report,
         pages,
         entries,
-        pages == 0 && dirty.isEmpty(),
+        pages == 0 && dirty.isEmpty() && asked == 0,
         null,
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore);
+  }
+
+  /**
+   * Offers main every prune this node asked for of {@code type}, in frame-bounded batches, and
+   * applies each erasure main answers at its rev. A refusal drops its request — main decided on its
+   * own copy — and fails the type naming the reason, once every answer of the batch is applied.
+   * Returns how many were asked.
+   */
+  private int askErasures(String type) {
+    if (eraseRequests == null) {
+      return 0;
+    }
+    var ids = eraseRequests.pending(type);
+    var asks = ids.stream().map(MainReplica.Offer::erasure).toList();
+    var refusals = new ArrayList<String>();
+    for (var offset = 0; offset < asks.size(); ) {
+      var offers = fitting(asks, offset, SyncWire::encodedLength);
+      var batch = offers.stream().map(MainReplica.Offer::id).toList();
+      var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Push(type, offers)));
+      if (!(response instanceof SyncWire.Results results)
+          || results.results().size() != batch.size()) {
+        throw unexpected(type, "a result per erase offer", response);
+      }
+      for (var i = 0; i < batch.size(); i++) {
+        var id = batch.get(i);
+        switch (results.results().get(i)) {
+          case SyncWire.Accepted accepted when accepted.id().equals(id) -> {
+            erasure.adopt(type, id, accepted.rev());
+            sawErasure = true;
+          }
+          case SyncWire.Refused refused when refused.id().equals(id) -> {
+            eraseRequests.drop(type, id);
+            refusals.add(id + ": " + refused.reason());
+          }
+          default ->
+              throw new SyncTransportException(
+                  "protocol",
+                  type + ": main answered " + results.results().get(i) + " for erasing " + id,
+                  null);
+        }
+      }
+      offset += batch.size();
+    }
+    if (!refusals.isEmpty()) {
+      throw new SyncTransportException(
+          "refused", type + ": main refused to prune " + String.join("; ", refusals), null);
+    }
+    return ids.size();
+  }
+
+  /**
+   * Applies every erasure among {@code entries} this node does not hold yet, at main's rev, and
+   * returns what the engine still reconciles: every other entry, and each erasure this node already
+   * held — as the absent entity at the erasure's rev, which an id created anew here since then is
+   * offered against, so main takes it as new.
+   */
+  private List<SyncWire.Entry> adoptErasures(String type, List<SyncWire.Entry> entries) {
+    var remaining = new ArrayList<SyncWire.Entry>(entries.size());
+    for (var entry : entries) {
+      if (!entry.erased()) {
+        remaining.add(entry);
+        continue;
+      }
+      if (erasure == null) {
+        throw new SyncTransportException(
+            "protocol",
+            type + " " + entry.id() + ": an erasure arrived on a session with no store",
+            null);
+      }
+      if (erasure.adopt(type, entry.id(), entry.rev())) {
+        sawErasure = true;
+      } else {
+        remaining.add(entry);
+      }
+    }
+    return remaining;
   }
 
   /**
@@ -224,9 +333,12 @@ public final class PagedSyncSession implements SyncSession {
         ids,
         (consumed, entries) -> {
           fetchContent(type, entries);
-          reports.add(
-              reconcile(
-                  local, new LinkedHashSet<>(consumed), new PageView(type, entries, checkpoint)));
+          var remaining = adoptErasures(type, entries);
+          var erasedNow = ids(entries);
+          erasedNow.removeAll(ids(remaining));
+          var scope = new LinkedHashSet<>(consumed);
+          scope.removeAll(erasedNow);
+          reports.add(reconcile(local, scope, new PageView(type, remaining, checkpoint)));
         });
     return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
   }
@@ -253,7 +365,7 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   private void fetchContent(String type, List<SyncWire.Entry> entries) {
-    sawTombstone |= entries.stream().anyMatch(SyncWire.Entry::deleted);
+    sawTombstone |= entries.stream().anyMatch(entry -> entry.deleted() && !entry.erased());
     var fields = contentFields.getOrDefault(type, Set.of());
     if (fields.isEmpty()) return;
     var hashes =
@@ -358,26 +470,31 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   private List<String> askable(List<String> ids, int offset) {
+    return fitting(ids, offset, SyncWire::encodedLength);
+  }
+
+  /** The items from {@code offset} on that fit one frame, at least one, by their encoded length. */
+  private <T> List<T> fitting(List<T> items, int offset, ToIntFunction<T> length) {
     var budget = new SyncWire.Frame(frame);
-    var asked = new ArrayList<String>();
-    for (var i = offset; i < ids.size(); i++) {
-      var length = SyncWire.encodedLength(ids.get(i));
-      if (!asked.isEmpty() && !budget.admits(length)) {
+    var fitting = new ArrayList<T>();
+    for (var i = offset; i < items.size(); i++) {
+      var bytes = length.applyAsInt(items.get(i));
+      if (!fitting.isEmpty() && !budget.admits(bytes)) {
         break;
       }
-      budget.add(length);
-      asked.add(ids.get(i));
+      budget.add(bytes);
+      fitting.add(items.get(i));
     }
-    return asked;
+    return fitting;
   }
 
   private SyncEngine.Report reconcile(LocalReplica local, Set<String> ids, PageView view) {
     return engine.reconcile(local.scopedTo(ids), view);
   }
 
-  private static Set<String> ids(SyncWire.Page page) {
+  private static Set<String> ids(List<SyncWire.Entry> entries) {
     var ids = new LinkedHashSet<String>();
-    for (var entry : page.entries()) {
+    for (var entry : entries) {
       ids.add(entry.id());
     }
     return ids;
@@ -604,6 +721,7 @@ public final class PagedSyncSession implements SyncSession {
           ids,
           (consumed, fetched) -> {
             fetchContent(type, fetched);
+            adoptErasures(type, fetched);
             consumed.forEach(entries::remove);
             fetched.forEach(entry -> entries.put(entry.id(), entry));
           });

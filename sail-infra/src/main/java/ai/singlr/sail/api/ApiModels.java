@@ -14,17 +14,22 @@ import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Duration;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 record HealthResponse(String status) implements Mappable {
   @Override
@@ -993,11 +998,17 @@ record AgentsResponse(List<AgentView> agents) implements Mappable {
 }
 
 record SpecRevisionView(
-    String rev, String actor, String recordedAt, String origin, boolean deleted, String peer)
+    String rev,
+    String actor,
+    String recordedAt,
+    String origin,
+    boolean deleted,
+    String peer,
+    String kind)
     implements Mappable {
   static SpecRevisionView from(ChangeLog.Entry e) {
     return new SpecRevisionView(
-        e.rev(), e.actor(), e.recordedAt(), e.origin(), e.deleted(), e.peer());
+        e.rev(), e.actor(), e.recordedAt(), e.origin(), e.deleted(), e.peer(), e.kind().wire());
   }
 
   @Override
@@ -1009,6 +1020,200 @@ record SpecRevisionView(
     m.put("origin", origin);
     m.put("deleted", deleted);
     if (peer != null) m.put("peer", peer);
+    m.put("kind", kind);
+    return m;
+  }
+}
+
+/**
+ * Body of {@code POST /v1/specs:prune}: what to erase, everywhere and for good, and whether only to
+ * report it. Specs are chosen by {@code ids}, or by a {@code policy} — {@code archived} or {@code
+ * cancelled} for longer than {@code older_than_days}, optionally in one {@code project} — or a
+ * whole {@code project} goes with everything in it. {@code dry_run} is true unless the body says
+ * {@code false}: a prune reports before it erases. The two retention ages — messages older than
+ * one, finished runs older than another — are set only by main's sweeper, never on the wire.
+ */
+record PruneRequest(
+    List<String> ids,
+    PruneRequest.Policy policy,
+    String project,
+    Duration messagesOlderThan,
+    Duration runsFinishedOlderThan,
+    boolean dryRun) {
+
+  /** Specs in one of {@code statuses} for longer than {@code olderThan}, in {@code project}. */
+  record Policy(List<SpecStatus> statuses, Duration olderThan, String project) {
+    static final Set<SpecStatus> PRUNABLE = EnumSet.of(SpecStatus.ARCHIVED, SpecStatus.CANCELLED);
+
+    Policy {
+      statuses = List.copyOf(statuses);
+      if (statuses.isEmpty()) {
+        throw new IllegalArgumentException("A prune policy names at least one status.");
+      }
+      for (var status : statuses) {
+        if (!PRUNABLE.contains(status)) {
+          throw new IllegalArgumentException(
+              "Only archived and cancelled specs are pruned by policy, not "
+                  + status.wire()
+                  + "; name other specs by id.");
+        }
+      }
+      Objects.requireNonNull(olderThan, "A prune policy needs an age");
+      if (olderThan.isNegative()) {
+        throw new IllegalArgumentException("A prune policy's age cannot be negative.");
+      }
+      if (project != null) {
+        NameValidator.requireValidProjectName(project);
+      }
+    }
+  }
+
+  PruneRequest {
+    ids = List.copyOf(Objects.requireNonNullElse(ids, List.of()));
+    ids.forEach(NameValidator::requireValidSpecId);
+    if (project != null) {
+      NameValidator.requireValidProjectName(project);
+    }
+    var chosen =
+        policy != null
+            || project != null
+            || messagesOlderThan != null
+            || runsFinishedOlderThan != null;
+    if (ids.isEmpty() && !chosen) {
+      throw new IllegalArgumentException(
+          "Name the specs to prune (ids), a policy (statuses and older_than_days), or a project.");
+    }
+    if (!ids.isEmpty() && chosen) {
+      throw new IllegalArgumentException(
+          "Prune either the specs named by ids or by a policy or project, not both at once.");
+    }
+  }
+
+  static PruneRequest ids(List<String> ids, boolean dryRun) {
+    return new PruneRequest(ids, null, null, null, null, dryRun);
+  }
+
+  static PruneRequest project(String project, boolean dryRun) {
+    return new PruneRequest(List.of(), null, project, null, null, dryRun);
+  }
+
+  @SuppressWarnings("unchecked")
+  static PruneRequest fromMap(Map<String, Object> map) {
+    var ids = map.get("ids");
+    if (ids != null && !(ids instanceof List<?>)) {
+      throw new IllegalArgumentException("ids must be an array of spec ids.");
+    }
+    var policy = map.get("policy");
+    if (policy != null && !(policy instanceof Map<?, ?>)) {
+      throw new IllegalArgumentException("policy must be an object.");
+    }
+    var dryRun = map.get("dry_run");
+    if (dryRun != null && !(dryRun instanceof Boolean)) {
+      throw new IllegalArgumentException("dry_run must be true or false.");
+    }
+    return new PruneRequest(
+        ids == null ? List.of() : ((List<Object>) ids).stream().map(String::valueOf).toList(),
+        policy == null ? null : policyFrom((Map<String, Object>) policy),
+        (String) map.get("project"),
+        null,
+        null,
+        !Boolean.FALSE.equals(dryRun));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Policy policyFrom(Map<String, Object> map) {
+    if (!(map.get("statuses") instanceof List<?> statuses)) {
+      throw new IllegalArgumentException("policy.statuses must be an array of statuses.");
+    }
+    if (!(map.get("older_than_days") instanceof Number days) || days.longValue() < 0) {
+      throw new IllegalArgumentException("policy.older_than_days must be a whole number of days.");
+    }
+    return new Policy(
+        ((List<Object>) statuses).stream().map(String::valueOf).map(SpecStatus::fromWire).toList(),
+        Duration.ofDays(days.longValue()),
+        (String) map.get("project"));
+  }
+}
+
+/**
+ * What a prune erased — or, as a dry run, would erase: the counts per kind, the events and the
+ * content bytes that go with them, and every entity by type and id. On a node an applied prune is
+ * {@code requested}: main erases it, and this box follows on its next sync.
+ */
+record PruneReport(
+    boolean dryRun,
+    boolean requested,
+    int specs,
+    int rooms,
+    int messages,
+    int runs,
+    int reviews,
+    int files,
+    int projects,
+    int events,
+    long blobBytes,
+    List<Erasure.Target> entries)
+    implements Mappable {
+
+  PruneReport {
+    entries = List.copyOf(entries);
+  }
+
+  static PruneReport of(Erasure.Result result, long blobBytes, boolean dryRun, boolean requested) {
+    return new PruneReport(
+        dryRun,
+        requested,
+        result.count(Erasure.SPEC),
+        result.count(Erasure.ROOM),
+        result.count(Erasure.MESSAGE),
+        result.count(Erasure.RUN),
+        result.count(Erasure.REVIEW),
+        result.count(Erasure.FILE),
+        result.count(Erasure.PROJECT),
+        result.events(),
+        blobBytes,
+        result.entities());
+  }
+
+  /** The counts as one line, for a prompt or a dry run: {@code 2 specs, 2 rooms, …}. */
+  String summary() {
+    return specs
+        + " specs, "
+        + rooms
+        + " rooms, "
+        + messages
+        + " messages, "
+        + runs
+        + " runs, "
+        + reviews
+        + " reviews, "
+        + files
+        + " files, "
+        + projects
+        + " projects, "
+        + events
+        + " events and "
+        + blobBytes
+        + " bytes of content";
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("dry_run", dryRun);
+    m.put("requested", requested);
+    m.put("specs", specs);
+    m.put("rooms", rooms);
+    m.put("messages", messages);
+    m.put("runs", runs);
+    m.put("reviews", reviews);
+    m.put("files", files);
+    m.put("projects", projects);
+    m.put("events", events);
+    m.put("blob_bytes", blobBytes);
+    m.put(
+        "entries",
+        entries.stream().map(entry -> Map.of("type", entry.type(), "id", entry.id())).toList());
     return m;
   }
 }

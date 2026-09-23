@@ -7,6 +7,7 @@ package ai.singlr.sail.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -34,5 +35,23 @@ class DateTimeUtilsTest {
     var second = DateTimeUtils.now();
     assertFalse(second.isBefore(first));
     assertTrue(Duration.between(first, second).toMillis() >= 0);
+  }
+
+  @Test
+  void parseAgeReadsDaysHoursAndMinutes() {
+    assertEquals(Duration.ofDays(7), DateTimeUtils.parseAge("7d"));
+    assertEquals(Duration.ofDays(365), DateTimeUtils.parseAge("365d"));
+    assertEquals(Duration.ofHours(24), DateTimeUtils.parseAge("24h"));
+    assertEquals(Duration.ofMinutes(30), DateTimeUtils.parseAge("30m"));
+    assertEquals(Duration.ofDays(3), DateTimeUtils.parseAge("  3d  "));
+  }
+
+  @Test
+  void parseAgeRefusesAnythingElseNamingTheForms() {
+    for (var bad : new String[] {"7x", "", "abc", "d7", null}) {
+      var refused = assertThrows(IllegalArgumentException.class, () -> DateTimeUtils.parseAge(bad));
+      assertTrue(refused.getMessage().contains("Invalid age format"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("Examples"), refused.getMessage());
+    }
   }
 }

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.ChangeLog;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,6 +183,63 @@ class SyncWireTest {
     var decoded = (SyncWire.Page) SyncWire.decodeResponse(line);
     assertTrue(decoded.entries().getFirst().deleted());
     assertNull(decoded.entries().getFirst().snapshot());
+  }
+
+  @Test
+  void everyEntryNamesItsKindSoAnErasureIsNeverReadAsARevision() {
+    var entries =
+        List.of(
+            new SyncWire.Entry(1, "live", "1-a", false, Map.of("title", "t")),
+            new SyncWire.Entry(2, "gone", "2-b", true, null),
+            new SyncWire.Entry(3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE));
+    var line = SyncWire.encode(new SyncWire.Page(entries, 3, true, 3));
+
+    var decoded = ((SyncWire.Page) SyncWire.decodeResponse(line)).entries();
+
+    assertEquals(
+        List.of(ChangeLog.Kind.REVISION, ChangeLog.Kind.TOMBSTONE, ChangeLog.Kind.ERASURE),
+        decoded.stream().map(SyncWire.Entry::kind).toList());
+    assertEquals(entries, decoded);
+    assertTrue(decoded.get(2).erased());
+    assertFalse(decoded.get(1).erased());
+    assertTrue(line.contains("\"kind\": \"erasure\""), line);
+  }
+
+  @Test
+  void anEntryThatNamesNoKindOrContradictsItselfIsRefused() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SyncWire.decodeResponse(
+                "{\"op\": \"page\", \"entries\": [{\"seq\": 1, \"id\": \"a\", \"rev\": \"1-a\","
+                    + " \"deleted\": true}], \"next\": 1, \"done\": true, \"maxSeq\": 1}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new SyncWire.Entry(1, "a", "1-a", false, null, ChangeLog.Kind.ERASURE));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new SyncWire.Entry(1, "a", "1-a", true, null, ChangeLog.Kind.REVISION));
+    assertThrows(
+        IllegalArgumentException.class, () -> new SyncWire.Entry(1, "a", "1-a", true, null, null));
+  }
+
+  @Test
+  void anEraseOfferCarriesTheFlagAndNoSnapshotAndARevisionOfferNoFlag() {
+    var push =
+        new SyncWire.Push(
+            "spec",
+            List.of(
+                MainReplica.Offer.erasure("old"), new MainReplica.Offer("new", Map.of(), null)));
+    var line = SyncWire.encode(push);
+
+    var decoded = (SyncWire.Push) SyncWire.decodeRequest(line);
+
+    assertEquals(push, decoded);
+    assertTrue(decoded.offers().getFirst().erase());
+    assertFalse(decoded.offers().getLast().erase());
+    assertEquals(1, line.split("\"erase\"", -1).length - 1, "only the erase offer names it");
+    assertThrows(
+        IllegalArgumentException.class, () -> new MainReplica.Offer("x", Map.of(), null, true));
   }
 
   @Test

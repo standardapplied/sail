@@ -146,6 +146,13 @@ public final class RevisionJournal implements ConflictResolver {
     return rev;
   }
 
+  /** Removes the live row of {@code id} for an erasure, which journals itself. */
+  public void eraseRow(String id) {
+    if (schema.exists(id)) {
+      schema.deleteRow(id);
+    }
+  }
+
   /**
    * Writes an authoritative state from main at its exact revision (no minting), marking it the new
    * synced ancestor ({@code base_rev = rev}). A null snapshot adopts a deletion. Used by the sync

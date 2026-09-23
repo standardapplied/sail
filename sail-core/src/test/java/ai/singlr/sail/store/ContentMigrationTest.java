@@ -14,7 +14,6 @@ import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -63,7 +62,7 @@ class ContentMigrationTest {
           assertTrue(blobs.has(hash));
         }
       }
-      blobs.gc(Set.of());
+      blobs.gc(BlobStore.Compaction.NONE, true).freed();
       assertEquals(0, migration.apply(db, null, prompter()).applied());
       assertTrue(
           db.query(

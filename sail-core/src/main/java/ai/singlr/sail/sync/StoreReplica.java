@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -106,14 +107,23 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     return store.comparableAtRev(entityId, store.baseRevOf(entityId));
   }
 
+  /**
+   * The latest revision of an entity, including a tombstone — and, for an erased one, its erasure's
+   * rev, whatever the store keeps on its rows: a message store reads revisions off its rows, and an
+   * erased message has none.
+   */
   @Override
   public String currentRev(String entityId) {
-    return store.latestRev(entityId);
+    return erasure(entityId).map(ChangeLog.Entry::rev).orElseGet(() -> store.latestRev(entityId));
   }
 
   @Override
   public MainReplica.State state(String entityId) {
-    return snapshot(() -> new MainReplica.State(current(entityId), currentRev(entityId)));
+    return snapshot(
+        () ->
+            erasure(entityId)
+                .map(erased -> new MainReplica.State(null, erased.rev(), ChangeLog.Kind.ERASURE))
+                .orElseGet(() -> new MainReplica.State(current(entityId), currentRev(entityId))));
   }
 
   @Override
@@ -127,12 +137,25 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     conflicts.settle(store.entityType(), entityId, rev);
   }
 
+  /**
+   * Main's compare-and-set commit. An erased entity takes a commit only from a node that saw the
+   * erasure — one offering against the erasure's rev, which creates it anew; any other offer is
+   * stale, so a node that has not heard of the erasure yet can never bring the entity back.
+   */
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-    return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
-      case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
-      case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
-    };
+    return atomically(
+        () -> {
+          var erased = erasure(entityId);
+          if (erased.isPresent() && !Objects.equals(erased.get().rev(), expectedRev)) {
+            return new CommitOutcome.Rejected(erased.get().rev(), null);
+          }
+          return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
+            case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
+            case PushOutcome.Stale s ->
+                new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
+          };
+        });
   }
 
   @Override
@@ -158,6 +181,12 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   @Override
   public void advanceCheckpoint(String peerId, long seq) {
     syncState.advance(peerId, store.entityType(), seq);
+  }
+
+  private Optional<ChangeLog.Entry> erasure(String entityId) {
+    return changeLog
+        .head(store.entityType(), entityId)
+        .filter(head -> head.kind() == ChangeLog.Kind.ERASURE);
   }
 
   private static String json(Map<String, Object> snapshot) {

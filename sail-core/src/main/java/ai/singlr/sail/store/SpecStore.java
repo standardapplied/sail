@@ -450,16 +450,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * Restores a spec to a prior revision's content, recorded as a NEW revision (origin {@code
    * restore}) — the current state is never discarded, it becomes part of history too, so a restore
-   * is itself reversible. Re-creates the spec if it had been deleted.
+   * is itself reversible. Re-creates the spec if it had been deleted, from any revision history
+   * still keeps — its tombstone included. A pruned spec has no history left to restore from, and
+   * says so; a revision compaction dropped says that too.
    */
   public void restore(String id, String rev) {
     var entry =
         changeLog
             .at(ENTITY, id, rev)
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "No revision '" + rev + "' recorded for spec '" + id + "'."));
+            .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
+            .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev)));
     var snapshot = YamlUtil.parseMap(entry.snapshot());
     db.transaction(
         () -> {
@@ -470,6 +470,37 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   String recordRevision(String id, String origin, boolean deleted) {
     return journal.recordRevision(id, origin, deleted);
+  }
+
+  /** Why {@code rev} of spec {@code id} cannot be restored, naming what can be done instead. */
+  public String unrestorable(String id, String rev) {
+    var head = changeLog.head(ENTITY, id).orElse(null);
+    if (head == null) {
+      return "No revision '" + rev + "' recorded for spec '" + id + "'.";
+    }
+    if (head.kind() == ChangeLog.Kind.ERASURE) {
+      return "Spec '"
+          + id
+          + "' was pruned"
+          + (head.actor() == null ? "" : " by " + head.actor())
+          + " at "
+          + head.recordedAt()
+          + ": it is erased everywhere with its history, so nothing is left to restore.";
+    }
+    return "Revision '"
+        + rev
+        + "' of spec '"
+        + id
+        + "' is not in its retained history: history keeps the newest "
+        + ChangeLog.HISTORY_REVISIONS
+        + " revisions of each spec and every deletion. Pick one of those from 'sail spec history "
+        + id
+        + "'.";
+  }
+
+  /** The latest entry of spec {@code id} — a revision, its tombstone, or its erasure — if any. */
+  public Optional<ChangeLog.Entry> head(String id) {
+    return changeLog.head(ENTITY, id);
   }
 
   private Map<String, Object> snapshotMap(SpecRow spec) {
@@ -729,6 +760,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     journal.applyRevision(id, snapshot, rev);
+  }
+
+  @Override
+  public void eraseRow(String id) {
+    journal.eraseRow(id);
   }
 
   /**

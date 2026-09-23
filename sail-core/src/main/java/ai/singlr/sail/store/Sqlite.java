@@ -220,6 +220,41 @@ public final class Sqlite implements AutoCloseable {
   }
 
   /**
+   * Runs {@code work} as a write transaction that is always rolled back, and answers what it
+   * computed: a rehearsal that sees its own writes and leaves none. How a dry run is made to report
+   * exactly what the real run then does — it is the real run, undone. Must be the outermost scope;
+   * without savepoints a nested rehearsal could not undo only itself.
+   */
+  public <T> T rehearse(Supplier<T> work) {
+    lock.lock();
+    try {
+      if (transactionDepth > 0) {
+        throw new IllegalStateException("A rehearsal must be the outermost transaction");
+      }
+      execute("BEGIN IMMEDIATE");
+      transactionDepth = 1;
+      writeLocked = true;
+      T result;
+      try {
+        result = work.get();
+      } catch (RuntimeException e) {
+        try {
+          execute("ROLLBACK");
+        } catch (RuntimeException rollbackEx) {
+          e.addSuppressed(rollbackEx);
+        }
+        throw e;
+      } finally {
+        transactionDepth = 0;
+      }
+      execute("ROLLBACK");
+      return result;
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /**
    * Runs {@code work} as one read snapshot: a deferred {@code BEGIN} that WAL serves from the last
    * commit, so every read inside sees the same state and no writer, in this process or another, is
    * ever made to wait for it. For work that reads and then writes, use {@link #transaction}.

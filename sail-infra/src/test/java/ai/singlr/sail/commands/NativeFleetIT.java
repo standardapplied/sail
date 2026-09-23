@@ -169,6 +169,104 @@ class NativeFleetIT {
     }
   }
 
+  @Test
+  void aPruneOnAnUpgradedMainLeavesTheNodeNoRowHistoryOrBlobOfItAfterOneRound() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.released());
+      var mady = fleet.node("mady", fleet.released());
+      main.serving(
+          () -> {
+            main.createSpecs("doomed", 1, BODY_BYTES);
+            main.createSpecs("kept", 1, BODY_BYTES);
+            main.shOk("dd if=/dev/urandom of=/tmp/scratch.bin bs=1M count=2 status=none");
+            main.sailOk(
+                "project", "files", "add", "-p", "scratch", "/tmp/scratch.bin", "--as", "s.bin");
+            main.shOk("dd if=/dev/urandom of=/tmp/kept.bin bs=1M count=1 status=none");
+            main.sailOk("project", "files", "add", "-p", "demo", "/tmp/kept.bin", "--as", "k.bin");
+          });
+      main.execute(RUN_OF_DOOMED);
+      mady.sailOk("sync");
+      fleet.assertConverged(mady);
+      assertEquals("1", mady.query("SELECT count(*) FROM runs WHERE spec_id = 'doomed-1'").strip());
+      var gone =
+          List.of(
+              main.query("SELECT body_hash FROM specs WHERE id = 'doomed-1'").strip(),
+              main.query("SELECT content_hash FROM project_files WHERE project = 'scratch'")
+                  .strip());
+      var keptFile =
+          main.query("SELECT content_hash FROM project_files WHERE project = 'demo'").strip();
+      for (var hash : gone) {
+        assertEquals(
+            "1", mady.query("SELECT count(*) FROM blobs WHERE hash = '" + hash + "'").strip());
+      }
+
+      main.install(fleet.candidate());
+      var beforeTheNodeUpgrades = mady.replicated();
+      var stale = mady.sail("sync");
+      assertNotEquals(0, stale.exit(), stale::output);
+      assertTrue(stale.output().contains("sail upgrade"), stale::output);
+      assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
+      mady.install(fleet.candidate());
+
+      main.serving(() -> main.apiOk("spec", "prune", "doomed-1", "--apply"));
+      main.shOk(
+          "printf '#!/bin/sh\\necho \"[]\"\\n' > /usr/local/bin/incus && chmod 755 /usr/local/bin/incus");
+      main.sailOk("project", "destroy", "scratch", "--purge", "--yes", "--json");
+      mady.sailOk("sync");
+
+      for (var box : List.of(main, mady)) {
+        for (var table :
+            List.of(
+                "specs WHERE id = 'doomed-1'",
+                "spec_content WHERE spec_id = 'doomed-1'",
+                "rooms WHERE id = 'doomed-1'",
+                "runs WHERE spec_id = 'doomed-1'",
+                "project_files WHERE project = 'scratch'")) {
+          assertEquals("0", box.query("SELECT count(*) FROM " + table).strip(), table);
+        }
+        assertEquals(
+            "0",
+            box.query(
+                    "SELECT count(*) FROM change_log WHERE kind <> 'erasure' AND (entity_id ="
+                        + " 'doomed-1' OR entity_id = '"
+                        + DOOMED_RUN
+                        + "' OR entity_id LIKE 'scratch%')")
+                .strip(),
+            "history of what was pruned");
+        for (var hash : gone) {
+          assertEquals(
+              "0", box.query("SELECT count(*) FROM blobs WHERE hash = '" + hash + "'").strip());
+        }
+        assertEquals(
+            "1", box.query("SELECT count(*) FROM blobs WHERE hash = '" + keptFile + "'").strip());
+        assertEquals("1", box.query("SELECT count(*) FROM specs WHERE id = 'kept-1'").strip());
+      }
+      assertTrue(
+          Integer.parseInt(
+                  mady.query("SELECT count(*) FROM change_log WHERE kind = 'erasure'").strip())
+              >= 3,
+          "the node holds main's erasure rows");
+      fleet.assertConverged(mady);
+    }
+  }
+
+  private static final String DOOMED_RUN = "019fee00-0000-7000-8000-00000000d00d";
+
+  private static final String RUN_OF_DOOMED =
+      """
+      INSERT INTO runs (id, project, spec_id, agent, status, started_at, node, role, rev)
+      VALUES ('%1$s', 'demo', 'doomed-1', 'claude', 'completed', '2026-09-01T00:00:00Z',
+          'uday', 'build', '1-d00d');
+      INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin, deleted,
+          snapshot)
+      VALUES ('run', '%1$s', '1-d00d', 'uday', '2026-09-01T00:00:00Z', 'local', 0,
+          '{"id": "%1$s", "project": "demo", "spec_id": "doomed-1", "node": "uday",
+            "role": "build", "agent": "claude", "status": "completed",
+            "started_at": "2026-09-01T00:00:00Z", "repos": [], "principals": []}');
+      INSERT INTO change_heads (entity_type, entity_id, seq)
+      VALUES ('run', '%1$s', last_insert_rowid());"""
+          .formatted(DOOMED_RUN);
+
   private static List<String> pendingConflicts(NativeFleet.Box box) throws Exception {
     return NativeFleet.jsonList(box.sailOk("conflicts", "--json")).stream()
         .map(conflict -> (String) conflict.get("entity"))

@@ -227,6 +227,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  @Override
+  public void eraseRow(String id) {
+    db.execute("DELETE FROM projects WHERE name = ?", id);
+  }
+
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
     return db.transaction(

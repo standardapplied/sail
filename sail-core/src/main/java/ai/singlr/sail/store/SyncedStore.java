@@ -69,6 +69,13 @@ public interface SyncedStore {
   /** Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). */
   void applyRevision(String id, Map<String, Object> snapshot, String rev);
 
+  /**
+   * Removes the live row of {@code id} and every child row the database cascades from it, writing
+   * no journal entry: the only caller is {@link Erasure}, which records the erasure itself. A no-op
+   * for an id with no live row.
+   */
+  void eraseRow(String id);
+
   /** Compare-and-set commit of an authoritative state ({@code null} = delete). */
   PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev);
 

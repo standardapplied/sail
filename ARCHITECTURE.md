@@ -188,8 +188,8 @@ materialized text stays where reads find it (`spec_content`, a file's row carrie
 mode and kind), so no read path opens a blob to answer a listing. History therefore grows by a
 hash per revision, an edit to a large file moves only the chunks it touched, two projects
 sharing a file store it once, and nothing on any path holds a whole file: ingest, sync,
-materialization and download all stream. `sail sync gc` frees what no live row, retained
-history row or open conflict references; a session or an ingest holds a shared lease
+materialization and download all stream. `sail sync gc` compacts history and frees what no
+live row, retained history row or open conflict references; a session or an ingest holds a shared lease
 (`BlobRetention`, one file lock beside the database) that GC's exclusive lease waits for, so
 a chunk that just arrived is never collected under a round.
 
@@ -276,6 +276,39 @@ three-way against main's current row, so a disjoint change on main merges and th
 parks again. Ids are unique only within a type and a spec's room carries the spec's id, so a
 conflict is addressed by type and id: `--type` on the CLI, `?type=` over the API. An id parked
 under several types is refused naming them (`400`) rather than guessed.
+
+### Archive, delete, prune
+
+Three verbs remove work, and each makes a different promise.
+
+- **Archive** takes a spec off the board and keeps everything. It is a status. `archived_at` and `cancelled_at` record when a spec entered those statuses, which is the time retention ages on.
+- **Delete** writes a tombstone that keeps the entity's last state. The spec's runs, reviews and room stay, so a restore from any retained revision, including the tombstone, brings the spec back with the identity room it minted.
+- **Prune** erases the entity everywhere, for good.
+
+An erasure is a kind of change-log entry, next to revision and tombstone. One transaction removes the live row, its open conflicts and every history entry, and records one erasure row: an empty snapshot plus a fresh rev naming who pruned and when. The head then points at that row.
+
+What a prune takes with it is declared once, in `Erasure.closure`:
+
+- a spec takes its runs, its reviews, and the identity room it minted (a room it was born into outlives it);
+- a room takes its messages and runs;
+- a project takes its specs, rooms, files and runs.
+
+Rows that belong to a single entity go with it through the database's own cascades: a spec's content and dependencies, a run's principals and delivery ledger, a review's stages and findings. There are deliberately no foreign keys between synced entities. A tombstone deletes its row, so such a key would cascade a delete through dependents without a log entry. It would also make adopting a child depend on its parent's page and on the parent's parked conflicts.
+
+Main is the only author of erasures. Main's own prune (`GlobalSpecOperations.prune`, which serves the CLI, the API, Mast and `project destroy --purge`) erases and then collects content. A node's prune is recorded in `erase_requests`, and the next round sends it as an `erase` offer. Main decides that offer against its own copy (`EraseAuthority`), erases, and answers the erasure's rev.
+
+A node applies an erasure the moment it arrives, whether in a page, a `need` answer or the refresh after a stale push. It does this outside the engine, so no conflict is ever parked against one.
+
+- An erasure the node already holds changes nothing.
+- An entity the node never held gets only the erasure row.
+- Children main never saw are removed with their parent, leaving no row of their own.
+- Main commits an erased entity only against the erasure's rev. A node that has not yet heard of the erasure cannot bring it back, while one that saw it may create the id anew.
+
+A dry run is the erasure itself, rehearsed in a transaction that is rolled back (`Sqlite.rehearse`), so it reports exactly what the real run does.
+
+Retention is opt-in. A `retention` block in main's `host.yaml` sets the ages: archived specs, messages, and finished runs. With the block, main's daily `RetentionSweeper` prunes by that policy through the same method. Without it the sweeper only compacts and collects. Nodes never evaluate retention.
+
+History compaction never crosses the wire. It is a compiled constant (`ChangeLog.HISTORY_REVISIONS`), so no two boxes can disagree. Every box keeps each entity's newest 20 entries, its synced base (the merge base of an open conflict included), and every tombstone and erasure. A node compacts what each round touched; main compacts daily and from `sail sync gc`. Protocol 4 pages the latest entry per entity, so a node whose checkpoint predates main's compaction still converges. Compaction runs under the exclusive content lease and is refused inside a transaction. Once a revision's row is gone its blob is unreferenced, and the collection that follows frees it.
 
 ### The transport: pure SSH keys, no network enroll
 

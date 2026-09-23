@@ -20,6 +20,11 @@ public record SyncReport(
     return types.stream().mapToLong(SyncSession.TypeReport::sentBytes).sum();
   }
 
+  /** Content bytes the collections after each type freed. */
+  public long freedBytes() {
+    return types.stream().mapToLong(SyncSession.TypeReport::freedBytes).sum();
+  }
+
   public SyncReport(SyncEngine.Report report, String message) {
     this(report, message, List.of());
   }

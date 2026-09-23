@@ -102,10 +102,15 @@ class BlobStoreTest {
       var store = new BlobStore(db);
       var kept = store.put(new ByteArrayInputStream(new byte[] {1, 2}));
       var removed = store.put(new ByteArrayInputStream(new byte[] {3, 4, 5}));
-      assertEquals(3, store.gc(Set.of(kept)));
+      db.execute(
+          "INSERT INTO specs (id, title, created_at, updated_at, body_hash, plan_hash)"
+              + " VALUES ('kept', 'Kept', 'now', 'now', ?, ?)",
+          kept,
+          kept);
+      assertEquals(3, store.gc(BlobStore.Compaction.NONE, true).freed());
       assertTrue(store.has(kept));
       assertFalse(store.has(removed));
-      assertEquals(0, store.gc(Set.of(kept)));
+      assertEquals(0, store.gc(BlobStore.Compaction.NONE, true).freed());
     }
   }
 
@@ -120,7 +125,7 @@ class BlobStoreTest {
       files.put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
       db.execute("DELETE FROM change_log");
       var blobs = new BlobStore(db);
-      assertEquals(0, blobs.gc(Set.of()));
+      assertEquals(0, blobs.gc(BlobStore.Compaction.NONE, true).freed());
       assertEquals(
           "body", blobs.text(specs.comparableSnapshot("live").get("body_hash").toString()));
       assertTrue(blobs.has(files.find("project", "file").orElseThrow().contentHash()));
@@ -142,7 +147,7 @@ class BlobStoreTest {
               ai.singlr.sail.config.YamlUtil.dumpJson(java.util.Map.of("body_hash", sides.get(1))),
               ai.singlr.sail.config.YamlUtil.dumpJson(java.util.Map.of("body_hash", sides.get(2))),
               List.of("body_hash"));
-      assertEquals(6, blobs.gc(Set.of()));
+      assertEquals(6, blobs.gc(BlobStore.Compaction.NONE, true).freed());
       sides.forEach(hash -> assertTrue(blobs.has(hash)));
       assertFalse(blobs.has(orphan));
     }
@@ -164,7 +169,8 @@ class BlobStoreTest {
           assertEquals("retained", executor.submit(output::readLine).get(10, TimeUnit.SECONDS));
           assertEquals("local", blobs.text(blobs.putText("local")));
         }
-        var collecting = executor.submit(() -> new BlobStore(gcDb).gc(Set.of()));
+        var collecting =
+            executor.submit(() -> new BlobStore(gcDb).gc(BlobStore.Compaction.NONE, true).freed());
         assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
         child.getOutputStream().write(1);
         child.getOutputStream().flush();
@@ -235,7 +241,7 @@ class BlobStoreTest {
         var blobs = new BlobStore(db);
         if (args[1].equals("gc")) {
           System.out.println("collecting");
-          System.out.println(blobs.gc(Set.of()));
+          System.out.println(blobs.gc(BlobStore.Compaction.NONE, true).freed());
         } else {
           try (var scope = blobs.retain()) {
             System.out.println("retained");
@@ -259,7 +265,9 @@ class BlobStoreTest {
       try (var round = blobs.retain()) {
         var bytes = new byte[] {1, 2, 3};
         blobs.putChunk(BlobStore.hash(bytes), bytes);
-        collecting = executor.submit(() -> new BlobStore(second).gc(Set.of()));
+        collecting =
+            executor.submit(
+                () -> new BlobStore(second).gc(BlobStore.Compaction.NONE, true).freed());
         assertThrows(
             java.util.concurrent.TimeoutException.class,
             () -> collecting.get(100, java.util.concurrent.TimeUnit.MILLISECONDS));
@@ -291,7 +299,8 @@ class BlobStoreTest {
         collecting =
             db.read(
                 () -> {
-                  var collector = executor.submit(() -> store.gc(Set.of()));
+                  var collector =
+                      executor.submit(() -> store.gc(BlobStore.Compaction.NONE, true).freed());
                   assertThrows(
                       TimeoutException.class, () -> collector.get(100, TimeUnit.MILLISECONDS));
                   assertEquals(2, leasesWhilePutting(db, store));
@@ -326,7 +335,7 @@ class BlobStoreTest {
                             IllegalStateException.class, () -> store.putText("data"));
                       }));
       assertTrue(reading.await(5, TimeUnit.SECONDS));
-      var collecting = executor.submit(() -> store.gc(Set.of()));
+      var collecting = executor.submit(() -> store.gc(BlobStore.Compaction.NONE, true).freed());
       collectorStarted.countDown();
       assertEquals(
           "Take blob retention before opening a transaction, not inside one",
@@ -342,9 +351,13 @@ class BlobStoreTest {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
       var store = new BlobStore(db);
-      assertThrows(IllegalStateException.class, () -> db.read(() -> store.gc(Set.of())));
-      assertThrows(IllegalStateException.class, () -> db.transaction(() -> store.gc(Set.of())));
-      assertEquals(0, store.gc(Set.of()));
+      assertThrows(
+          IllegalStateException.class,
+          () -> db.read(() -> store.gc(BlobStore.Compaction.NONE, true).freed()));
+      assertThrows(
+          IllegalStateException.class,
+          () -> db.transaction(() -> store.gc(BlobStore.Compaction.NONE, true).freed()));
+      assertEquals(0, store.gc(BlobStore.Compaction.NONE, true).freed());
     }
   }
 
