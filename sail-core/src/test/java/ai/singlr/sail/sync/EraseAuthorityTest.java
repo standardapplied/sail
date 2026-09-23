@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -70,13 +71,32 @@ class EraseAuthorityTest {
   }
 
   @Test
-  void aSpecMainDoesNotHoldHasNothingToProtectButAnOwnerlessOneIsAdminOnly() {
+  void aSpecMainHoldsNothingOfOrNoOwnerOfIsAdminOnly() {
     specs.create(spec("ownerless", null, null));
 
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "never-here"));
+    assertEquals(
+        Optional.of(
+            "main holds no spec 'never-here', so it cannot tell whose it is; sync it before"
+                + " pruning"),
+        authority.refusal(MADY, "spec", "never-here"));
     assertEquals(
         Optional.of("spec 'ownerless' has no owner; only an admin can prune it"),
         authority.refusal(MADY, "spec", "ownerless"));
+    assertEquals(
+        Optional.empty(),
+        authority.refusal(new SyncPrincipal("mady", true, true), "spec", "never-here"));
+  }
+
+  @Test
+  void aSpecMainAlreadyErasedHasNothingLeftToProtect() {
+    specs.create(spec("theirs", "uday", "uday"));
+    var erasure = new Erasure(db);
+    erasure.eraseClosure(new Erasure.Target("spec", "theirs"), "uday", "local");
+
+    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "theirs"));
+    assertEquals(
+        Optional.of("a read-only role cannot prune"),
+        authority.refusal(new SyncPrincipal("mady", false), "spec", "theirs"));
   }
 
   @Test

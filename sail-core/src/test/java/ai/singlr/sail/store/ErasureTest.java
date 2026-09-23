@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
@@ -80,10 +82,67 @@ class ErasureTest {
   }
 
   @Test
-  void anIdentityRoomThatWasNeverMintedHereIsNotErased() {
+  void aSpecsIdentityRoomGoesWithItThoughNoRoomRowWasEverMinted() {
     spec("old", null);
+    var posted = messages.append("old", "uday", "talk in a room with no row", null);
 
-    assertEquals(Set.of("spec:old"), names(erasure.closure(List.of(spec("old")))));
+    erasure.eraseClosure(spec("old"), "uday", "local");
+
+    assertTrue(messages.findById(posted.id()).isEmpty());
+    assertTrue(erasure.isErased(new Erasure.Target("room", "old")));
+    assertTrue(erasure.isErased(new Erasure.Target("message", posted.id())));
+  }
+
+  @Test
+  void aRoomSharingTheIdOfASpecThisBoxNeverHeldIsNotItsToTake() {
+    room("lobby", "proj");
+    messages.append("lobby", "uday", "the lobby's own talk", null);
+
+    assertEquals(Set.of("spec:lobby"), names(erasure.closure(List.of(spec("lobby")))));
+  }
+
+  @Test
+  void aMessageTakesEveryReplyDownItsThread() {
+    room("lobby", "proj");
+    var first = messages.append("lobby", "uday", "first", null);
+    var reply = messages.append("lobby", "uday", "reply", first.id());
+    var nested = messages.append("lobby", "uday", "nested", reply.id());
+    var aside = messages.append("lobby", "uday", "aside", null);
+
+    var closure = names(erasure.closure(List.of(new Erasure.Target("message", first.id()))));
+
+    assertEquals(
+        Set.of("message:" + first.id(), "message:" + reply.id(), "message:" + nested.id()),
+        closure);
+    assertFalse(closure.contains("message:" + aside.id()));
+  }
+
+  @Test
+  void aStateNamingAnErasedParentIsTheOnlyOneRefused() {
+    spec("old", null);
+    spec("deleted", null);
+    specs.delete("deleted");
+    room("lobby", "proj");
+    var first = messages.append("lobby", "uday", "first", null);
+    erasure.eraseClosure(spec("old"), "uday", "local");
+    erasure.erase(List.of(new Erasure.Target("message", first.id())), "uday", "local");
+    var changeLog = new ChangeLog(db);
+
+    assertEquals(
+        Optional.of(spec("old")),
+        Erasure.erasedOwner(changeLog, "run", Map.of("spec_id", "old", "project", "proj")));
+    assertEquals(
+        Optional.of(new Erasure.Target("message", first.id())),
+        Erasure.erasedOwner(
+            changeLog, "message", Map.of("room_id", "lobby", "reply_to", first.id())));
+    assertEquals(
+        Optional.of(new Erasure.Target("room", "old")),
+        Erasure.erasedOwner(changeLog, "message", Map.of("room_id", "old")));
+    assertEquals(
+        Optional.empty(), Erasure.erasedOwner(changeLog, "run", Map.of("spec_id", "deleted")));
+    assertEquals(
+        Optional.empty(), Erasure.erasedOwner(changeLog, "review", Map.of("spec_id", "unseen")));
+    assertEquals(Optional.empty(), Erasure.erasedOwner(changeLog, "spec", Map.of("id", "old")));
   }
 
   @Test
@@ -161,18 +220,23 @@ class ErasureTest {
 
     assertEquals(List.of(), second.entities());
     assertEquals(first, erasure.eraseClosure(spec("old"), "mady", "local"));
-    assertEquals(1, count("SELECT count(*) FROM change_log WHERE kind = 'erasure'"));
+    assertEquals(
+        List.of("spec:uday", "room:uday"),
+        db.query(
+            "SELECT entity_type || ':' || actor FROM change_log WHERE kind = 'erasure' ORDER BY seq",
+            row -> row.text(0)));
   }
 
   @Test
-  void anErasureRevIsNewForEveryErasureOfTheSameId() {
+  void aPrunedIdIsNeverUsedAgain() {
     spec("reborn", null);
-    var first = erasure.eraseClosure(spec("reborn"), "uday", "local");
-    spec("reborn", null);
+    erasure.eraseClosure(spec("reborn"), "uday", "local");
 
-    var second = erasure.eraseClosure(spec("reborn"), "uday", "local");
-
-    assertFalse(first.equals(second), "a node must tell this erasure from the earlier one");
+    var spec = assertThrows(IllegalArgumentException.class, () -> spec("reborn", null));
+    assertTrue(spec.getMessage().contains("'reborn' was pruned"), spec.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> room("reborn", "proj"));
+    assertEquals(0, count("SELECT count(*) FROM specs"));
+    assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind <> 'erasure'"));
   }
 
   @Test

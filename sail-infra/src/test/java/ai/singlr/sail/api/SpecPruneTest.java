@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -224,6 +225,32 @@ class SpecPruneTest {
   }
 
   @Test
+  void aChildWrittenBetweenTheRehearsalAndTheErasureGoesWithItsParent() {
+    archived("old", "uday");
+    var late = new AtomicReference<String>();
+
+    var report =
+        racing(() -> late.set(run(new RunStore(db), "running", null, "old")))
+            .prune(PruneRequest.ids(List.of("old"), false), UDAY);
+
+    assertTrue(report.entries().contains(new Erasure.Target(Erasure.RUN, late.get())));
+    assertEquals(0, count("SELECT count(*) FROM runs WHERE spec_id = 'old'"));
+    assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind <> 'erasure'"));
+  }
+
+  @Test
+  void anOwnerChangedBetweenTheRehearsalAndTheErasureIsTheOneChecked() {
+    archived("old", "uday");
+
+    assertRefused(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        () ->
+            racing(() -> specs.update(row("old", "mady", SpecStatus.ARCHIVED)))
+                .prune(PruneRequest.ids(List.of("old"), false), UDAY));
+    assertTrue(specs.findById("old").isPresent());
+  }
+
+  @Test
   void anUnknownSpecIsNotFoundAndAPrunedOneIsNothingToDo() {
     archived("old", "uday");
     ops.prune(PruneRequest.ids(List.of("old"), false), UDAY);
@@ -384,6 +411,29 @@ class SpecPruneTest {
     assertThrows(
         NullPointerException.class,
         () -> new GlobalSpecOperations.Pruning(null, () -> true, DateTimeUtils::now));
+  }
+
+  /**
+   * Operations over the same box whose second authority check — the one between the rehearsal and
+   * the erasure — first runs {@code between}, the way a concurrent writer lands in that gap.
+   */
+  private GlobalSpecOperations racing(Runnable between) {
+    var checks = new AtomicInteger();
+    return new GlobalSpecOperations(
+        specs,
+        null,
+        bus,
+        new RunStore(db),
+        () -> rooms,
+        new GlobalSpecOperations.Pruning(
+            db,
+            () -> {
+              if (checks.incrementAndGet() == 2) {
+                between.run();
+              }
+              return true;
+            },
+            clock::get));
   }
 
   private void archived(String id, String owner) {

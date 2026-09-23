@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -138,17 +139,25 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   /**
-   * Main's compare-and-set commit. An erased entity takes a commit only from a node that saw the
-   * erasure — one offering against the erasure's rev, which creates it anew; any other offer is
-   * stale, so a node that has not heard of the erasure yet can never bring the entity back.
+   * Main's compare-and-set commit. An erased entity takes no commit at all — every offer is stale
+   * against its erasure, so the node adopts it and nothing brings the entity back — and a state
+   * that would belong to an erased entity is refused ({@link Erasure.Orphaned}), decided in the
+   * same transaction as the commit so a prune cannot slip between the two.
    */
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
     return atomically(
         () -> {
           var erased = erasure(entityId);
-          if (erased.isPresent() && !Objects.equals(erased.get().rev(), expectedRev)) {
+          if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
+          }
+          if (snapshot != null) {
+            var owner = Erasure.erasedOwner(changeLog, store.entityType(), snapshot);
+            if (owner.isPresent()) {
+              throw new Erasure.Orphaned(
+                  new Erasure.Target(store.entityType(), entityId), owner.get());
+            }
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
             case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());

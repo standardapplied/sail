@@ -78,6 +78,23 @@ class OrphanErasureTest {
   }
 
   @Test
+  void anOrphanedThreadIsErasedWhicheverOfItsMessagesIsReadFirst() {
+    try (var db = Sqlite.open(dir.resolve("thread.db"))) {
+      new SchemaManager(db).migrate();
+      var reply = DateTimeUtils.newId().toString();
+      var parent = DateTimeUtils.newId().toString();
+      message(db, parent, "nowhere", null);
+      message(db, reply, "nowhere", parent);
+
+      var report = new OrphanErasure(() -> true).apply(db, null, null);
+
+      assertEquals(2, report.applied());
+      assertEquals(0, count(db, "SELECT count(*) FROM room_messages"));
+      assertEquals(2, erasures(db));
+    }
+  }
+
+  @Test
   void aNodeErasesNothingItsMainHasNotErased() {
     try (var db = Sqlite.open(dir.resolve("node.db"))) {
       new SchemaManager(db).migrate();
@@ -180,13 +197,17 @@ class OrphanErasureTest {
   }
 
   private static String message(Sqlite db, String roomId) {
-    var id = DateTimeUtils.newId().toString();
+    return message(db, DateTimeUtils.newId().toString(), roomId, null);
+  }
+
+  private static String message(Sqlite db, String id, String roomId, String replyTo) {
     db.execute(
         """
-        INSERT INTO room_messages (id, room_id, author, body, created_at, rev, base_rev)
-        VALUES (?, ?, 'uday', 'hello', 'then', '1-a', '1-a')""",
+        INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev, base_rev)
+        VALUES (?, ?, 'uday', 'hello', ?, 'then', '1-a', '1-a')""",
         id,
-        roomId);
+        roomId,
+        replyTo);
     return id;
   }
 

@@ -61,6 +61,7 @@ public final class SyncRpcServer {
   private final ChangeHeads heads;
   private final String version;
   private boolean welcomed;
+  private Sqlite db;
   private BlobStore blobs;
   private FileLimits limits = FileLimits.defaults();
   private Erasure erasure;
@@ -129,6 +130,7 @@ public final class SyncRpcServer {
    * Serves content and erasure from main's database {@code db}, uploads bounded by {@code limits}.
    */
   public SyncRpcServer content(Sqlite db, FileLimits limits) {
+    this.db = db;
     this.blobs = new BlobStore(db);
     this.limits = limits;
     this.erasure = new Erasure(db);
@@ -498,24 +500,28 @@ public final class SyncRpcServer {
   /**
    * Main's answer to a request to erase: refused, naming why, unless the principal may erase what
    * main holds; otherwise the entity and what belongs to it are erased as the principal and the
-   * erasure's rev is the answer. Asking again for an erased entity answers the erasure it has.
+   * erasure's rev is the answer. Decided and erased in one transaction, so what the decision read
+   * is what the erasure removes. Asking again for an erased entity answers the erasure it has.
    */
   private SyncWire.Result erased(String type, MainReplica.Offer offer) {
     if (erasure == null) {
       return new SyncWire.Refused(offer.id(), "this main keeps no erasure log");
     }
-    var refusal = authority.refusal(principal, type, offer.id());
-    if (refusal.isPresent()) {
-      return new SyncWire.Refused(offer.id(), refusal.get());
-    }
-    var rev =
-        SyncPeer.with(
-            principal.handle(),
-            () ->
-                erasure.eraseClosure(
-                    new Erasure.Target(type, offer.id()), principal.handle(), "sync"));
-    erasedInSession = true;
-    return new SyncWire.Accepted(offer.id(), rev);
+    return SyncPeer.with(
+        principal.handle(),
+        () ->
+            db.<SyncWire.Result>transaction(
+                () -> {
+                  var refusal = authority.refusal(principal, type, offer.id());
+                  if (refusal.isPresent()) {
+                    return new SyncWire.Refused(offer.id(), refusal.get());
+                  }
+                  var rev =
+                      erasure.eraseClosure(
+                          new Erasure.Target(type, offer.id()), principal.handle(), "sync");
+                  erasedInSession = true;
+                  return new SyncWire.Accepted(offer.id(), rev);
+                }));
   }
 
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
@@ -537,7 +543,7 @@ public final class SyncRpcServer {
           SyncPeer.with(
               principal.handle(),
               () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
-    } catch (BlobStore.NotHeld e) {
+    } catch (BlobStore.NotHeld | Erasure.Orphaned e) {
       return new SyncWire.Refused(offer.id(), e.getMessage());
     }
     return switch (outcome) {

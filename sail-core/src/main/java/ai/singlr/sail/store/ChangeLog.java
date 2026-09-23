@@ -32,8 +32,10 @@ import java.util.stream.Collectors;
  * <p>Every entry is one {@link Kind}: a revision, a tombstone (a deletion that keeps the entity's
  * last state, so it can be restored), or an erasure — the entity is gone everywhere, and the
  * erasure row, a few hundred bytes naming who and when, is the only thing left of it. An erasure is
- * terminal for its history: {@link #erase} removes every other entry of the entity in the same
- * transaction, and no compaction or later erasure ever removes an erasure row.
+ * terminal: {@link #erase} removes every other entry of the entity in the same transaction, no
+ * compaction ever removes an erasure row, and {@link #append} refuses anything after one — an
+ * erased id is never created again, so its erasure stays its head, the last entry every node pages
+ * for it however long it was offline.
  *
  * <p>Otherwise this store only appends and reads. Mutators call {@link #append} inside their own
  * transaction so the journal can never diverge from the row it describes. History is bounded by
@@ -107,7 +109,7 @@ public final class ChangeLog {
 
   /**
    * Appends a revision and moves the entity's head to it, as one transaction. {@code snapshot} is
-   * the entity's full state as JSON at this revision.
+   * the entity's full state as JSON at this revision. An erased entity is refused: its id is spent.
    */
   public void append(
       String entityType,
@@ -117,15 +119,25 @@ public final class ChangeLog {
       String origin,
       boolean deleted,
       String snapshot) {
-    insert(
-        entityType,
-        entityId,
-        rev,
-        actor,
-        origin,
-        deleted,
-        snapshot,
-        deleted ? Kind.TOMBSTONE : Kind.REVISION);
+    db.transaction(
+        () -> {
+          if (head(entityType, entityId).filter(head -> head.kind() == Kind.ERASURE).isPresent()) {
+            throw new IllegalArgumentException(
+                entityType
+                    + " '"
+                    + entityId
+                    + "' was pruned, and a pruned id is never used again; choose a new one.");
+          }
+          insert(
+              entityType,
+              entityId,
+              rev,
+              actor,
+              origin,
+              deleted,
+              snapshot,
+              deleted ? Kind.TOMBSTONE : Kind.REVISION);
+        });
   }
 
   /**

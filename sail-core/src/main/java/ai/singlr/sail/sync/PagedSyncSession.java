@@ -294,8 +294,8 @@ public final class PagedSyncSession implements SyncSession {
   /**
    * Applies every erasure among {@code entries} this node does not hold yet, at main's rev, and
    * returns what the engine still reconciles: every other entry, and each erasure this node already
-   * held — as the absent entity at the erasure's rev, which an id created anew here since then is
-   * offered against, so main takes it as new.
+   * held — as the absent entity at the erasure's rev, which this node's own erasure already
+   * matches.
    */
   private List<SyncWire.Entry> adoptErasures(String type, List<SyncWire.Entry> entries) {
     var remaining = new ArrayList<SyncWire.Entry>(entries.size());

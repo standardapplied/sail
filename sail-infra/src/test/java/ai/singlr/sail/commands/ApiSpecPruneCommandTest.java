@@ -113,7 +113,10 @@ class ApiSpecPruneCommandTest {
 
     var applied = YamlUtil.parseMap(run("prune", "old", "--apply", "--json").out());
     assertEquals(false, applied.get("dry_run"));
-    assertEquals(List.of(Map.of("type", "spec", "id", "old")), applied.get("entries"));
+    assertEquals(
+        List.of(Map.of("type", "spec", "id", "old"), Map.of("type", "room", "id", "old")),
+        applied.get("entries"),
+        "the spec and the identity room it minted, which has no room row yet");
   }
 
   @Test

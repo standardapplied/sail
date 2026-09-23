@@ -17,10 +17,11 @@ import java.util.Optional;
 /**
  * Main's decision on a node's request to erase, made against main's own copy — never the node's. A
  * spec is erased by an admin or by its owner: the assignee, or its creator when it is unassigned,
- * read from the live row or from the last state its tombstone kept. A spec main does not hold, or
- * has already erased, has nothing left to protect. A whole project is erased only by an admin, and
- * nothing else is erased on request: messages and runs go with what they belong to, or by main's
- * own retention.
+ * read from the live row or from the last state its tombstone kept. One main has already erased has
+ * nothing left to protect, so asking again only answers the erasure it has; one main holds nothing
+ * of has no owner main can establish, so only an admin may erase it. A whole project is erased only
+ * by an admin, and nothing else is erased on request: messages and runs go with what they belong
+ * to, or by main's own retention.
  */
 final class EraseAuthority {
 
@@ -40,20 +41,31 @@ final class EraseAuthority {
     if (!Erasure.SPEC.equals(type) && !Erasure.PROJECT.equals(type)) {
       return Optional.of("only specs and projects are pruned on request, not a " + type);
     }
-    if (principal.admin()) {
+    if (principal.admin() || erased(type, id)) {
       return Optional.empty();
     }
     if (Erasure.PROJECT.equals(type)) {
       return Optional.of("pruning a whole project is admin-only");
     }
     var owner = owner(id);
-    if (owner.isEmpty() || owner.get().equals(principal.handle())) {
+    if (owner.isEmpty()) {
+      return Optional.of(
+          "main holds no spec '" + id + "', so it cannot tell whose it is; sync it before pruning");
+    }
+    if (owner.get().equals(principal.handle())) {
       return Optional.empty();
     }
     if (owner.get().isBlank()) {
       return Optional.of("spec '" + id + "' has no owner; only an admin can prune it");
     }
     return Optional.of("spec '" + id + "' belongs to '" + owner.get() + "'; ask them or an admin");
+  }
+
+  private boolean erased(String type, String id) {
+    return changeLog
+        .head(type, id)
+        .filter(head -> head.kind() == ChangeLog.Kind.ERASURE)
+        .isPresent();
   }
 
   private Optional<String> owner(String specId) {

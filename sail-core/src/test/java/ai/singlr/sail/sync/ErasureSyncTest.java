@@ -271,17 +271,137 @@ class ErasureSyncTest {
   }
 
   @Test
-  void anIdCreatedAnewAfterItsErasureSyncsAsANewEntity() throws IOException {
+  void aPrunedIdIsNeverCreatedAgainSoItsErasureIsTheLastWordEveryNodeHears() throws IOException {
     seedArchivedSpec(main, "reborn", "uday");
     round(NODE);
     prune(main, "reborn", "uday");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> main.specs.create(SyncBox.spec("reborn", "Born again on main", "pending")));
+    round(NODE);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> node.specs.create(SyncBox.spec("reborn", "Born again on the node", "pending")));
+
+    for (var box : List.of(main, node)) {
+      assertTrue(box.specs.findById("reborn").isEmpty());
+      assertEquals(
+          0,
+          count(
+              box.db,
+              "SELECT count(*) FROM change_log WHERE entity_id = 'reborn' AND kind <> 'erasure'"));
+    }
+  }
+
+  @Test
+  void aMemberCannotPruneASpecMainHoldsNothingOfNorTheRoomSharingItsId() throws IOException {
+    new RoomStore(main.db)
+        .create(
+            new RoomStore.RoomRow(
+                "lobby", "proj", "Lobby", "uday", null, null, "uday", null, null, "uday"));
+    new MessageStore(main.db).append("lobby", "uday", "the lobby's own talk", null);
+    round(NODE);
+    new EraseRequests(node.db).request(Erasure.SPEC, "lobby", "node");
+
+    try (var link = SyncBox.connect(main.server(NODE), node)) {
+      var refused =
+          assertThrows(
+              SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
+      assertTrue(refused.getMessage().contains("main holds no spec 'lobby'"), refused.getMessage());
+    }
+    new EraseRequests(node.db).request(Erasure.SPEC, "lobby", "node");
+    round(new SyncPrincipal("node", true, true));
+
+    for (var box : List.of(main, node)) {
+      assertTrue(new RoomStore(box.db).findById("lobby").isPresent(), box.id + " lost the room");
+      assertEquals(1, count(box.db, "SELECT count(*) FROM room_messages WHERE room_id = 'lobby'"));
+    }
+  }
+
+  @Test
+  void askingAgainForASpecMainAlreadyErasedAnswersItsErasure() throws IOException {
+    seedArchivedSpec(main, "mine", "node");
+    round(NODE);
+    var onMain = prune(main, "mine", "uday");
+    new EraseRequests(node.db).request(Erasure.SPEC, "mine", "node");
+
+    var reports = round(NODE);
+
+    assertTrue(reports.stream().allMatch(report -> report.failure() == null));
+    assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
+    assertNothingOf(node.db, onMain.entities());
+    assertEquals("uday", erasure(main.db, new Erasure.Target(Erasure.SPEC, "mine")).actor());
+  }
+
+  @Test
+  void aThreadMainErasesReachesANodeHoldingItAndTheNodesOwnUnpushedReply() throws IOException {
+    new RoomStore(main.db)
+        .create(
+            new RoomStore.RoomRow(
+                "lobby", "proj", "Lobby", "uday", null, null, "uday", null, null, "uday"));
+    var mainMessages = new MessageStore(main.db);
+    var parent = mainMessages.append("lobby", "uday", "old news", null);
+    var reply = mainMessages.append("lobby", "uday", "old reply", parent.id());
+    round(NODE);
+    var unpushed = new MessageStore(node.db).append("lobby", "node", "late word", reply.id());
+    new Erasure(main.db)
+        .erase(
+            List.of(
+                new Erasure.Target(Erasure.MESSAGE, parent.id()),
+                new Erasure.Target(Erasure.MESSAGE, reply.id())),
+            "sail",
+            "retention");
+
+    var reports = round(NODE);
+
+    assertTrue(reports.stream().allMatch(report -> report.failure() == null));
+    for (var box : List.of(main, node)) {
+      assertEquals(0, count(box.db, "SELECT count(*) FROM room_messages"), box.id);
+    }
+    assertEquals(2, erasures(node.db, Erasure.MESSAGE), "main's two erasure rows, adopted");
+    assertTrue(new MessageStore(node.db).findById(unpushed.id()).isEmpty());
+  }
+
+  @Test
+  void aRunPushedForASpecMainErasedMidRoundIsRefusedAndGoesWithTheSpec() throws IOException {
+    main.specs.create(owned("old", "Old work", "archived", "node"));
+    round(NODE);
+    var late =
+        new RunStore(node.db)
+            .create(
+                DateTimeUtils.newId().toString(),
+                "proj",
+                "old",
+                "node",
+                "node",
+                "build",
+                "claude",
+                "b",
+                "t",
+                null,
+                null,
+                "/log",
+                "u");
+
+    try (var link = SyncBox.connect(main.server(NODE), node)) {
+      var replicas = replicas();
+      link.reconcile("spec", replicas.get("spec"));
+      prune(main, "old", "uday");
+      var refused =
+          assertThrows(
+              SyncTransportException.class, () -> link.reconcile("run", replicas.get("run")));
+      assertEquals("refused", refused.kind());
+      assertTrue(
+          refused.getMessage().contains("belongs to spec 'old', which was pruned"),
+          refused.getMessage());
+    }
     round(NODE);
 
-    node.specs.create(SyncBox.spec("reborn", "Born again on the node", "pending"));
-    round(NODE);
-
-    assertEquals("Born again on the node", main.specs.findById("reborn").orElseThrow().title());
-    assertEquals(1, erasures(main.db, "spec"), "the erasure row stays as the audit trail");
+    for (var box : List.of(main, node)) {
+      assertEquals(0, count(box.db, "SELECT count(*) FROM runs"), box.id);
+    }
+    assertEquals(0, count(node.db, "SELECT count(*) FROM change_log WHERE entity_id = ?", late));
   }
 
   private List<SyncSession.TypeReport> round(SyncPrincipal as) throws IOException {

@@ -554,7 +554,9 @@ final class GlobalSpecOperations {
    * rehearsed in a transaction that is rolled back, so it reports exactly what the real one then
    * does. On main, or a standalone box, the real one erases and collects the content it leaves
    * unreferenced; on a node it records the ask, which the next sync offers to main — main erases,
-   * and this box follows.
+   * and this box follows. The rehearsal and the erasure each select their targets, check who owns
+   * them and read what belongs to them inside their own write transaction, so a child written
+   * between the two goes with its parent and an owner changed between them is the one checked.
    *
    * <p>Authority: write capability, never an agent; the owner of every named spec (its assignee, or
    * its creator when unassigned) or an admin; a policy, a project or retention only an admin.
@@ -576,22 +578,23 @@ final class GlobalSpecOperations {
           "Retention runs on main; a node prunes only specs and projects.",
           "Set the retention block in main's host.yaml.");
     }
-    var roots = pruneRoots(request, actor);
     var db = pruning.db();
     var erasure = new Erasure(db);
     var blobs = new BlobStore(db);
     var handle = principal(actor.handle());
-    var plan = erasure.closure(roots);
     var rehearsed =
         db.rehearse(
             () ->
                 PruneReport.of(
-                    erasure.erase(plan, handle, "local"), blobs.collectable(), true, false));
-    if (request.dryRun() || plan.isEmpty()) {
+                    erasure.erase(erasure.closure(pruneRoots(request, actor)), handle, "local"),
+                    blobs.collectable(),
+                    true,
+                    false));
+    if (request.dryRun() || rehearsed.entries().isEmpty()) {
       return withDryRun(rehearsed, request.dryRun());
     }
     if (!pruning.authoritative().getAsBoolean()) {
-      requestFromMain(db, roots, handle);
+      requestFromMain(request, actor, handle);
       return new PruneReport(
           false,
           true,
@@ -606,12 +609,15 @@ final class GlobalSpecOperations {
           rehearsed.blobBytes(),
           rehearsed.entries());
     }
-    var projects = projectsOf(plan);
+    var projects = new LinkedHashSet<String>();
     var report =
         db.transaction(
-            () ->
-                PruneReport.of(
-                    erasure.erase(plan, handle, "local"), blobs.collectable(), false, false));
+            () -> {
+              var plan = erasure.closure(pruneRoots(request, actor));
+              projects.addAll(projectsOf(plan));
+              return PruneReport.of(
+                  erasure.erase(plan, handle, "local"), blobs.collectable(), false, false);
+            });
     blobs.gc(BlobStore.Compaction.NONE, true);
     projects.forEach(project -> publishBoardUpdated(project, null, handle));
     return report;
@@ -754,14 +760,14 @@ final class GlobalSpecOperations {
    * Records a node's prune for main: the named specs and projects are offered, as erase requests,
    * at the start of their type's next round; the rest of the closure goes with them on main.
    */
-  private static void requestFromMain(Sqlite db, List<Erasure.Target> roots, String handle) {
+  private void requestFromMain(PruneRequest request, Actor actor, String handle) {
+    var db = pruning.db();
     var requests = new EraseRequests(db);
     db.transaction(
         () -> {
-          for (var root : roots) {
+          for (var root : pruneRoots(request, actor)) {
             requests.request(root.type(), root.id(), handle);
           }
-          return null;
         });
   }
 

@@ -21,9 +21,11 @@ import java.util.function.BooleanSupplier;
  *
  * <p>Only an authoritative box — main, or a standalone box — erases, recording an erasure row per
  * entity that every node then adopts through its pages; a node's own view of "no parent" may only
- * mean a page it has not pulled yet, so on a node this migration erases nothing. One entity per
- * transaction and re-checked under its lock, so an upgrade killed partway resumes where it stopped
- * and running it twice erases nothing twice. The count is printed.
+ * mean a page it has not pulled yet, so on a node this migration erases nothing. One orphan per
+ * transaction, with what belongs to it — a message goes with its replies, which live in the same
+ * orphaned room — and re-checked under its lock, so the order the orphans are read in never
+ * matters, an upgrade killed partway resumes where it stopped and running it twice erases nothing
+ * twice. The count is printed.
  */
 public final class OrphanErasure implements DataMigration {
 
@@ -87,7 +89,10 @@ public final class OrphanErasure implements DataMigration {
             db.transaction(
                 () ->
                     stillOrphaned(db, type, id)
-                        ? erasure.erase(List.of(new Erasure.Target(type, id)), "sail", "migration")
+                        ? erasure.erase(
+                            erasure.closure(List.of(new Erasure.Target(type, id))),
+                            "sail",
+                            "migration")
                         : new Erasure.Result(List.of(), 0));
         erased.addAll(result.entities());
       }
