@@ -985,6 +985,7 @@ class SailOperationsSeamTest {
     try (var box = new SyncBox("main");
         var operations = operations(box.db)) {
       box.specs.create(SyncBox.spec("old", "Old", "archived"));
+      box.specs.create(SyncBox.spec("kept", "Kept", "pending"));
       var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
 
       var rehearsed = operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin);
@@ -994,11 +995,10 @@ class SailOperationsSeamTest {
       assertEquals(1, ((Result.Success<PruneReport>) erased).value().specs());
       assertTrue(box.specs.findById("old").isEmpty(), "a standalone box authors the erasure");
       assertEquals(
-          List.of(),
+          List.of("kept"),
           ((Result.Success<GlobalSpecsListResponse>)
                   operations.globalSpecs(SpecStore.SpecFilter.all()))
-              .value()
-              .specs(),
+              .value().specs().stream().map(GlobalSpecView::id).toList(),
           "the board reads the same stores the prune erased from");
       try (var sweeper = operations.retentionSweeper()) {
         assertNotNull(sweeper.sweep().collected());
@@ -1055,10 +1055,10 @@ class SailOperationsSeamTest {
       assertEquals(definition, operations.catalog().project("old").orElseThrow().definition());
       assertEquals(1, operations.catalog().projects().size());
       assertEquals(
-          "0 specs, 0 rooms, 0 messages, 0 runs, 0 reviews, 1 files, 1 projects, 0 events and 1"
+          "0 specs, 0 rooms, 0 messages, 0 runs, 0 reviews, 1 files, 1 projects, 0 events and 0"
               + " bytes of content",
           operations.catalog().purgeSummary("old"),
-          "the purge is rehearsed first");
+          "the purge is rehearsed first; the rename's history still holds the file's content");
       assertEquals("config", operations.projectFiles("old").list().getFirst().path());
       assertTrue(operations.catalog().destroy("old", true).purged());
       assertTrue(operations.projectFiles("old").list().isEmpty(), "its files go with it");
