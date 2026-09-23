@@ -10,6 +10,7 @@ import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
@@ -25,16 +26,20 @@ public final class ProjectCatalog {
 
   /**
    * Refuses a project name that was pruned, before anything is provisioned under it: a pruned name
-   * is spent for good. A catalog that cannot be read refuses nothing — recording stays best-effort.
+   * is spent for good. Reads the catalog without creating or migrating it, so a dry run changes
+   * nothing; a catalog that is missing or cannot be read refuses nothing — recording stays
+   * best-effort.
    */
   public static void requireUnpruned(String name) {
     requireUnpruned(SailPaths.controlPlaneDb(), name);
   }
 
   static void requireUnpruned(Path catalog, String name) {
+    if (!Files.isRegularFile(catalog)) {
+      return;
+    }
     boolean pruned;
     try (var db = Sqlite.open(catalog)) {
-      new SchemaManager(db).migrate();
       pruned = new ChangeLog(db).isErased(Erasure.PROJECT, name);
     } catch (Exception e) {
       return;

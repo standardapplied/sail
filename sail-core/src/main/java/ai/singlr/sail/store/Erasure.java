@@ -222,6 +222,11 @@ public final class Erasure {
     return changeLog.isErased(target.type(), target.id());
   }
 
+  /** Whether {@code target} has a change here that main has not taken yet. */
+  public boolean unpushed(Target target) {
+    return stores.get(target.type()).dirtyIds().contains(target.id());
+  }
+
   /** Whether main never acknowledged {@code target}: it has no synced base on this box. */
   public boolean unacknowledged(Target target) {
     return stores.get(target.type()).baseRevOf(target.id()) == null;
@@ -274,27 +279,25 @@ public final class Erasure {
    * nothing here, so a room that merely shares its id is not its to take.
    */
   private List<Target> roomsLeftBehind(Set<Target> closure, boolean asNode) {
-    var rooms = new ArrayList<Target>();
+    var candidates = new LinkedHashSet<String>();
     for (var target : closure) {
       if (!SPEC.equals(target.type())) {
         continue;
       }
-      var roomId =
-          specs.lastKnown(target.id()).map(SpecStore.LastKnown::roomIdOrIdentity).orElse(null);
-      if (roomId == null) {
-        continue;
+      specs
+          .lastKnown(target.id())
+          .map(SpecStore.LastKnown::roomIdOrIdentity)
+          .filter(room -> !closure.contains(new Target(ROOM, room)))
+          .filter(
+              room -> closure.contains(new Target(SPEC, room)) || isErased(new Target(SPEC, room)))
+          .filter(room -> !asNode || unacknowledged(new Target(ROOM, room)))
+          .ifPresent(candidates::add);
+    }
+    var rooms = new ArrayList<Target>();
+    for (var conversing : specs.inRooms(candidates).entrySet()) {
+      if (conversing.getValue().stream().allMatch(id -> closure.contains(new Target(SPEC, id)))) {
+        rooms.add(new Target(ROOM, conversing.getKey()));
       }
-      var room = new Target(ROOM, roomId);
-      var minter = new Target(SPEC, roomId);
-      if (closure.contains(room)
-          || rooms.contains(room)
-          || (!closure.contains(minter) && !isErased(minter))
-          || (asNode && !unacknowledged(room))
-          || specs.inRoom(roomId).stream()
-              .anyMatch(id -> !closure.contains(new Target(SPEC, id)))) {
-        continue;
-      }
-      rooms.add(room);
     }
     return rooms;
   }

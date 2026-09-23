@@ -12,6 +12,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -510,7 +511,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * A spec as this box last knew it: its live row, or the state its tombstone kept. What deciding
    * who owns it, whether it may be pruned and which room it lives in reads, the same way for a
-   * deleted spec as for a live one.
+   * deleted spec as for a live one. The tombstone of a spec this box only heard was deleted keeps
+   * nothing, so every field but the id may be null.
    */
   public record LastKnown(
       String id,
@@ -536,6 +538,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     public boolean prunable() {
       return !live || status == SpecStatus.ARCHIVED || status == SpecStatus.CANCELLED;
     }
+  }
+
+  /** A tombstone of a spec this box never held as a row keeps no state, so no status. */
+  private static SpecStatus statusOf(String wire) {
+    return wire == null ? null : SpecStatus.fromWire(wire);
   }
 
   /** The one rule for who owns a spec: its assignee, or its creator while it is unassigned. */
@@ -568,7 +575,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             last ->
                 new LastKnown(
                     id,
-                    SpecStatus.fromWire(Snapshots.text(last, "status")),
+                    statusOf(Snapshots.text(last, "status")),
                     Snapshots.text(last, "assignee"),
                     Snapshots.text(last, "created_by"),
                     Snapshots.text(last, "room_id"),
@@ -578,7 +585,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * Up to {@code limit} specs a prune policy selects: in one of {@code statuses} since before
    * {@code cutoff} (when this box saw the spec enter it), in {@code project} when one is named, and
-   * with no run still going — a spec still at work is never swept away.
+   * with no run still going in it or its room — a spec still at work is never swept away.
    */
   public List<String> prunableSince(
       List<SpecStatus> statuses, String project, Instant cutoff, int limit) {
@@ -595,7 +602,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             + ") AND (? IS NULL OR project = ?)"
             + " AND julianday(CASE status WHEN 'archived' THEN archived_at"
             + " ELSE cancelled_at END) < julianday(?)"
-            + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.spec_id = s.id AND r.status IN ("
+            + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE (r.spec_id = s.id OR r.room_id = s.id)"
+            + " AND r.status IN ("
             + placeholders(unfinished.size())
             + ")) ORDER BY id LIMIT ?",
         row -> row.text(0),
@@ -607,25 +615,40 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The specs, live or deleted and restorable, that converse in room {@code roomId}: the one that
-   * minted it and every one born into it.
+   * For each of {@code roomIds}, the specs, live or deleted and restorable, that converse in it:
+   * the one that minted it and every one born into it. One read of the deletions, however many
+   * rooms.
    */
-  public List<String> inRoom(String roomId) {
-    var ids =
-        new LinkedHashSet<>(
-            db.query(
-                """
-                SELECT id FROM specs
-                WHERE room_id = ? OR (id = ? AND (room_id IS NULL OR room_id = ''))""",
-                row -> row.text(0),
-                roomId,
-                roomId));
-    var deleted = changeLog.tombstonedBy(ENTITY, "room_id");
-    ids.addAll(deleted.getOrDefault(roomId, List.of()));
-    if (deleted.getOrDefault("", List.of()).contains(roomId)) {
-      ids.add(roomId);
+  public Map<String, Set<String>> inRooms(Collection<String> roomIds) {
+    var rooms = List.copyOf(new LinkedHashSet<>(roomIds));
+    var conversing = new LinkedHashMap<String, Set<String>>();
+    rooms.forEach(room -> conversing.put(room, new LinkedHashSet<>()));
+    for (var from = 0; from < rooms.size(); from += 500) {
+      var batch = rooms.subList(from, Math.min(rooms.size(), from + 500));
+      var marks = placeholders(batch.size());
+      var parameters = new ArrayList<Object>(batch);
+      parameters.addAll(batch);
+      for (var row :
+          db.query(
+              "SELECT COALESCE(NULLIF(room_id, ''), id), id FROM specs WHERE room_id IN ("
+                  + marks
+                  + ") OR (id IN ("
+                  + marks
+                  + ") AND (room_id IS NULL OR room_id = ''))",
+              r -> Map.entry(r.text(0), r.text(1)),
+              parameters.toArray())) {
+        conversing.get(row.getKey()).add(row.getValue());
+      }
     }
-    return List.copyOf(ids);
+    for (var deleted : changeLog.tombstonedBy(ENTITY, "room_id").entrySet()) {
+      for (var id : deleted.getValue()) {
+        var room = deleted.getKey().isBlank() ? id : deleted.getKey();
+        if (conversing.containsKey(room)) {
+          conversing.get(room).add(id);
+        }
+      }
+    }
+    return conversing;
   }
 
   /** The latest entry of spec {@code id} — a revision, its tombstone, or its erasure — if any. */

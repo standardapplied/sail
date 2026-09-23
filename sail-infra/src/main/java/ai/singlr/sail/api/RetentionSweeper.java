@@ -76,7 +76,12 @@ public final class RetentionSweeper implements AutoCloseable {
    * other did, each failure reported and left to the next sweep.
    */
   void sweepQuietly() {
-    if (!authoritative.getAsBoolean()) {
+    try {
+      if (!authoritative.getAsBoolean()) {
+        return;
+      }
+    } catch (RuntimeException e) {
+      failed("deciding whether this box sweeps", e);
       return;
     }
     try {

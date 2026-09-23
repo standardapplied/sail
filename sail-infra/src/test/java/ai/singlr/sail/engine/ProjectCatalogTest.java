@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,14 @@ class ProjectCatalogTest {
     assertTrue(refused.getMessage().contains("'gone' was pruned"), refused.getMessage());
     assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "kept"));
     assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "fresh"));
+  }
+
+  @Test
+  void aBoxWithNoCatalogYetRefusesNothingAndIsLeftWithoutOne() {
+    var missing = dir.resolve("none.db");
+
+    assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(missing, "any"));
+    assertFalse(Files.exists(missing), "a dry run must not create the catalog");
   }
 
   @Test

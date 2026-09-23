@@ -163,8 +163,9 @@ final class SpecPruner {
 
   /**
    * A node's prune: rehearsed here for the report, then what main acknowledged is asked of main,
-   * offered at the start of its type's next round, and what this box alone ever held is discarded
-   * now — main has nothing of it to erase, and asking would publish it instead.
+   * offered at the start of its type's next round, and a root that nothing main ever acknowledged
+   * belongs to is discarded now — main has nothing of it to erase, and asking would publish it
+   * instead. What was discarded leaves the board and its content is collected at once.
    */
   private PruneReport ask(
       PruneRequest request,
@@ -174,17 +175,30 @@ final class SpecPruner {
       boolean idle) {
     var rehearsed = rehearse(select, handle, idle);
     var requests = new EraseRequests(db);
+    var projects = new LinkedHashSet<String>();
+    var discarded = new ArrayList<Erasure.Target>();
     var asked =
         db.transaction(
             () -> {
               var roots = roots(request, actor, Integer.MAX_VALUE);
-              var local = roots.stream().filter(erasure::unacknowledged).toList();
-              erasure.discard(local);
+              var local =
+                  roots.stream()
+                      .filter(
+                          root ->
+                              erasure.closure(List.of(root)).stream()
+                                  .allMatch(erasure::unacknowledged))
+                      .toList();
+              projects.addAll(projectsOf(erasure.closure(local)));
+              discarded.addAll(erasure.discard(local).entities());
               roots.stream()
                   .filter(root -> !local.contains(root))
                   .forEach(root -> requests.request(root.type(), root.id(), handle));
               return roots.size() > local.size();
             });
+    if (!discarded.isEmpty()) {
+      collect();
+      projects.forEach(project -> publishBoardUpdated(project, handle));
+    }
     return rehearsed.applied(asked);
   }
 

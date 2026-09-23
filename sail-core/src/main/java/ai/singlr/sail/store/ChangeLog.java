@@ -246,10 +246,7 @@ public final class ChangeLog {
     var byOwner = new HashMap<String, List<String>>();
     for (var tombstone :
         db.query(
-            """
-            SELECT l.entity_id, json_extract(l.snapshot, ?) FROM change_log l
-            JOIN change_heads h ON h.seq = l.seq
-            WHERE l.entity_type = ? AND l.kind = 'tombstone'""",
+            TOMBSTONED_BY,
             row -> Map.entry(row.text(0), Objects.toString(row.text(1), "")),
             "$." + field,
             entityType)) {
@@ -259,6 +256,13 @@ public final class ChangeLog {
     }
     return byOwner;
   }
+
+  static final String TOMBSTONED_BY =
+      """
+      SELECT l.entity_id, json_extract(l.snapshot, ?) FROM change_log l
+      JOIN change_heads h
+          ON h.entity_type = l.entity_type AND h.entity_id = l.entity_id AND h.seq = l.seq
+      WHERE l.entity_type = ? AND l.kind = 'tombstone'""";
 
   /** Whether this box holds the erasure of an entity recorded at {@code rev}. */
   public boolean hasErasure(String entityType, String entityId, String rev) {

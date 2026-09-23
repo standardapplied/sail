@@ -162,6 +162,24 @@ class RetentionSweeperTest {
   }
 
   @Test
+  void aSweepThatCannotTellWhetherThisBoxIsMainReportsItAndDoesNotEndTheSchedule() {
+    var confused =
+        new RetentionSweeper(
+            new SpecPruner(db, null, main::get, clock::get),
+            policy::get,
+            new BlobStore(db),
+            () -> {
+              throw new IllegalStateException("host.yaml: sync is not a mapping");
+            },
+            scheduler);
+
+    var err = capture(true, confused::sweepQuietly);
+
+    assertTrue(err.contains("deciding whether this box sweeps failed"), err);
+    assertTrue(err.contains("sync is not a mapping"), err);
+  }
+
+  @Test
   void startingSchedulesOneDailySweepAndClosingStopsIt() {
     sweeper.start();
 

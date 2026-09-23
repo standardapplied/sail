@@ -175,6 +175,22 @@ class SchemaManagerTest {
   }
 
   @Test
+  void readingTheDeletionsOfATypeNeverScansTheHeads() {
+    new SchemaManager(db).migrate();
+
+    var plan =
+        String.join(
+            " ",
+            db.query(
+                "EXPLAIN QUERY PLAN " + ChangeLog.TOMBSTONED_BY,
+                row -> Objects.toString(row.text(3), ""),
+                "$.room_id",
+                "spec"));
+
+    assertFalse(plan.contains("SCAN"), plan);
+  }
+
+  @Test
   void theStatusTimesFollowEveryStatusWriteAndLeavingTheStatusClearsIt() {
     new SchemaManager(db).migrate();
     db.execute(

@@ -351,6 +351,15 @@ class ErasureTest {
   }
 
   @Test
+  void adoptingTheErasureOfASpecHeardOfOnlyAsDeletedRecordsItsRow() {
+    specs.applyRevision("gone", null, "3-deleted-on-main");
+
+    assertTrue(erasure.adopt("spec", "gone", "4-erased-on-main"));
+    assertTrue(erasure.isErased(spec("gone")));
+    assertEquals(Set.of("spec:gone"), names(erasure.closure(List.of(spec("gone")))));
+  }
+
+  @Test
   void adoptingTheErasureOfAnEntityNeverHeldRecordsOnlyTheRow() {
     assertTrue(erasure.adopt("spec", "never-held", "3-rev"));
 

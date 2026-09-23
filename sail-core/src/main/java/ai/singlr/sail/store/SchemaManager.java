@@ -561,6 +561,7 @@ public final class SchemaManager {
           """
           ALTER TABLE change_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'revision'
               CHECK (kind IN ('revision', 'tombstone', 'erasure'))""",
+          KIND_FROM_DELETED,
           "UPDATE change_log SET kind = 'tombstone' WHERE deleted = 1",
           "ALTER TABLE specs ADD COLUMN archived_at TEXT",
           "ALTER TABLE specs ADD COLUMN cancelled_at TEXT",
@@ -576,7 +577,6 @@ public final class SchemaManager {
               requested_at TEXT NOT NULL,
               PRIMARY KEY (entity_type, entity_id)
           )""",
-          KIND_FROM_DELETED,
           "CREATE INDEX idx_change_log_tombstones ON change_log(entity_type) WHERE kind = 'tombstone'",
           "CREATE INDEX idx_room_messages_reply ON room_messages(reply_to)",
           "CREATE INDEX idx_runs_room ON runs(room_id)",

@@ -204,6 +204,22 @@ class ErasureSyncTest {
   }
 
   @Test
+  void aSpecArchivedAndPrunedOnANodeBeforeItSyncsIsErasedInOneRoundNotRefused() throws IOException {
+    main.specs.create(owned("late", "Work done on the node", "pending", "node"));
+    round(NODE);
+    node.specs.update(owned("late", "Work done on the node", "archived", "node"));
+    new EraseRequests(node.db).request(Erasure.SPEC, "late", "node");
+
+    var reports = round(NODE);
+
+    assertTrue(reports.stream().allMatch(report -> report.failure() == null));
+    assertTrue(main.specs.findById("late").isEmpty());
+    assertTrue(node.specs.findById("late").isEmpty());
+    assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
+    assertEquals("node", erasure(main.db, new Erasure.Target(Erasure.SPEC, "late")).actor());
+  }
+
+  @Test
   void aRoundThatOnlyAppliesErasuresReportsThemPulledSoTheBoardRefreshes() throws IOException {
     seedArchivedSpec(main, "old", "node");
     round(NODE);

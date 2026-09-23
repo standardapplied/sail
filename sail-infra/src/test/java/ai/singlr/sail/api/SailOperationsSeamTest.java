@@ -1040,6 +1040,34 @@ class SailOperationsSeamTest {
   }
 
   @Test
+  void aNodeThatHasNotSyncedItsRosterSaysSoInsteadOfGuessingARole() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      try (var operations =
+          OperationsFactory.create(
+                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "node",
+                      tempDir,
+                      () -> new SyncConfig("node", "main", "node", "node-box"),
+                      target -> {
+                        throw new IOException("main unavailable");
+                      }))) {
+        var refused =
+            assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
+
+        assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+        assertTrue(refused.getMessage().contains("does not know its FDE's role yet"));
+      }
+    }
+  }
+
+  @Test
   void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();

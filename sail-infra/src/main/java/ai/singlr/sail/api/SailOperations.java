@@ -110,21 +110,21 @@ public final class SailOperations implements HostOperations {
   /**
    * The operator of this box's root CLI: the box's owner, an admin, on main or a standalone box; on
    * a node, its FDE with the role main's roster gives it, so a node never promises what main then
-   * refuses.
+   * refuses. A node that has not synced the roster yet cannot tell, and says so.
    */
   private Actor cliOperator() {
     var handle = syncOperations.configuration().handle();
     if (authoritative()) {
       return Actor.cliOperator(handle);
     }
-    var role =
-        Strings.isBlank(handle)
-            ? Role.VIEWER
-            : fdeStore
-                .byHandle(handle)
-                .map(fde -> Role.fromAttribute(fde.role()))
-                .orElse(Role.VIEWER);
-    return new Actor(handle, role, Actor.Lane.CLI);
+    var fde = Strings.isBlank(handle) ? Optional.<FdeStore.Fde>empty() : fdeStore.byHandle(handle);
+    if (fde.isEmpty()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "This node does not know its FDE's role yet, so it cannot tell what you may do.",
+          "Run 'sail sync' first, then try again.");
+    }
+    return new Actor(handle, Role.fromAttribute(fde.get().role()), Actor.Lane.CLI);
   }
 
   @Override

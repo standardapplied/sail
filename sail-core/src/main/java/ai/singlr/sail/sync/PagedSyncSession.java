@@ -243,6 +243,7 @@ public final class PagedSyncSession implements SyncSession {
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
+    var late = askAfterPush(type);
     var reconciled = new LinkedHashSet<>(seen);
     reconciled.addAll(dirty);
     touched = reconciled;
@@ -251,7 +252,7 @@ public final class PagedSyncSession implements SyncSession {
         report.plus(new SyncEngine.Report(adopted, 0, 0, 0)),
         pages,
         entries,
-        pages == 0 && dirty.isEmpty() && ask.count() == 0,
+        pages == 0 && dirty.isEmpty() && ask.count() + late.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore);
@@ -265,14 +266,20 @@ public final class PagedSyncSession implements SyncSession {
   /**
    * What asking main to erase {@code type}'s pending prunes came to. The first type of a session
    * asks for every type, before main's tips are read, so the erasure rows main writes for them —
-   * and for everything that belongs to them, in other types — page in this same round.
+   * and for everything that belongs to them, in other types — page in this same round. A prune of
+   * an entity with a change main has not taken yet waits for its type's push ({@link
+   * #askAfterPush}): main decides on its own copy, which must first hold the archive the prune
+   * relies on.
    */
   private Asked askedFor(String type) {
     if (asked == null) {
       asked = new HashMap<>();
       for (var entity :
           eraseRequests == null ? List.<SyncedEntities.Entity>of() : SyncedEntities.all()) {
-        var ids = eraseRequests.pending(entity.type());
+        var ids =
+            eraseRequests.pending(entity.type()).stream()
+                .filter(id -> !erasure.unpushed(new Erasure.Target(entity.type(), id)))
+                .toList();
         if (!ids.isEmpty()) {
           asked.put(entity.type(), askErasures(entity.type(), ids));
           tips = null;
@@ -280,6 +287,27 @@ public final class PagedSyncSession implements SyncSession {
       }
     }
     return asked.getOrDefault(type, Asked.NONE);
+  }
+
+  /**
+   * Offers main the prunes of {@code type} that waited for this type's push, now that main holds
+   * what they rely on, and applies each erasure main answers. Later types read main's tips afresh,
+   * so what belongs to the erased entities still pages this round. A refusal fails the type once
+   * its pages and push are done.
+   */
+  private Asked askAfterPush(String type) {
+    var ids = eraseRequests == null ? List.<String>of() : eraseRequests.pending(type);
+    if (ids.isEmpty()) {
+      return Asked.NONE;
+    }
+    var late = askErasures(type, ids);
+    tips = null;
+    adopted += late.adopted();
+    if (!late.refusals().isEmpty()) {
+      throw new SyncTransportException(
+          "refused", type + ": main refused to prune " + String.join("; ", late.refusals()), null);
+    }
+    return late;
   }
 
   /**
@@ -304,6 +332,7 @@ public final class PagedSyncSession implements SyncSession {
         switch (results.results().get(i)) {
           case SyncWire.Accepted accepted when accepted.id().equals(id) -> {
             if (erasure.adopt(type, id, accepted.rev())) applied++;
+            eraseRequests.drop(type, id);
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
             eraseRequests.drop(type, id);
