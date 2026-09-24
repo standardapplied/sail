@@ -138,8 +138,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     ensureIncusOrSkip();
     try {
       launchPrepared(BOX);
-      var booted = root("systemctl is-system-running --wait").stdout().strip();
-      assertTrue(List.of("running", "degraded").contains(booted), booted);
+      UserUnitFixture.await(this::booted, "the box's systemd to finish booting");
       push(binaries.released(), INSTALLED);
       push(binaries.candidate(), STAGED);
       rootOk(PROVISION_MAIN);
@@ -454,6 +453,19 @@ class UpgradeE2EIT extends AbstractIncusIT {
                 "mode=0600"));
     assertTrue(added.ok(), "could not proxy the pty socket: " + added.stderr());
     return socket;
+  }
+
+  /**
+   * Whether the box's systemd has finished booting. Right after launch {@code systemctl} cannot yet
+   * reach the manager and answers at once, so its {@code --wait} only waits once it is reachable.
+   */
+  private boolean booted() {
+    try {
+      var state = root("systemctl is-system-running --wait").stdout().strip();
+      return state.equals("running") || state.equals("degraded");
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
   }
 
   /** Waits for the unit's current run to log that it is listening. */
