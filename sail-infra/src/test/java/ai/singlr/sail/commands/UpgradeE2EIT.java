@@ -128,6 +128,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     ensureIncusOrSkip();
     try {
       launchPrepared(BOX);
+      root("systemctl is-system-running --wait");
       push(binaries.released(), INSTALLED);
       push(binaries.candidate(), STAGED);
       rootOk(PROVISION_MAIN);
