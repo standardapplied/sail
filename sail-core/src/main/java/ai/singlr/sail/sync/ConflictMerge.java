@@ -19,9 +19,15 @@ import java.util.Objects;
  * it was at the common base versus what each side made it, flagged when both sides clashed. {@link
  * #mergeTemplate} pre-fills the {@code --merge} editor with a field-level three-way merge: disjoint
  * edits are already applied, clashing fields default to yours with theirs shown in a comment, and
- * the result round-trips back through {@link YamlUtil#parseMap}. No I/O, no editor — just text.
+ * the result round-trips back through {@link #parseTemplate}. No I/O, no editor — just text.
  */
 public final class ConflictMerge {
+
+  /**
+   * The template key naming the conflict a merge was made from. The template is a full record, so
+   * applied to a newer version of the conflict it would revert every field that moved since.
+   */
+  public static final String CONFLICT = "_conflict";
 
   private ConflictMerge() {}
 
@@ -50,13 +56,15 @@ public final class ConflictMerge {
   /**
    * The editable three-way merge for {@code --merge}: a header comment naming each clashing field
    * with theirs for reference, then a YAML body of the auto-merge with clashing fields defaulting
-   * to yours. Both sides must be present (delete-vs-edit has no field merge).
+   * to yours, and {@code conflict} under {@link #CONFLICT}. Both sides must be present
+   * (delete-vs-edit has no field merge).
    */
   public static String mergeTemplate(
       Map<String, Object> base,
       Map<String, Object> mine,
       Map<String, Object> theirs,
-      List<String> clashingFields) {
+      List<String> clashingFields,
+      String conflict) {
     var safeBase = base == null ? Map.<String, Object>of() : base;
     var merged = new LinkedHashMap<String, Object>();
     for (var field : allKeys(safeBase, mine, theirs)) {
@@ -69,10 +77,13 @@ public final class ConflictMerge {
         merged.put(field, atMine);
       }
     }
+    merged.put(CONFLICT, conflict);
 
     var header = new StringBuilder();
     header.append("# Resolve this conflict, then save and close the editor.\n");
     header.append("# Disjoint edits are already merged below; the value shown is YOURS.\n");
+    header.append(
+        "# Keep " + CONFLICT + ": it names the version of the conflict this merge is for.\n");
     for (var field : clashingFields) {
       header
           .append("#   ")
@@ -84,9 +95,12 @@ public final class ConflictMerge {
     return header + YamlUtil.dumpToString(merged);
   }
 
-  /** Parses an edited merge template back into a comparable snapshot. */
+  /**
+   * Parses an edited merge template back into a comparable snapshot, still carrying {@link
+   * #CONFLICT}. Malformed YAML or a repeated key is refused, never half-read.
+   */
   public static Map<String, Object> parseTemplate(String edited) {
-    return YamlUtil.parseMap(edited);
+    return YamlUtil.parseMapStrict(edited);
   }
 
   /** A one-line human rendering of a snapshot value for diffs and headers. */

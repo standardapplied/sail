@@ -27,6 +27,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayInputStream;
@@ -153,7 +154,71 @@ class ApiRouterTest {
     var remote = new LinkedHashMap<>(local);
     remote.put(field, theirs);
     box.conflicts.record(
-        type, "auth", null, YamlUtil.dumpJson(local), YamlUtil.dumpJson(remote), List.of(field));
+        type,
+        "auth",
+        YamlUtil.dumpJson(local),
+        YamlUtil.dumpJson(local),
+        YamlUtil.dumpJson(remote),
+        List.of(field));
+  }
+
+  @Test
+  void aMergeSettlesOnlyTheVersionOfTheConflictItWasMadeFrom() throws Exception {
+    try (var box = new SyncBox("node")) {
+      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      var local = box.specs.comparableSnapshot("auth");
+      park(box, "spec", local, "title", "remote");
+      var conflicts = new ConflictOperations(box.db);
+      var started = conflicts.mergeTemplate("spec", "auth");
+      var rev = box.specs.revOf("auth");
+      var operations =
+          new TestOperations() {
+            @Override
+            public SyncConflicts.Conflict resolveConflict(
+                String type, String id, Resolution resolution) {
+              return conflicts.resolve(type, id, resolution);
+            }
+          };
+      try (var server = serverWith(operations, true)) {
+        var path = "/v1/conflicts/auth/resolve?type=spec";
+        var unnamed =
+            post(
+                server,
+                path,
+                "token",
+                mergeBody(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
+        assertEquals(400, unnamed.statusCode(), unnamed.body());
+        assertTrue(
+            unnamed.body().contains("must start from 'sail conflicts show auth --template'"),
+            unnamed.body());
+
+        park(box, "spec", local, "title", "remote, revised");
+        var parked = box.conflicts.pendingFor("spec", "auth").orElseThrow();
+        var moved = post(server, path, "token", mergeBody(started));
+        assertEquals(409, moved.statusCode(), moved.body());
+        assertTrue(
+            moved.body().contains("'auth' was re-recorded after this merge was started"),
+            moved.body());
+        assertEquals(parked, box.conflicts.pendingFor("spec", "auth").orElseThrow());
+        assertEquals(rev, box.specs.revOf("auth"));
+        assertEquals(local, box.specs.comparableSnapshot("auth"));
+
+        var fresh = post(server, path, "token", mergeBody(conflicts.mergeTemplate("spec", "auth")));
+        assertEquals(200, fresh.statusCode(), fresh.body());
+        assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
+        assertTrue(box.conflicts.pending().isEmpty());
+      }
+    }
+  }
+
+  private static String mergeBody(String template) {
+    assertTrue(template.contains("\ntitle: local\n"), template);
+    return YamlUtil.dumpJson(
+        Map.of(
+            "strategy",
+            "merge",
+            "merged",
+            template.replace("\ntitle: local\n", "\ntitle: merged\n")));
   }
 
   @Test

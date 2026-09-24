@@ -23,6 +23,13 @@ public interface Operations extends LocalLaneOperations {
    */
   SyncConflicts.Conflict conflict(String type, String id);
 
+  /**
+   * The editable record a {@code merge} resolution of the conflict on {@code id} starts from, bound
+   * to the version of the conflict it was made from. Refused for a conflict with no field-level
+   * merge, or one this box has written over since it was recorded.
+   */
+  String conflictMergeTemplate(String type, String id);
+
   SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution);
 
   ProjectFiles projectFiles(String project);

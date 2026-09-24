@@ -21,9 +21,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public final class ConflictOperations {
+  private static final int FINGERPRINT_LENGTH = 16;
+
   private final Sqlite db;
   private final SyncConflicts conflicts;
 
@@ -65,29 +69,44 @@ public final class ConflictOperations {
   }
 
   /**
+   * The editable record a {@code MERGE} resolution starts from: the three-way merge of the conflict
+   * on {@code entityId}, bound to the version it was made from. A stale or unmergeable conflict is
+   * refused here, before anyone spends effort merging it.
+   */
+  public String mergeTemplate(String entityType, String entityId) {
+    var conflict = requireOpen(entityType, entityId);
+    requireMergeable(conflict);
+    requireCurrent(conflict);
+    var shown = display(conflict);
+    return ConflictMerge.mergeTemplate(
+        parse(shown.baseSnapshot()),
+        parse(shown.localSnapshot()),
+        parse(shown.remoteSnapshot()),
+        shown.fields(),
+        fingerprint(conflict));
+  }
+
+  /**
    * Settles a conflict on the side the engineer chose. The decision was made looking at the
    * recorded snapshots, so it applies only while the row still is what was shown: a local write
-   * since then refuses the resolve untouched, whatever the strategy, until a round re-records it.
+   * since then refuses the resolve untouched, whatever the strategy, until a round re-records it. A
+   * merge is a full record, so it applies only to the version of the conflict its template was made
+   * from: once a round re-records the conflict with main's news, it would revert that news.
    */
   public SyncConflicts.Conflict resolve(String entityType, String entityId, Resolution resolution) {
     return db.transaction(
         () -> {
-          var conflict = findRaw(entityType, entityId);
-          if (conflict == null) {
-            throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
-          }
+          var conflict = requireOpen(entityType, entityId);
           requireCurrent(conflict);
           var chosen =
               switch (resolution.strategy()) {
                 case MINE -> parse(conflict.localSnapshot());
                 case THEIRS -> parse(conflict.remoteSnapshot());
                 case MERGE -> {
-                  if (!mergeable(conflict)) {
-                    throw new IllegalArgumentException(
-                        "Field-level --merge isn't available for this conflict; use --mine or --theirs.");
-                  }
+                  requireMergeable(conflict);
                   var merged =
                       new LinkedHashMap<>(ConflictMerge.parseTemplate(resolution.merged()));
+                  requireMadeFrom(conflict, merged.remove(ConflictMerge.CONFLICT));
                   var blobs = new BlobStore(db);
                   for (var field :
                       SyncedEntities.require(conflict.entityType()).store(db).contentFields()) {
@@ -118,6 +137,58 @@ public final class ConflictOperations {
                   "resolved",
                   rev));
         });
+  }
+
+  private SyncConflicts.Conflict requireOpen(String entityType, String entityId) {
+    var conflict = findRaw(entityType, entityId);
+    if (conflict == null) {
+      throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
+    }
+    return conflict;
+  }
+
+  /**
+   * A field-level merge needs both sides present and a structure with mergeable fields, so it is
+   * offered only for spec conflicts that are not delete-vs-edit. A file's content is an opaque blob
+   * and a project's definition is a single descriptor field, so both resolve mine or theirs only.
+   */
+  private static void requireMergeable(SyncConflicts.Conflict conflict) {
+    if (!conflict.entityType().equals("spec")
+        || parse(conflict.baseSnapshot()) == null
+        || parse(conflict.localSnapshot()) == null
+        || parse(conflict.remoteSnapshot()) == null) {
+      throw new IllegalArgumentException(
+          "Field-level --merge isn't available for this conflict; use --mine or --theirs.");
+    }
+  }
+
+  private static void requireMadeFrom(SyncConflicts.Conflict conflict, Object madeFrom) {
+    if (!(madeFrom instanceof String named) || named.isBlank()) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "A merged record must start from 'sail conflicts show %s --template'."
+              .formatted(conflict.entityId()));
+    }
+    if (!named.equals(fingerprint(conflict))) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "'%s' was re-recorded after this merge was started. Start again from the fresh version."
+              .formatted(conflict.entityId()));
+    }
+  }
+
+  /**
+   * Names the recorded versions of a conflict. Every round re-records every parked conflict under a
+   * new row id, so the name is taken from the raw snapshots instead: a re-record that brings no
+   * news keeps it, one that does changes it.
+   */
+  private static String fingerprint(SyncConflicts.Conflict conflict) {
+    var snapshots =
+        Stream.of(conflict.baseSnapshot(), conflict.localSnapshot(), conflict.remoteSnapshot())
+            .map(snapshot -> (Object) new TreeMap<>(parse(snapshot)))
+            .toList();
+    return BlobStore.hash(YamlUtil.dumpJson(snapshots).getBytes(StandardCharsets.UTF_8))
+        .substring(0, FINGERPRINT_LENGTH);
   }
 
   private void requireCurrent(SyncConflicts.Conflict conflict) {
@@ -198,13 +269,6 @@ public final class ConflictOperations {
       case "content_hash" -> "content";
       default -> field;
     };
-  }
-
-  public static boolean mergeable(SyncConflicts.Conflict conflict) {
-    return conflict.entityType().equals("spec")
-        && parse(conflict.baseSnapshot()) != null
-        && parse(conflict.localSnapshot()) != null
-        && parse(conflict.remoteSnapshot()) != null;
   }
 
   public static Map<String, Object> parse(String snapshot) {
