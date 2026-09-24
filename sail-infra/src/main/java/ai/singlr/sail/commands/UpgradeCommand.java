@@ -13,6 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.ReleaseFetcher;
+import ai.singlr.sail.engine.SailBinary;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -21,13 +22,14 @@ import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -46,6 +48,14 @@ public final class UpgradeCommand implements Runnable {
   @Option(names = "--target", description = "Install a specific version (e.g. 1.7.0).")
   private String targetVersion;
 
+  @Option(
+      names = "--binary",
+      paramLabel = "<file>",
+      description =
+          "Install this sail binary instead of downloading a release: an unreleased build, or a"
+              + " box without internet access.")
+  private Path localBinary;
+
   @Option(names = "--dry-run", description = "Print actions instead of executing them.")
   private boolean dryRun;
 
@@ -54,140 +64,352 @@ public final class UpgradeCommand implements Runnable {
 
   @Spec private CommandSpec spec;
 
+  private final Function<Path, SemVer> versionOf;
+  private final Supplier<Path> installedBinary;
+  private final Callable<String> latestRelease;
+  private final BooleanSupplier provisioned;
+
+  public UpgradeCommand() {
+    this(
+        SailBinary::versionOf,
+        SailPaths::installedBinary,
+        ReleaseFetcher::fetchLatestVersion,
+        HostYaml::exists);
+  }
+
+  /**
+   * @param versionOf the version a sail binary reports
+   * @param installedBinary where the upgrade installs, and whose version it upgrades from
+   * @param latestRelease the version of the latest release
+   * @param provisioned whether this is a host whose database and services an upgrade converges
+   */
+  UpgradeCommand(
+      Function<Path, SemVer> versionOf,
+      Supplier<Path> installedBinary,
+      Callable<String> latestRelease,
+      BooleanSupplier provisioned) {
+    this.versionOf = versionOf;
+    this.installedBinary = installedBinary;
+    this.latestRelease = latestRelease;
+    this.provisioned = provisioned;
+  }
+
   @Override
   public void run() {
     CliCommand.run(spec, this::execute);
   }
 
   private void execute() throws Exception {
-    var currentVersion = SailVersion.version();
-    if ("dev".equals(currentVersion)) {
+    requireProvisionedData(System.getenv("SAIL_DATA_DIR"));
+    if ("dev".equals(SailVersion.version())) {
       throw new IllegalStateException(
           "Cannot upgrade a development build. Install a release version first.");
     }
-    var current = SemVer.parse(currentVersion);
-
-    String latestVersionStr;
-    if (targetVersion != null) {
-      latestVersionStr = targetVersion.startsWith("v") ? targetVersion.substring(1) : targetVersion;
-    } else {
-      latestVersionStr = ReleaseFetcher.fetchLatestVersion();
+    if (localBinary != null) {
+      installLocal();
+      return;
     }
-    var latest = SemVer.parse(latestVersionStr);
+    var target = installedBinary.get();
+    var installed = installedVersion(target);
+    var latest =
+        SemVer.parse(
+            targetVersion == null
+                ? latestRelease.call()
+                : targetVersion.startsWith("v") ? targetVersion.substring(1) : targetVersion);
     var versionTag = "v" + latest;
 
     if (checkOnly) {
-      printCheckResult(currentVersion, latestVersionStr, current.compareTo(latest));
+      printCheckResult(installed, latest);
       return;
     }
-
-    if (current.compareTo(latest) >= 0 && targetVersion == null) {
-      if (json) {
-        printJsonResult(currentVersion, latestVersionStr, "up_to_date", null);
-      } else {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green \u2713|@ Already up to date (sail " + currentVersion + ")"));
-      }
+    if (targetVersion == null && installed.filter(v -> v.compareTo(latest) >= 0).isPresent()) {
+      printUpToDate(installed.get(), latest);
       return;
     }
-
-    var binaryPath = SailPaths.binaryPath();
-    var installDir = binaryPath.getParent();
-    if (!dryRun && installDir != null && !Files.isWritable(installDir)) {
-      if (!ConsoleHelper.isRoot()) {
-        if (!json) {
-          System.out.println(
-              Ansi.AUTO.string("  @|faint Installing to " + installDir + " (requires sudo)...|@"));
-        }
-        reExecWithSudo();
-        return;
-      }
+    requireNotOlder(installed, latest, "The release", "--target ");
+    if (needsSudo(target)) {
+      return;
     }
-
-    if (!json) {
-      Banner.printBranding(System.out, Ansi.AUTO);
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|bold Upgrading:|@ " + currentVersion + " \u2192 " + latestVersionStr));
-      System.out.println();
-    }
+    printBanner(installed, latest);
 
     if (!json) {
       System.out.println(
           Banner.stepLine(1, 4, "Downloading sail " + versionTag + "...", Ansi.AUTO));
     }
-    byte[] binary;
     if (dryRun) {
       System.out.println(
           "[dry-run] Download " + ReleaseFetcher.buildDownloadUrl(versionTag, "sail"));
-      binary = new byte[0];
-    } else {
-      binary =
-          targetVersion != null
-              ? ReleaseFetcher.downloadBinary(versionTag)
-              : ReleaseFetcher.downloadLatestBinary();
       if (!json) {
-        System.out.println(
-            Banner.stepDoneLine(
-                1, 4, "Downloaded (" + (binary.length / 1024 / 1024) + " MB)", Ansi.AUTO));
+        System.out.println(Banner.stepLine(2, 4, "Verifying checksum...", Ansi.AUTO));
       }
+      System.out.println("[dry-run] Verify SHA-256 checksum");
+      install(null, target, installed, latest, new Steps(3, 4));
+      return;
     }
-
+    var binary =
+        targetVersion != null
+            ? ReleaseFetcher.downloadBinary(versionTag)
+            : ReleaseFetcher.downloadLatestBinary();
     if (!json) {
+      System.out.println(
+          Banner.stepDoneLine(
+              1, 4, "Downloaded (" + (binary.length / 1024 / 1024) + " MB)", Ansi.AUTO));
       System.out.println(Banner.stepLine(2, 4, "Verifying checksum...", Ansi.AUTO));
     }
-    if (dryRun) {
-      System.out.println("[dry-run] Verify SHA-256 checksum");
-    } else {
-      var expectedChecksum =
-          targetVersion != null
-              ? ReleaseFetcher.fetchChecksum(versionTag)
-              : ReleaseFetcher.fetchLatestChecksum();
-      var digest = MessageDigest.getInstance("SHA-256");
-      var actualChecksum = HexFormat.of().formatHex(digest.digest(binary));
-      if (!actualChecksum.equalsIgnoreCase(expectedChecksum)) {
-        throw new IOException(
-            "Checksum mismatch.\n  Expected: "
-                + expectedChecksum
-                + "\n  Actual:   "
-                + actualChecksum
-                + "\n  The download may be corrupted. Try again.");
-      }
-      if (!PlatformDetector.isValidBinary(binary)) {
-        throw new IOException(
-            "The download is not a " + PlatformDetector.platformSuffix() + " executable.");
-      }
-      if (!json) {
-        System.out.println(Banner.stepDoneLine(2, 4, "Checksum verified", Ansi.AUTO));
-      }
+    var expectedChecksum =
+        targetVersion != null
+            ? ReleaseFetcher.fetchChecksum(versionTag)
+            : ReleaseFetcher.fetchLatestChecksum();
+    var actualChecksum = SailBinary.sha256(binary);
+    if (!actualChecksum.equalsIgnoreCase(expectedChecksum)) {
+      throw new IOException(
+          "Checksum mismatch.\n  Expected: "
+              + expectedChecksum
+              + "\n  Actual:   "
+              + actualChecksum
+              + "\n  The download may be corrupted. Try again.");
     }
-
-    if (!dryRun && !PlatformDetector.isValidBinary(binary)) {
-      throw new IOException("Downloaded file is not a valid binary for this platform.");
+    if (!PlatformDetector.isValidBinary(binary)) {
+      throw new IOException(
+          "The download is not a " + PlatformDetector.platformSuffix() + " executable.");
     }
-
     if (!json) {
-      System.out.println(Banner.stepLine(3, 4, "Installing to " + binaryPath + "...", Ansi.AUTO));
+      System.out.println(Banner.stepDoneLine(2, 4, "Checksum verified", Ansi.AUTO));
+    }
+    try (var staged = SailBinary.stage(binary, target)) {
+      install(staged, target, installed, latest, new Steps(3, 4));
+    }
+  }
+
+  /**
+   * Refuses to run against a {@code SAIL_DATA_DIR} copy: an upgrade replaces this box's binary and
+   * restarts its services, so pointed at a copy it would change the real box while migrating the
+   * copy. A rehearsal is {@code migrate}, which converges only the database it is pointed at.
+   */
+  static void requireProvisionedData(String dataDir) {
+    if (SailPaths.dataDirOverridden(dataDir)) {
+      throw new IllegalStateException(
+          "SAIL_DATA_DIR is "
+              + dataDir
+              + ", not the provisioned "
+              + SailPaths.systemDataDir()
+              + ": sail upgrade replaces this box's binary and restarts its services, so it never"
+              + " runs against a copy. To rehearse a release's migrations on a copy, run"
+              + " 'SAIL_DATA_DIR="
+              + dataDir
+              + " <new sail> migrate'; to upgrade, unset SAIL_DATA_DIR.");
+    }
+  }
+
+  /**
+   * The installed sail's version, or empty — with a warning — when it cannot say: a broken install
+   * is what an upgrade repairs, so it is replaced rather than refused.
+   */
+  private Optional<SemVer> installedVersion(Path target) {
+    try {
+      return Optional.of(versionOf.apply(target));
+    } catch (SailBinary.NotSail unreadable) {
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ "
+                  + target
+                  + " did not report its version ("
+                  + unreadable.getMessage()
+                  + "); replacing it anyway."));
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * Refuses {@code offered} when it is older than the installed sail: migrations never run
+   * backwards, and a binary older than its database cannot open it. {@code what} names the offer
+   * and {@code pass} the option that picks another.
+   */
+  private static void requireNotOlder(
+      Optional<SemVer> installed, SemVer offered, String what, String pass) {
+    if (installed.filter(current -> offered.compareTo(current) < 0).isPresent()) {
+      throw new IllegalArgumentException(
+          what
+              + " is sail "
+              + offered
+              + ", older than the installed sail "
+              + installed.get()
+              + ". Migrations never run backwards: pass "
+              + pass
+              + installed.get()
+              + " or newer.");
+    }
+  }
+
+  /**
+   * {@code --binary}: the same install as a download, from a file already on this box. The file is
+   * staged beside the installed sail and it is that staged copy which answers for its version, so
+   * the bytes checked are the bytes installed. Refused before anything changes when the file is
+   * missing, is no sail for this platform, or is older than the installed sail — migrations never
+   * run backwards. The installed bytes themselves are a no-op, so a repeated upgrade restarts
+   * nothing; a different build of the same version is reinstalled.
+   */
+  private void installLocal() throws Exception {
+    if (checkOnly) {
+      throw new IllegalArgumentException(
+          "--check asks GitHub for the latest release, which --binary does not use. Pass either"
+              + " --binary <file> or --check, not both.");
+    }
+    if (targetVersion != null) {
+      throw new IllegalArgumentException(
+          "--target picks a release to download, which --binary does not do. Pass either --binary"
+              + " <file> or --target <version>, not both.");
+    }
+    var file = localBinary.toAbsolutePath();
+    var binary = readBinary(file);
+    var target = installedBinary.get();
+    if (Files.mismatch(file, target) == -1L) {
+      var installed = installedVersion(target);
+      printUpToDate(installed.orElse(null), installed.orElse(null));
+      return;
+    }
+    if (needsSudo(target)) {
+      return;
+    }
+    if (dryRun) {
+      verifyAndInstall(null, file, file, target);
+      return;
+    }
+    try (var staged = SailBinary.stage(binary, target)) {
+      verifyAndInstall(staged, staged.file(), file, target);
+    }
+  }
+
+  private void verifyAndInstall(SailBinary.Staged staged, Path runnable, Path file, Path target)
+      throws IOException {
+    SemVer offered;
+    try {
+      offered = versionOf.apply(runnable);
+    } catch (SailBinary.NotSail notSail) {
+      throw new IllegalArgumentException(
+          file
+              + " is not a runnable sail: "
+              + notSail.getMessage()
+              + ". Pass a sail binary built for this platform.",
+          notSail);
+    }
+    var installed = installedVersion(target);
+    requireNotOlder(installed, offered, file.toString(), "sail ");
+    printBanner(installed, offered);
+    if (!json) {
+      System.out.println(
+          Banner.stepDoneLine(1, 3, "Verified " + file + " (sail " + offered + ")", Ansi.AUTO));
+    }
+    install(staged, target, installed, offered, new Steps(2, 3));
+  }
+
+  /**
+   * The bytes of {@code file}, once they are known to be an executable for this platform — a
+   * missing file, one without its execute bit, or anything else is refused naming the remedy.
+   */
+  private static byte[] readBinary(Path file) throws IOException {
+    if (!Files.isRegularFile(file)) {
+      throw new IllegalArgumentException(
+          "No file at "
+              + file
+              + ". Pass --binary the path of a sail binary, e.g. --binary ./sail-"
+              + PlatformDetector.platformSuffix()
+              + ".");
+    }
+    var binary = Files.readAllBytes(file);
+    if (!PlatformDetector.isValidBinary(binary)) {
+      throw new IllegalArgumentException(
+          file
+              + " is not a "
+              + PlatformDetector.platformSuffix()
+              + " executable. Pass a sail binary built for this platform.");
+    }
+    if (!Files.isExecutable(file)) {
+      throw new IllegalArgumentException(
+          file + " is not executable. Run 'chmod +x " + file + "', then rerun.");
+    }
+    return binary;
+  }
+
+  /** Step numbering for the steps every upgrade shares: install, then reconcile + restart. */
+  private record Steps(int install, int total) {
+    int restart() {
+      return install + 1;
+    }
+  }
+
+  /**
+   * Re-executes under sudo when the install directory is not writable and this is not root. Returns
+   * whether it did, in which case the sudo run has done the upgrade.
+   */
+  private boolean needsSudo(Path binaryPath) throws IOException, InterruptedException {
+    var installDir = binaryPath.getParent();
+    if (dryRun || installDir == null || Files.isWritable(installDir) || ConsoleHelper.isRoot()) {
+      return false;
+    }
+    if (!json) {
+      System.out.println(
+          Ansi.AUTO.string("  @|faint Installing to " + installDir + " (requires sudo)...|@"));
+    }
+    reExecWithSudo();
+    return true;
+  }
+
+  private void printBanner(Optional<SemVer> from, SemVer to) {
+    if (!json) {
+      Banner.printBranding(System.out, Ansi.AUTO);
+      System.out.println(
+          Ansi.AUTO.string("  @|bold Upgrading:|@ " + shown(from) + " \u2192 " + to));
+      System.out.println();
+    }
+  }
+
+  private void printUpToDate(SemVer installed, SemVer latest) {
+    if (json) {
+      printJsonResult(shown(installed), shown(latest), "up_to_date", null);
+    } else {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green \u2713|@ Already up to date (sail " + shown(installed) + ")"));
+    }
+  }
+
+  private static String shown(Optional<SemVer> version) {
+    return version.map(SemVer::toString).orElse("unknown");
+  }
+
+  private static String shown(SemVer version) {
+    return shown(Optional.ofNullable(version));
+  }
+
+  /**
+   * Everything after the binary is staged and checked: rename it over {@code binaryPath}, run its
+   * own {@code migrate}, and reconcile and restart {@code sail-api} on it. A dry run stages
+   * nothing, so {@code staged} is null there.
+   */
+  private void install(
+      SailBinary.Staged staged, Path binaryPath, Optional<SemVer> from, SemVer to, Steps steps)
+      throws IOException {
+    if (!json) {
+      System.out.println(
+          Banner.stepLine(
+              steps.install(), steps.total(), "Installing to " + binaryPath + "...", Ansi.AUTO));
     }
     if (dryRun) {
       System.out.println("[dry-run] Write new binary to " + binaryPath);
       System.out.println("[dry-run] chmod +x " + binaryPath);
     } else {
-      var tmpPath = binaryPath.resolveSibling("sail.tmp");
-      Files.write(tmpPath, binary);
-      Files.setPosixFilePermissions(tmpPath, Files.getPosixFilePermissions(binaryPath));
-      Files.move(
-          tmpPath, binaryPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      staged.install();
       if (!json) {
-        System.out.println(Banner.stepDoneLine(3, 4, "Installed", Ansi.AUTO));
+        System.out.println(
+            Banner.stepDoneLine(steps.install(), steps.total(), "Installed", Ansi.AUTO));
       }
     }
 
     RestartStatus restartStatus;
-    if (HostYaml.exists()) {
-      migrateDatabase(dryRun);
-      restartStatus = restartSailApi(dryRun);
+    if (provisioned.getAsBoolean()) {
+      migrateDatabase(binaryPath);
+      restartStatus = restartSailApi(steps);
     } else {
       restartStatus = RestartStatus.SKIPPED_CLIENT;
       if (!json) {
@@ -198,21 +420,13 @@ public final class UpgradeCommand implements Runnable {
     }
 
     if (json) {
-      printJsonResult(
-          currentVersion, latestVersionStr, "upgraded", binaryPath.toString(), restartStatus);
+      printJsonResult(shown(from), to.toString(), "upgraded", binaryPath.toString(), restartStatus);
     } else {
       System.out.println();
-      System.out.println(
-          Ansi.AUTO.string("  @|bold,green \u2713 Upgraded to sail " + latestVersionStr + "|@"));
+      System.out.println(Ansi.AUTO.string("  @|bold,green \u2713 Upgraded to sail " + to + "|@"));
     }
   }
 
-  /**
-   * Detects whether {@code sail-api.service} is installed (system- or user-level depending on who's
-   * invoking this command) and restarts it if it was active so the new binary takes effect
-   * immediately. Returns a short status string for the JSON payload. Failures are logged but never
-   * fatal \u2014 the binary install already succeeded.
-   */
   /**
    * Guidance when {@code sail upgrade} finds no sail-api on a box that should have one. A
    * provisioned box (it has {@code host.yaml}) is a working dev box that dispatches agents and
@@ -229,9 +443,15 @@ public final class UpgradeCommand implements Runnable {
             + " @|bold sudo sail host service install|@");
   }
 
-  private RestartStatus restartSailApi(boolean dryRun) {
-    var stepNum = 4;
-    var totalSteps = 4;
+  /**
+   * Detects whether {@code sail-api.service} is installed (system- or user-level depending on who's
+   * invoking this command) and restarts it if it was active so the new binary takes effect
+   * immediately. Returns a short status string for the JSON payload. Failures are logged but never
+   * fatal \u2014 the binary install already succeeded.
+   */
+  private RestartStatus restartSailApi(Steps steps) {
+    var stepNum = steps.restart();
+    var totalSteps = steps.total();
     if (dryRun) {
       if (!json) {
         System.out.println(
@@ -250,12 +470,7 @@ public final class UpgradeCommand implements Runnable {
     try {
       var shell = new ShellExecutor(false);
       var defaultEndpoint = new Endpoint("127.0.0.1", 7070);
-      var bootstrap =
-          HostServiceInstallers.create(
-              shell,
-              defaultEndpoint.host(),
-              defaultEndpoint.port(),
-              HostServiceInstallers.currentUsername());
+      var bootstrap = HostServiceInstallers.create(shell);
       if (!bootstrap.isInstalled()) {
         if (!json) {
           var provisioned = Files.exists(SailPaths.hostConfigPath());
@@ -363,9 +578,8 @@ public final class UpgradeCommand implements Runnable {
    * has bitten us every release since 0.13.4. (The host-level steps — relocating {@code host.yaml},
    * syncing {@code authorized_keys} — run only in the full {@code migrate}, as they need root.)
    */
-  private void migrateDatabase(boolean dryRun) {
+  private void migrateDatabase(Path binaryPath) {
     var dbPath = SailPaths.controlPlaneDb();
-    var binaryPath = SailPaths.binaryPath();
     if (dryRun) {
       if (!json) {
         System.out.println("[dry-run] Would initialize database and create API token at " + dbPath);
@@ -412,15 +626,16 @@ public final class UpgradeCommand implements Runnable {
 
   /**
    * Spawns the just-installed binary's {@code sail migrate --non-interactive}. The sub-process runs
-   * NEW code — that's the whole point. Inherits stdio so the operator sees what migrated. Tolerates
+   * NEW code — that's the whole point. Inherits stdio so the operator sees what migrated, and never
+   * auto-upgrades: it must migrate as the version just installed, not fetch another. Tolerates
    * non-zero exits; the {@code sail-api} restart afterwards is a second chance.
    */
   private void runNewBinaryMigrate(Path binaryPath) {
     try {
-      var process =
-          new ProcessBuilder(binaryPath.toString(), "migrate", "--non-interactive")
-              .inheritIO()
-              .start();
+      var builder =
+          new ProcessBuilder(binaryPath.toString(), "migrate", "--non-interactive").inheritIO();
+      builder.environment().put("SAIL_AUTO_UPGRADED", "1");
+      var process = builder.start();
       var finished = process.waitFor(2, TimeUnit.MINUTES);
       if (!finished) {
         process.destroyForcibly();
@@ -464,22 +679,23 @@ public final class UpgradeCommand implements Runnable {
     }
   }
 
-  private void printCheckResult(String current, String latest, int comparison) {
+  private void printCheckResult(Optional<SemVer> installed, SemVer latest) {
+    var available = installed.map(current -> current.compareTo(latest) < 0).orElse(true);
     if (json) {
       var map = new LinkedHashMap<String, Object>();
-      map.put("current", current);
-      map.put("latest", latest);
-      map.put("update_available", comparison < 0);
+      map.put("current", shown(installed));
+      map.put("latest", latest.toString());
+      map.put("update_available", available);
       System.out.println(YamlUtil.dumpJson(map));
+    } else if (available) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|bold Update available:|@ " + shown(installed) + " \u2192 " + latest));
+      System.out.println(Ansi.AUTO.string("  @|faint Run 'sail upgrade' to install.|@"));
     } else {
-      if (comparison < 0) {
-        System.out.println(
-            Ansi.AUTO.string("  @|bold Update available:|@ " + current + " \u2192 " + latest));
-        System.out.println(Ansi.AUTO.string("  @|faint Run 'sail upgrade' to install.|@"));
-      } else {
-        System.out.println(
-            Ansi.AUTO.string("  @|green \u2713|@ Already up to date (sail " + current + ")"));
-      }
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green \u2713|@ Already up to date (sail " + shown(installed) + ")"));
     }
   }
 
@@ -506,11 +722,15 @@ public final class UpgradeCommand implements Runnable {
   private void reExecWithSudo() throws IOException, InterruptedException {
     var args = new ArrayList<String>();
     args.add("sudo");
-    args.add(SailPaths.binaryPath().toString());
+    args.add(ProcessHandle.current().info().command().orElse(SailPaths.binaryPath().toString()));
     args.add("upgrade");
     if (targetVersion != null) {
       args.add("--target");
       args.add(targetVersion);
+    }
+    if (localBinary != null) {
+      args.add("--binary");
+      args.add(localBinary.toAbsolutePath().toString());
     }
     if (json) {
       args.add("--json");

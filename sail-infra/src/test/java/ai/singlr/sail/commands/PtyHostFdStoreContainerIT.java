@@ -5,15 +5,14 @@
 
 package ai.singlr.sail.commands;
 
+import static ai.singlr.sail.commands.PtyTranscript.awaitText;
+import static ai.singlr.sail.commands.PtyTranscript.prologue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
-import java.io.IOException;
-import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -122,24 +121,5 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
     } catch (Exception e) {
       throw new AssertionError(e);
     }
-  }
-
-  private static void prologue(SocketChannel channel) throws IOException {
-    assertInstanceOf(PtyMessage.Resized.class, PtyWire.read(channel));
-    assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
-  }
-
-  private static String awaitText(SocketChannel channel, String marker) throws IOException {
-    var seen = new StringBuilder();
-    while (!seen.toString().contains(marker)) {
-      var message = PtyWire.read(channel);
-      if (message instanceof PtyMessage.Output(var seq, var bytes)) {
-        seen.append(new String(bytes, StandardCharsets.UTF_8));
-      }
-      if (message instanceof PtyMessage.SessionEnded(var reason)) {
-        throw new AssertionError("ended (" + reason + ") before '" + marker + "': " + seen);
-      }
-    }
-    return seen.toString();
   }
 }

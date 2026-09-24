@@ -8,27 +8,43 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyRooms;
+import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class MigrateCommandTest {
+
+  private static final Path INSTALLED = Path.of("/usr/local/bin/sail");
+  private static final Path DB = Path.of("/var/lib/sail/sail.db");
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -47,7 +63,7 @@ class MigrateCommandTest {
 
   @Test
   void aBoxIdIsAssignedFromTheHostnameOnlyToARoledBoxWithoutOne() {
-    var base = ai.singlr.sail.config.HostYaml.fromMap(java.util.Map.of("storage_backend", "dir"));
+    var base = HostYaml.fromMap(Map.of("storage_backend", "dir"));
     assertTrue(MigrateCommand.assignBoxId(base, "devbox").isEmpty(), "no role, no identity");
     var node =
         HostConfigSetCommand.applyChange(
@@ -92,6 +108,118 @@ class MigrateCommandTest {
   }
 
   @Test
+  void aRehearsalMigratesOnlyTheCopyWhicheverBinaryRunsIt() {
+    var copy = Path.of("/root/rehearsal/sail.db");
+    var staged = Path.of("/tmp/sail-new");
+
+    var scope =
+        assertInstanceOf(
+            MigrateCommand.Scope.DatabaseOnly.class,
+            MigrateCommand.scope(true, copy, staged, Optional.of(INSTALLED)));
+
+    assertTrue(scope.why().contains("Rehearsal: migrated " + copy + " only"), scope.why());
+    assertTrue(scope.why().contains("not the provisioned /var/lib/sail"), scope.why());
+  }
+
+  @Test
+  void theInstalledBinaryConvergesTheBox() {
+    assertEquals(
+        new MigrateCommand.Scope.Box(),
+        MigrateCommand.scope(false, DB, INSTALLED, Optional.of(INSTALLED)));
+  }
+
+  @Test
+  void aStagedBinaryIsRefusedAndToldHowToInstallOrRehearse() {
+    var staged = Path.of("/tmp/sail-new");
+
+    var scope =
+        assertInstanceOf(
+            MigrateCommand.Scope.Refused.class,
+            MigrateCommand.scope(false, DB, staged, Optional.of(INSTALLED)));
+
+    assertTrue(scope.why().contains("This is " + staged + ", not the installed " + INSTALLED));
+    assertTrue(scope.why().contains("sudo " + INSTALLED + " upgrade --binary " + staged));
+    assertTrue(scope.why().contains("SAIL_DATA_DIR=<copy> " + staged + " migrate"));
+  }
+
+  @Test
+  void aBoxWithNothingInstalledMigratesItsDatabaseAndSaysHowToConvergeTheRest() {
+    var scope =
+        assertInstanceOf(
+            MigrateCommand.Scope.DatabaseOnly.class,
+            MigrateCommand.scope(false, DB, Path.of("/opt/sail"), Optional.empty()));
+
+    assertTrue(scope.why().contains("host state left as is"), scope.why());
+    assertTrue(scope.why().contains("No sail is installed at " + INSTALLED), scope.why());
+  }
+
+  @Test
+  void aRefusedRunNeverOpensTheDatabase() {
+    var fresh = tempDir.resolve("fresh/sail.db");
+    var steps = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                MigrateCommand.runMigrations(
+                    fresh, true, true, new MigrateCommand.Scope.Refused("staged"), record(steps)));
+
+    assertEquals("staged", refused.getMessage());
+    assertFalse(Files.exists(fresh.getParent()));
+    assertTrue(steps.isEmpty());
+  }
+
+  @Test
+  void aDatabaseOnlyRunImportsIntoTheDatabaseAndLeavesTheHostAlone() {
+    var copy = tempDir.resolve("copy/sail.db");
+    var steps = new ArrayList<String>();
+
+    var err =
+        captureStderr(
+            () ->
+                MigrateCommand.runMigrations(
+                    copy,
+                    true,
+                    true,
+                    new MigrateCommand.Scope.DatabaseOnly("only the copy"),
+                    record(steps)));
+
+    assertEquals(List.of("imports"), steps);
+    assertTrue(err.contains("only the copy"), err);
+    try (var migrated = Sqlite.open(copy)) {
+      assertTrue(new SchemaManager(migrated).currentVersion() > 0);
+    }
+  }
+
+  @Test
+  void aBoxRunImportsThenConvergesTheHost() {
+    var steps = new ArrayList<String>();
+
+    MigrateCommand.runMigrations(
+        tempDir.resolve("box/sail.db"), true, true, new MigrateCommand.Scope.Box(), record(steps));
+
+    assertEquals(List.of("imports", "host"), steps);
+  }
+
+  private static MigrateCommand.Convergence record(List<String> steps) {
+    return new MigrateCommand.Convergence(
+        (db, json) -> steps.add("imports"), (db, json) -> steps.add("host"));
+  }
+
+  private static String captureStderr(Runnable action) {
+    var err = new ByteArrayOutputStream();
+    var original = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      action.run();
+    } finally {
+      System.setErr(original);
+    }
+    return err.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
   void ensurePtyHostServiceInstallsOnlyOnAProvisionedHost(@TempDir Path home) {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var binary = Path.of("/usr/local/bin/sail");
@@ -125,15 +253,15 @@ class MigrateCommandTest {
   }
 
   private static String captureStdout(Runnable action) {
-    var out = new java.io.ByteArrayOutputStream();
+    var out = new ByteArrayOutputStream();
     var original = System.out;
-    System.setOut(new java.io.PrintStream(out, true, java.nio.charset.StandardCharsets.UTF_8));
+    System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     try {
       action.run();
     } finally {
       System.setOut(original);
     }
-    return out.toString(java.nio.charset.StandardCharsets.UTF_8);
+    return out.toString(StandardCharsets.UTF_8);
   }
 
   private static void writeOldUnit(Path home) throws Exception {
@@ -142,14 +270,9 @@ class MigrateCommandTest {
     Files.writeString(unit, "[Service]\nExecStart=/usr/local/bin/sail _pty-host\n");
   }
 
-  private static ai.singlr.sail.pty.PtySessionHost liveHost(Path socket, Path sessions)
-      throws Exception {
+  private static PtySessionHost liveHost(Path socket, Path sessions) throws Exception {
     return PtyHostCommand.startHost(
-        socket,
-        sessions,
-        token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
-        ai.singlr.sail.pty.PtyRooms.NONE,
-        ai.singlr.sail.pty.PtyEvents.NONE);
+        socket, sessions, token -> new PtyIdentity("uday", true), PtyRooms.NONE, PtyEvents.NONE);
   }
 
   @Test

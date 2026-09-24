@@ -19,8 +19,9 @@ dependencies, sub-millisecond startup.
 curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash
 ```
 
-`sail upgrade` replaces the binary in place and converges the database. Linux (amd64) runs
-a full host. macOS (arm64) runs as a thin client that drives a remote host over SSH.
+`sail upgrade` replaces `/usr/local/bin/sail`, where install.sh puts it, and converges the
+database. `sail upgrade --binary <file>` installs a local build the same way. Linux (amd64)
+runs a full host. macOS (arm64) runs as a thin client that drives a remote host over SSH.
 
 ### Upgrade compatibility
 

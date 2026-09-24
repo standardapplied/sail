@@ -83,10 +83,7 @@ public final class FileImporter {
           hash = BlobStore.hash(limits.bounded(input, size));
         }
         var mode = WorkspaceFiles.mode(file);
-        if (files
-            .find(project, path)
-            .map(row -> !row.contentHash().equals(hash) || row.mode() != mode)
-            .orElse(true)) {
+        if (files.find(project, path).map(row -> changed(row, hash, mode)).orElse(true)) {
           try (var input = Files.newInputStream(file)) {
             files.put(project, path, limits.bounded(input, size), mode);
           }
@@ -95,5 +92,25 @@ public final class FileImporter {
       }
     }
     return imported;
+  }
+
+  /**
+   * Whether the copy on disk is an edit the store has not seen. New content always is. A new mode
+   * on the same content is when this file's history already records a mode for that content — a
+   * real {@code chmod}, even one back to an earlier mode — or when it grants an execute bit the row
+   * lacks. Otherwise the history is legacy and recorded no mode: an older materializer wrote {@code
+   * 0666 & ~umask}, so a copy that differs only by the umask it got is no edit, and recording it
+   * would raise a mode conflict on every node; but it never wrote an execute bit, so one on disk
+   * was put there on purpose.
+   */
+  private boolean changed(FileStore.FileRow row, String hash, int mode) {
+    if (!row.contentHash().equals(hash)) {
+      return true;
+    }
+    if (row.mode() == mode) {
+      return false;
+    }
+    return (mode & ~row.mode() & 0111) != 0
+        || files.recordsModeFor(FileStore.idOf(row.project(), row.path()), hash);
   }
 }

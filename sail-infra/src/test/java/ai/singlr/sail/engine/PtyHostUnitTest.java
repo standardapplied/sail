@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -92,5 +94,34 @@ class PtyHostUnitTest {
     unit.uninstall();
     assertFalse(Files.exists(home.resolve(".sail/services/sail-pty-host.service")));
     assertFalse(Files.exists(home.resolve(".config/systemd/user/sail-pty-host.service")));
+  }
+
+  @Test
+  void aDryRunNeitherWritesNorRemovesTheUnit(@TempDir Path home) throws Exception {
+    var dry =
+        new PtyHostUnit(new ShellExecutor(true), SystemdServiceInstaller.Mode.USER, home, BINARY);
+    var file = home.resolve(".sail/services/sail-pty-host.service");
+
+    dry.install();
+    assertFalse(Files.exists(file));
+
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, "kept");
+    dry.uninstall();
+    assertEquals("kept", Files.readString(file));
+  }
+
+  @Test
+  void removingTheUnitNeverAsksWhereSailIsInstalled(@TempDir Path home) throws Exception {
+    var unit =
+        new PtyHostUnit(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", "")),
+            SystemdServiceInstaller.Mode.USER,
+            home,
+            () -> {
+              throw new AssertionError("only rendering the unit names the binary");
+            });
+
+    assertDoesNotThrow(unit::uninstall);
   }
 }

@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -17,6 +19,7 @@ import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -153,6 +156,94 @@ class FileImporterTest {
 
     assertEquals(1, report.imported());
     assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aLegacyScriptsUnchangedCopyAtTheUmasksModeRecordsNothing() throws Exception {
+    var id = legacy("deploy.sh", 0644, 0755);
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported());
+    assertEquals(0755, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(1, revisions(id));
+  }
+
+  @Test
+  void aLegacyFileRestrictedOnlyByTheUmaskStaysAsItsRowSays() throws Exception {
+    var id = legacy("notes.md", 0600, 0644);
+
+    assertEquals(0, importer.importAll().imported());
+    assertEquals(0644, files.find("acme", "notes.md").orElseThrow().mode());
+    assertEquals(1, revisions(id));
+  }
+
+  @Test
+  void aLegacyExecutableKeepsTheExecuteBitSomeoneGaveIt() throws Exception {
+    var id = legacy("bin/setup", 0755, 0644);
+
+    assertEquals(1, importer.importAll().imported());
+    assertEquals(0755, files.find("acme", "bin/setup").orElseThrow().mode());
+    assertEquals(2, revisions(id));
+  }
+
+  @Test
+  void aChmodBackToAnEarlierModeIsRecordedNotUndone() throws Exception {
+    writeOnDisk("acme", "deploy.sh", "echo hi");
+    var copy = projectsDir.resolve("acme/files/deploy.sh");
+    WorkspaceFiles.mode(copy, 0644);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0755);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0644);
+
+    assertEquals(1, importer.importAll().imported());
+    assertEquals(0644, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(3, revisions(FileStore.idOf("acme", "deploy.sh")));
+  }
+
+  /**
+   * A shared file as the content migration left it: one revision recording no mode, the row at
+   * {@code rowMode}, and the copy on disk at {@code diskMode}.
+   */
+  private String legacy(String path, int diskMode, int rowMode) throws Exception {
+    writeOnDisk("acme", path, "#!/bin/sh\necho " + path);
+    WorkspaceFiles.mode(projectsDir.resolve("acme/files").resolve(path), diskMode);
+    importer.importAll();
+    var id = FileStore.idOf("acme", path);
+    var snapshot =
+        new LinkedHashMap<>(
+            YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
+    snapshot.remove("mode");
+    db.execute(
+        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+        YamlUtil.dumpJson(snapshot),
+        id);
+    db.execute("UPDATE project_files SET mode = ? WHERE id = ?", rowMode, id);
+    return id;
+  }
+
+  @Test
+  void aRealChmodOfUnchangedContentIsRecorded() throws Exception {
+    writeOnDisk("acme", "deploy.sh", "echo hi");
+    var copy = projectsDir.resolve("acme/files/deploy.sh");
+    WorkspaceFiles.mode(copy, 0644);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0755);
+
+    var report = importer.importAll();
+
+    assertEquals(1, report.imported());
+    assertEquals(0755, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(2, revisions(FileStore.idOf("acme", "deploy.sh")));
+  }
+
+  private long revisions(String id) {
+    return db.queryOne(
+            "SELECT count(*) FROM change_log WHERE entity_type = 'file' AND entity_id = ?",
+            row -> row.integer(0),
+            id)
+        .orElseThrow();
   }
 
   @Test

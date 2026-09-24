@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
@@ -31,6 +32,11 @@ public final class SailPaths {
   }
 
   private static final Path SYSTEM_DATA_DIR = Path.of("/var/lib/sail");
+
+  /** The provisioned system data directory, where a host's control-plane database lives. */
+  public static Path systemDataDir() {
+    return SYSTEM_DATA_DIR;
+  }
 
   /**
    * Returns the control-plane data directory. Resolution: {@code $SAIL_DATA_DIR} when set;
@@ -252,8 +258,37 @@ public final class SailPaths {
   }
 
   /**
+   * Whether {@code $SAIL_DATA_DIR} names a directory other than the provisioned system data
+   * directory — a rehearsal against a copy of the database, which must converge that copy and leave
+   * the box's host state alone.
+   */
+  public static boolean dataDirOverridden() {
+    return dataDirOverridden(System.getenv("SAIL_DATA_DIR"));
+  }
+
+  /**
+   * Whether {@code configured}, a {@code $SAIL_DATA_DIR} value, names another directory than the
+   * provisioned one. A path that reaches it through a symlink or a bind mount is the same
+   * directory; one that cannot be compared is not.
+   */
+  public static boolean dataDirOverridden(String configured) {
+    if (Strings.isBlank(configured)) {
+      return false;
+    }
+    var named = Path.of(configured).toAbsolutePath().normalize();
+    if (named.equals(SYSTEM_DATA_DIR)) {
+      return false;
+    }
+    try {
+      return !Files.isSameFile(named, SYSTEM_DATA_DIR);
+    } catch (IOException incomparable) {
+      return true;
+    }
+  }
+
+  /**
    * Returns the path to the running binary. Uses {@code /proc/self/exe} on Linux, falls back to
-   * {@code /usr/local/bin/sail}.
+   * {@link #INSTALLED_BINARY}.
    */
   public static Path binaryPath() {
     var procSelf = Path.of("/proc/self/exe");
@@ -263,6 +298,50 @@ public final class SailPaths {
       }
     } catch (IOException ignored) {
     }
-    return Path.of("/usr/local/bin/sail");
+    return INSTALLED_BINARY;
+  }
+
+  /** Where {@code install.sh} puts sail and {@code sail upgrade} replaces it. */
+  public static final Path INSTALLED_BINARY = Path.of("/usr/local/bin/sail");
+
+  /**
+   * The installed sail binary, resolved as {@link #binaryPath()} is: the one path host state — the
+   * {@code sail} user's forced commands, the systemd units — may name, whichever binary writes it.
+   * A staged build naming itself there would re-point the box at a file that is not meant to stay.
+   * Fails when nothing runnable is installed, since host state naming a missing binary locks every
+   * key out.
+   */
+  public static Path installedBinary() {
+    return installedBinary(INSTALLED_BINARY);
+  }
+
+  /** Pure resolver; visible for tests so the refusal can be exercised on any path. */
+  static Path installedBinary(Path location) {
+    return findInstalledBinary(location)
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    (Files.exists(location, LinkOption.NOFOLLOW_LINKS)
+                            ? location + " is not an executable file"
+                            : "No sail binary is installed at " + location)
+                        + ". Install it there with install.sh"
+                        + " (https://github.com/standardapplied/sail), then rerun."));
+  }
+
+  /** The installed sail binary, or empty when nothing runnable is installed. */
+  public static Optional<Path> findInstalledBinary() {
+    return findInstalledBinary(INSTALLED_BINARY);
+  }
+
+  /** Pure resolver; visible for tests so resolution can be exercised on any path. */
+  static Optional<Path> findInstalledBinary(Path location) {
+    try {
+      var real = location.toRealPath();
+      return Files.isRegularFile(real) && Files.isExecutable(real)
+          ? Optional.of(real)
+          : Optional.empty();
+    } catch (IOException missing) {
+      return Optional.empty();
+    }
   }
 }

@@ -105,5 +105,18 @@ jobs:
           incus version
           incus list
 
+      # UpgradeE2EIT upgrades a box from the latest release to the binary built here. The native
+      # fleet suite needs the same binaries but already runs in the CI workflow, so it is left out
+      # here to keep this job inside its timeout.
+      - name: Build and fetch the native binaries
+        id: binaries
+        uses: ./.github/actions/native-binaries
+
       - name: Run incus integration tests
-        run: mvn -B -Pintegration verify
+        run: >
+          mvn -B -Pintegration verify
+          -Dit.test='*IT,!NativeFleetIT'
+          -Dfailsafe.failIfNoSpecifiedTests=false
+          -Dsail.it.requireNative=true
+          -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
+          -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}

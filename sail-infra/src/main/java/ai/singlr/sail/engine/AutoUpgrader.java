@@ -9,12 +9,7 @@ import ai.singlr.sail.SailVersion;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.PosixFilePermission;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.function.UnaryOperator;
@@ -28,7 +23,8 @@ import picocli.CommandLine.Help.Ansi;
  * <p>Rate-limited by {@link UpdateChecker}'s 24-hour cache — no network call when cache is fresh.
  * On any failure, silently falls back to the current binary. Never disrupts the actual command.
  *
- * <p>Skips for: dev builds, {@code SAIL_NO_UPDATE_CHECK=1}, {@code SAIL_AUTO_UPGRADED=1}, {@code
+ * <p>Skips for: dev builds, {@code SAIL_NO_UPDATE_CHECK=1}, {@code SAIL_AUTO_UPGRADED=1}, a {@code
+ * SAIL_DATA_DIR} rehearsal (it would replace the real binary while pointed at a copy), {@code
  * upgrade} subcommand (handles itself), {@code --version}/{@code --help}.
  */
 public final class AutoUpgrader {
@@ -80,6 +76,9 @@ public final class AutoUpgrader {
     if ("1".equals(env.apply("SAIL_AUTO_UPGRADED"))) {
       return true;
     }
+    if (SailPaths.dataDirOverridden(env.apply("SAIL_DATA_DIR"))) {
+      return true;
+    }
     for (var arg : args) {
       if (SKIP_ARGS.contains(arg)) {
         return true;
@@ -91,29 +90,6 @@ public final class AutoUpgrader {
   /** Whether {@code latestVersion} is strictly newer than {@code currentVersion}. */
   static boolean shouldUpgrade(String currentVersion, String latestVersion) {
     return SemVer.parse(currentVersion).compareTo(SemVer.parse(latestVersion)) < 0;
-  }
-
-  /**
-   * Whether a downloaded artifact may be trusted: its SHA-256 matches the published checksum and it
-   * carries the expected executable magic for the platform. The {@code osName} is injected so the
-   * accept/reject decision is unit-tested.
-   */
-  public static boolean isAcceptable(byte[] binary, String expectedChecksum) {
-    return isAcceptable(binary, expectedChecksum, System.getProperty("os.name", ""));
-  }
-
-  static boolean isAcceptable(byte[] binary, String expectedChecksum, String osName) {
-    return checksumMatches(binary, expectedChecksum)
-        && PlatformDetector.isValidBinary(binary, osName);
-  }
-
-  private static boolean checksumMatches(byte[] binary, String expectedChecksum) {
-    try {
-      var actual = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(binary));
-      return actual.equalsIgnoreCase(expectedChecksum);
-    } catch (NoSuchAlgorithmException e) {
-      return false;
-    }
   }
 
   private static void doUpgrade(String[] args) throws Exception {
@@ -142,7 +118,7 @@ public final class AutoUpgrader {
 
     var binary = ReleaseFetcher.downloadBinary(versionTag);
     var expectedChecksum = ReleaseFetcher.fetchChecksum(versionTag);
-    if (!isAcceptable(binary, expectedChecksum)) {
+    if (!SailBinary.isAcceptable(binary, expectedChecksum)) {
       return;
     }
 
@@ -160,24 +136,9 @@ public final class AutoUpgrader {
   }
 
   private static void installDirect(byte[] binary, Path binaryPath) throws IOException {
-    var tmpPath = binaryPath.resolveSibling("sail.tmp");
-    Files.write(tmpPath, binary);
-    if (Files.exists(binaryPath)) {
-      Files.setPosixFilePermissions(tmpPath, Files.getPosixFilePermissions(binaryPath));
-    } else {
-      Files.setPosixFilePermissions(
-          tmpPath,
-          Set.of(
-              PosixFilePermission.OWNER_READ,
-              PosixFilePermission.OWNER_WRITE,
-              PosixFilePermission.OWNER_EXECUTE,
-              PosixFilePermission.GROUP_READ,
-              PosixFilePermission.GROUP_EXECUTE,
-              PosixFilePermission.OTHERS_READ,
-              PosixFilePermission.OTHERS_EXECUTE));
+    try (var staged = SailBinary.stage(binary, binaryPath)) {
+      staged.install();
     }
-    Files.move(
-        tmpPath, binaryPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
   }
 
   private static void installWithSudo(byte[] binary, Path binaryPath) throws Exception {

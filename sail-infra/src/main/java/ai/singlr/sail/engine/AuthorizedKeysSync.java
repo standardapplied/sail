@@ -44,24 +44,33 @@ public final class AuthorizedKeysSync {
   private final Path destination;
   private final boolean root;
   private final ShellExec shell;
+  private final Supplier<Path> binary;
 
   public AuthorizedKeysSync() {
     this(
         Path.of(SshIdentityProvisioner.SAIL_HOME, ".ssh", "authorized_keys"),
         SailPaths.isRoot(),
-        new ShellExecutor(false));
+        new ShellExecutor(false),
+        SailPaths::installedBinary);
   }
 
-  AuthorizedKeysSync(Path destination, boolean root, ShellExec shell) {
+  /**
+   * @param binary the sail every forced command runs — the installed one, asked for only once the
+   *     file is about to be rendered
+   */
+  AuthorizedKeysSync(Path destination, boolean root, ShellExec shell, Supplier<Path> binary) {
     this.destination = destination;
     this.root = root;
     this.shell = shell;
+    this.binary = binary;
   }
 
-  /** Renders the authorized_keys content without writing it, for {@code --dry-run}. */
-  public String render(Sqlite db) {
-    return AuthorizedKeysRenderer.render(
-        new FdeSshKeyStore(db).list(), SailPaths.binaryPath().toString());
+  /**
+   * Renders the authorized_keys content for {@code keys} without writing it — what {@code
+   * --dry-run} prints and {@link #sync} installs.
+   */
+  public String render(List<FdeSshKeyStore.SshKeyInfo> keys) {
+    return AuthorizedKeysRenderer.render(keys, binary.get().toString());
   }
 
   public Outcome sync(Sqlite db) throws Exception {
@@ -76,7 +85,7 @@ public final class AuthorizedKeysSync {
       return new NotProvisioned();
     }
     var keys = registry.get();
-    install(AuthorizedKeysRenderer.render(keys, SailPaths.binaryPath().toString()));
+    install(render(keys));
     return new Synced(keys.size(), destination);
   }
 

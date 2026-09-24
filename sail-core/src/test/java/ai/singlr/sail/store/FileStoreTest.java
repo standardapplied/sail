@@ -108,6 +108,23 @@ class FileStoreTest {
   }
 
   @Test
+  void onlyHistoryWrittenSinceModesAreJournaledRecordsAModeForContent() {
+    var journaled = files.blobs().putText("journaled");
+    files.put(new FileStore.FileRow("acme", "run.sh", journaled, 9, 0755, "text"));
+    ContentFixtures.put(files, "acme", "legacy.sh", "legacy");
+    var legacy = files.find("acme", "legacy.sh").orElseThrow().contentHash();
+    db.execute(
+        "UPDATE change_log SET snapshot = json_remove(snapshot, '$.mode')"
+            + " WHERE entity_type = 'file' AND entity_id = ?",
+        id("legacy.sh"));
+
+    assertTrue(files.recordsModeFor(id("run.sh"), journaled));
+    assertFalse(files.recordsModeFor(id("run.sh"), files.blobs().putText("other")));
+    assertFalse(files.recordsModeFor(id("legacy.sh"), legacy));
+    assertFalse(files.recordsModeFor(id("absent"), journaled));
+  }
+
+  @Test
   void knownVersionsMatchContentAndModeFromTheSameRevisionOfTheSameFile() {
     var first = files.blobs().putText("first");
     var second = files.blobs().putText("second");

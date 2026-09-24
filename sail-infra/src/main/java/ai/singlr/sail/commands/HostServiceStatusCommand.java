@@ -38,8 +38,7 @@ public final class HostServiceStatusCommand implements Runnable {
 
   private void execute() throws Exception {
     var username = HostServiceInstallers.currentUsername();
-    var installer =
-        HostServiceInstallers.create(new ShellExecutor(false), "127.0.0.1", 7070, username);
+    var installer = HostServiceInstallers.create(new ShellExecutor(false));
 
     if (showUnit) {
       System.out.print(installer.renderUnit());

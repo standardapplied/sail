@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Installs {@code sail-pty-host.service}, the host-side pty session host daemon. Same two-mode
@@ -37,10 +38,23 @@ public final class PtyHostUnit {
   private final SystemdServiceInstaller.Mode mode;
   private final Path serviceFilePath;
   private final Path systemdLinkPath;
-  private final Path sailBinary;
+  private final Supplier<Path> sailBinary;
+  private final UnitFile unitFile;
 
   public PtyHostUnit(
       ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome, Path sailBinary) {
+    this(shell, mode, userHome, SystemdServiceInstaller.fixed(sailBinary));
+  }
+
+  /**
+   * @param sailBinary the {@code sail} binary the unit runs, asked for only when the unit is
+   *     rendered — removing a unit already on disk needs no binary
+   */
+  public PtyHostUnit(
+      ShellExec shell,
+      SystemdServiceInstaller.Mode mode,
+      Path userHome,
+      Supplier<Path> sailBinary) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.mode = Objects.requireNonNull(mode, "mode");
     var home = Objects.requireNonNull(userHome, "userHome");
@@ -52,6 +66,7 @@ public final class PtyHostUnit {
       this.systemdLinkPath = home.resolve(".config/systemd/user").resolve(UNIT_NAME);
     }
     this.sailBinary = Objects.requireNonNull(sailBinary, "sailBinary");
+    this.unitFile = new UnitFile(shell, serviceFilePath, systemdLinkPath);
   }
 
   public Path serviceFilePath() {
@@ -83,7 +98,8 @@ public final class PtyHostUnit {
         [Install]
         WantedBy=%s
         """
-        .formatted(userClause, sailBinary, PtySessionHost.Limits.DEFAULTS.sessions(), wantedBy);
+        .formatted(
+            userClause, sailBinary.get(), PtySessionHost.Limits.DEFAULTS.sessions(), wantedBy);
   }
 
   /** Whether the unit file at {@code path} carries the descriptor store — an older one does not. */
@@ -105,13 +121,7 @@ public final class PtyHostUnit {
    * adopts them.
    */
   public void install() throws IOException, InterruptedException, TimeoutException {
-    Files.createDirectories(serviceFilePath.getParent());
-    Files.writeString(serviceFilePath, renderUnit());
-    if (systemdLinkPath != null) {
-      Files.createDirectories(systemdLinkPath.getParent());
-      Files.deleteIfExists(systemdLinkPath);
-      Files.createSymbolicLink(systemdLinkPath, serviceFilePath);
-    }
+    unitFile.write(renderUnit());
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
     requireSuccess(shell.exec(systemctl("enable", UNIT_NAME)), "Failed to enable " + UNIT_NAME);
     requireSuccess(shell.exec(systemctl("restart", UNIT_NAME)), "Failed to (re)start " + UNIT_NAME);
@@ -120,10 +130,7 @@ public final class PtyHostUnit {
   /** Stops, disables, and removes the unit; missing pieces are not an error. */
   public void uninstall() throws IOException, InterruptedException, TimeoutException {
     shell.exec(systemctl("disable", "--now", UNIT_NAME));
-    if (systemdLinkPath != null) {
-      Files.deleteIfExists(systemdLinkPath);
-    }
-    Files.deleteIfExists(serviceFilePath);
+    unitFile.remove();
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
   }
 
