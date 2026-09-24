@@ -12,9 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.SystemdServiceInstaller.Mode;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,7 +62,81 @@ class SystemdServiceInstallerTest {
         NullPointerException.class,
         () ->
             new SystemdServiceInstaller(
-                new ScriptedShellExecutor(), Mode.USER, home, null, HOST, PORT, USER));
+                new ScriptedShellExecutor(), Mode.USER, home, (Path) null, HOST, PORT, USER));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SystemdServiceInstaller(
+                new ScriptedShellExecutor(),
+                Mode.USER,
+                home,
+                (Supplier<Path>) null,
+                HOST,
+                PORT,
+                USER));
+  }
+
+  @Test
+  void managingAUnitNeverAsksWhereSailIsInstalled(@TempDir Path home) throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var installer =
+        new SystemdServiceInstaller(
+            shell,
+            Mode.USER,
+            home,
+            () -> {
+              throw new AssertionError("only rendering a unit names the binary");
+            },
+            HOST,
+            PORT,
+            USER);
+
+    installer.start();
+    installer.stop();
+    installer.uninstall();
+
+    assertFalse(shell.invocations().isEmpty());
+  }
+
+  @Test
+  void aSystemDryRunPrintsTheUnitItWouldWriteAndRemoveWithoutALink(@TempDir Path home)
+      throws Exception {
+    var dry =
+        new SystemdServiceInstaller(
+            new ShellExecutor(true), Mode.SYSTEM, home, SAIL_BINARY, HOST, PORT, USER);
+    var unit = dry.serviceFilePath();
+    var existed = Files.exists(unit);
+    var out = new ByteArrayOutputStream();
+    var original = System.out;
+    System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+    try {
+      dry.install();
+      dry.uninstall();
+    } finally {
+      System.setOut(original);
+    }
+
+    var printed = out.toString(StandardCharsets.UTF_8);
+    assertTrue(printed.contains("[dry-run] Write " + unit), printed);
+    assertTrue(printed.contains("[dry-run] Remove " + unit), printed);
+    assertFalse(printed.contains("[dry-run] Link"), printed);
+    assertEquals(existed, Files.exists(unit));
+  }
+
+  @Test
+  void aDryRunNeitherWritesNorRemovesTheUnit(@TempDir Path home) throws Exception {
+    var dry =
+        new SystemdServiceInstaller(
+            new ShellExecutor(true), Mode.USER, home, SAIL_BINARY, HOST, PORT, USER);
+    var unit = dry.serviceFilePath();
+
+    dry.install();
+    assertFalse(Files.exists(unit));
+
+    Files.createDirectories(unit.getParent());
+    Files.writeString(unit, "kept");
+    dry.uninstall();
+    assertEquals("kept", Files.readString(unit));
   }
 
   @Test

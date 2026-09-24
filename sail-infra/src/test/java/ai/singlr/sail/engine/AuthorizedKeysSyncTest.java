@@ -111,7 +111,7 @@ class AuthorizedKeysSyncTest {
 
   @Test
   void rendersForcedCommandLinesWithoutWriting() {
-    var content = sync(true).render(db);
+    var content = sync(true).render(new FdeSshKeyStore(db).list());
     assertTrue(content.startsWith("# Managed by sail"));
     assertTrue(content.contains("_gateway --fde uday\",restrict ssh-ed25519 "));
     assertTrue(shell.invocations().isEmpty());
@@ -119,9 +119,26 @@ class AuthorizedKeysSyncTest {
 
   @Test
   void everyForcedCommandRunsTheInstalledBinaryWhicheverBinaryRenders() {
-    var content = sync(true).render(db);
+    var content = sync(true).render(new FdeSshKeyStore(db).list());
 
     assertTrue(content.contains("command=\"/usr/local/bin/sail _gateway --fde uday\""), content);
+  }
+
+  @Test
+  void theDefaultSyncNamesTheInstalledSailNeverTheProcessThatRendersIt() {
+    var keys = new FdeSshKeyStore(db).list();
+    var sync = new AuthorizedKeysSync();
+
+    SailPaths.findInstalledBinary()
+        .ifPresentOrElse(
+            installed ->
+                assertTrue(sync.render(keys).contains("command=\"" + installed + " _gateway")),
+            () -> {
+              var refused = assertThrows(IllegalStateException.class, () -> sync.render(keys));
+              assertTrue(
+                  refused.getMessage().contains(SailPaths.INSTALLED_BINARY.toString()),
+                  refused.getMessage());
+            });
   }
 
   @Test

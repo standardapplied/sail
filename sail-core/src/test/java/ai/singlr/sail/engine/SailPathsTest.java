@@ -202,11 +202,34 @@ class SailPathsTest {
           assertThrows(IllegalStateException.class, () -> SailPaths.installedBinary(location));
       assertTrue(failure.getMessage().contains(location.toString()), failure.getMessage());
       assertTrue(failure.getMessage().contains("install.sh"), failure.getMessage());
+      assertTrue(SailPaths.findInstalledBinary(location).isEmpty());
     }
   }
 
   @Test
-  void theDefaultInstalledBinaryIsWhereInstallShPutsIt() {
-    assertEquals(Path.of("/usr/local/bin/sail"), SailPaths.INSTALLED_BINARY);
+  void aPresentButNonExecutableBinaryIsNamedAsSuchNotAsMissing() throws Exception {
+    var plain = Files.writeString(tempDir.resolve("sail"), "not executable");
+
+    var failure = assertThrows(IllegalStateException.class, () -> SailPaths.installedBinary(plain));
+
+    assertTrue(failure.getMessage().startsWith(plain + " is not an executable file"));
+  }
+
+  @Test
+  void theInstalledBinaryIsWhereInstallShPutsIt() throws Exception {
+    var installer = Files.readString(Path.of("..", "install.sh"));
+
+    assertTrue(
+        installer.contains("INSTALL_DIR=\"" + SailPaths.INSTALLED_BINARY.getParent() + "\""),
+        "install.sh and SailPaths.INSTALLED_BINARY disagree on where sail lives");
+  }
+
+  @Test
+  void aLinkToAnotherDirectoryOrAMissingOneIsStillAnOverride() throws Exception {
+    var elsewhere = Files.createDirectory(tempDir.resolve("copy"));
+    var link = Files.createSymbolicLink(tempDir.resolve("link"), elsewhere);
+
+    assertTrue(SailPaths.dataDirOverridden(link.toString()));
+    assertTrue(SailPaths.dataDirOverridden(tempDir.resolve("missing").toString()));
   }
 }

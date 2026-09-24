@@ -143,7 +143,11 @@ per-developer identity to placeholders, and seeds the bundled demo. Schema and r
 data migrations run on `sail migrate`, on `sail upgrade` (which spawns the new binary's
 `migrate` so a release's new migrations actually execute), and on every daemon start, so a
 failed upgrade-time migration self-heals on the next service start. Imports run only from
-the explicit migrate lane.
+the explicit migrate lane. Host state (the `sail` user's forced commands and the systemd
+units) names the installed binary, `/usr/local/bin/sail`, so only that binary's migrate
+converges the host. Under a `SAIL_DATA_DIR` override, migrate is a rehearsal that migrates
+and imports into the copy alone. Any other binary is refused before it opens the database:
+it would migrate the database past what the installed binary can open.
 
 **Migration policy.** Schema migrations are append-only within a major version: entries
 are added after the baseline, never reordered, edited, or removed, and each one ships in

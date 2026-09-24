@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Installs and manages the {@code sail-api.service} systemd unit so the API server runs as a
@@ -56,7 +57,8 @@ public final class SystemdServiceInstaller {
   private final Mode mode;
   private final Path serviceFilePath;
   private final Path systemdLinkPath;
-  private final Path sailBinary;
+  private final Supplier<Path> sailBinary;
+  private final UnitFile unitFile;
   private final String bindAddress;
   private final int bindPort;
   private final String username;
@@ -66,7 +68,8 @@ public final class SystemdServiceInstaller {
    * @param mode install scope — USER (per-user systemd) or SYSTEM ({@code /etc/systemd/system})
    * @param userHome target user's home directory; only used in {@link Mode#USER} for the unit and
    *     discovery-symlink paths
-   * @param sailBinary absolute path to the {@code sail} binary for {@code ExecStart}
+   * @param sailBinary the {@code sail} binary for {@code ExecStart}, asked for only when the unit
+   *     is rendered — managing a unit already on disk needs no binary
    * @param bindAddress bind address for {@code sail server start --host}
    * @param bindPort bind port
    * @param username target username; in {@link Mode#USER} used for {@code loginctl} queries, in
@@ -77,6 +80,17 @@ public final class SystemdServiceInstaller {
       Mode mode,
       Path userHome,
       Path sailBinary,
+      String bindAddress,
+      int bindPort,
+      String username) {
+    this(shell, mode, userHome, fixed(sailBinary), bindAddress, bindPort, username);
+  }
+
+  public SystemdServiceInstaller(
+      ShellExec shell,
+      Mode mode,
+      Path userHome,
+      Supplier<Path> sailBinary,
       String bindAddress,
       int bindPort,
       String username) {
@@ -91,6 +105,7 @@ public final class SystemdServiceInstaller {
       this.systemdLinkPath = home.resolve(".config/systemd/user").resolve(UNIT_FILENAME);
     }
     this.sailBinary = Objects.requireNonNull(sailBinary, "sailBinary");
+    this.unitFile = new UnitFile(shell, serviceFilePath, systemdLinkPath);
     if (Strings.isBlank(bindAddress)) {
       throw new IllegalArgumentException("bindAddress is required");
     }
@@ -139,6 +154,12 @@ public final class SystemdServiceInstaller {
     return systemdLinkPath == null || Files.exists(systemdLinkPath);
   }
 
+  /** A binary known up front, as a supplier that answers it. */
+  static Supplier<Path> fixed(Path sailBinary) {
+    Objects.requireNonNull(sailBinary, "sailBinary");
+    return () -> sailBinary;
+  }
+
   /**
    * Returns the contents of the unit file that {@link #install()} writes. Pure function — no I/O.
    * Public for tests and {@code sail host service status --show-unit}.
@@ -163,7 +184,7 @@ public final class SystemdServiceInstaller {
         [Install]
         WantedBy=%s
         """
-        .formatted(userClause, sailBinary, bindAddress, bindPort, remoteFlag, wantedBy);
+        .formatted(userClause, sailBinary.get(), bindAddress, bindPort, remoteFlag, wantedBy);
   }
 
   /**
@@ -172,13 +193,7 @@ public final class SystemdServiceInstaller {
    * Idempotent: an existing symlink is replaced; an existing unit file is overwritten in place.
    */
   public void install() throws IOException, InterruptedException, TimeoutException {
-    Files.createDirectories(serviceFilePath.getParent());
-    Files.writeString(serviceFilePath, renderUnit());
-    if (systemdLinkPath != null) {
-      Files.createDirectories(systemdLinkPath.getParent());
-      Files.deleteIfExists(systemdLinkPath);
-      Files.createSymbolicLink(systemdLinkPath, serviceFilePath);
-    }
+    unitFile.write(renderUnit());
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
     requireSuccess(
         shell.exec(systemctl("enable", "--now", UNIT_NAME)), "Failed to enable+start " + UNIT_NAME);
@@ -208,7 +223,7 @@ public final class SystemdServiceInstaller {
     if (expected.equals(onDisk)) {
       return false;
     }
-    Files.writeString(serviceFilePath, expected);
+    unitFile.write(expected);
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
     return true;
   }
@@ -219,10 +234,7 @@ public final class SystemdServiceInstaller {
    */
   public void uninstall() throws IOException, InterruptedException, TimeoutException {
     shell.exec(systemctl("disable", "--now", UNIT_NAME));
-    if (systemdLinkPath != null) {
-      Files.deleteIfExists(systemdLinkPath);
-    }
-    Files.deleteIfExists(serviceFilePath);
+    unitFile.remove();
     requireSuccess(shell.exec(systemctl("daemon-reload")), "Failed to reload systemd units");
   }
 

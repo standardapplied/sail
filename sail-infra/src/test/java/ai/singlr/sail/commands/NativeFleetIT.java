@@ -58,15 +58,7 @@ class NativeFleetIT {
           });
 
       main.install(fleet.candidate());
-      var beforeTheNodeUpgrades = mady.replicated();
-      var stale = mady.sail("sync");
-      if (NativeFleet.belowFloor(mady.version())) {
-        assertNotEquals(0, stale.exit(), stale::output);
-        assertTrue(stale.output().contains("sail upgrade"), stale::output);
-        assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
-      } else {
-        assertEquals(0, stale.exit(), stale::output);
-      }
+      aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(mady);
 
       mady.install(fleet.candidate());
       mady.sailOk("sync");
@@ -201,15 +193,7 @@ class NativeFleetIT {
       }
 
       main.install(fleet.candidate());
-      var beforeTheNodeUpgrades = mady.replicated();
-      var stale = mady.sail("sync");
-      if (NativeFleet.belowFloor(mady.version())) {
-        assertNotEquals(0, stale.exit(), stale::output);
-        assertTrue(stale.output().contains("sail upgrade"), stale::output);
-        assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
-      } else {
-        assertEquals(0, stale.exit(), stale::output);
-      }
+      aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(mady);
       mady.install(fleet.candidate());
 
       main.serving(
@@ -274,6 +258,26 @@ class NativeFleetIT {
       INSERT INTO change_heads (entity_type, entity_id, seq)
       VALUES ('run', '%1$s', last_insert_rowid());"""
           .formatted(DOOMED_RUN);
+
+  /**
+   * The node's round after main takes the candidate. Below the sync floor it is refused, changes
+   * nothing and names the upgrade; at or above it, it is an ordinary round.
+   */
+  private static void aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(NativeFleet.Box node)
+      throws Exception {
+    var version = node.version();
+    var before = node.replicated();
+    var stale = node.sail("sync");
+    if (NativeFleet.belowFloor(version)) {
+      System.out.println("node at " + version + " is below the sync floor: its round is refused");
+      assertNotEquals(0, stale.exit(), stale::output);
+      assertTrue(stale.output().contains("sail upgrade"), stale::output);
+      assertEquals(before, node.replicated(), "a refused round changed the node");
+    } else {
+      System.out.println("node at " + version + " meets the sync floor: its round goes through");
+      assertEquals(0, stale.exit(), stale::output);
+    }
+  }
 
   private static List<String> pendingConflicts(NativeFleet.Box box) throws Exception {
     return NativeFleet.jsonList(box.sailOk("conflicts", "--json")).stream()

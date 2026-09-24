@@ -96,15 +96,21 @@ public final class FileImporter {
 
   /**
    * Whether the copy on disk is an edit the store has not seen. New content always is. A new mode
-   * on the same content is only when no revision of this file knows that content at that mode — a
-   * real {@code chmod}; a legacy revision recorded no mode, so the umask an older materializer gave
-   * the copy is no edit, and recording it would raise a mode conflict on every node.
+   * on the same content is when this file's history already records a mode for that content — a
+   * real {@code chmod}, even one back to an earlier mode — or when it grants an execute bit the row
+   * lacks. Otherwise the history is legacy and recorded no mode: an older materializer wrote {@code
+   * 0666 & ~umask}, so a copy that differs only by the umask it got is no edit, and recording it
+   * would raise a mode conflict on every node; but it never wrote an execute bit, so one on disk
+   * was put there on purpose.
    */
   private boolean changed(FileStore.FileRow row, String hash, int mode) {
     if (!row.contentHash().equals(hash)) {
       return true;
     }
-    return row.mode() != mode
-        && !files.isKnownVersion(FileStore.idOf(row.project(), row.path()), hash, mode);
+    if (row.mode() == mode) {
+      return false;
+    }
+    return (mode & ~row.mode() & 0111) != 0
+        || files.recordsModeFor(FileStore.idOf(row.project(), row.path()), hash);
   }
 }

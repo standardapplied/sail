@@ -25,7 +25,7 @@ public final class HostServiceStartCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var installer = HostServiceInstallers.existing(new ShellExecutor(false));
+    var installer = HostServiceInstallers.create(new ShellExecutor(false));
     installer.start();
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ sail-api started."));
   }

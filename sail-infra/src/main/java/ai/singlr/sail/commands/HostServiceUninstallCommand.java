@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -40,19 +41,25 @@ public final class HostServiceUninstallCommand implements Runnable {
         uninstall(
             new ShellExecutor(dryRun),
             HostServiceInstallers.mode(),
-            HostServiceInstallers.userHome());
+            HostServiceInstallers.userHome(),
+            SailPaths::installedBinary);
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ Uninstalled " + removed));
   }
 
   /**
-   * Removes sail-api and the pty host, returning the sail-api unit's path. Removing a unit runs no
-   * sail, so a box whose installed binary is gone or broken can still be cleaned up.
+   * Removes sail-api and the pty host, returning the sail-api unit's path. Removing a unit never
+   * asks for {@code installedBinary}, so a box whose installed sail is gone or broken can still be
+   * cleaned up.
    */
-  static Path uninstall(ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome)
+  static Path uninstall(
+      ShellExec shell,
+      SystemdServiceInstaller.Mode mode,
+      Path userHome,
+      Supplier<Path> installedBinary)
       throws IOException, InterruptedException, TimeoutException {
-    var api = HostServiceInstallers.existing(shell, mode, userHome);
+    var api = HostServiceInstallers.create(shell, mode, userHome, installedBinary);
     api.uninstall();
-    new PtyHostUnit(shell, mode, userHome, SailPaths.INSTALLED_BINARY).uninstall();
+    new PtyHostUnit(shell, mode, userHome, installedBinary).uninstall();
     return api.serviceFilePath();
   }
 }

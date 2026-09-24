@@ -44,6 +44,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -54,7 +55,8 @@ import picocli.CommandLine.Spec;
 /**
  * Single command that runs every pending schema + data migration on the control-plane database.
  * Idempotent: schema migrations are tracked by version, data migrations by name, so re-runs do
- * nothing. {@code sail upgrade} calls this at the end so future upgrades need no manual step.
+ * nothing. {@code sail upgrade} runs the new binary's {@code migrate} at the end, so an upgrade
+ * needs no manual step.
  */
 @Command(
     name = "migrate",
@@ -85,13 +87,97 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Reusable entry point: opens the DB, applies schema + data migrations, returns the data-runs for
-   * the caller (UpgradeCommand wires this in at the end of the upgrade flow). Host state is
-   * converged only by the installed binary against the provisioned database — see {@link
-   * #hostStateWithheld}.
+   * Runs every pending migration on this box's database and converges the host around it, within
+   * the {@link Scope} this binary and {@code SAIL_DATA_DIR} allow.
    */
   public static List<DataMigrator.Run> runMigrations(boolean nonInteractive, boolean jsonOutput) {
     var dbPath = SailPaths.controlPlaneDb();
+    return runMigrations(
+        dbPath,
+        nonInteractive,
+        jsonOutput,
+        scope(
+            SailPaths.dataDirOverridden(),
+            dbPath,
+            SailPaths.binaryPath(),
+            SailPaths.findInstalledBinary()),
+        ON_THIS_BOX);
+  }
+
+  /**
+   * What one run of {@code migrate} may change. {@link Box}: the database and the host around it —
+   * keys, host config, units, services, containers. {@link DatabaseOnly}: only the database it
+   * opens, and it says why. {@link Refused}: nothing at all, decided before the database is opened.
+   */
+  sealed interface Scope permits Scope.Box, Scope.DatabaseOnly, Scope.Refused {
+    record Box() implements Scope {}
+
+    record DatabaseOnly(String why) implements Scope {}
+
+    record Refused(String why) implements Scope {}
+  }
+
+  /**
+   * The scope of a run. A {@code SAIL_DATA_DIR} override is a rehearsal against a copy: it
+   * converges the copy and nothing on the box. A box with nothing installed converges its database
+   * only, since host state names the installed binary. The installed binary converges the box. Any
+   * other binary — a staged build — is refused before it opens the database: migrated by a newer
+   * binary, the database would lock the installed one out, and host state must keep naming the
+   * installed binary. Pure for testing.
+   */
+  static Scope scope(boolean dataDirOverridden, Path db, Path running, Optional<Path> installed) {
+    if (dataDirOverridden) {
+      return new Scope.DatabaseOnly(
+          "  @|yellow ⚠|@ Rehearsal: migrated "
+              + db
+              + " only. SAIL_DATA_DIR is not the provisioned "
+              + SailPaths.systemDataDir()
+              + ", so no keys, units or services were touched.");
+    }
+    if (installed.isEmpty()) {
+      return new Scope.DatabaseOnly(
+          "  @|yellow ⚠|@ Migrated the database only; host state left as is. No sail is"
+              + " installed at "
+              + SailPaths.INSTALLED_BINARY
+              + ": install it there with install.sh, then rerun to converge the box.");
+    }
+    if (running.equals(installed.get())) {
+      return new Scope.Box();
+    }
+    return new Scope.Refused(
+        "This is "
+            + running
+            + ", not the installed "
+            + installed.get()
+            + ". Migrating this box with it would leave the installed sail unable to open its"
+            + " database. Install it first: sudo "
+            + installed.get()
+            + " upgrade --binary "
+            + running
+            + ". Or rehearse on a copy: SAIL_DATA_DIR=<copy> "
+            + running
+            + " migrate.");
+  }
+
+  /**
+   * The steps of a migrate beyond the schema and data migrations: {@code imports} bring what lives
+   * on this box's disk into the database being migrated — the project catalog and shared files —
+   * and {@code host} converges the box around it.
+   */
+  record Convergence(BiConsumer<Sqlite, Boolean> imports, BiConsumer<Sqlite, Boolean> host) {}
+
+  private static final Convergence ON_THIS_BOX =
+      new Convergence(MigrateCommand::importAll, MigrateCommand::convergeHost);
+
+  static List<DataMigrator.Run> runMigrations(
+      Path dbPath,
+      boolean nonInteractive,
+      boolean jsonOutput,
+      Scope scope,
+      Convergence convergence) {
+    if (scope instanceof Scope.Refused refused) {
+      throw new IllegalStateException(refused.why());
+    }
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
     } catch (Exception e) {
@@ -101,64 +187,30 @@ public final class MigrateCommand implements Runnable {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
-      importCatalog(db, jsonOutput);
-      var withheld =
-          hostStateWithheld(
-              SailPaths.dataDirOverridden(),
-              dbPath,
-              SailPaths.binaryPath(),
-              SailPaths::installedBinary);
-      if (withheld.isPresent()) {
-        (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(withheld.get()));
+      convergence.imports().accept(db, jsonOutput);
+      if (scope instanceof Scope.DatabaseOnly databaseOnly) {
+        (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
         return runs;
       }
-      importFiles(db, jsonOutput);
-      relocateHostConfig(jsonOutput);
-      assignBoxId(jsonOutput);
-      syncAuthorizedKeys(db, jsonOutput);
-      ensureSshdKeepalive(jsonOutput);
-      convergeContainers(jsonOutput);
-      ensurePtyHostService(jsonOutput);
+      convergence.host().accept(db, jsonOutput);
       return runs;
     }
   }
 
-  /**
-   * Why this run converges the database and nothing else, or empty when it may converge the box. A
-   * {@code SAIL_DATA_DIR} override is a rehearsal against a copy: rewriting {@code authorized_keys}
-   * or the units, or restarting a service, would change the real box. A binary other than the
-   * installed one — a staged build — must not either: everything it would write names a binary, and
-   * the box must keep running the installed one. Pure for testing.
-   */
-  static Optional<String> hostStateWithheld(
-      boolean dataDirOverridden, Path db, Path running, Supplier<Path> installed) {
-    if (dataDirOverridden) {
-      return Optional.of(
-          "  @|yellow ⚠|@ Rehearsal: migrated "
-              + db
-              + " only. SAIL_DATA_DIR is not the provisioned "
-              + SshIdentityProvisioner.DEFAULT_DATA_DIR
-              + ", so no keys, units, services or workspace files were touched.");
-    }
-    Path target;
-    try {
-      target = installed.get();
-    } catch (IllegalStateException notInstalled) {
-      return Optional.of(
-          "  @|yellow ⚠|@ Migrated the database only; host state left as is. "
-              + notInstalled.getMessage());
-    }
-    if (running.equals(target)) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        "  @|yellow ⚠|@ Migrated the database only; host state left as is: this is "
-            + running
-            + ", not the installed "
-            + target
-            + ". Converge the box with 'sudo "
-            + target
-            + " migrate'.");
+  private static void importAll(Sqlite db, boolean jsonOutput) {
+    importProjects(db, jsonOutput);
+    scrubProjectIdentity(db, jsonOutput);
+    importFiles(db, jsonOutput);
+    seedDemo(db, jsonOutput);
+  }
+
+  private static void convergeHost(Sqlite db, boolean jsonOutput) {
+    relocateHostConfig(jsonOutput);
+    assignBoxId(jsonOutput);
+    syncAuthorizedKeys(db, jsonOutput);
+    ensureSshdKeepalive(jsonOutput);
+    convergeContainers(jsonOutput);
+    ensurePtyHostService(jsonOutput);
   }
 
   /**
@@ -172,12 +224,12 @@ public final class MigrateCommand implements Runnable {
    */
   private static void ensurePtyHostService(boolean jsonOutput) {
     var shell = new ShellExecutor(false);
-    var api = HostServiceInstallers.existing(shell);
+    var api = HostServiceInstallers.create(shell);
     ensurePtyHostService(
         api.isInstalled(),
         shell,
         api.mode(),
-        Path.of(System.getProperty("user.home")),
+        HostServiceInstallers.userHome(),
         SailPaths.installedBinary(),
         SailPaths.ptySocketPath(),
         jsonOutput);
@@ -243,13 +295,6 @@ public final class MigrateCommand implements Runnable {
                   + "); this host predates live handoff; from the next upgrade on, sessions"
                   + " survive"));
     }
-  }
-
-  /** Converges the project catalog, which lives wholly in the database being migrated. */
-  private static void importCatalog(Sqlite db, boolean jsonOutput) {
-    importProjects(db, jsonOutput);
-    scrubProjectIdentity(db, jsonOutput);
-    seedDemo(db, jsonOutput);
   }
 
   /** Imports catalog writes missed by current best-effort project creation. */

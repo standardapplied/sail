@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 /**
  * Construction helpers for {@link SystemdServiceInstaller}; centralizes default arguments and picks
@@ -20,28 +21,28 @@ final class HostServiceInstallers {
   private HostServiceInstallers() {}
 
   /**
-   * An installer that writes the sail-api unit — an install, or an upgrade's reconcile. The unit
-   * runs the installed binary, so one must be installed.
+   * The sail-api unit on this box. The unit runs the installed binary, asked for only when the unit
+   * is rendered — an install or an upgrade's reconcile — so start, stop, status, logs and uninstall
+   * never need one, and a box whose binary is gone can still be managed and cleaned up.
    */
   static SystemdServiceInstaller create(
       ShellExec shell, String bindHost, int bindPort, String username) {
     return new SystemdServiceInstaller(
-        shell, mode(), userHome(), SailPaths.installedBinary(), bindHost, bindPort, username);
+        shell, mode(), userHome(), SailPaths::installedBinary, bindHost, bindPort, username);
   }
 
-  /**
-   * An installer for the sail-api unit already on this box: start, stop, restart, status, logs,
-   * uninstall. None of them runs sail, so a missing or broken installed binary cannot keep a box
-   * from managing, or cleaning up, what is left of it.
-   */
-  static SystemdServiceInstaller existing(ShellExec shell) {
-    return existing(shell, mode(), userHome());
+  /** The sail-api unit on this box, at the default endpoint, for everything but writing it. */
+  static SystemdServiceInstaller create(ShellExec shell) {
+    return create(shell, mode(), userHome(), SailPaths::installedBinary);
   }
 
-  static SystemdServiceInstaller existing(
-      ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome) {
+  static SystemdServiceInstaller create(
+      ShellExec shell,
+      SystemdServiceInstaller.Mode mode,
+      Path userHome,
+      Supplier<Path> installedBinary) {
     return new SystemdServiceInstaller(
-        shell, mode, userHome, SailPaths.INSTALLED_BINARY, "127.0.0.1", 7070, currentUsername());
+        shell, mode, userHome, installedBinary, "127.0.0.1", 7070, currentUsername());
   }
 
   static SystemdServiceInstaller.Mode mode() {

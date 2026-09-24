@@ -32,7 +32,14 @@ class HostServiceUninstallCommandTest {
     }
     var shell = new ScriptedShellExecutor().onOk("systemctl");
 
-    var removed = HostServiceUninstallCommand.uninstall(shell, Mode.USER, home);
+    var removed =
+        HostServiceUninstallCommand.uninstall(
+            shell,
+            Mode.USER,
+            home,
+            () -> {
+              throw new AssertionError("removing a unit never names the binary");
+            });
 
     assertEquals(services.resolve(SystemdServiceInstaller.UNIT_NAME), removed);
     try (var left = Files.list(services)) {

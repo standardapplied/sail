@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
@@ -31,6 +32,11 @@ public final class SailPaths {
   }
 
   private static final Path SYSTEM_DATA_DIR = Path.of("/var/lib/sail");
+
+  /** The provisioned system data directory, where a host's control-plane database lives. */
+  public static Path systemDataDir() {
+    return SYSTEM_DATA_DIR;
+  }
 
   /**
    * Returns the control-plane data directory. Resolution: {@code $SAIL_DATA_DIR} when set;
@@ -260,10 +266,24 @@ public final class SailPaths {
     return dataDirOverridden(System.getenv("SAIL_DATA_DIR"));
   }
 
-  /** Pure resolver; visible for tests so the decision can be exercised without the environment. */
-  static boolean dataDirOverridden(String configured) {
-    return Strings.isNotBlank(configured)
-        && !Path.of(configured).toAbsolutePath().normalize().equals(SYSTEM_DATA_DIR);
+  /**
+   * Whether {@code configured}, a {@code $SAIL_DATA_DIR} value, names another directory than the
+   * provisioned one. A path that reaches it through a symlink or a bind mount is the same
+   * directory; one that cannot be compared is not.
+   */
+  public static boolean dataDirOverridden(String configured) {
+    if (Strings.isBlank(configured)) {
+      return false;
+    }
+    var named = Path.of(configured).toAbsolutePath().normalize();
+    if (named.equals(SYSTEM_DATA_DIR)) {
+      return false;
+    }
+    try {
+      return !Files.isSameFile(named, SYSTEM_DATA_DIR);
+    } catch (IOException incomparable) {
+      return true;
+    }
   }
 
   /**
@@ -288,25 +308,40 @@ public final class SailPaths {
    * The installed sail binary, resolved as {@link #binaryPath()} is: the one path host state — the
    * {@code sail} user's forced commands, the systemd units — may name, whichever binary writes it.
    * A staged build naming itself there would re-point the box at a file that is not meant to stay.
-   * Fails when nothing is installed, since host state naming a missing binary locks every key out.
+   * Fails when nothing runnable is installed, since host state naming a missing binary locks every
+   * key out.
    */
   public static Path installedBinary() {
     return installedBinary(INSTALLED_BINARY);
   }
 
-  /** Pure resolver; visible for tests so resolution can be exercised on any path. */
+  /** Pure resolver; visible for tests so the refusal can be exercised on any path. */
   static Path installedBinary(Path location) {
+    return findInstalledBinary(location)
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    (Files.exists(location, LinkOption.NOFOLLOW_LINKS)
+                            ? location + " is not an executable file"
+                            : "No sail binary is installed at " + location)
+                        + ". Install it there with install.sh"
+                        + " (https://github.com/standardapplied/sail), then rerun."));
+  }
+
+  /** The installed sail binary, or empty when nothing runnable is installed. */
+  public static Optional<Path> findInstalledBinary() {
+    return findInstalledBinary(INSTALLED_BINARY);
+  }
+
+  /** Pure resolver; visible for tests so resolution can be exercised on any path. */
+  static Optional<Path> findInstalledBinary(Path location) {
     try {
       var real = location.toRealPath();
-      if (Files.isRegularFile(real) && Files.isExecutable(real)) {
-        return real;
-      }
+      return Files.isRegularFile(real) && Files.isExecutable(real)
+          ? Optional.of(real)
+          : Optional.empty();
     } catch (IOException missing) {
+      return Optional.empty();
     }
-    throw new IllegalStateException(
-        "No sail binary is installed at "
-            + location
-            + ". Install it there with install.sh (https://github.com/standardapplied/sail),"
-            + " then rerun.");
   }
 }

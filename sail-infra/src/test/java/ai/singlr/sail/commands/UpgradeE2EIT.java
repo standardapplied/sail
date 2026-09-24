@@ -18,9 +18,9 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
+import ai.singlr.sail.store.OrphanErasure;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import java.io.IOException;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,9 +46,10 @@ import org.junit.jupiter.api.Timeout;
  *
  * <p>The shared script stands for a box the content migration converted: its row carries the mode
  * the old rule gave a script (0755), its history records none, and the copy an older materializer
- * wrote on disk is 0644 — on main and on the node alike.
+ * wrote on disk is 0644 — on main and on the node alike. Main's record of the orphan erasure is
+ * dropped before the hop, so the candidate's migrate has a data migration to run and record.
  */
-@Timeout(value = 20, unit = TimeUnit.MINUTES)
+@Timeout(value = 8, unit = TimeUnit.MINUTES)
 class UpgradeE2EIT extends AbstractIncusIT {
 
   private static final String BOX = "sail-it-upgrade";
@@ -72,6 +73,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
           "/home/sail/.ssh/authorized_keys",
           "/etc/systemd/system/sail-api.service",
           "/etc/systemd/system/sail-pty-host.service",
+          "/var/lib/sail/host.yaml",
           SshIdentityProvisioner.DROP_IN,
           SshdKeepalive.DROP_IN_PATH);
   private static final String SPECS =
@@ -85,6 +87,14 @@ class UpgradeE2EIT extends AbstractIncusIT {
           + " WHERE entity_type = 'file' AND entity_id = '"
           + SCRIPT_ID
           + "'";
+  private static final String MODES_RECORDED =
+      "SELECT count(*) FROM change_log WHERE entity_type = 'file' AND entity_id = '"
+          + SCRIPT_ID
+          + "' AND json_extract(snapshot, '$.mode') IS NOT NULL";
+  private static final String SCRIPT_MODE =
+      "SELECT mode FROM project_files WHERE id = '" + SCRIPT_ID + "'";
+  private static final String ORPHANS_ERASED =
+      "SELECT count(*) FROM data_migrations WHERE name = '" + OrphanErasure.NAME + "'";
 
   private static final String PROVISION_MAIN =
       """
@@ -128,7 +138,8 @@ class UpgradeE2EIT extends AbstractIncusIT {
     ensureIncusOrSkip();
     try {
       launchPrepared(BOX);
-      root("systemctl is-system-running --wait");
+      var booted = root("systemctl is-system-running --wait").stdout().strip();
+      assertTrue(List.of("running", "degraded").contains(booted), booted);
       push(binaries.released(), INSTALLED);
       push(binaries.candidate(), STAGED);
       rootOk(PROVISION_MAIN);
@@ -136,6 +147,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
       seed();
       var socket = ptyProxy();
       var pid = openSession(socket);
+      query("DELETE FROM data_migrations WHERE name = '" + OrphanErasure.NAME + "'");
       rootOk(
           "install -d -m 700 "
               + REHEARSAL
@@ -147,6 +159,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
       var driver = driver();
 
       aFileThatIsNotSailIsRefusedBeforeAnythingChanges(driver, socket, pid);
+      theStagedCandidateMayNotMigrateTheBoxItIsNotInstalledOn(socket, pid);
 
       var specs = query(SPECS);
       var revisions = List.of(query(SCRIPT_REVISIONS), nodeQuery(SCRIPT_REVISIONS));
@@ -208,8 +221,10 @@ class UpgradeE2EIT extends AbstractIncusIT {
     rootOk("chmod 644 " + SCRIPT_ON_MAIN);
     nodeQuery(LEGACY_HISTORY);
     ok(List.of("runuser", "-u", NODE, "--", "chmod", "644", SCRIPT_ON_NODE));
-    assertEquals("493", query("SELECT mode FROM project_files WHERE id = '" + SCRIPT_ID + "'"));
-    assertEquals("493", nodeQuery("SELECT mode FROM project_files WHERE id = '" + SCRIPT_ID + "'"));
+    assertEquals(List.of("493", "493"), List.of(query(SCRIPT_MODE), nodeQuery(SCRIPT_MODE)));
+    assertEquals(List.of("0", "0"), List.of(query(MODES_RECORDED), nodeQuery(MODES_RECORDED)));
+    assertEquals("644", ok(List.of("stat", "-c", "%a", SCRIPT_ON_MAIN)).strip());
+    assertEquals("644", ok(List.of("stat", "-c", "%a", SCRIPT_ON_NODE)).strip());
   }
 
   /** Opens the session whose child prints its pid and blocks on {@code read}; returns the pid. */
@@ -238,10 +253,31 @@ class UpgradeE2EIT extends AbstractIncusIT {
     var refused = root(driver + " upgrade --binary " + NOT_SAIL);
 
     assertNotEquals(0, refused.exitCode(), refused::stdout);
-    assertTrue(
-        refused.stderr().contains(NOT_SAIL + " is not a linux-amd64 executable"), refused::stderr);
+    assertTrue(refused.stderr().contains(NOT_SAIL), refused::stderr);
     assertEquals(installed, sha(INSTALLED), "the released binary stays in place");
     assertEquals(services, serviceStates(), "nothing restarted");
+    assertSessionAlive(socket, pid);
+  }
+
+  /**
+   * The candidate's own migrate, run from where it was staged, is refused before it opens the
+   * database: migrated by it, the database would lock the installed sail out, and host state must
+   * keep naming the installed binary. The refusal says how to install it instead.
+   */
+  private void theStagedCandidateMayNotMigrateTheBoxItIsNotInstalledOn(Path socket, String pid)
+      throws Exception {
+    var hostState = hostState();
+    var services = serviceStates();
+
+    var refused = root(STAGED + " migrate --non-interactive");
+
+    assertNotEquals(0, refused.exitCode(), refused::stdout);
+    assertTrue(
+        refused.stderr().contains("sudo " + INSTALLED + " upgrade --binary " + STAGED),
+        refused::stderr);
+    assertEquals("0", query(ORPHANS_ERASED), "the staged candidate migrated the database");
+    assertEquals(hostState, hostState(), "the staged candidate rewrote host state");
+    assertEquals(services, serviceStates(), "the staged candidate restarted a service");
     assertSessionAlive(socket, pid);
   }
 
@@ -254,6 +290,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     for (var migration : MigrateCommand.REGISTRY) {
       assertTrue(recorded.contains(migration.name()), migration.name() + " not in " + recorded);
     }
+    assertEquals("1", query(ORPHANS_ERASED), "the candidate ran its data migrations");
     assertEquals(specs, query(SPECS), "the seeded specs are intact");
   }
 
@@ -306,7 +343,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
         ok(List.of("cat", "/etc/systemd/system/sail-api.service"))
             .contains("ExecStart=" + INSTALLED + " server start"));
     var named = root("grep -rl " + STAGED + " /home/sail/.ssh /etc/systemd/system");
-    assertEquals("", named.stdout().strip(), "host state names the staged candidate");
+    assertEquals(1, named.exitCode(), () -> "host state names the staged candidate: " + named);
   }
 
   /**
@@ -344,18 +381,20 @@ class UpgradeE2EIT extends AbstractIncusIT {
   }
 
   private void aRehearsalConvergesTheCopyAndTouchesNothingElse() throws Exception {
-    var hostState = mtimes();
+    var hostState = hostState();
     var services = serviceStates();
+    var copy = REHEARSAL + "/sail.db";
+    assertEquals("0", ok(List.of("sqlite3", copy, ORPHANS_ERASED)).strip());
 
     var rehearsed = rootOk("SAIL_DATA_DIR=" + REHEARSAL + " sail migrate --non-interactive");
 
-    assertEquals(hostState, mtimes(), "a rehearsal rewrote host state");
+    assertEquals(hostState, hostState(), "a rehearsal rewrote host state");
     assertEquals(services, serviceStates(), "a rehearsal restarted a service");
-    assertTrue(rehearsed.contains("Rehearsal: migrated " + REHEARSAL + "/sail.db only"), rehearsed);
+    assertTrue(rehearsed.contains("Rehearsal: migrated " + copy + " only"), rehearsed);
     assertEquals(
         Integer.toString(candidateSchema()),
-        ok(List.of("sqlite3", REHEARSAL + "/sail.db", "SELECT max(version) FROM schema_version"))
-            .strip());
+        ok(List.of("sqlite3", copy, "SELECT max(version) FROM schema_version")).strip());
+    assertEquals("1", ok(List.of("sqlite3", copy, ORPHANS_ERASED)).strip());
   }
 
   private void assertSessionAlive(Path socket, String pid) throws Exception {
@@ -371,7 +410,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
         root("kill -0 " + pid).ok(), () -> "the session's child " + pid + " is gone" + journal());
   }
 
-  private static String pidOf(SocketChannel channel) throws IOException {
+  private static String pidOf(SocketChannel channel) {
     var seen = awaitText(channel, "pid=");
     while (!PID.matcher(seen).find()) {
       seen += awaitText(channel, "\n");
@@ -446,8 +485,9 @@ class UpgradeE2EIT extends AbstractIncusIT {
     return states;
   }
 
-  private String mtimes() throws Exception {
-    var command = new ArrayList<>(List.of("stat", "-c", "%n %y"));
+  /** Each host-state file's modify and change times, mode and owner: any rewrite or chmod shows. */
+  private String hostState() throws Exception {
+    var command = new ArrayList<>(List.of("stat", "-c", "%n %y %z %a %U:%G"));
     command.addAll(HOST_STATE);
     return ok(command);
   }

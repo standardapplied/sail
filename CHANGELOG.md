@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.46.1
+
+- **`sail upgrade --binary <file>` installs a local build**, such as an unreleased build or one for a box without internet access. It is the same install as a release download.
+  - The file must be an executable for this platform.
+  - It is staged beside the installed sail, and that staged copy answers `-V`, so the bytes checked are the bytes installed.
+  - A build older than the installed sail is refused, as is combining `--binary` with `--check` or `--target`. Installing the bytes already installed changes nothing.
+  - The installed sail knows `--binary` from this release on. To move a box on an older release to a local build, run the build's own upgrade: `sudo ./sail upgrade --binary ./sail`.
+- **`sail upgrade` upgrades `/usr/local/bin/sail`, starting from that binary's version.**
+  - It installs where install.sh puts sail, and compares the release with that binary's `-V`, not with the sail that is running.
+  - An installed sail that cannot report its version is replaced, with a warning.
+  - A `--target` older than the installed sail is refused, because migrations never run backwards.
+  - With nothing installed there, `sail upgrade` and `--check` say to run install.sh.
+  - Under a `SAIL_DATA_DIR` override it refuses, because an upgrade replaces this box's binary and restarts its services.
+- **Host state names the installed binary.**
+  - The `sail` user's forced commands and the `sail-api` and `sail-pty-host` units run `/usr/local/bin/sail`, whichever binary writes them.
+  - `sail host service install` needs sail installed there.
+  - Start, stop, status, logs and uninstall never need the binary, so a box whose binary is gone can still be cleaned up.
+- **`sail migrate` limits what it changes to what the binary that runs it may change.**
+  - Run by the installed sail, it converges the database and the host.
+  - Under a `SAIL_DATA_DIR` override it is a rehearsal. It migrates and imports into that copy and touches no keys, units or services.
+  - Any other binary is refused before it opens the database. The refusal names `sudo /usr/local/bin/sail upgrade --binary <it>` and the rehearsal.
+  - The migrate that an upgrade starts never auto-upgrades, and neither does a rehearsal.
+- **Legacy shared files sync without a mode conflict.**
+  - Some files have no mode in their history; the content migration left them that way. Such a file keeps the mode its row records when the copy on disk lacks only bits the umask removed.
+  - A copy someone made executable is imported as a new revision. So is a chmod back to a mode the history already records.
+- `--dry-run` on `sail host service install` and `uninstall` no longer writes or removes unit files.
+
 ## 0.46.0
 
 - **Archive keeps, delete restores, prune erases everywhere.**

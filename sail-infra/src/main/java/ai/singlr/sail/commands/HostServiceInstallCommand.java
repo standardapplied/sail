@@ -6,6 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.BindPolicy;
+import ai.singlr.sail.engine.PtyHostUnit;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import picocli.CommandLine.Command;
@@ -53,13 +55,9 @@ public final class HostServiceInstallCommand implements Runnable {
     var installer = HostServiceInstallers.create(shell, host, port, username);
 
     installer.install();
-    var ptyHost =
-        new ai.singlr.sail.engine.PtyHostUnit(
-            shell,
-            installer.mode(),
-            java.nio.file.Path.of(System.getProperty("user.home")),
-            ai.singlr.sail.engine.SailPaths.installedBinary());
-    ptyHost.install();
+    new PtyHostUnit(
+            shell, installer.mode(), HostServiceInstallers.userHome(), SailPaths::installedBinary)
+        .install();
 
     var modeLabel =
         installer.mode() == SystemdServiceInstaller.Mode.SYSTEM ? "system-level" : "user-level";

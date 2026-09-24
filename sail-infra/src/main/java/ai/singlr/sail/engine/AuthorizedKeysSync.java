@@ -65,12 +65,11 @@ public final class AuthorizedKeysSync {
     this.binary = binary;
   }
 
-  /** Renders the authorized_keys content without writing it, for {@code --dry-run}. */
-  public String render(Sqlite db) {
-    return render(new FdeSshKeyStore(db).list());
-  }
-
-  private String render(List<FdeSshKeyStore.SshKeyInfo> keys) {
+  /**
+   * Renders the authorized_keys content for {@code keys} without writing it — what {@code
+   * --dry-run} prints and {@link #sync} installs.
+   */
+  public String render(List<FdeSshKeyStore.SshKeyInfo> keys) {
     return AuthorizedKeysRenderer.render(keys, binary.get().toString());
   }
 

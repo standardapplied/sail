@@ -22,7 +22,7 @@ public final class HostServiceStopCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var installer = HostServiceInstallers.existing(new ShellExecutor(false));
+    var installer = HostServiceInstallers.create(new ShellExecutor(false));
     installer.stop();
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ sail-api stopped."));
   }

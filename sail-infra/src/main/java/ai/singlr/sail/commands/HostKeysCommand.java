@@ -6,9 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.engine.AuthorizedKeysRenderer;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
-import ai.singlr.sail.engine.SailPaths;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -55,9 +53,7 @@ public final class HostKeysCommand implements Runnable {
             try (var operations = OperationsFactory.open()) {
               var sync = new AuthorizedKeysSync();
               if (dryRun) {
-                System.out.print(
-                    AuthorizedKeysRenderer.render(
-                        operations.identity().sshKeys(), SailPaths.installedBinary().toString()));
+                System.out.print(sync.render(operations.identity().sshKeys()));
                 return;
               }
               switch (sync.sync(operations.identity()::sshKeys)) {

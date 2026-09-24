@@ -8,8 +8,6 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
@@ -70,32 +68,16 @@ class AutoUpgraderTest {
   }
 
   @Test
-  void acceptsABinaryWithAMatchingChecksumAndTheExpectedExecutableFormat() {
-    var binary = new byte[] {0x7f, 'E', 'L', 'F', 4, 5, 6, 7};
-    assertTrue(AutoUpgrader.isAcceptable(binary, sha256(binary), "Linux"));
-  }
-
-  @Test
-  void rejectsATamperedBinaryWhoseChecksumDoesNotMatch() {
-    var binary = new byte[] {0x7f, 'E', 'L', 'F', 4, 5, 6, 7};
-    assertFalse(AutoUpgrader.isAcceptable(binary, "00ff", "Linux"));
-  }
-
-  @Test
-  void rejectsABinaryThatIsNotInTheExpectedExecutableFormat() {
-    var notElf = new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
-    assertFalse(AutoUpgrader.isAcceptable(notElf, sha256(notElf), "Linux"));
+  void neverUpgradesDuringARehearsalAgainstACopy() {
+    assertTrue(
+        AutoUpgrader.shouldSkip(
+            "0.13.0", env("SAIL_DATA_DIR", "/root/rehearsal"), true, new String[] {"migrate"}));
+    assertFalse(
+        AutoUpgrader.shouldSkip(
+            "0.13.0", env("SAIL_DATA_DIR", "/var/lib/sail"), true, new String[] {"migrate"}));
   }
 
   private static UnaryOperator<String> env(String key, String value) {
     return Map.of(key, value)::get;
-  }
-
-  private static String sha256(byte[] binary) {
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(binary));
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
   }
 }

@@ -160,25 +160,67 @@ class FileImporterTest {
 
   @Test
   void aLegacyScriptsUnchangedCopyAtTheUmasksModeRecordsNothing() throws Exception {
-    writeOnDisk("acme", "deploy.sh", "echo hi");
-    WorkspaceFiles.mode(projectsDir.resolve("acme/files/deploy.sh"), 0644);
-    importer.importAll();
-    var id = FileStore.idOf("acme", "deploy.sh");
-    var legacy =
-        new LinkedHashMap<>(
-            YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
-    legacy.remove("mode");
-    db.execute(
-        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
-        YamlUtil.dumpJson(legacy),
-        id);
-    db.execute("UPDATE project_files SET mode = ? WHERE id = ?", 0755, id);
+    var id = legacy("deploy.sh", 0644, 0755);
 
     var report = importer.importAll();
 
     assertEquals(0, report.imported());
     assertEquals(0755, files.find("acme", "deploy.sh").orElseThrow().mode());
     assertEquals(1, revisions(id));
+  }
+
+  @Test
+  void aLegacyFileRestrictedOnlyByTheUmaskStaysAsItsRowSays() throws Exception {
+    var id = legacy("notes.md", 0600, 0644);
+
+    assertEquals(0, importer.importAll().imported());
+    assertEquals(0644, files.find("acme", "notes.md").orElseThrow().mode());
+    assertEquals(1, revisions(id));
+  }
+
+  @Test
+  void aLegacyExecutableKeepsTheExecuteBitSomeoneGaveIt() throws Exception {
+    var id = legacy("bin/setup", 0755, 0644);
+
+    assertEquals(1, importer.importAll().imported());
+    assertEquals(0755, files.find("acme", "bin/setup").orElseThrow().mode());
+    assertEquals(2, revisions(id));
+  }
+
+  @Test
+  void aChmodBackToAnEarlierModeIsRecordedNotUndone() throws Exception {
+    writeOnDisk("acme", "deploy.sh", "echo hi");
+    var copy = projectsDir.resolve("acme/files/deploy.sh");
+    WorkspaceFiles.mode(copy, 0644);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0755);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0644);
+
+    assertEquals(1, importer.importAll().imported());
+    assertEquals(0644, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(3, revisions(FileStore.idOf("acme", "deploy.sh")));
+  }
+
+  /**
+   * A shared file as the content migration left it: one revision recording no mode, the row at
+   * {@code rowMode}, and the copy on disk at {@code diskMode}.
+   */
+  private String legacy(String path, int diskMode, int rowMode) throws Exception {
+    writeOnDisk("acme", path, "#!/bin/sh\necho " + path);
+    WorkspaceFiles.mode(projectsDir.resolve("acme/files").resolve(path), diskMode);
+    importer.importAll();
+    var id = FileStore.idOf("acme", path);
+    var snapshot =
+        new LinkedHashMap<>(
+            YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
+    snapshot.remove("mode");
+    db.execute(
+        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+        YamlUtil.dumpJson(snapshot),
+        id);
+    db.execute("UPDATE project_files SET mode = ? WHERE id = ?", rowMode, id);
+    return id;
   }
 
   @Test

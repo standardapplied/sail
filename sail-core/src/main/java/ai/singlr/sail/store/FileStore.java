@@ -214,6 +214,23 @@ public final class FileStore implements ConflictResolver, SyncedStore {
       WHERE h.entity_type = ? AND l.kind <> 'erasure'""";
 
   /**
+   * Whether any retained revision of the file records a mode for this content — history written
+   * since modes are journaled, as opposed to the mode-less revisions the content migration left.
+   */
+  public boolean recordsModeFor(String id, String hash) {
+    return db.queryOne(
+            """
+            SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
+                AND json_extract(snapshot, '$.content_hash') = ?
+                AND json_extract(snapshot, '$.mode') IS NOT NULL LIMIT 1
+            """,
+            row -> row.integer(0),
+            id,
+            hash)
+        .isPresent();
+  }
+
+  /**
    * Whether this content-and-mode pair is a recorded version of the file. A revision the content
    * migration converted recorded no mode — the old materializer wrote whatever the box's umask gave
    * — so it matches its content at any mode.
