@@ -203,9 +203,13 @@ class NativeFleetIT {
       main.install(fleet.candidate());
       var beforeTheNodeUpgrades = mady.replicated();
       var stale = mady.sail("sync");
-      assertNotEquals(0, stale.exit(), stale::output);
-      assertTrue(stale.output().contains("sail upgrade"), stale::output);
-      assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
+      if (NativeFleet.belowFloor(mady.version())) {
+        assertNotEquals(0, stale.exit(), stale::output);
+        assertTrue(stale.output().contains("sail upgrade"), stale::output);
+        assertEquals(beforeTheNodeUpgrades, mady.replicated(), "a refused round changed the node");
+      } else {
+        assertEquals(0, stale.exit(), stale::output);
+      }
       mady.install(fleet.candidate());
 
       main.serving(
