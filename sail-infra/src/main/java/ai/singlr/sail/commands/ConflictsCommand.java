@@ -284,10 +284,9 @@ public final class ConflictsCommand implements Callable<Integer> {
       if (!edited(file)) {
         return 1;
       }
-      var merged = Files.readString(file);
       try {
-        resolve(operations, type, Resolution.Strategy.MERGE, merged);
-      } catch (RuntimeException e) {
+        resolve(operations, type, Resolution.Strategy.MERGE, Files.readString(file));
+      } catch (IOException | RuntimeException e) {
         System.err.println(
             Banner.warnLine("Your merge is kept for reference at " + file + ".", Ansi.AUTO));
         throw e;

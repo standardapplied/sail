@@ -37,6 +37,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -482,6 +483,37 @@ class ConflictsCommandTest {
       assertEquals(409, assertInstanceOf(ApiException.class, refused.escaped()).status());
       assertTrue(refused.err().contains("kept for reference at " + kept), refused.err());
       assertTrue(Files.readString(kept).contains("\ntitle: merged title\n"));
+      assertEquals("node title", title());
+      assertEquals(2, conflicts.pending().size());
+    } finally {
+      Files.deleteIfExists(kept);
+    }
+  }
+
+  @Test
+  void aMergeSavedInAnotherEncodingIsKeptAndItsPathPrinted() throws IOException {
+    parkASpecAndItsRoomUnderOneId();
+    var opened = new ArrayList<Path>();
+
+    var unreadable =
+        run(
+            resolve(
+                file -> {
+                  opened.add(file);
+                  Files.write(file, "title: café\n".getBytes(StandardCharsets.ISO_8859_1));
+                  return 0;
+                }),
+            "auth",
+            "--type",
+            "spec",
+            "--merge");
+
+    var kept = opened.getFirst();
+    try {
+      assertEquals(1, unreadable.exit());
+      assertInstanceOf(CharacterCodingException.class, unreadable.escaped());
+      assertTrue(unreadable.err().contains("kept for reference at " + kept), unreadable.err());
+      assertTrue(Files.exists(kept));
       assertEquals("node title", title());
       assertEquals(2, conflicts.pending().size());
     } finally {

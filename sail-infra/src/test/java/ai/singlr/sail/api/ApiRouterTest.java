@@ -169,10 +169,14 @@ class ApiRouterTest {
       var local = box.specs.comparableSnapshot("auth");
       park(box, "spec", local, "title", "remote");
       var conflicts = new ConflictOperations(box.db);
-      var started = conflicts.mergeTemplate("spec", "auth");
       var rev = box.specs.revOf("auth");
       var operations =
           new TestOperations() {
+            @Override
+            public String conflictMergeTemplate(String type, String id) {
+              return conflicts.mergeTemplate(type, id);
+            }
+
             @Override
             public SyncConflicts.Conflict resolveConflict(
                 String type, String id, Resolution resolution) {
@@ -180,6 +184,7 @@ class ApiRouterTest {
             }
           };
       try (var server = serverWith(operations, true)) {
+        var started = template(server);
         var path = "/v1/conflicts/auth/resolve?type=spec";
         var unnamed =
             post(
@@ -203,12 +208,21 @@ class ApiRouterTest {
         assertEquals(rev, box.specs.revOf("auth"));
         assertEquals(local, box.specs.comparableSnapshot("auth"));
 
-        var fresh = post(server, path, "token", mergeBody(conflicts.mergeTemplate("spec", "auth")));
+        var fresh = post(server, path, "token", mergeBody(template(server)));
         assertEquals(200, fresh.statusCode(), fresh.body());
         assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
         assertTrue(box.conflicts.pending().isEmpty());
+        var gone = get(server, "/v1/conflicts/auth?type=spec&template=true", "token");
+        assertEquals(422, gone.statusCode(), gone.body());
+        assertTrue(gone.body().contains("No open conflict for 'auth'."), gone.body());
       }
     }
+  }
+
+  private static String template(SailApiServer server) throws Exception {
+    var response = get(server, "/v1/conflicts/auth?type=spec&template=true", "token");
+    assertEquals(200, response.statusCode(), response.body());
+    return (String) YamlUtil.parseMap(response.body()).get("template");
   }
 
   private static String mergeBody(String template) {

@@ -8,6 +8,7 @@
   - `--merge` refuses a conflict this box has written over before the editor opens.
   - A refused `--merge` keeps the edited file and prints its path, as reference for the redo.
   - `--merge-file` takes a template from `show --template`, so an agent or a script can merge without a terminal.
+  - API clients get the same template from `GET /v1/conflicts/<id>?template=true`, on the web API and the in-container socket. A path suffix would collide with a file conflict's `project/path` id.
   - A merged record that is not valid YAML, or repeats a key, is refused as a bad request.
   - `--mine` and `--theirs` are unchanged: the side they choose and the merge base come from the same recorded conflict.
 

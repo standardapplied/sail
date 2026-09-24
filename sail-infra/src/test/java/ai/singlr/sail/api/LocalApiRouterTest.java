@@ -139,18 +139,32 @@ class LocalApiRouterTest {
       var local = box.specs.comparableSnapshot("auth");
       parkTitle(box, local, "remote");
       var conflicts = new ConflictOperations(box.db);
-      var started = conflicts.mergeTemplate("spec", "auth");
       var rev = box.specs.revOf("auth");
       var lane =
           new LocalApiRouter(
               bus,
               new TestOperations() {
                 @Override
+                public String conflictMergeTemplate(String type, String id) {
+                  return conflicts.mergeTemplate(type, id);
+                }
+
+                @Override
                 public SyncConflicts.Conflict resolveConflict(
                     String type, String id, Resolution resolution) {
                   return conflicts.resolve(type, id, resolution);
                 }
               });
+      var started = template(lane);
+      var posted =
+          lane.handle(
+              new LocalApiRequest(
+                  "POST",
+                  "/v1/conflicts/auth",
+                  Map.of("type", "spec", "template", "true"),
+                  auth(),
+                  new byte[0]));
+      assertEquals(405, posted.status(), posted.body().toString());
 
       var unnamed =
           lane.handle(merge(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
@@ -170,11 +184,18 @@ class LocalApiRouterTest {
       assertEquals(rev, box.specs.revOf("auth"));
       assertEquals(local, box.specs.comparableSnapshot("auth"));
 
-      var fresh = lane.handle(merge(conflicts.mergeTemplate("spec", "auth")));
+      var fresh = lane.handle(merge(template(lane)));
       assertEquals(200, fresh.status(), fresh.body().toString());
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
       assertTrue(box.conflicts.pending().isEmpty());
     }
+  }
+
+  private static String template(LocalApiRouter lane) {
+    var response =
+        lane.handle(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
+    assertEquals(200, response.status(), response.body().toString());
+    return (String) response.body().get("template");
   }
 
   private static void parkTitle(SyncBox box, Map<String, Object> local, String theirs) {

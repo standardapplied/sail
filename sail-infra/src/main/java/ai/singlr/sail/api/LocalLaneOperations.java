@@ -25,6 +25,13 @@ public interface LocalLaneOperations {
 
   List<SyncConflicts.Conflict> conflicts();
 
+  /**
+   * The editable record a {@code merge} resolution of the conflict on {@code id} starts from, bound
+   * to the version of the conflict it was made from. Refused for a conflict with no field-level
+   * merge, or one this box has written over since it was recorded.
+   */
+  String conflictMergeTemplate(String type, String id);
+
   SyncConflicts.Conflict resolveConflict(
       String type, String id, Resolution resolution, Actor actor);
 

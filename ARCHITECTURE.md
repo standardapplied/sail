@@ -283,8 +283,9 @@ it was when the merge started, and a round re-records the conflict with main's n
 applied to the fresh version it would read every field main moved as a local edit back to its
 old value, and that edit would win main's compare-and-set. So a merge is bound to the conflict it
 was made from. `sail conflicts show <id> --template` (and `--merge`, which opens it in
-`$EDITOR`) emits the record with a `_conflict` key: a short SHA-256 over the conflict's recorded
-base, local and remote snapshots, which a re-record that brings no news keeps. A merge resolve
+`$EDITOR`; `GET /v1/conflicts/<id>?template=true` over either API) emits the record with a
+`_conflict` key: a short SHA-256 over the conflict's recorded base, local and remote
+snapshots, which a re-record that brings no news keeps. A merge resolve
 without it is refused (`400`), one made from another version is refused (`409`) with nothing
 written, and the key never reaches the row, the change log or the wire. A refused `--merge`
 keeps the edited file and prints its path, as reference for the redo. Ids are unique only within
