@@ -298,12 +298,11 @@ class ConflictsCommandTest {
     return resolve(file -> fail("the editor must not open"));
   }
 
-  private ConflictsCommand.Resolve resolve(ConflictsCommand.Resolve.Editor editor) {
+  private ConflictsCommand.Resolve resolve(Editor editor) {
     return new ConflictsCommand.Resolve(this::operations, editor);
   }
 
-  private static ConflictsCommand.Resolve.Editor mergingTitle(
-      List<Path> opened, Runnable meanwhile) {
+  private static Editor mergingTitle(List<Path> opened, Runnable meanwhile) {
     return file -> {
       opened.add(file);
       Files.writeString(file, retitled(Files.readString(file)));
@@ -551,7 +550,7 @@ class ConflictsCommandTest {
 
     assertEquals(1, aborted.exit());
     assertNull(aborted.escaped());
-    assertTrue(aborted.err().contains("Editor exited non-zero; aborting."), aborted.err());
+    assertTrue(aborted.err().contains("Editor exited with status 1; aborting."), aborted.err());
     assertEquals(1, unlaunched.exit());
     assertInstanceOf(IOException.class, unlaunched.escaped());
     assertEquals(2, opened.size());
@@ -564,20 +563,8 @@ class ConflictsCommandTest {
   void theEditorIsTheCommandItNamesRunOnTheTemplate() {
     parkASpecAndItsRoomUnderOneId();
 
-    var aborted =
-        run(
-            resolve(ConflictsCommand.Resolve.Editor.command("false")),
-            "auth",
-            "--type",
-            "spec",
-            "--merge");
-    var saved =
-        run(
-            resolve(ConflictsCommand.Resolve.Editor.command("true")),
-            "auth",
-            "--type",
-            "spec",
-            "--merge");
+    var aborted = run(resolve(Editor.command("false")), "auth", "--type", "spec", "--merge");
+    var saved = run(resolve(Editor.command("true")), "auth", "--type", "spec", "--merge");
 
     assertEquals(1, aborted.exit());
     assertEquals(0, saved.exit(), saved.err());

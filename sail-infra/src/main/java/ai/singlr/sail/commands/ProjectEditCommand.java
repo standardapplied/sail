@@ -46,6 +46,16 @@ public final class ProjectEditCommand implements Runnable {
 
   @Spec private CommandSpec spec;
 
+  private final Editor editor;
+
+  public ProjectEditCommand() {
+    this(Editor.fromEnvironment());
+  }
+
+  ProjectEditCommand(Editor editor) {
+    this.editor = editor;
+  }
+
   @Override
   public void run() {
     CliCommand.run(spec, this::execute);
@@ -63,7 +73,7 @@ public final class ProjectEditCommand implements Runnable {
                             + "' to edit. Create it with 'sail project apply', or sync it from"
                             + " main with 'sail sync'."));
 
-    var edited = file != null ? Files.readString(Path.of(file)) : editInEditor(current);
+    var edited = file != null ? Files.readString(Path.of(file)) : edit(editor, name, current);
     if (edited.equals(current)) {
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|faint No changes.|@"));
@@ -109,17 +119,15 @@ public final class ProjectEditCommand implements Runnable {
     }
   }
 
-  private String editInEditor(String seed) throws IOException, InterruptedException {
-    var editor = System.getenv("EDITOR");
-    if (editor == null || editor.isBlank()) {
-      editor = "vi";
-    }
+  /** {@code seed} as the engineer left it in {@code editor}; the scratch file never outlives it. */
+  static String edit(Editor editor, String name, String seed)
+      throws IOException, InterruptedException {
     var tmp = Files.createTempFile("sail-project-" + name + "-", ".yaml");
     try {
       Files.writeString(tmp, seed);
-      var process = new ProcessBuilder(editor, tmp.toString()).inheritIO().start();
-      if (process.waitFor() != 0) {
-        throw new IllegalStateException("Editor exited without saving; no changes made.");
+      var exit = editor.edit(tmp);
+      if (exit != 0) {
+        throw new IllegalStateException("Editor exited with status " + exit + "; no changes made.");
       }
       return Files.readString(tmp);
     } finally {

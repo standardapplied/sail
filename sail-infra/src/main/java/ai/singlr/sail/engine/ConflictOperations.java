@@ -185,7 +185,7 @@ public final class ConflictOperations {
   private static String fingerprint(SyncConflicts.Conflict conflict) {
     var snapshots =
         Stream.of(conflict.baseSnapshot(), conflict.localSnapshot(), conflict.remoteSnapshot())
-            .map(snapshot -> (Object) new TreeMap<>(parse(snapshot)))
+            .map(snapshot -> new TreeMap<>(parse(snapshot)))
             .toList();
     return BlobStore.hash(YamlUtil.dumpJson(snapshots).getBytes(StandardCharsets.UTF_8))
         .substring(0, FINGERPRINT_LENGTH);

@@ -8,9 +8,9 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import java.io.IOException;
@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
@@ -164,9 +163,9 @@ public final class ConflictsCommand implements Callable<Integer> {
       var isFile = conflict.entityType().equals(FILE);
       var diff =
           ConflictMerge.diff(
-              parse(conflict.baseSnapshot()),
-              parse(conflict.localSnapshot()),
-              parse(conflict.remoteSnapshot()),
+              ConflictOperations.parse(conflict.baseSnapshot()),
+              ConflictOperations.parse(conflict.localSnapshot()),
+              ConflictOperations.parse(conflict.remoteSnapshot()),
               conflict.fields());
       var out = new StringBuilder();
       out.append(
@@ -199,23 +198,13 @@ public final class ConflictsCommand implements Callable<Integer> {
       mixinStandardHelpOptions = true)
   static final class Resolve implements Callable<Integer> {
 
-    /** Opens a file for the engineer to edit and answers the editor's exit status. */
-    @FunctionalInterface
-    interface Editor {
-      int edit(Path file) throws IOException, InterruptedException;
-
-      static Editor command(String command) {
-        return file -> new ProcessBuilder(command, file.toString()).inheritIO().start().waitFor();
-      }
-    }
-
     @Mixin private Address address;
 
     private final Supplier<HostOperations> operations;
     private final Editor editor;
 
     Resolve() {
-      this(OperationsFactory::open, Editor.command(System.getenv().getOrDefault("EDITOR", "vi")));
+      this(OperationsFactory::open, Editor.fromEnvironment());
     }
 
     Resolve(Supplier<HostOperations> operations, Editor editor) {
@@ -305,7 +294,8 @@ public final class ConflictsCommand implements Callable<Integer> {
       }
       if (exit != 0) {
         Files.delete(file);
-        System.err.println(Banner.errorLine("Editor exited non-zero; aborting.", Ansi.AUTO));
+        System.err.println(
+            Banner.errorLine("Editor exited with status " + exit + "; aborting.", Ansi.AUTO));
       }
       return exit == 0;
     }
@@ -319,9 +309,5 @@ public final class ConflictsCommand implements Callable<Integer> {
                   + address.entity
                   + "|@. Run @|bold sail sync|@ to propagate."));
     }
-  }
-
-  static Map<String, Object> parse(String json) {
-    return Strings.isBlank(json) ? null : YamlUtil.parseMap(json);
   }
 }

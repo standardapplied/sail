@@ -11,6 +11,7 @@
   - API clients get the same template from `GET /v1/conflicts/<id>?template=true`, on the web API and the in-container socket. A path suffix would collide with a file conflict's `project/path` id.
   - A merged record that is not valid YAML, or repeats a key, is refused as a bad request.
   - `--mine` and `--theirs` are unchanged: the side they choose and the merge base come from the same recorded conflict.
+- **`$EDITOR` runs as git runs it.** `sail conflicts resolve --merge` and `sail project edit` run `$EDITOR` as a shell command with the file as its argument, so `EDITOR="code --wait"` works. An unset or blank `EDITOR` means `vi` in both, and a failed editor names its exit status.
 
 ## 0.46.1
 
