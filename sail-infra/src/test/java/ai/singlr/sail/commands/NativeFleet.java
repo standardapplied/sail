@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SemVer;
@@ -109,20 +108,12 @@ public final class NativeFleet implements AutoCloseable {
   }
 
   public static NativeFleet openOrSkip() throws Exception {
-    var unavailable = unavailable();
-    if (unavailable != null) {
-      if (Boolean.getBoolean("sail.it.requireNative")) {
-        throw new AssertionError(
-            "the native fleet is required in this lane (-Dsail.it.requireNative=true) but cannot"
-                + " run — the test cannot validate anything. Reason: "
-                + unavailable);
-      }
-      assumeTrue(false, "native fleet skipped (" + unavailable + ")");
-    }
+    var binaries = NativeBinaries.requireOrSkip("the native fleet");
+    NativeBinaries.requireOrSkip("the native fleet", podmanUnavailable());
     buildImage();
     var pod = "sail-fleet-" + UUID.randomUUID().toString().substring(0, 8);
     ok(run(COMMAND_DEADLINE, List.of("podman", "pod", "create", "--share", "net", "--name", pod)));
-    return new NativeFleet(pod, binary("sail.it.nativeBinary"), binary("sail.it.releasedBinary"));
+    return new NativeFleet(pod, binaries.candidate(), binaries.released());
   }
 
   public Path candidate() {
@@ -251,26 +242,13 @@ public final class NativeFleet implements AutoCloseable {
     return box;
   }
 
-  private static String unavailable() throws Exception {
-    for (var property : List.of("sail.it.nativeBinary", "sail.it.releasedBinary")) {
-      var value = System.getProperty(property, "");
-      if (value.isBlank()) {
-        return "-D" + property + " is not set";
-      }
-      if (!Files.isExecutable(Path.of(value))) {
-        return "-D" + property + "=" + value + " is not an executable file";
-      }
-    }
+  private static String podmanUnavailable() throws Exception {
     try {
       var version = run(COMMAND_DEADLINE, List.of("podman", "version"));
       return version.exit() == 0 ? null : "podman version failed: " + version.output();
     } catch (IOException e) {
       return "podman is not installed: " + e.getMessage();
     }
-  }
-
-  private static Path binary(String property) {
-    return Path.of(System.getProperty(property)).toAbsolutePath();
   }
 
   private static synchronized void buildImage() throws Exception {

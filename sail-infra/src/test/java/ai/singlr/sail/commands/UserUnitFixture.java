@@ -146,17 +146,22 @@ final class UserUnitFixture implements AutoCloseable {
 
   /** Connects as the box owner, retrying until the host answers or the wait runs out. */
   SessionClient connect() throws Exception {
+    return connect(socket());
+  }
+
+  /** Connects to the host on {@code socket} as the box owner, as {@link #connect()} does. */
+  static SessionClient connect(Path socket) {
     var deadline = System.nanoTime() + WAIT_NANOS;
     IOException last = null;
     while (System.nanoTime() < deadline) {
       try {
-        return SessionClient.connect(socket(), "");
+        return SessionClient.connect(socket, "");
       } catch (IOException notYet) {
         last = notYet;
         Thread.onSpinWait();
       }
     }
-    throw new AssertionError("the pty host never answered on " + socket() + ": " + last);
+    throw new AssertionError("the pty host never answered on " + socket + ": " + last);
   }
 
   void systemctl(String... args) throws Exception {

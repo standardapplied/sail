@@ -63,12 +63,12 @@ public abstract class AbstractIncusIT {
         launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
   }
 
-  private static final String PREPARED_ALIAS = "sail-it-prepared-v2";
+  private static final String PREPARED_ALIAS = "sail-it-prepared-v3";
   private static final String BUILDER = "sail-it-image-builder";
   private static final List<String> PREPARED_PACKAGES =
       Stream.concat(
               ProjectProvisioner.BASELINE_PACKAGES.stream(),
-              Stream.of("python3", "podman", "uidmap"))
+              Stream.of("python3", "podman", "uidmap", "sqlite3"))
           .distinct()
           .toList();
   private static final Object PREPARE_LOCK = new Object();

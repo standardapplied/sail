@@ -1,0 +1,38 @@
+name: Native binaries
+description: >
+  Builds the native image under test and fetches the latest released binary, each smoke-tested:
+  the two inputs of every test that upgrades the release engineers run today to this build.
+
+outputs:
+  candidate:
+    description: The native binary built from this commit.
+    value: ${{ github.workspace }}/sail-infra/target/sail
+  released:
+    description: The latest release's Linux binary, checked against its published checksum.
+    value: ${{ runner.temp }}/released/sail-linux-amd64
+
+runs:
+  using: composite
+  steps:
+    - name: Build native image
+      shell: bash
+      run: mvn -B package -Pnative -DskipTests
+
+    - name: Smoke test
+      shell: bash
+      run: |
+        ./sail-infra/target/sail -V
+        ./sail-infra/target/sail _pty-selftest
+
+    - name: Download the latest released binary
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/released"
+        gh release download --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/released" \
+          --pattern sail-linux-amd64 --pattern sail-linux-amd64.sha256
+        cd "$RUNNER_TEMP/released"
+        echo "$(cat sail-linux-amd64.sha256)  sail-linux-amd64" | sha256sum -c -
+        chmod +x sail-linux-amd64
+        ./sail-linux-amd64 -V

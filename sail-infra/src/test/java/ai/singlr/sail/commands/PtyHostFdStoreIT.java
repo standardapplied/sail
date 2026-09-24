@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import static ai.singlr.sail.commands.PtyTranscript.awaitText;
+import static ai.singlr.sail.commands.PtyTranscript.prologue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,25 +118,6 @@ class PtyHostFdStoreIT {
         .filter(info -> info.name().equals(name))
         .findFirst()
         .orElseThrow(() -> new AssertionError("no session '" + name + "' in " + listing));
-  }
-
-  private static void prologue(SocketChannel channel) throws IOException {
-    assertInstanceOf(PtyMessage.Resized.class, PtyWire.read(channel));
-    assertInstanceOf(PtyMessage.ReplayBegin.class, PtyWire.read(channel));
-  }
-
-  private static String awaitText(SocketChannel channel, String marker) throws IOException {
-    var seen = new StringBuilder();
-    while (!seen.toString().contains(marker)) {
-      var message = PtyWire.read(channel);
-      if (message instanceof PtyMessage.Output(var seq, var bytes)) {
-        seen.append(new String(bytes, StandardCharsets.UTF_8));
-      }
-      if (message instanceof PtyMessage.SessionEnded(var reason)) {
-        throw new AssertionError("ended (" + reason + ") before '" + marker + "': " + seen);
-      }
-    }
-    return seen.toString();
   }
 
   private static PtyMessage.SessionEnded awaitEnd(SocketChannel channel) throws IOException {
