@@ -39,7 +39,7 @@ public final class HostServiceUninstallCommand implements Runnable {
             shell,
             installer.mode(),
             java.nio.file.Path.of(System.getProperty("user.home")),
-            ai.singlr.sail.engine.SailPaths.binaryPath())
+            ai.singlr.sail.engine.SailPaths.installedBinary())
         .uninstall();
 
     System.out.println(

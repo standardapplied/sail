@@ -86,7 +86,9 @@ public final class MigrateCommand implements Runnable {
 
   /**
    * Reusable entry point: opens the DB, applies schema + data migrations, returns the data-runs for
-   * the caller (UpgradeCommand wires this in at the end of the upgrade flow).
+   * the caller (UpgradeCommand wires this in at the end of the upgrade flow). Host state is
+   * converged only by the installed binary against the provisioned database — see {@link
+   * #hostStateWithheld}.
    */
   public static List<DataMigrator.Run> runMigrations(boolean nonInteractive, boolean jsonOutput) {
     var dbPath = SailPaths.controlPlaneDb();
@@ -99,7 +101,18 @@ public final class MigrateCommand implements Runnable {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
-      applyDataImports(db, jsonOutput);
+      importCatalog(db, jsonOutput);
+      var withheld =
+          hostStateWithheld(
+              SailPaths.dataDirOverridden(),
+              dbPath,
+              SailPaths.binaryPath(),
+              SailPaths::installedBinary);
+      if (withheld.isPresent()) {
+        (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(withheld.get()));
+        return runs;
+      }
+      importFiles(db, jsonOutput);
       relocateHostConfig(jsonOutput);
       assignBoxId(jsonOutput);
       syncAuthorizedKeys(db, jsonOutput);
@@ -108,6 +121,44 @@ public final class MigrateCommand implements Runnable {
       ensurePtyHostService(jsonOutput);
       return runs;
     }
+  }
+
+  /**
+   * Why this run converges the database and nothing else, or empty when it may converge the box. A
+   * {@code SAIL_DATA_DIR} override is a rehearsal against a copy: rewriting {@code authorized_keys}
+   * or the units, or restarting a service, would change the real box. A binary other than the
+   * installed one — a staged build — must not either: everything it would write names a binary, and
+   * the box must keep running the installed one. Pure for testing.
+   */
+  static Optional<String> hostStateWithheld(
+      boolean dataDirOverridden, Path db, Path running, Supplier<Path> installed) {
+    if (dataDirOverridden) {
+      return Optional.of(
+          "  @|yellow ⚠|@ Rehearsal: migrated "
+              + db
+              + " only. SAIL_DATA_DIR is not the provisioned "
+              + SshIdentityProvisioner.DEFAULT_DATA_DIR
+              + ", so no keys, units, services or workspace files were touched.");
+    }
+    Path target;
+    try {
+      target = installed.get();
+    } catch (IllegalStateException notInstalled) {
+      return Optional.of(
+          "  @|yellow ⚠|@ Migrated the database only; host state left as is. "
+              + notInstalled.getMessage());
+    }
+    if (running.equals(target)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "  @|yellow ⚠|@ Migrated the database only; host state left as is: this is "
+            + running
+            + ", not the installed "
+            + target
+            + ". Converge the box with 'sudo "
+            + target
+            + " migrate'.");
   }
 
   /**
@@ -129,7 +180,7 @@ public final class MigrateCommand implements Runnable {
         shell,
         api.mode(),
         Path.of(System.getProperty("user.home")),
-        SailPaths.binaryPath(),
+        SailPaths.installedBinary(),
         SailPaths.ptySocketPath(),
         jsonOutput);
   }
@@ -196,11 +247,10 @@ public final class MigrateCommand implements Runnable {
     }
   }
 
-  /** Imports host data that remains outside schema and versioned data migrations. */
-  private static void applyDataImports(Sqlite db, boolean jsonOutput) {
+  /** Converges the project catalog, which lives wholly in the database being migrated. */
+  private static void importCatalog(Sqlite db, boolean jsonOutput) {
     importProjects(db, jsonOutput);
     scrubProjectIdentity(db, jsonOutput);
-    importFiles(db, jsonOutput);
     seedDemo(db, jsonOutput);
   }
 

@@ -91,6 +91,56 @@ class MigrateCommandTest {
             .orElseThrow());
   }
 
+  private static final Path INSTALLED = Path.of("/usr/local/bin/sail");
+
+  @Test
+  void aRehearsalConvergesTheCopyAndWithholdsHostStateWithoutAskingWhereSailIs() {
+    var copy = Path.of("/root/rehearsal/sail.db");
+
+    var line =
+        MigrateCommand.hostStateWithheld(
+                true,
+                copy,
+                INSTALLED,
+                () -> {
+                  throw new AssertionError("a rehearsal never names a binary");
+                })
+            .orElseThrow();
+
+    assertTrue(line.contains("Rehearsal: migrated " + copy + " only"), line);
+    assertTrue(line.contains("not the provisioned /var/lib/sail"), line);
+    assertTrue(line.contains("no keys, units, services or workspace files"), line);
+  }
+
+  @Test
+  void onlyTheInstalledBinaryConvergesHostState() {
+    var db = Path.of("/var/lib/sail/sail.db");
+    var staged = Path.of("/tmp/sail-new");
+
+    assertTrue(MigrateCommand.hostStateWithheld(false, db, INSTALLED, () -> INSTALLED).isEmpty());
+    var line = MigrateCommand.hostStateWithheld(false, db, staged, () -> INSTALLED).orElseThrow();
+
+    assertTrue(line.contains("this is " + staged + ", not the installed " + INSTALLED), line);
+    assertTrue(line.contains("'sudo " + INSTALLED + " migrate'"), line);
+  }
+
+  @Test
+  void aBoxWithoutAnInstalledBinaryMigratesItsDatabaseAndSaysWhyNothingElse() {
+    var line =
+        MigrateCommand.hostStateWithheld(
+                false,
+                Path.of("/root/.sail/sail.db"),
+                Path.of("/opt/sail"),
+                () -> {
+                  throw new IllegalStateException(
+                      "No sail binary is installed at " + INSTALLED + ". Install it there.");
+                })
+            .orElseThrow();
+
+    assertTrue(line.contains("host state left as is"), line);
+    assertTrue(line.contains("No sail binary is installed at " + INSTALLED), line);
+  }
+
   @Test
   void ensurePtyHostServiceInstallsOnlyOnAProvisionedHost(@TempDir Path home) {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));

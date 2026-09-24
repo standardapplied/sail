@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -17,6 +19,7 @@ import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -153,6 +156,52 @@ class FileImporterTest {
 
     assertEquals(1, report.imported());
     assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aLegacyScriptsUnchangedCopyAtTheUmasksModeRecordsNothing() throws Exception {
+    writeOnDisk("acme", "deploy.sh", "echo hi");
+    WorkspaceFiles.mode(projectsDir.resolve("acme/files/deploy.sh"), 0644);
+    importer.importAll();
+    var id = FileStore.idOf("acme", "deploy.sh");
+    var legacy =
+        new LinkedHashMap<>(
+            YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
+    legacy.remove("mode");
+    db.execute(
+        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+        YamlUtil.dumpJson(legacy),
+        id);
+    db.execute("UPDATE project_files SET mode = ? WHERE id = ?", 0755, id);
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported());
+    assertEquals(0755, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(1, revisions(id));
+  }
+
+  @Test
+  void aRealChmodOfUnchangedContentIsRecorded() throws Exception {
+    writeOnDisk("acme", "deploy.sh", "echo hi");
+    var copy = projectsDir.resolve("acme/files/deploy.sh");
+    WorkspaceFiles.mode(copy, 0644);
+    importer.importAll();
+    WorkspaceFiles.mode(copy, 0755);
+
+    var report = importer.importAll();
+
+    assertEquals(1, report.imported());
+    assertEquals(0755, files.find("acme", "deploy.sh").orElseThrow().mode());
+    assertEquals(2, revisions(FileStore.idOf("acme", "deploy.sh")));
+  }
+
+  private long revisions(String id) {
+    return db.queryOne(
+            "SELECT count(*) FROM change_log WHERE entity_type = 'file' AND entity_id = ?",
+            row -> row.integer(0),
+            id)
+        .orElseThrow();
   }
 
   @Test

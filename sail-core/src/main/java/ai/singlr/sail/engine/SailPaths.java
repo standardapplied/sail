@@ -252,8 +252,23 @@ public final class SailPaths {
   }
 
   /**
+   * Whether {@code $SAIL_DATA_DIR} names a directory other than the provisioned system data
+   * directory — a rehearsal against a copy of the database, which must converge that copy and leave
+   * the box's host state alone.
+   */
+  public static boolean dataDirOverridden() {
+    return dataDirOverridden(System.getenv("SAIL_DATA_DIR"));
+  }
+
+  /** Pure resolver; visible for tests so the decision can be exercised without the environment. */
+  static boolean dataDirOverridden(String configured) {
+    return Strings.isNotBlank(configured)
+        && !Path.of(configured).toAbsolutePath().normalize().equals(SYSTEM_DATA_DIR);
+  }
+
+  /**
    * Returns the path to the running binary. Uses {@code /proc/self/exe} on Linux, falls back to
-   * {@code /usr/local/bin/sail}.
+   * {@link #INSTALLED_BINARY}.
    */
   public static Path binaryPath() {
     var procSelf = Path.of("/proc/self/exe");
@@ -263,6 +278,35 @@ public final class SailPaths {
       }
     } catch (IOException ignored) {
     }
-    return Path.of("/usr/local/bin/sail");
+    return INSTALLED_BINARY;
+  }
+
+  /** Where {@code install.sh} puts sail and {@code sail upgrade} replaces it. */
+  public static final Path INSTALLED_BINARY = Path.of("/usr/local/bin/sail");
+
+  /**
+   * The installed sail binary, resolved as {@link #binaryPath()} is: the one path host state — the
+   * {@code sail} user's forced commands, the systemd units — may name, whichever binary writes it.
+   * A staged build naming itself there would re-point the box at a file that is not meant to stay.
+   * Fails when nothing is installed, since host state naming a missing binary locks every key out.
+   */
+  public static Path installedBinary() {
+    return installedBinary(INSTALLED_BINARY);
+  }
+
+  /** Pure resolver; visible for tests so resolution can be exercised on any path. */
+  static Path installedBinary(Path location) {
+    try {
+      var real = location.toRealPath();
+      if (Files.isRegularFile(real) && Files.isExecutable(real)) {
+        return real;
+      }
+    } catch (IOException missing) {
+    }
+    throw new IllegalStateException(
+        "No sail binary is installed at "
+            + location
+            + ". Install it there with install.sh (https://github.com/standardapplied/sail),"
+            + " then rerun.");
   }
 }

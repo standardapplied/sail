@@ -46,8 +46,20 @@ class AuthorizedKeysSyncTest {
     if (db != null) db.close();
   }
 
+  private static final Path INSTALLED = Path.of("/usr/local/bin/sail");
+
   private AuthorizedKeysSync sync(boolean root) {
-    return new AuthorizedKeysSync(destination, root, shell);
+    return new AuthorizedKeysSync(destination, root, shell, () -> INSTALLED);
+  }
+
+  private AuthorizedKeysSync uninstalled(boolean root) {
+    return new AuthorizedKeysSync(
+        destination,
+        root,
+        shell,
+        () -> {
+          throw new IllegalStateException("No sail binary is installed at " + INSTALLED);
+        });
   }
 
   @Test
@@ -102,6 +114,29 @@ class AuthorizedKeysSyncTest {
     var content = sync(true).render(db);
     assertTrue(content.startsWith("# Managed by sail"));
     assertTrue(content.contains("_gateway --fde uday\",restrict ssh-ed25519 "));
+    assertTrue(shell.invocations().isEmpty());
+  }
+
+  @Test
+  void everyForcedCommandRunsTheInstalledBinaryWhicheverBinaryRenders() {
+    var content = sync(true).render(db);
+
+    assertTrue(content.contains("command=\"/usr/local/bin/sail _gateway --fde uday\""), content);
+  }
+
+  @Test
+  void aHostThatCannotSyncNeverAsksWhereSailIsInstalled() throws Exception {
+    assertInstanceOf(AuthorizedKeysSync.NeedsRoot.class, uninstalled(false).sync(db));
+    assertInstanceOf(AuthorizedKeysSync.NotProvisioned.class, uninstalled(true).sync(db));
+  }
+
+  @Test
+  void aProvisionedHostWithoutAnInstalledBinaryFailsBeforeWritingAnything() throws Exception {
+    Files.createDirectories(destination.getParent());
+
+    var thrown = assertThrows(IllegalStateException.class, () -> uninstalled(true).sync(db));
+
+    assertTrue(thrown.getMessage().contains("/usr/local/bin/sail"), thrown.getMessage());
     assertTrue(shell.invocations().isEmpty());
   }
 }

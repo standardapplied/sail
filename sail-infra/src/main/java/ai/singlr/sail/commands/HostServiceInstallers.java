@@ -29,7 +29,7 @@ final class HostServiceInstallers {
         shell,
         mode,
         Path.of(System.getProperty("user.home")),
-        SailPaths.binaryPath(),
+        SailPaths.installedBinary(),
         bindHost,
         bindPort,
         username);

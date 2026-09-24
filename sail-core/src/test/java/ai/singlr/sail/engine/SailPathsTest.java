@@ -6,11 +6,14 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -167,5 +170,43 @@ class SailPathsTest {
   @Test
   void controlPlaneDbIsSailDbUnderDataDir() {
     assertEquals("sail.db", SailPaths.controlPlaneDb().getFileName().toString());
+  }
+
+  @Test
+  void onlyADataDirOtherThanTheProvisionedOneIsAnOverride() {
+    assertFalse(SailPaths.dataDirOverridden(null));
+    assertFalse(SailPaths.dataDirOverridden("  "));
+    assertFalse(SailPaths.dataDirOverridden("/var/lib/sail"));
+    assertFalse(SailPaths.dataDirOverridden("/var/lib/sail/"));
+    assertFalse(SailPaths.dataDirOverridden("/var/lib/../lib/sail"));
+    assertTrue(SailPaths.dataDirOverridden("/root/rehearsal"));
+    assertTrue(SailPaths.dataDirOverridden("/var/lib/sail-copy"));
+  }
+
+  @Test
+  void theInstalledBinaryResolvesThroughALinkToTheExecutableItNames() throws Exception {
+    var binary = Files.writeString(tempDir.resolve("sail-0.46.0"), "#!/bin/sh\n");
+    binary.toFile().setExecutable(true);
+    var link = Files.createSymbolicLink(tempDir.resolve("sail"), binary);
+
+    assertEquals(binary.toRealPath(), SailPaths.installedBinary(link));
+  }
+
+  @Test
+  void aMissingOrNonExecutableInstalledBinaryFailsNamingTheInstaller() throws Exception {
+    var missing = tempDir.resolve("absent/sail");
+    var plain = Files.writeString(tempDir.resolve("plain"), "not executable");
+
+    for (var location : List.of(missing, plain, tempDir)) {
+      var failure =
+          assertThrows(IllegalStateException.class, () -> SailPaths.installedBinary(location));
+      assertTrue(failure.getMessage().contains(location.toString()), failure.getMessage());
+      assertTrue(failure.getMessage().contains("install.sh"), failure.getMessage());
+    }
+  }
+
+  @Test
+  void theDefaultInstalledBinaryIsWhereInstallShPutsIt() {
+    assertEquals(Path.of("/usr/local/bin/sail"), SailPaths.INSTALLED_BINARY);
   }
 }

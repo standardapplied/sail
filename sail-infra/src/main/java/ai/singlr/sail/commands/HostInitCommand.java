@@ -274,7 +274,7 @@ public final class HostInitCommand implements Runnable {
             new ShellExecutor(false),
             SystemdServiceInstaller.Mode.USER,
             userHome,
-            SailPaths.binaryPath(),
+            SailPaths.INSTALLED_BINARY,
             "127.0.0.1",
             7070,
             "sail")

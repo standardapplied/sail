@@ -57,7 +57,7 @@ public final class HostKeysCommand implements Runnable {
               if (dryRun) {
                 System.out.print(
                     AuthorizedKeysRenderer.render(
-                        operations.identity().sshKeys(), SailPaths.binaryPath().toString()));
+                        operations.identity().sshKeys(), SailPaths.installedBinary().toString()));
                 return;
               }
               switch (sync.sync(operations.identity()::sshKeys)) {
