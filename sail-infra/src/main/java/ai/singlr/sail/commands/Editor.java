@@ -27,7 +27,10 @@ interface Editor {
   static Editor command(String command) {
     var script = script(command);
     return file ->
-        new ProcessBuilder("sh", "-c", script, "sh", file.toString()).inheritIO().start().waitFor();
+        new ProcessBuilder("/bin/sh", "-c", script, "sh", file.toString())
+            .inheritIO()
+            .start()
+            .waitFor();
   }
 
   /** The shell script that runs {@code command} on the file given as {@code $1}. */

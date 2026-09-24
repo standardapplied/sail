@@ -284,10 +284,10 @@ applied to the fresh version it would read every field main moved as a local edi
 old value, and that edit would win main's compare-and-set. So a merge is bound to the conflict it
 was made from. `sail conflicts show <id> --template` (and `--merge`, which opens it in
 `$EDITOR`; `GET /v1/conflicts/<id>?template=true` over either API) emits the record with a
-`_conflict` key: a short SHA-256 over the conflict's recorded base, local and remote
-snapshots, which a re-record that brings no news keeps. A merge resolve
-without it is refused (`400`), one made from another version is refused (`409`) with nothing
-written, and the key never reaches the row, the change log or the wire. A refused `--merge`
+`_conflict` key: a short SHA-256 over the work in the conflict's recorded base, local and
+remote snapshots (who wrote a side is no news, as conflict detection holds), which a re-record
+that brings no news keeps. A merge resolve without it is refused (`400`), one made from another
+version is refused (`409`) with nothing written, a conflict that is not open is `404`, and the key never reaches the row, the change log or the wire. A refused `--merge`
 keeps the edited file and prints its path, as reference for the redo. Ids are unique only within
 a type and a spec's room carries the spec's id, so a conflict is addressed by type and id:
 `--type` on the CLI, `?type=` over the API. An id parked under several types is refused naming

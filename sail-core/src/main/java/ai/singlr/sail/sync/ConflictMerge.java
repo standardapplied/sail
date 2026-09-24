@@ -12,6 +12,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Pure helpers for the conflict-resolution UX, working over the comparable snapshots parked by the
@@ -89,7 +90,7 @@ public final class ConflictMerge {
           .append("#   ")
           .append(field)
           .append(": theirs = ")
-          .append(render(value(theirs, field)))
+          .append(commented(render(value(theirs, field))))
           .append('\n');
     }
     return header + YamlUtil.dumpToString(merged);
@@ -111,6 +112,11 @@ public final class ConflictMerge {
           list.isEmpty() ? "[]" : String.join(", ", list.stream().map(String::valueOf).toList());
       default -> value.toString();
     };
+  }
+
+  /** {@code text} kept inside the header comment: each line after its first is commented too. */
+  private static String commented(String text) {
+    return text.lines().collect(Collectors.joining("\n#     "));
   }
 
   private static Object value(Map<String, Object> map, String field) {

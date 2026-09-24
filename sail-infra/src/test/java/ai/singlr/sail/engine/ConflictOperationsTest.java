@@ -132,12 +132,61 @@ class ConflictOperationsTest {
     assertEquals(
         """
         'auth' changed on this box after this conflict was recorded (body).
-        Run 'sail sync' to refresh it, then resolve.""",
+        Run 'sail sync' to refresh it, then %s."""
+            .formatted(strategy == Resolution.Strategy.MERGE ? "start the merge again" : "resolve"),
         refused.getMessage());
     assertEquals("written after the conflict was recorded", bodyOf(node));
     assertEquals("node title", titleOf(node));
     assertEquals(rev, node.specs.revOf("auth"));
     assertEquals(conflict, node.conflicts.pendingFor("spec", "auth").orElseThrow());
+  }
+
+  @Test
+  void aBodyClashMergesThroughItsTemplateWhateverLineBreaksMainsBodyHas() throws IOException {
+    main.specs.create(SyncBox.spec("auth", "title", "pending"));
+    round();
+    main.specs.setContent("auth", "main: first\r\nkey: value\rlast", "");
+    node.specs.setContent("auth", "node line one\nnode line two", "");
+    round();
+    var template = operations.mergeTemplate("spec", "auth");
+    assertTrue(template.contains("#   body: theirs = main: first\n#     key: value\n#     last\n"));
+    var merged = new LinkedHashMap<>(ConflictMerge.parseTemplate(template));
+    assertEquals("node line one\nnode line two", merged.get("body"));
+    merged.put("body", "merged\nbody");
+
+    operations.resolve(
+        "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpToString(merged)));
+    round();
+
+    assertEquals(List.of(), node.conflicts.pending());
+    assertEquals("merged\nbody", bodyOf(main));
+    assertEquals("merged\nbody", bodyOf(node));
+  }
+
+  @Test
+  void aTemplateNamesItsConflictAsTextNoYamlToolReadsAsANumber() throws IOException {
+    parkTitle();
+
+    var named = ConflictMerge.parseTemplate(operations.mergeTemplate("spec", "auth"));
+
+    assertTrue(
+        named.get(ConflictMerge.CONFLICT) instanceof String text
+            && text.matches("sha256:[0-9a-f]{16}"),
+        String.valueOf(named.get(ConflictMerge.CONFLICT)));
+  }
+
+  @Test
+  void aReRecordThatChangesOnlyWhoWroteASideKeepsTheMergeValid() throws IOException {
+    parkTitle();
+    var started = mergedTitle(operations.mergeTemplate("spec", "auth"));
+    node.db.execute(
+        "UPDATE sync_conflicts SET remote_snapshot = json_set(remote_snapshot, '$._actor',"
+            + " 'someone else') WHERE entity_id = 'auth' AND status = 'pending'");
+
+    operations.resolve("spec", "auth", started);
+
+    assertEquals(List.of(), node.conflicts.pending());
+    assertEquals("merged title", titleOf(node));
   }
 
   @Test
@@ -172,10 +221,9 @@ class ConflictOperationsTest {
           refused.getMessage(),
           type);
     }
-    assertEquals(
-        "No open conflict for 'ghost'.",
-        assertThrows(IllegalArgumentException.class, () -> operations.mergeTemplate(null, "ghost"))
-            .getMessage());
+    var ghost = assertThrows(ApiException.class, () -> operations.mergeTemplate(null, "ghost"));
+    assertEquals(404, ghost.status());
+    assertEquals("No open conflict for 'ghost'.", ghost.getMessage());
   }
 
   @Test
@@ -474,9 +522,12 @@ class ConflictOperationsTest {
   }
 
   @Test
-  void resolvingWhatIsNotParkedIsRefused() {
+  void resolvingWhatIsNotParkedIsNotFound() {
     assertNull(operations.find(null, "ghost"));
-    assertThrows(IllegalArgumentException.class, () -> operations.resolve("spec", "ghost", mine()));
+    var refused =
+        assertThrows(ApiException.class, () -> operations.resolve("spec", "ghost", mine()));
+    assertEquals(404, refused.status());
+    assertEquals("No open conflict for 'ghost'.", refused.getMessage());
   }
 
   private static String b64(String text) {

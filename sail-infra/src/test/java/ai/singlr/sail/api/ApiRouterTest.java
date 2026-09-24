@@ -213,7 +213,7 @@ class ApiRouterTest {
         assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
         assertTrue(box.conflicts.pending().isEmpty());
         var gone = get(server, "/v1/conflicts/auth?type=spec&template=true", "token");
-        assertEquals(422, gone.statusCode(), gone.body());
+        assertEquals(404, gone.statusCode(), gone.body());
         assertTrue(gone.body().contains("No open conflict for 'auth'."), gone.body());
       }
     }

@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public final class ConflictOperations {
+  private static final String FINGERPRINT_PREFIX = "sha256:";
   private static final int FINGERPRINT_LENGTH = 16;
 
   private final Sqlite db;
@@ -76,7 +77,7 @@ public final class ConflictOperations {
   public String mergeTemplate(String entityType, String entityId) {
     var conflict = requireOpen(entityType, entityId);
     requireMergeable(conflict);
-    requireCurrent(conflict);
+    requireCurrent(conflict, "merge");
     var shown = display(conflict);
     return ConflictMerge.mergeTemplate(
         parse(shown.baseSnapshot()),
@@ -97,7 +98,11 @@ public final class ConflictOperations {
     return db.transaction(
         () -> {
           var conflict = requireOpen(entityType, entityId);
-          requireCurrent(conflict);
+          requireCurrent(
+              conflict,
+              resolution.strategy() == Resolution.Strategy.MERGE
+                  ? "start the merge again"
+                  : "resolve");
           var chosen =
               switch (resolution.strategy()) {
                 case MINE -> parse(conflict.localSnapshot());
@@ -142,7 +147,7 @@ public final class ConflictOperations {
   private SyncConflicts.Conflict requireOpen(String entityType, String entityId) {
     var conflict = findRaw(entityType, entityId);
     if (conflict == null) {
-      throw new IllegalArgumentException("No open conflict for '" + entityId + "'.");
+      throw new ApiException(ErrorCode.NOT_FOUND, "No open conflict for '" + entityId + "'.");
     }
     return conflict;
   }
@@ -179,19 +184,27 @@ public final class ConflictOperations {
 
   /**
    * Names the recorded versions of a conflict. Every round re-records every parked conflict under a
-   * new row id, so the name is taken from the raw snapshots instead: a re-record that brings no
-   * news keeps it, one that does changes it.
+   * new row id, so the name is taken from the work in the raw snapshots instead: a re-record that
+   * brings no news keeps it, one that does changes it, and metadata such as the author is no news,
+   * as conflict detection holds. The prefix keeps it a string in any YAML tool.
    */
   private static String fingerprint(SyncConflicts.Conflict conflict) {
     var snapshots =
         Stream.of(conflict.baseSnapshot(), conflict.localSnapshot(), conflict.remoteSnapshot())
-            .map(snapshot -> new TreeMap<>(parse(snapshot)))
+            .map(ConflictOperations::work)
             .toList();
-    return BlobStore.hash(YamlUtil.dumpJson(snapshots).getBytes(StandardCharsets.UTF_8))
-        .substring(0, FINGERPRINT_LENGTH);
+    return FINGERPRINT_PREFIX
+        + BlobStore.hash(YamlUtil.dumpJson(snapshots).getBytes(StandardCharsets.UTF_8))
+            .substring(0, FINGERPRINT_LENGTH);
   }
 
-  private void requireCurrent(SyncConflicts.Conflict conflict) {
+  private static TreeMap<String, Object> work(String snapshot) {
+    var work = new TreeMap<>(parse(snapshot));
+    work.keySet().removeIf(ConflictDetector::isMetadata);
+    return work;
+  }
+
+  private void requireCurrent(SyncConflicts.Conflict conflict, String then) {
     var store = SyncedEntities.require(conflict.entityType()).store(db);
     var drift =
         ConflictDetector.drift(
@@ -203,12 +216,13 @@ public final class ConflictOperations {
           ErrorCode.CONFLICT,
           """
           '%s' changed on this box after this conflict was recorded (%s).
-          Run 'sail sync' to refresh it, then resolve."""
+          Run 'sail sync' to refresh it, then %s."""
               .formatted(
                   conflict.entityId(),
                   drift.stream()
                       .map(ConflictOperations::displayField)
-                      .collect(Collectors.joining(", "))));
+                      .collect(Collectors.joining(", ")),
+                  then));
     }
   }
 

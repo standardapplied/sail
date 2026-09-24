@@ -280,7 +280,7 @@ public final class ConflictsCommand implements Callable<Integer> {
             Banner.warnLine("Your merge is kept for reference at " + file + ".", Ansi.AUTO));
         throw e;
       }
-      Files.delete(file);
+      Files.deleteIfExists(file);
       return 0;
     }
 
@@ -289,11 +289,11 @@ public final class ConflictsCommand implements Callable<Integer> {
       try {
         exit = editor.edit(file);
       } catch (IOException | InterruptedException e) {
-        Files.delete(file);
+        Files.deleteIfExists(file);
         throw e;
       }
       if (exit != 0) {
-        Files.delete(file);
+        Files.deleteIfExists(file);
         System.err.println(
             Banner.errorLine("Editor exited with status " + exit + "; aborting.", Ansi.AUTO));
       }
