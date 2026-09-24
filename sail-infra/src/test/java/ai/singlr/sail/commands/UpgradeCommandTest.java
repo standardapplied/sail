@@ -33,7 +33,7 @@ import picocli.CommandLine;
 
 class UpgradeCommandTest {
 
-  private static final byte[] ELF = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
+  private static final byte[] HEADER = executableHeader(System.getProperty("os.name", ""));
   private static final SemVer INSTALLED_VERSION = SemVer.parse("0.46.0");
 
   @TempDir Path tempDir;
@@ -119,6 +119,11 @@ class UpgradeCommandTest {
   }
 
   @Test
+  void theFixtureIsAnExecutableForThePlatformRunningTheSuite() {
+    assertTrue(PlatformDetector.isValidBinary(HEADER));
+  }
+
+  @Test
   void helpListsBinary() {
     assertTrue(new CommandLine(new UpgradeCommand()).getUsageMessage().contains("--binary"));
   }
@@ -167,9 +172,7 @@ class UpgradeCommandTest {
             candidate.toString());
 
     assertRefused(
-        run,
-        candidate + " is not a runnable sail: it answered",
-        "Pass a sail binary built for this platform");
+        run, candidate + " is not a runnable sail: ", "Pass a sail binary built for this platform");
     assertNothingStaged();
   }
 
@@ -390,10 +393,18 @@ class UpgradeCommandTest {
         .reduce("", String::concat);
   }
 
+  /** Eight bytes that open an executable for {@code osName}: Mach-O on macOS, ELF elsewhere. */
+  private static byte[] executableHeader(String osName) {
+    var os = osName.toLowerCase();
+    return os.contains("mac") || os.contains("darwin")
+        ? new byte[] {(byte) 0xcf, (byte) 0xfa, (byte) 0xed, (byte) 0xfe, 0x0c, 0, 0, 0x01}
+        : new byte[] {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
+  }
+
   private static Path executable(Path file, String build) throws Exception {
     Files.createDirectories(file.getParent());
     var bytes = new ByteArrayOutputStream();
-    bytes.write(ELF);
+    bytes.write(HEADER);
     bytes.write(build.getBytes(StandardCharsets.UTF_8));
     Files.write(file, bytes.toByteArray());
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rwxr-xr-x"));
