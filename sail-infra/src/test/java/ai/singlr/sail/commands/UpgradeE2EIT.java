@@ -348,13 +348,13 @@ class UpgradeE2EIT extends AbstractIncusIT {
 
     var rehearsed = rootOk("SAIL_DATA_DIR=" + REHEARSAL + " sail migrate --non-interactive");
 
+    assertEquals(hostState, mtimes(), "a rehearsal rewrote host state");
+    assertEquals(services, serviceStates(), "a rehearsal restarted a service");
     assertTrue(rehearsed.contains("Rehearsal: migrated " + REHEARSAL + "/sail.db only"), rehearsed);
     assertEquals(
         Integer.toString(candidateSchema()),
         ok(List.of("sqlite3", REHEARSAL + "/sail.db", "SELECT max(version) FROM schema_version"))
             .strip());
-    assertEquals(hostState, mtimes(), "a rehearsal rewrote host state");
-    assertEquals(services, serviceStates(), "a rehearsal restarted a service");
   }
 
   private void assertSessionAlive(Path socket, String pid) throws Exception {
