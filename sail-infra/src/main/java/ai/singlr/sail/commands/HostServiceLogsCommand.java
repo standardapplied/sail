@@ -31,9 +31,7 @@ public final class HostServiceLogsCommand implements Runnable {
     if (lines <= 0) {
       throw new IllegalArgumentException("-n must be a positive integer.");
     }
-    var installer =
-        HostServiceInstallers.create(
-            new ShellExecutor(false), "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+    var installer = HostServiceInstallers.existing(new ShellExecutor(false));
     System.out.print(installer.journal(lines));
   }
 }

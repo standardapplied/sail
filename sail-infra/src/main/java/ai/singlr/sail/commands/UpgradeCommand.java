@@ -30,6 +30,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -70,18 +71,24 @@ public final class UpgradeCommand implements Runnable {
 
   private final Function<Path, String> versionOf;
   private final Supplier<Path> installedBinary;
+  private final Callable<String> latestRelease;
 
   public UpgradeCommand() {
-    this(UpgradeCommand::versionOf, SailPaths::installedBinary);
+    this(UpgradeCommand::versionOf, SailPaths::installedBinary, ReleaseFetcher::fetchLatestVersion);
   }
 
   /**
    * @param versionOf the version a sail binary reports
    * @param installedBinary where the upgrade installs, and whose version it upgrades from
+   * @param latestRelease the version of the latest release
    */
-  UpgradeCommand(Function<Path, String> versionOf, Supplier<Path> installedBinary) {
+  UpgradeCommand(
+      Function<Path, String> versionOf,
+      Supplier<Path> installedBinary,
+      Callable<String> latestRelease) {
     this.versionOf = versionOf;
     this.installedBinary = installedBinary;
+    this.latestRelease = latestRelease;
   }
 
   @Override
@@ -90,8 +97,7 @@ public final class UpgradeCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var currentVersion = SailVersion.version();
-    if ("dev".equals(currentVersion)) {
+    if ("dev".equals(SailVersion.version())) {
       throw new IllegalStateException(
           "Cannot upgrade a development build. Install a release version first.");
     }
@@ -99,13 +105,15 @@ public final class UpgradeCommand implements Runnable {
       installLocal();
       return;
     }
+    var binaryPath = installedBinary.get();
+    var currentVersion = versionOf.apply(binaryPath);
     var current = SemVer.parse(currentVersion);
 
     String latestVersionStr;
     if (targetVersion != null) {
       latestVersionStr = targetVersion.startsWith("v") ? targetVersion.substring(1) : targetVersion;
     } else {
-      latestVersionStr = ReleaseFetcher.fetchLatestVersion();
+      latestVersionStr = latestRelease.call();
     }
     var latest = SemVer.parse(latestVersionStr);
     var versionTag = "v" + latest;
@@ -120,7 +128,6 @@ public final class UpgradeCommand implements Runnable {
       return;
     }
 
-    var binaryPath = installedBinary.get();
     if (needsSudo(binaryPath)) {
       return;
     }
@@ -422,12 +429,7 @@ public final class UpgradeCommand implements Runnable {
     try {
       var shell = new ShellExecutor(false);
       var defaultEndpoint = new Endpoint("127.0.0.1", 7070);
-      var bootstrap =
-          HostServiceInstallers.create(
-              shell,
-              defaultEndpoint.host(),
-              defaultEndpoint.port(),
-              HostServiceInstallers.currentUsername());
+      var bootstrap = HostServiceInstallers.existing(shell);
       if (!bootstrap.isInstalled()) {
         if (!json) {
           var provisioned = Files.exists(SailPaths.hostConfigPath());

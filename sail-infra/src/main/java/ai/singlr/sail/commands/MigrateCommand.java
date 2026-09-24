@@ -172,9 +172,7 @@ public final class MigrateCommand implements Runnable {
    */
   private static void ensurePtyHostService(boolean jsonOutput) {
     var shell = new ShellExecutor(false);
-    var api =
-        HostServiceInstallers.create(
-            shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+    var api = HostServiceInstallers.existing(shell);
     ensurePtyHostService(
         api.isInstalled(),
         shell,

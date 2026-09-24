@@ -25,9 +25,7 @@ public final class HostServiceRestartCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var installer =
-        HostServiceInstallers.create(
-            new ShellExecutor(false), "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+    var installer = HostServiceInstallers.existing(new ShellExecutor(false));
     installer.restart();
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ sail-api restarted."));
   }

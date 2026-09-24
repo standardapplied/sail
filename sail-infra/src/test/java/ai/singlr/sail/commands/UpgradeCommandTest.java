@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -202,6 +203,36 @@ class UpgradeCommandTest {
   }
 
   @Test
+  void aCheckReportsTheInstalledSailNotTheRunningOne() {
+    var run = upgrade(() -> "98.0.0", path -> "0.1.0", "--check", "--json");
+
+    assertEquals(0, run.exit(), run::err);
+    assertTrue(run.out().contains("\"current\": \"0.1.0\""), run.out());
+    assertTrue(run.out().contains("\"update_available\": true"), run.out());
+  }
+
+  @Test
+  void aReleaseUpgradesTheInstalledSailFromItsOwnVersion() throws Exception {
+    var run = upgrade(() -> "98.0.0", path -> "0.1.0", "--dry-run");
+
+    assertEquals(0, run.exit(), run::err);
+    assertTrue(run.out().contains("0.1.0 \u2192 98.0.0"), run.out());
+    assertTrue(run.out().contains("[dry-run] Write new binary to " + installed), run.out());
+    assertInstalled("installed");
+  }
+
+  @Test
+  void anInstalledBuildNewerThanTheLatestReleaseIsNotDowngraded() throws Exception {
+    var run = upgrade(() -> "98.0.0", path -> "99.0.0", "--dry-run", "--json");
+
+    assertEquals(0, run.exit(), run::err);
+    assertTrue(run.out().contains("\"status\": \"up_to_date\""), run.out());
+    assertTrue(run.out().contains("\"from\": \"99.0.0\""), run.out());
+    assertFalse(run.out().contains("[dry-run]"), run.out());
+    assertInstalled("installed");
+  }
+
+  @Test
   void theVersionIsWhatTheBinaryAnswersToDashV() throws Exception {
     var script = executable(tempDir.resolve("fake-sail"), "");
     Files.writeString(script, "#!/bin/sh\necho \"sail 0.47.1\"\n");
@@ -234,6 +265,16 @@ class UpgradeCommandTest {
   }
 
   private Run upgrade(Function<Path, String> versionOf, String... args) {
+    return upgrade(
+        () -> {
+          throw new AssertionError("Only a release upgrade looks up the latest release");
+        },
+        versionOf,
+        args);
+  }
+
+  private Run upgrade(
+      Callable<String> latestRelease, Function<Path, String> versionOf, String... args) {
     var out = new ByteArrayOutputStream();
     var err = new ByteArrayOutputStream();
     var originalOut = System.out;
@@ -242,7 +283,7 @@ class UpgradeCommandTest {
         var capturedErr = new PrintStream(err, true, StandardCharsets.UTF_8)) {
       System.setOut(capturedOut);
       System.setErr(capturedErr);
-      var command = new CommandLine(new UpgradeCommand(versionOf, () -> installed));
+      var command = new CommandLine(new UpgradeCommand(versionOf, () -> installed, latestRelease));
       var exit = command.execute(args);
       return new Run(
           exit, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));

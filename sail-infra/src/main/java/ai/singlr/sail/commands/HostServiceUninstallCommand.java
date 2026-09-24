@@ -5,7 +5,14 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.PtyHostUnit;
+import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -29,20 +36,23 @@ public final class HostServiceUninstallCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var shell = new ShellExecutor(dryRun);
-    var installer =
-        HostServiceInstallers.create(
-            shell, "127.0.0.1", 7070, HostServiceInstallers.currentUsername());
+    var removed =
+        uninstall(
+            new ShellExecutor(dryRun),
+            HostServiceInstallers.mode(),
+            HostServiceInstallers.userHome());
+    System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ Uninstalled " + removed));
+  }
 
-    installer.uninstall();
-    new ai.singlr.sail.engine.PtyHostUnit(
-            shell,
-            installer.mode(),
-            java.nio.file.Path.of(System.getProperty("user.home")),
-            ai.singlr.sail.engine.SailPaths.installedBinary())
-        .uninstall();
-
-    System.out.println(
-        Ansi.AUTO.string("  @|bold,green ✓|@ Uninstalled " + installer.serviceFilePath()));
+  /**
+   * Removes sail-api and the pty host, returning the sail-api unit's path. Removing a unit runs no
+   * sail, so a box whose installed binary is gone or broken can still be cleaned up.
+   */
+  static Path uninstall(ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome)
+      throws IOException, InterruptedException, TimeoutException {
+    var api = HostServiceInstallers.existing(shell, mode, userHome);
+    api.uninstall();
+    new PtyHostUnit(shell, mode, userHome, SailPaths.INSTALLED_BINARY).uninstall();
+    return api.serviceFilePath();
   }
 }
