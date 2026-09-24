@@ -820,11 +820,13 @@ class SailOperationsSeamTest {
       assertNotNull(resolved.resolvedRev());
       assertEquals("remote", box.specs.findById("auth").orElseThrow().title());
       assertTrue(operations.conflicts().isEmpty());
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              operations.resolveConflict(
-                  "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+      var settled =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  operations.resolveConflict(
+                      "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+      assertEquals(404, settled.status());
       box.specs.update(SyncBox.spec("auth", "local", "pending"));
       box.conflicts.record(
           "spec",

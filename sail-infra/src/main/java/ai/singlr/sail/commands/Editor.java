@@ -10,9 +10,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 /**
- * The engineer's editor, opened on a file. {@code $EDITOR} is read as git reads it: a shell
- * command, so {@code code --wait} works, with the file passed as its argument and never spliced
- * into the command. Unset or blank means {@code vi}.
+ * The engineer's editor, opened on a file. {@code $EDITOR} runs as git runs it: as a shell command,
+ * so {@code code --wait} works and a path with spaces is quoted, with the file passed as its
+ * argument and never spliced into the command. Unset or blank means {@code vi}.
  */
 @FunctionalInterface
 interface Editor {

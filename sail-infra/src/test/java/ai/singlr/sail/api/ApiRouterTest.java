@@ -215,6 +215,8 @@ class ApiRouterTest {
         var gone = get(server, "/v1/conflicts/auth?type=spec&template=true", "token");
         assertEquals(404, gone.statusCode(), gone.body());
         assertTrue(gone.body().contains("No open conflict for 'auth'."), gone.body());
+        var settled = post(server, path, "token", mergeBody(started));
+        assertEquals(404, settled.statusCode(), settled.body());
       }
     }
   }

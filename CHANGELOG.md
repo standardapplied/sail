@@ -10,10 +10,10 @@
   - `--merge-file` takes a template from `show --template`, so an agent or a script can merge without a terminal.
   - API clients get the same template from `GET /v1/conflicts/<id>?template=true`, on the web API and the in-container socket. A path suffix would collide with a file conflict's `project/path` id.
   - A merged record that is not valid YAML, or repeats a key, is refused as a bad request.
-  - A clash on a field with several lines, such as a body, no longer breaks the template: main's value is commented line by line in its header.
+  - A clash on a field with several lines, such as a body, no longer breaks the template: main's value is commented line by line in its header, with any character YAML cannot carry, such as a terminal colour code, written as `\uXXXX`.
   - A template for a conflict that is not open is `404` on both APIs, as is a resolve of one; a stale merge is told to start again, not to resolve.
   - `--mine` and `--theirs` are unchanged: the side they choose and the merge base come from the same recorded conflict.
-- **`$EDITOR` runs as git runs it.** `sail conflicts resolve --merge` and `sail project edit` run `$EDITOR` as a shell command with the file as its argument, so `EDITOR="code --wait"` works. An unset or blank `EDITOR` means `vi` in both, and a failed editor names its exit status.
+- **`$EDITOR` runs as git runs it.** `sail conflicts resolve --merge` and `sail project edit` run `$EDITOR` as a shell command with the file as its argument, so `EDITOR="code --wait"` works and an editor path with spaces is quoted, as for git. An unset or blank `EDITOR` means `vi` in both, and a failed editor names its exit status.
 
 ## 0.46.1
 

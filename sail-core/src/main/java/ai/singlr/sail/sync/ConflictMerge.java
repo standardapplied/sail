@@ -114,9 +114,36 @@ public final class ConflictMerge {
     };
   }
 
-  /** {@code text} kept inside the header comment: each line after its first is commented too. */
+  /**
+   * {@code text} kept inside the header comment: each line after its first is commented too, and
+   * every character YAML may not carry, even in a comment, is written as a Unicode escape.
+   */
   private static String commented(String text) {
-    return text.lines().collect(Collectors.joining("\n#     "));
+    return text.lines().map(ConflictMerge::printable).collect(Collectors.joining("\n#     "));
+  }
+
+  private static String printable(String line) {
+    var out = new StringBuilder();
+    line.codePoints()
+        .forEach(
+            point -> {
+              if (yamlPrintable(point)) {
+                out.appendCodePoint(point);
+              } else {
+                out.append("\\u%04x".formatted(point));
+              }
+            });
+    return out.toString();
+  }
+
+  /** YAML 1.2's printable set: what a stream may contain anywhere, comments included. */
+  private static boolean yamlPrintable(int point) {
+    return point == 0x09
+        || (point >= 0x20 && point <= 0x7E)
+        || point == 0x85
+        || (point >= 0xA0 && point <= 0xD7FF)
+        || (point >= 0xE000 && point <= 0xFFFD)
+        || point >= 0x10000;
   }
 
   private static Object value(Map<String, Object> map, String field) {

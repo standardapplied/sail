@@ -90,6 +90,24 @@ class ConflictMergeTest {
   }
 
   @Test
+  void theirsIsShownInTheHeaderWhateverCharactersItCarries() {
+    var theirsBody = "main: first\r\nkey: value\rred \u001b[31mtext\u007f\u0000 \ud800 end\n";
+    var base = map("title", "Auth", "body", "base");
+    var mine = map("title", "Auth", "body", "mine");
+    var theirs = map("title", "Auth", "body", theirsBody);
+
+    var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of("body"), "sha256:c0");
+    var parsed = ConflictMerge.parseTemplate(template);
+
+    assertEquals("mine", parsed.get("body"));
+    assertTrue(
+        template.contains(
+            "#   body: theirs = main: first\n#     key: value\n"
+                + "#     red \\u001b[31mtext\\u007f\\u0000 \\ud800 end\n"),
+        template);
+  }
+
+  @Test
   void mergeTemplateRoundTripsAMultiLineBody() {
     var base = map("title", "Auth", "body", "one\ntwo");
     var mine = map("title", "Mine", "body", "one\ntwo");

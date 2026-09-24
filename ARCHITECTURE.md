@@ -274,24 +274,24 @@ log, so no choice loses work.
 A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
 a resolve is refused (`409` over the API) when the live row no longer matches the conflict's
 recorded local side, ignoring latest-wins fields such as a run's heartbeat; `sail sync`
-re-records every parked conflict, after which the same resolve applies. `--mine` and
-`--theirs` need no such guard on main's side: the side they choose and the merge base come from
-the same row, the recorded remote only becomes the merge base, and the next round runs the
-three-way against main's current row, so a disjoint change on main merges and the same field
-parks again. `--merge` is different. A merged record is a full record made from the conflict as
-it was when the merge started, and a round re-records the conflict with main's news meanwhile;
-applied to the fresh version it would read every field main moved as a local edit back to its
-old value, and that edit would win main's compare-and-set. So a merge is bound to the conflict it
-was made from. `sail conflicts show <id> --template` (and `--merge`, which opens it in
-`$EDITOR`; `GET /v1/conflicts/<id>?template=true` over either API) emits the record with a
-`_conflict` key: a short SHA-256 over the work in the conflict's recorded base, local and
-remote snapshots (who wrote a side is no news, as conflict detection holds), which a re-record
-that brings no news keeps. A merge resolve without it is refused (`400`), one made from another
-version is refused (`409`) with nothing written, a conflict that is not open is `404`, and the key never reaches the row, the change log or the wire. A refused `--merge`
-keeps the edited file and prints its path, as reference for the redo. Ids are unique only within
-a type and a spec's room carries the spec's id, so a conflict is addressed by type and id:
-`--type` on the CLI, `?type=` over the API. An id parked under several types is refused naming
-them (`400`) rather than guessed.
+re-records every parked conflict, after which the same resolve applies. `--mine` and `--theirs`
+need no such guard on main's side: the side they choose and the merge base come from the same
+row, the recorded remote only becomes the merge base, and the next round runs the three-way
+against main's current row, so a disjoint change on main merges and the same field parks again.
+`--merge` is different. A merged record is a full record made from the conflict as it was when
+the merge started, and a round re-records the conflict with main's news meanwhile; applied to
+the fresh version it would read every field main moved as a local edit back to its old value,
+and that edit would win main's compare-and-set. So a merge is bound to the conflict it was made
+from. `sail conflicts show <id> --template` (and `--merge`, which opens it in `$EDITOR`; `GET
+/v1/conflicts/<id>?template=true` over either API) emits the record with a `_conflict` key: a
+short SHA-256 over the work in the conflict's recorded base, local and remote snapshots (who
+wrote a side is no news, as conflict detection holds), which a re-record that brings no news
+keeps. A merge resolve without it is refused (`400`), one made from another version is refused
+(`409`) with nothing written, a conflict that is not open is `404`, and the key never reaches
+the row, the change log or the wire. A refused `--merge` keeps the edited file and prints its
+path, as reference for the redo. Ids are unique only within a type and a spec's room carries
+the spec's id, so a conflict is addressed by type and id: `--type` on the CLI, `?type=` over
+the API. An id parked under several types is refused naming them (`400`) rather than guessed.
 
 ### Archive, delete, prune
 

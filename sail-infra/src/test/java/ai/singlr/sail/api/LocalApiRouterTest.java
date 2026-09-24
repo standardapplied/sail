@@ -190,6 +190,7 @@ class LocalApiRouterTest {
       assertTrue(box.conflicts.pending().isEmpty());
       var gone = lane.handle(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
       assertEquals(404, gone.status(), gone.body().toString());
+      assertEquals(404, lane.handle(merge(started)).status());
     }
   }
 
