@@ -36,6 +36,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
@@ -631,13 +632,12 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
+      var theirs =
+          new LinkedHashMap<>(
+              ConflictMerge.parseTemplate(operations.conflictMergeTemplate("spec", "auth")));
+      theirs.putAll(YamlUtil.parseMap(operations.conflict("spec", "auth").remoteSnapshot()));
       var body =
-          YamlUtil.dumpJson(
-              Map.of(
-                  "strategy",
-                  strategy,
-                  "merged",
-                  operations.conflict("spec", "auth").remoteSnapshot()));
+          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpJson(theirs)));
       for (var handle : List.of("uday", "other")) {
         var member = credential(box.db, handle, "member", lane);
         assertEquals(200, send(server, "GET", "/v1/conflicts/auth", member, "").statusCode());
@@ -820,11 +820,13 @@ class SailOperationsSeamTest {
       assertNotNull(resolved.resolvedRev());
       assertEquals("remote", box.specs.findById("auth").orElseThrow().title());
       assertTrue(operations.conflicts().isEmpty());
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              operations.resolveConflict(
-                  "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+      var settled =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  operations.resolveConflict(
+                      "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+      assertEquals(404, settled.status());
       box.specs.update(SyncBox.spec("auth", "local", "pending"));
       box.conflicts.record(
           "spec",
@@ -844,7 +846,7 @@ class SailOperationsSeamTest {
           List.of("title"));
       var merged =
           new LinkedHashMap<>(
-              YamlUtil.parseMap(operations.conflict("spec", "auth").localSnapshot()));
+              ConflictMerge.parseTemplate(operations.conflictMergeTemplate("spec", "auth")));
       merged.put("title", "merged");
       operations.resolveConflict(
           "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));

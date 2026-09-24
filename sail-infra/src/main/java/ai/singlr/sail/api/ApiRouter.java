@@ -266,7 +266,8 @@ public final class ApiRouter implements HttpHandler {
       return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
     }
     var path = request.uri().getPath();
-    var type = QueryParameters.from(request.uri()).values().get("type");
+    var query = QueryParameters.from(request.uri()).values();
+    var type = query.get("type");
     if (request.is(POST) && path.endsWith("/resolve") && request.size() > 3) {
       var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
       var body = JsonBody.readMap(exchange);
@@ -281,7 +282,11 @@ public final class ApiRouter implements HttpHandler {
           SyncViews.conflict(operations.resolveConflict(type, id, resolution, actorOf(exchange))));
     }
     requireMethod(request, GET);
-    var conflict = operations.conflict(type, path.substring("/v1/conflicts/".length()));
+    var id = path.substring("/v1/conflicts/".length());
+    if (Boolean.parseBoolean(query.get("template"))) {
+      return ApiResponse.ok(Map.of("template", operations.conflictMergeTemplate(type, id)));
+    }
+    var conflict = operations.conflict(type, id);
     if (conflict == null) {
       throw notFound();
     }

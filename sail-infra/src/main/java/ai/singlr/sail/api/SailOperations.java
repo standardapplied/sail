@@ -275,6 +275,11 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
+  public String conflictMergeTemplate(String type, String id) {
+    return new ConflictOperations(controlPlane).mergeTemplate(type, id);
+  }
+
+  @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     return resolveConflict(
         type, id, resolution, Actor.cliOperator(syncOperations.configuration().handle()));

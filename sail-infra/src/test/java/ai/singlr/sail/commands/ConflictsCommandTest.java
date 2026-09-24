@@ -8,13 +8,14 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SyncConfig;
@@ -36,9 +37,11 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -95,28 +98,11 @@ class ConflictsCommandTest {
 
   @Test
   void strategyRequiresExactlyOneChoice() {
-    assertEquals(
-        ConflictsCommand.Resolve.Strategy.MINE,
-        ConflictsCommand.Resolve.strategy(true, false, false));
-    assertEquals(
-        ConflictsCommand.Resolve.Strategy.THEIRS,
-        ConflictsCommand.Resolve.strategy(false, true, false));
-    assertEquals(
-        ConflictsCommand.Resolve.Strategy.MERGE,
-        ConflictsCommand.Resolve.strategy(false, false, true));
+    assertEquals(Resolution.Strategy.MINE, ConflictsCommand.Resolve.strategy(true, false, false));
+    assertEquals(Resolution.Strategy.THEIRS, ConflictsCommand.Resolve.strategy(false, true, false));
+    assertEquals(Resolution.Strategy.MERGE, ConflictsCommand.Resolve.strategy(false, false, true));
     assertNull(ConflictsCommand.Resolve.strategy(false, false, false));
     assertNull(ConflictsCommand.Resolve.strategy(true, true, false));
-  }
-
-  @Test
-  void mergeableOnlyWhenBothSidesArePresent() {
-    var both = conflicts.record("spec", "a", "{}", "{}", "{}", List.of("title"));
-    assertTrue(ConflictsCommand.Resolve.mergeable(conflicts.pendingFor("spec", "a").orElseThrow()));
-    assertNotEquals(0, both);
-
-    conflicts.record("spec", "b", "{}", null, "{}", List.of("<deleted>"));
-    assertFalse(
-        ConflictsCommand.Resolve.mergeable(conflicts.pendingFor("spec", "b").orElseThrow()));
   }
 
   @Test
@@ -150,27 +136,6 @@ class ConflictsCommandTest {
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
     var out = ConflictsCommand.renderList(conflicts.pending(), true);
     assertTrue(out.contains("\"type\": \"file\""));
-  }
-
-  @Test
-  void mergeIsOfferedOnlyForSpecsNotProjectsOrFiles() {
-    conflicts.record("project", "acme", "{}", "{}", "{}", List.of("definition"));
-    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
-
-    assertFalse(
-        ConflictsCommand.Resolve.mergeable(conflicts.pendingFor("project", "acme").orElseThrow()),
-        "a project definition is a single blob — resolve with --mine/--theirs");
-    assertFalse(
-        ConflictsCommand.Resolve.mergeable(
-            conflicts.pendingFor("file", "acme/x.txt").orElseThrow()));
-  }
-
-  @Test
-  void fileConflictsAreNeverFieldMergeable() {
-    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
-    assertFalse(
-        ConflictsCommand.Resolve.mergeable(
-            conflicts.pendingFor("file", "acme/x.txt").orElseThrow()));
   }
 
   @Test
@@ -274,25 +239,38 @@ class ConflictsCommandTest {
   private void parkASpecAndItsRoomUnderOneId() {
     new SpecStore(db).create(SyncBox.spec("auth", "node title", "pending"));
     new RoomStore(db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
-    var replicas = SyncedEntities.replicas(db, "node", "node");
-    for (var parked : List.of(List.of("spec", "title"), List.of("room", "wake"))) {
-      var replica = replicas.get(parked.getFirst());
-      var field = parked.getLast();
-      var local = replica.current("auth");
-      var remote = new LinkedHashMap<>(local);
-      remote.put(field, "main's " + field);
-      replica.recordConflict("auth", local, local, remote, List.of(field));
-    }
+    park("spec", "title", "main's title");
+    park("room", "wake", "main's wake");
   }
 
-  private record Ran(int exit, String out, Exception escaped) {}
+  private void park(String type, String field, String theirs) {
+    var replica = SyncedEntities.replicas(db, "node", "node").get(type);
+    var local = replica.current("auth");
+    var remote = new LinkedHashMap<>(local);
+    remote.put(field, theirs);
+    replica.recordConflict("auth", local, local, remote, List.of(field));
+  }
+
+  private SyncConflicts.Conflict parkedSpec() {
+    return conflicts.pendingFor("spec", "auth").orElseThrow();
+  }
+
+  private String title() {
+    return new SpecStore(db).findById("auth").orElseThrow().title();
+  }
+
+  private record Ran(int exit, String out, String err, Exception escaped) {}
 
   private Ran run(Object command, String... args) {
     var out = new ByteArrayOutputStream();
-    var original = System.out;
+    var err = new ByteArrayOutputStream();
+    var originalOut = System.out;
+    var originalErr = System.err;
     var escaped = new Exception[1];
-    try (var stream = new PrintStream(out, true, StandardCharsets.UTF_8)) {
-      System.setOut(stream);
+    try (var outStream = new PrintStream(out, true, StandardCharsets.UTF_8);
+        var errStream = new PrintStream(err, true, StandardCharsets.UTF_8)) {
+      System.setOut(outStream);
+      System.setErr(errStream);
       var exit =
           new CommandLine(command)
               .setExecutionExceptionHandler(
@@ -301,10 +279,41 @@ class ConflictsCommandTest {
                     return 1;
                   })
               .execute(args);
-      return new Ran(exit, out.toString(StandardCharsets.UTF_8), escaped[0]);
+      return new Ran(
+          exit,
+          out.toString(StandardCharsets.UTF_8),
+          err.toString(StandardCharsets.UTF_8),
+          escaped[0]);
     } finally {
-      System.setOut(original);
+      System.setOut(originalOut);
+      System.setErr(originalErr);
     }
+  }
+
+  private ConflictsCommand.Show show() {
+    return new ConflictsCommand.Show(this::operations);
+  }
+
+  private ConflictsCommand.Resolve resolve() {
+    return resolve(file -> fail("the editor must not open"));
+  }
+
+  private ConflictsCommand.Resolve resolve(Editor editor) {
+    return new ConflictsCommand.Resolve(this::operations, editor);
+  }
+
+  private static Editor mergingTitle(List<Path> opened, Runnable meanwhile) {
+    return file -> {
+      opened.add(file);
+      Files.writeString(file, retitled(Files.readString(file)));
+      meanwhile.run();
+      return 0;
+    };
+  }
+
+  private static String retitled(String template) {
+    assertTrue(template.contains("\ntitle: node title\n"), template);
+    return template.replace("\ntitle: node title\n", "\ntitle: merged title\n");
   }
 
   @Test
@@ -326,8 +335,8 @@ class ConflictsCommandTest {
   void anIdParkedUnderSeveralTypesIsRefusedByNameUntilTypeSaysWhich() {
     parkASpecAndItsRoomUnderOneId();
 
-    var ambiguous = run(new ConflictsCommand.Resolve(this::operations), "auth", "--mine");
-    var shown = run(new ConflictsCommand.Show(this::operations), "auth");
+    var ambiguous = run(resolve(), "auth", "--mine");
+    var shown = run(show(), "auth");
 
     for (var refused : List.of(ambiguous, shown)) {
       assertEquals(1, refused.exit());
@@ -342,9 +351,8 @@ class ConflictsCommandTest {
   void typeSettlesTheNamedConflictAndLeavesItsTwinParked() {
     parkASpecAndItsRoomUnderOneId();
 
-    var shown = run(new ConflictsCommand.Show(this::operations), "auth", "--type", "room");
-    var resolved =
-        run(new ConflictsCommand.Resolve(this::operations), "auth", "--type", "spec", "--theirs");
+    var shown = run(show(), "auth", "--type", "room");
+    var resolved = run(resolve(), "auth", "--type", "spec", "--theirs");
 
     assertEquals(0, shown.exit());
     assertTrue(shown.out().contains("wake"), shown.out());
@@ -361,8 +369,7 @@ class ConflictsCommandTest {
     parkASpecAndItsRoomUnderOneId();
     new SpecStore(db).setContent("auth", "written after the conflict was recorded", "");
 
-    var stale =
-        run(new ConflictsCommand.Resolve(this::operations), "auth", "--type", "spec", "--mine");
+    var stale = run(resolve(), "auth", "--type", "spec", "--mine");
 
     assertEquals(1, stale.exit());
     assertEquals(409, assertInstanceOf(ApiException.class, stale.escaped()).status());
@@ -371,50 +378,220 @@ class ConflictsCommandTest {
   }
 
   @Test
-  void aMergedRecordFromAFileSettlesASpecAndIsRefusedForWhatHasNoFieldsToMerge()
-      throws IOException {
+  void aTemplateShownOnTheCommandLineSettlesASpecThroughAMergeFileButNotARoom() throws IOException {
     parkASpecAndItsRoomUnderOneId();
-    var merged =
-        new LinkedHashMap<>(
-            YamlUtil.parseMap(
-                new ai.singlr.sail.engine.ConflictOperations(db)
-                    .find("spec", "auth")
-                    .localSnapshot()));
-    merged.put("title", "merged title");
-    var file = Files.writeString(tempDir.resolve("merged.yaml"), YamlUtil.dumpJson(merged));
+    var shown = run(show(), "auth", "--type", "spec", "--template");
+    var file = Files.writeString(tempDir.resolve("merged.yaml"), retitled(shown.out()));
 
-    var room =
-        run(
-            new ConflictsCommand.Resolve(this::operations),
-            "auth",
-            "--type",
-            "room",
-            "--merge-file",
-            file.toString());
-    var spec =
-        run(
-            new ConflictsCommand.Resolve(this::operations),
-            "auth",
-            "--type",
-            "spec",
-            "--merge-file",
-            file.toString());
+    var room = run(resolve(), "auth", "--type", "room", "--merge-file", file.toString());
+    var spec = run(resolve(), "auth", "--type", "spec", "--merge-file", file.toString());
 
+    assertEquals(0, shown.exit());
     assertEquals(1, room.exit(), "a room has no field-level merge");
+    assertEquals(
+        "Field-level --merge isn't available for this conflict; use --mine or --theirs.",
+        room.escaped().getMessage());
     assertEquals(0, spec.exit());
-    assertEquals("merged title", new SpecStore(db).findById("auth").orElseThrow().title());
+    assertEquals("merged title", title());
     assertEquals(
         List.of("room"),
         conflicts.pending().stream().map(SyncConflicts.Conflict::entityType).toList());
   }
 
   @Test
-  void aVerbAimedAtNothingParkedSaysSoAndFails() {
-    assertEquals(1, run(new ConflictsCommand.Show(this::operations), "ghost").exit());
-    assertEquals(1, run(new ConflictsCommand.Resolve(this::operations), "ghost", "--mine").exit());
+  void aMergeFileThatDoesNotNameThisVersionOfTheConflictIsRefusedAndTouchesNothing()
+      throws IOException {
+    parkASpecAndItsRoomUnderOneId();
+    var template = run(show(), "auth", "--type", "spec", "--template").out();
+    var unnamed =
+        Files.writeString(
+            tempDir.resolve("unnamed.yaml"),
+            retitled(template).replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", ""));
+    var stale = Files.writeString(tempDir.resolve("stale.yaml"), retitled(template));
+    var rev = new SpecStore(db).revOf("auth");
+
+    var parked = parkedSpec();
+    var absent = run(resolve(), "auth", "--type", "spec", "--merge-file", unnamed.toString());
+    assertEquals(1, absent.exit());
+    assertEquals(400, assertInstanceOf(ApiException.class, absent.escaped()).status());
     assertEquals(
-        1,
-        run(new ConflictsCommand.Resolve(this::operations), "ghost", "--mine", "--theirs").exit(),
-        "two strategies are no decision");
+        "A merged record must start from 'sail conflicts show auth --template'.",
+        absent.escaped().getMessage());
+    assertEquals(parked, parkedSpec());
+
+    park("spec", "title", "main's title, revised");
+    var reparked = parkedSpec();
+    var moved = run(resolve(), "auth", "--type", "spec", "--merge-file", stale.toString());
+    assertEquals(1, moved.exit());
+    assertEquals(409, assertInstanceOf(ApiException.class, moved.escaped()).status());
+    assertEquals(
+        "'auth' was re-recorded after this merge was started. Start again from the fresh version.",
+        moved.escaped().getMessage());
+    assertEquals(reparked, parkedSpec());
+
+    assertEquals("node title", title());
+    assertEquals(rev, new SpecStore(db).revOf("auth"));
+  }
+
+  @Test
+  void aConflictTheBoxHasSinceWrittenOverIsRefusedAMergeBeforeTheEditorOpens() {
+    parkASpecAndItsRoomUnderOneId();
+    new SpecStore(db).setContent("auth", "written after the conflict was recorded", "");
+    var opened = new ArrayList<Path>();
+
+    var stale = run(resolve(mergingTitle(opened, () -> {})), "auth", "--type", "spec", "--merge");
+
+    assertEquals(1, stale.exit());
+    assertEquals(409, assertInstanceOf(ApiException.class, stale.escaped()).status());
+    assertEquals(List.of(), opened);
+    assertEquals(2, conflicts.pending().size());
+  }
+
+  @Test
+  void aMergeSavedInTheEditorSettlesTheSpecAndLeavesNoFileBehind() {
+    parkASpecAndItsRoomUnderOneId();
+    var opened = new ArrayList<Path>();
+
+    var saved = run(resolve(mergingTitle(opened, () -> {})), "auth", "--type", "spec", "--merge");
+
+    assertEquals(0, saved.exit(), saved.err());
+    assertTrue(saved.out().contains("Resolved"), saved.out());
+    assertEquals("merged title", title());
+    assertFalse(Files.exists(opened.getFirst()));
+    assertEquals(
+        List.of("room"),
+        conflicts.pending().stream().map(SyncConflicts.Conflict::entityType).toList());
+  }
+
+  @Test
+  void aMergeRefusedAfterTheEditorIsKeptAndItsPathPrintedBesideTheError() throws IOException {
+    parkASpecAndItsRoomUnderOneId();
+    var opened = new ArrayList<Path>();
+
+    var refused =
+        run(
+            resolve(mergingTitle(opened, () -> park("spec", "title", "main's title, revised"))),
+            "auth",
+            "--type",
+            "spec",
+            "--merge");
+
+    var kept = opened.getFirst();
+    try {
+      assertEquals(1, refused.exit());
+      assertEquals(409, assertInstanceOf(ApiException.class, refused.escaped()).status());
+      assertTrue(refused.err().contains("kept for reference at " + kept), refused.err());
+      assertTrue(Files.readString(kept).contains("\ntitle: merged title\n"));
+      assertEquals("node title", title());
+      assertEquals(2, conflicts.pending().size());
+    } finally {
+      Files.deleteIfExists(kept);
+    }
+  }
+
+  @Test
+  void aMergeSavedInAnotherEncodingIsKeptAndItsPathPrinted() throws IOException {
+    parkASpecAndItsRoomUnderOneId();
+    var opened = new ArrayList<Path>();
+
+    var unreadable =
+        run(
+            resolve(
+                file -> {
+                  opened.add(file);
+                  Files.write(file, "title: café\n".getBytes(StandardCharsets.ISO_8859_1));
+                  return 0;
+                }),
+            "auth",
+            "--type",
+            "spec",
+            "--merge");
+
+    var kept = opened.getFirst();
+    try {
+      assertEquals(1, unreadable.exit());
+      assertInstanceOf(CharacterCodingException.class, unreadable.escaped());
+      assertTrue(unreadable.err().contains("kept for reference at " + kept), unreadable.err());
+      assertTrue(Files.exists(kept));
+      assertEquals("node title", title());
+      assertEquals(2, conflicts.pending().size());
+    } finally {
+      Files.deleteIfExists(kept);
+    }
+  }
+
+  @Test
+  void anEditorThatFailsAbortsTheMergeAndLeavesNoFileBehind() {
+    parkASpecAndItsRoomUnderOneId();
+    var opened = new ArrayList<Path>();
+
+    var aborted =
+        run(
+            resolve(
+                file -> {
+                  opened.add(file);
+                  return 1;
+                }),
+            "auth",
+            "--type",
+            "spec",
+            "--merge");
+    var unlaunched =
+        run(
+            resolve(
+                file -> {
+                  opened.add(file);
+                  throw new IOException("Cannot run program \"nano\"");
+                }),
+            "auth",
+            "--type",
+            "spec",
+            "--merge");
+
+    assertEquals(1, aborted.exit());
+    assertNull(aborted.escaped());
+    assertTrue(aborted.err().contains("Editor exited with status 1; aborting."), aborted.err());
+    assertEquals(1, unlaunched.exit());
+    assertInstanceOf(IOException.class, unlaunched.escaped());
+    assertEquals(2, opened.size());
+    opened.forEach(file -> assertFalse(Files.exists(file), file.toString()));
+    assertEquals(2, conflicts.pending().size());
+    assertEquals("node title", title());
+  }
+
+  @Test
+  void theEditorIsTheCommandItNamesRunOnTheTemplate() {
+    parkASpecAndItsRoomUnderOneId();
+
+    var aborted = run(resolve(Editor.command("false")), "auth", "--type", "spec", "--merge");
+    var saved = run(resolve(Editor.command("true")), "auth", "--type", "spec", "--merge");
+
+    assertEquals(1, aborted.exit());
+    assertEquals(0, saved.exit(), saved.err());
+    assertEquals("node title", title(), "a template saved untouched keeps mine on the clash");
+    assertEquals(
+        List.of("room"),
+        conflicts.pending().stream().map(SyncConflicts.Conflict::entityType).toList());
+  }
+
+  @Test
+  void theHelpPointsAMergeFileAtTheTemplateShowPrints() {
+    var verbs = new CommandLine(new ConflictsCommand()).getSubcommands();
+
+    var template = verbs.get("show").getCommandSpec().findOption("--template");
+    var mergeFile = verbs.get("resolve").getCommandSpec().findOption("--merge-file");
+
+    assertTrue(template.description()[0].contains("'resolve --merge-file'"));
+    assertTrue(mergeFile.description()[0].contains("made by 'show --template'"));
+  }
+
+  @Test
+  void aVerbAimedAtNothingParkedSaysSoAndFails() {
+    assertEquals(1, run(show(), "ghost").exit());
+    assertEquals(
+        "No open conflict for 'ghost'.", run(show(), "ghost", "--template").escaped().getMessage());
+    assertEquals(1, run(resolve(), "ghost", "--mine").exit());
+    assertEquals(
+        1, run(resolve(), "ghost", "--mine", "--theirs").exit(), "two strategies are no decision");
   }
 }

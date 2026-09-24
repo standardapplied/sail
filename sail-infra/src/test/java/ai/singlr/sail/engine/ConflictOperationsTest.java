@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,7 +20,9 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncPrincipal;
@@ -27,16 +31,22 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class ConflictOperationsTest {
 
@@ -78,14 +88,16 @@ class ConflictOperationsTest {
     return node.conflicts.pendingFor("spec", "auth").orElseThrow();
   }
 
-  private static Resolution resolution(
-      Resolution.Strategy strategy, SyncConflicts.Conflict conflict) {
-    if (strategy != Resolution.Strategy.MERGE) {
-      return new Resolution(strategy, null);
-    }
-    var merged = new LinkedHashMap<>(ConflictOperations.parse(conflict.localSnapshot()));
+  private Resolution resolution(Resolution.Strategy strategy) {
+    return strategy == Resolution.Strategy.MERGE
+        ? mergedTitle(operations.mergeTemplate("spec", "auth"))
+        : new Resolution(strategy, null);
+  }
+
+  private static Resolution mergedTitle(String template) {
+    var merged = new LinkedHashMap<>(ConflictMerge.parseTemplate(template));
     merged.put("title", "merged title");
-    return new Resolution(strategy, YamlUtil.dumpJson(merged));
+    return new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpToString(merged));
   }
 
   private static Resolution mine() {
@@ -109,24 +121,248 @@ class ConflictOperationsTest {
   void aLocalEditAfterDetectionRefusesTheResolveAndTouchesNothing(Resolution.Strategy strategy)
       throws IOException {
     var conflict = parkTitle();
+    var decided = resolution(strategy);
     node.specs.setContent("auth", "written after the conflict was recorded", "");
     var rev = node.specs.revOf("auth");
 
     var refused =
-        assertThrows(
-            ApiException.class,
-            () -> operations.resolve("spec", "auth", resolution(strategy, conflict)));
+        assertThrows(ApiException.class, () -> operations.resolve("spec", "auth", decided));
 
     assertEquals(409, refused.status());
     assertEquals(
         """
         'auth' changed on this box after this conflict was recorded (body).
-        Run 'sail sync' to refresh it, then resolve.""",
+        Run 'sail sync' to refresh it, then %s."""
+            .formatted(strategy == Resolution.Strategy.MERGE ? "start the merge again" : "resolve"),
         refused.getMessage());
     assertEquals("written after the conflict was recorded", bodyOf(node));
     assertEquals("node title", titleOf(node));
     assertEquals(rev, node.specs.revOf("auth"));
     assertEquals(conflict, node.conflicts.pendingFor("spec", "auth").orElseThrow());
+  }
+
+  @Test
+  void aBodyClashMergesThroughItsTemplateWhateverLineBreaksMainsBodyHas() throws IOException {
+    main.specs.create(SyncBox.spec("auth", "title", "pending"));
+    round();
+    main.specs.setContent("auth", "main: first\r\nkey: value\rlast", "");
+    node.specs.setContent("auth", "node line one\nnode line two", "");
+    round();
+    var template = operations.mergeTemplate("spec", "auth");
+    assertTrue(template.contains("#   body: theirs = main: first\n#     key: value\n#     last\n"));
+    var merged = new LinkedHashMap<>(ConflictMerge.parseTemplate(template));
+    assertEquals("node line one\nnode line two", merged.get("body"));
+    merged.put("body", "merged\nbody");
+
+    operations.resolve(
+        "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpToString(merged)));
+    round();
+
+    assertEquals(List.of(), node.conflicts.pending());
+    assertEquals("merged\nbody", bodyOf(main));
+    assertEquals("merged\nbody", bodyOf(node));
+  }
+
+  @Test
+  void aTemplateNamesItsConflictAsTextNoYamlToolReadsAsANumber() throws IOException {
+    parkTitle();
+
+    var named = ConflictMerge.parseTemplate(operations.mergeTemplate("spec", "auth"));
+
+    assertTrue(
+        named.get(ConflictMerge.CONFLICT) instanceof String text
+            && text.matches("sha256:[0-9a-f]{16}"),
+        String.valueOf(named.get(ConflictMerge.CONFLICT)));
+  }
+
+  @Test
+  void aReRecordThatChangesOnlyWhoWroteASideKeepsTheMergeValid() throws IOException {
+    parkTitle();
+    var started = mergedTitle(operations.mergeTemplate("spec", "auth"));
+    node.db.execute(
+        "UPDATE sync_conflicts SET remote_snapshot = json_set(remote_snapshot, '$._actor',"
+            + " 'someone else') WHERE entity_id = 'auth' AND status = 'pending'");
+
+    operations.resolve("spec", "auth", started);
+
+    assertEquals(List.of(), node.conflicts.pending());
+    assertEquals("merged title", titleOf(node));
+  }
+
+  @Test
+  void aConflictThisBoxHasWrittenOverIsRefusedATemplateBeforeAnyoneMergesIt() throws IOException {
+    parkTitle();
+    node.specs.setContent("auth", "written after the conflict was recorded", "");
+
+    var refused = assertThrows(ApiException.class, () -> operations.mergeTemplate("spec", "auth"));
+
+    assertEquals(409, refused.status());
+    assertTrue(
+        refused.getMessage().contains("Run 'sail sync' to refresh it"), refused.getMessage());
+  }
+
+  @Test
+  void onlyAnOpenSpecConflictWithBothSidesPresentHasATemplate() throws IOException {
+    main.specs.create(SyncBox.spec("auth", "base title", "pending"));
+    new RoomStore(main.db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+    round();
+    new RoomStore(main.db).updateWake("auth", "on", "uday");
+    new RoomStore(node.db).updateWake("auth", "off", "uday");
+    main.specs.delete("auth");
+    node.specs.update(SyncBox.spec("auth", "node title", "pending"));
+    round();
+
+    for (var type : List.of("room", "spec")) {
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class, () -> operations.mergeTemplate(type, "auth"));
+      assertEquals(
+          "Field-level --merge isn't available for this conflict; use --mine or --theirs.",
+          refused.getMessage(),
+          type);
+    }
+    var ghost = assertThrows(ApiException.class, () -> operations.mergeTemplate(null, "ghost"));
+    assertEquals(404, ghost.status());
+    assertEquals("No open conflict for 'ghost'.", ghost.getMessage());
+  }
+
+  @Test
+  void aMergeStartedBeforeARoundBroughtMainsNewsIsRefusedAndMainKeepsIt() throws IOException {
+    parkTitle();
+    var started = mergedTitle(operations.mergeTemplate("spec", "auth"));
+    main.specs.setContent("auth", "main wrote this while the editor was open", "");
+    round();
+    var parked = node.conflicts.pendingFor("spec", "auth").orElseThrow();
+    var rev = node.specs.revOf("auth");
+
+    var refused =
+        assertThrows(ApiException.class, () -> operations.resolve("spec", "auth", started));
+
+    assertEquals(409, refused.status());
+    assertEquals(
+        "'auth' was re-recorded after this merge was started. Start again from the fresh version.",
+        refused.getMessage());
+    assertEquals(parked, node.conflicts.pendingFor("spec", "auth").orElseThrow());
+    assertEquals(rev, node.specs.revOf("auth"));
+    round();
+    assertEquals("main wrote this while the editor was open", bodyOf(main));
+    assertEquals("main title", titleOf(main));
+  }
+
+  @Test
+  void aMergeStartedAfterTheRoundSettlesOnTheMergedTitleAndMainsBody() throws IOException {
+    parkTitle();
+    main.specs.setContent("auth", "main wrote this while the editor was open", "");
+    round();
+
+    operations.resolve("spec", "auth", mergedTitle(operations.mergeTemplate("spec", "auth")));
+    round();
+
+    assertEquals(List.of(), node.conflicts.pending());
+    for (var box : List.of(main, node)) {
+      assertEquals("merged title", titleOf(box), box.id);
+      assertEquals("main wrote this while the editor was open", bodyOf(box), box.id);
+    }
+  }
+
+  @Test
+  void aRoundThatBringsNoNewsReRecordsTheConflictButKeepsTheMergeValid() throws IOException {
+    parkTitle();
+    var started = mergedTitle(operations.mergeTemplate("spec", "auth"));
+    var recorded = node.conflicts.pendingFor("spec", "auth").orElseThrow().id();
+    round();
+    assertNotEquals(recorded, node.conflicts.pendingFor("spec", "auth").orElseThrow().id());
+
+    operations.resolve("spec", "auth", started);
+    round();
+
+    assertEquals(List.of(), node.conflicts.pending());
+    assertEquals("merged title", titleOf(main));
+    assertEquals("merged title", titleOf(node));
+  }
+
+  static Stream<Arguments> unboundMerges() {
+    var unnamed = "A merged record must start from 'sail conflicts show auth --template'.";
+    return Stream.of(
+        Arguments.of(null, 400, unnamed),
+        Arguments.of(" ", 400, unnamed),
+        Arguments.of(7, 400, unnamed),
+        Arguments.of(
+            "0000000000000000",
+            409,
+            "'auth' was re-recorded after this merge was started. Start again from the fresh"
+                + " version."));
+  }
+
+  @ParameterizedTest
+  @MethodSource("unboundMerges")
+  void aMergeThatDoesNotNameThisConflictIsRefusedAndTouchesNothing(
+      Object madeFrom, int status, String message) throws IOException {
+    parkTitle();
+    var merged =
+        new LinkedHashMap<>(ConflictMerge.parseTemplate(operations.mergeTemplate("spec", "auth")));
+    merged.put("title", "merged title");
+    merged.put(ConflictMerge.CONFLICT, madeFrom);
+    var parked = node.conflicts.pendingFor("spec", "auth").orElseThrow();
+    var rev = node.specs.revOf("auth");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                operations.resolve(
+                    "spec",
+                    "auth",
+                    new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged))));
+
+    assertEquals(status, refused.status());
+    assertEquals(message, refused.getMessage());
+    assertEquals("node title", titleOf(node));
+    assertEquals(rev, node.specs.revOf("auth"));
+    assertEquals(parked, node.conflicts.pendingFor("spec", "auth").orElseThrow());
+  }
+
+  @Test
+  void aMergesBindingNeverReachesTheRowTheChangeLogOrTheWire() throws IOException {
+    parkTitle();
+
+    operations.resolve("spec", "auth", mergedTitle(operations.mergeTemplate("spec", "auth")));
+    String wire;
+    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      link.reconcile("spec", replicas.get("spec"));
+      wire = link.log().toString();
+    }
+
+    assertTrue(wire.contains("merged title"), wire);
+    assertFalse(wire.contains(ConflictMerge.CONFLICT), wire);
+    for (var box : List.of(main, node)) {
+      assertEquals("merged title", titleOf(box), box.id);
+      assertEquals(List.of(), rowsNaming(box, ConflictMerge.CONFLICT), box.id);
+    }
+  }
+
+  private static List<String> rowsNaming(SyncBox box, String key) {
+    var tables =
+        box.db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            row -> row.text(0));
+    var naming = new ArrayList<String>();
+    for (var table : tables) {
+      for (var row :
+          box.db.query("SELECT * FROM \"" + table + "\"", ConflictOperationsTest::cells)) {
+        if (row.stream()
+            .anyMatch(cell -> cell.contains("\"" + key + "\"") || cell.contains(key + ":"))) {
+          naming.add(table + ": " + row);
+        }
+      }
+    }
+    return naming;
+  }
+
+  private static List<String> cells(Sqlite.Row row) {
+    return IntStream.range(0, row.columnCount())
+        .mapToObj(column -> Objects.toString(row.text(column), ""))
+        .toList();
   }
 
   @Test
@@ -286,9 +522,12 @@ class ConflictOperationsTest {
   }
 
   @Test
-  void resolvingWhatIsNotParkedIsRefused() {
+  void resolvingWhatIsNotParkedIsNotFound() {
     assertNull(operations.find(null, "ghost"));
-    assertThrows(IllegalArgumentException.class, () -> operations.resolve("spec", "ghost", mine()));
+    var refused =
+        assertThrows(ApiException.class, () -> operations.resolve("spec", "ghost", mine()));
+    assertEquals(404, refused.status());
+    assertEquals("No open conflict for 'ghost'.", refused.getMessage());
   }
 
   private static String b64(String text) {

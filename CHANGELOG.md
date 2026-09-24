@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.46.2
+
+- **A merge applies only to the conflict it was made from.** A merged record is a full record. A merge started before a round re-recorded the conflict with main's news used to revert that news: every field main had moved since read as a local edit back to its old value, and won main's compare-and-set.
+  - `sail conflicts show <id> --template` prints the record to merge. Its `_conflict` key names the version of the conflict it was made from. `--merge` opens the same template in `$EDITOR`.
+  - A merge without `_conflict` is refused (`400`). One made from an earlier version is refused (`409`) with nothing written. A round that brings no news keeps a template valid.
+  - `--merge` refuses a conflict this box has written over before the editor opens.
+  - A refused `--merge` keeps the edited file and prints its path, as reference for the redo.
+  - `--merge-file` takes a template from `show --template`, so an agent or a script can merge without a terminal.
+  - API clients get the same template from `GET /v1/conflicts/<id>?template=true`, on the web API and the in-container socket. A path suffix would collide with a file conflict's `project/path` id.
+  - A merged record that is not valid YAML, or repeats a key, is refused as a bad request.
+  - A clash on a field with several lines, such as a body, no longer breaks the template: main's value is commented line by line in its header, with any character YAML cannot carry, such as a terminal colour code, written as `\uXXXX`.
+  - A template for a conflict that is not open is `404` on both APIs, as is a resolve of one; a stale merge is told to start again, not to resolve.
+  - `--mine` and `--theirs` are unchanged: the side they choose and the merge base come from the same recorded conflict.
+- **`$EDITOR` runs as git runs it.** `sail conflicts resolve --merge` and `sail project edit` run `$EDITOR` as a shell command with the file as its argument, so `EDITOR="code --wait"` works and an editor path with spaces is quoted, as for git. An unset or blank `EDITOR` means `vi` in both, and a failed editor names its exit status.
+
 ## 0.46.1
 
 - **`sail upgrade --binary <file>` installs a local build**, such as an unreleased build or one for a box without internet access. It is the same install as a release download.

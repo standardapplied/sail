@@ -8,9 +8,9 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import java.io.IOException;
@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
@@ -43,9 +42,7 @@ import picocli.CommandLine.Parameters;
     subcommands = {ConflictsCommand.Show.class, ConflictsCommand.Resolve.class})
 public final class ConflictsCommand implements Callable<Integer> {
 
-  static final String SPEC = "spec";
   static final String FILE = "file";
-  static final String PROJECT = "project";
 
   @Option(names = "--json", description = "Output the pending conflicts as JSON.")
   private boolean json;
@@ -129,6 +126,11 @@ public final class ConflictsCommand implements Callable<Integer> {
 
     @Mixin private Address address;
 
+    @Option(
+        names = "--template",
+        description = "Print the record to edit and pass to 'resolve --merge-file' (specs only).")
+    private boolean template;
+
     private final Supplier<HostOperations> operations;
 
     Show() {
@@ -142,6 +144,10 @@ public final class ConflictsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
       try (var operations = this.operations.get()) {
+        if (template) {
+          System.out.print(operations.conflictMergeTemplate(address.type, address.entity));
+          return 0;
+        }
         var conflict = operations.conflict(address.type, address.entity);
         if (conflict == null) {
           System.err.println(
@@ -157,9 +163,9 @@ public final class ConflictsCommand implements Callable<Integer> {
       var isFile = conflict.entityType().equals(FILE);
       var diff =
           ConflictMerge.diff(
-              parse(conflict.baseSnapshot()),
-              parse(conflict.localSnapshot()),
-              parse(conflict.remoteSnapshot()),
+              ConflictOperations.parse(conflict.baseSnapshot()),
+              ConflictOperations.parse(conflict.localSnapshot()),
+              ConflictOperations.parse(conflict.remoteSnapshot()),
               conflict.fields());
       var out = new StringBuilder();
       out.append(
@@ -195,13 +201,15 @@ public final class ConflictsCommand implements Callable<Integer> {
     @Mixin private Address address;
 
     private final Supplier<HostOperations> operations;
+    private final Editor editor;
 
     Resolve() {
-      this(OperationsFactory::open);
+      this(OperationsFactory::open, Editor.fromEnvironment());
     }
 
-    Resolve(Supplier<HostOperations> operations) {
+    Resolve(Supplier<HostOperations> operations, Editor editor) {
       this.operations = operations;
+      this.editor = editor;
     }
 
     @Option(names = "--mine", description = "Keep this box's version.")
@@ -213,14 +221,10 @@ public final class ConflictsCommand implements Callable<Integer> {
     @Option(names = "--merge", description = "Merge in $EDITOR, pre-filled with a 3-way merge.")
     private boolean merge;
 
-    @Option(names = "--merge-file", description = "Read the merged record from a file (no editor).")
+    @Option(
+        names = "--merge-file",
+        description = "Read the merged record from a file made by 'show --template' (no editor).")
     private Path mergeFile;
-
-    enum Strategy {
-      MINE,
-      THEIRS,
-      MERGE
-    }
 
     @Override
     public Integer call() throws Exception {
@@ -237,83 +241,73 @@ public final class ConflictsCommand implements Callable<Integer> {
               Banner.errorLine("No open conflict for '" + address.entity + "'.", Ansi.AUTO));
           return 1;
         }
-        String edited = null;
-        if (strategy == Strategy.MERGE) {
-          if (!mergeable(conflict)) {
-            System.err.println(
-                Banner.errorLine(
-                    "Field-level --merge isn't available for this conflict; use --mine or"
-                        + " --theirs.",
-                    Ansi.AUTO));
-            return 1;
-          }
-          edited = mergeFile != null ? Files.readString(mergeFile) : editInEditor(conflict);
-          if (edited == null) {
-            return 1;
-          }
+        var type = conflict.entityType();
+        if (strategy == Resolution.Strategy.MERGE && mergeFile == null) {
+          return mergeInEditor(operations, type);
         }
-        operations.resolveConflict(
-            conflict.entityType(),
-            address.entity,
-            new Resolution(Resolution.Strategy.valueOf(strategy.name()), edited));
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ Resolved @|yellow "
-                    + address.entity
-                    + "|@. Run @|bold sail sync|@ to propagate."));
+        resolve(operations, type, strategy, mergeFile == null ? null : Files.readString(mergeFile));
         return 0;
       }
     }
 
     /** The single chosen strategy, or {@code null} unless exactly one was requested. */
-    static Strategy strategy(boolean mine, boolean theirs, boolean merge) {
+    static Resolution.Strategy strategy(boolean mine, boolean theirs, boolean merge) {
       if ((mine ? 1 : 0) + (theirs ? 1 : 0) + (merge ? 1 : 0) != 1) {
         return null;
       }
       if (mine) {
-        return Strategy.MINE;
+        return Resolution.Strategy.MINE;
       }
-      return theirs ? Strategy.THEIRS : Strategy.MERGE;
+      return theirs ? Resolution.Strategy.THEIRS : Resolution.Strategy.MERGE;
     }
 
     /**
-     * A field-level merge needs both sides present and a structure with mergeable fields, so it is
-     * offered only for spec conflicts that are not delete-vs-edit. A file's content is an opaque
-     * blob and a project's definition is a single descriptor field, so both resolve with {@code
-     * --mine}/{@code --theirs}, never {@code --merge}.
+     * Merges in the editor. The template is fetched first, so a conflict that cannot be merged is
+     * refused before the editor opens; once the engineer has saved, the file outlives any refusal
+     * of the resolve, as reference for the redo.
      */
-    static boolean mergeable(SyncConflicts.Conflict conflict) {
-      return conflict.entityType().equals(SPEC)
-          && parse(conflict.baseSnapshot()) != null
-          && parse(conflict.localSnapshot()) != null
-          && parse(conflict.remoteSnapshot()) != null;
-    }
-
-    private String editInEditor(SyncConflicts.Conflict conflict)
+    private int mergeInEditor(HostOperations operations, String type)
         throws IOException, InterruptedException {
-      var template =
-          ConflictMerge.mergeTemplate(
-              parse(conflict.baseSnapshot()),
-              parse(conflict.localSnapshot()),
-              parse(conflict.remoteSnapshot()),
-              conflict.fields());
-      var file = Files.createTempFile("sail-merge-", ".yaml");
-      try {
-        Files.writeString(file, template);
-        var editor = System.getenv().getOrDefault("EDITOR", "vi");
-        var exit = new ProcessBuilder(editor, file.toString()).inheritIO().start().waitFor();
-        if (exit != 0) {
-          System.err.println(Banner.errorLine("Editor exited non-zero; aborting.", Ansi.AUTO));
-          return null;
-        }
-        return Files.readString(file);
-      } finally {
-        Files.deleteIfExists(file);
+      var template = operations.conflictMergeTemplate(type, address.entity);
+      var file = Files.writeString(Files.createTempFile("sail-merge-", ".yaml"), template);
+      if (!edited(file)) {
+        return 1;
       }
+      try {
+        resolve(operations, type, Resolution.Strategy.MERGE, Files.readString(file));
+      } catch (IOException | RuntimeException e) {
+        System.err.println(
+            Banner.warnLine("Your merge is kept for reference at " + file + ".", Ansi.AUTO));
+        throw e;
+      }
+      Files.deleteIfExists(file);
+      return 0;
     }
-  }
 
-  static Map<String, Object> parse(String json) {
-    return Strings.isBlank(json) ? null : YamlUtil.parseMap(json);
+    private boolean edited(Path file) throws IOException, InterruptedException {
+      int exit;
+      try {
+        exit = editor.edit(file);
+      } catch (IOException | InterruptedException e) {
+        Files.deleteIfExists(file);
+        throw e;
+      }
+      if (exit != 0) {
+        Files.deleteIfExists(file);
+        System.err.println(
+            Banner.errorLine("Editor exited with status " + exit + "; aborting.", Ansi.AUTO));
+      }
+      return exit == 0;
+    }
+
+    private void resolve(
+        HostOperations operations, String type, Resolution.Strategy strategy, String merged) {
+      operations.resolveConflict(type, address.entity, new Resolution(strategy, merged));
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Resolved @|yellow "
+                  + address.entity
+                  + "|@. Run @|bold sail sync|@ to propagate."));
+    }
   }
 }

@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
@@ -50,7 +51,7 @@ class ConflictMergeTest {
     var mine = map("title", "Mine", "status", "pending", "body", "old");
     var theirs = map("title", "Theirs", "status", "in_progress", "body", "old");
 
-    var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of("title"));
+    var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of("title"), "c0ffee");
     var parsed = ConflictMerge.parseTemplate(template);
 
     assertEquals("Mine", parsed.get("title"), "clash defaults to mine");
@@ -59,13 +60,51 @@ class ConflictMergeTest {
   }
 
   @Test
+  void aTemplateNamesTheConflictItWasMadeFromEvenWhenTheNameReadsAsANumber() {
+    var mine = map("title", "Mine");
+    var theirs = map("title", "Theirs");
+
+    for (var conflict : List.of("c0ffee", "1234567890123456", "12e4567890123456")) {
+      var parsed =
+          ConflictMerge.parseTemplate(
+              ConflictMerge.mergeTemplate(mine, mine, theirs, List.of("title"), conflict));
+      assertEquals(conflict, parsed.get(ConflictMerge.CONFLICT));
+    }
+  }
+
+  @Test
+  void aTemplateThatIsNotYamlOrRepeatsAKeyIsRefusedRatherThanHalfRead() {
+    for (var edited : List.of("title: [unclosed", "title: one\ntitle: two\n")) {
+      assertThrows(IllegalArgumentException.class, () -> ConflictMerge.parseTemplate(edited));
+    }
+  }
+
+  @Test
   void mergeTemplateToleratesAnAbsentBase() {
     var mine = map("title", "Mine");
     var theirs = map("title", "Theirs");
     var parsed =
         ConflictMerge.parseTemplate(
-            ConflictMerge.mergeTemplate(null, mine, theirs, List.of("title")));
+            ConflictMerge.mergeTemplate(null, mine, theirs, List.of("title"), "c0ffee"));
     assertEquals("Mine", parsed.get("title"));
+  }
+
+  @Test
+  void theirsIsShownInTheHeaderWhateverCharactersItCarries() {
+    var theirsBody = "main: first\r\nkey: value\rred \u001b[31mtext\u007f\u0000 \ud800 end\n";
+    var base = map("title", "Auth", "body", "base");
+    var mine = map("title", "Auth", "body", "mine");
+    var theirs = map("title", "Auth", "body", theirsBody);
+
+    var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of("body"), "sha256:c0");
+    var parsed = ConflictMerge.parseTemplate(template);
+
+    assertEquals("mine", parsed.get("body"));
+    assertTrue(
+        template.contains(
+            "#   body: theirs = main: first\n#     key: value\n"
+                + "#     red \\u001b[31mtext\\u007f\\u0000 \\ud800 end\n"),
+        template);
   }
 
   @Test
@@ -76,7 +115,7 @@ class ConflictMergeTest {
 
     var parsed =
         ConflictMerge.parseTemplate(
-            ConflictMerge.mergeTemplate(base, mine, theirs, List.of("title")));
+            ConflictMerge.mergeTemplate(base, mine, theirs, List.of("title"), "c0ffee"));
 
     assertEquals("one\ntwo", parsed.get("body"));
   }

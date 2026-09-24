@@ -35,6 +35,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public String conflictMergeTemplate(String type, String id) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     throw new UnsupportedOperationException();
   }

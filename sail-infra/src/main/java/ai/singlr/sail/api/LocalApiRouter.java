@@ -158,6 +158,13 @@ final class LocalApiRouter implements LocalApiHandler {
               operations.resolveConflict(
                   request.query().get("type"), id, resolution, caller.actor())));
     }
+    if (path.startsWith("/v1/conflicts/")
+        && Boolean.parseBoolean(request.query().get("template"))) {
+      if (!"GET".equals(request.method())) return problem(405, "A merge template accepts GET");
+      var id = path.substring("/v1/conflicts/".length());
+      return ApiResponse.ok(
+          Map.of("template", operations.conflictMergeTemplate(request.query().get("type"), id)));
+    }
     if (WHOAMI.equals(path)) {
       return whoami(request, caller);
     }

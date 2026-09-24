@@ -204,7 +204,8 @@ public final class ConflictDetector {
     return keys;
   }
 
-  private static boolean isMetadata(String key) {
+  /** Whether {@code key} is revision metadata, such as its author, rather than work. */
+  public static boolean isMetadata(String key) {
     return key.startsWith("_");
   }
 }
