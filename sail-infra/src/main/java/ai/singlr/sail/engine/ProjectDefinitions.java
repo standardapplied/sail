@@ -131,14 +131,15 @@ public final class ProjectDefinitions {
    * there and the catalog is left untouched. Otherwise the catalog (the replicated source of truth)
    * is recorded first and the canonical descriptor re-materialized from it — exactly how {@code
    * project edit} saves — so the change survives the next sync and re-materialize instead of being
-   * silently overwritten.
+   * silently overwritten. The catalog write is this box's operator's, so a node that cannot name it
+   * refuses the edit before anything is written.
    */
   public static void persist(String name, Path explicitFile, String definition) throws IOException {
     if (explicitFile != null) {
       Files.writeString(explicitFile, definition);
       return;
     }
-    ProjectCatalog.record(name, definition);
+    ProjectCatalog.record(name, definition, CliOperator.current());
     materialize(name, definition);
   }
 

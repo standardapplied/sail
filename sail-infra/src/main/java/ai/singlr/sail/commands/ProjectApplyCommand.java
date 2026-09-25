@@ -10,6 +10,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -737,20 +738,22 @@ public final class ProjectApplyCommand implements Runnable {
 
   /**
    * Copies the descriptor and its {@code files/} directory into the canonical project bundle and
-   * records it in the catalog. A dry run must not touch the host filesystem at all — the plan is
-   * computed from the source descriptor, and the sync starts by deleting the canonical files
-   * directory, so running it under dry-run would destroy locally authored project files.
+   * records it in the catalog as this box's operator, resolved first so a node that cannot name it
+   * refuses before anything is copied. A dry run must not touch the host filesystem at all — the
+   * plan is computed from the source descriptor, and the sync starts by deleting the canonical
+   * files directory, so running it under dry-run would destroy locally authored project files.
    */
   static void persistCanonicalBundle(String name, Path sailYamlPath, boolean dryRun)
       throws Exception {
     if (dryRun) {
       return;
     }
+    var operator = CliOperator.current();
     var projectDir = SailPaths.projectDir(name);
     Files.createDirectories(projectDir);
     var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     syncProjectBundle(sailYamlPath, canonicalYaml);
-    ProjectCatalog.record(name, Files.readString(canonicalYaml));
+    ProjectCatalog.record(name, Files.readString(canonicalYaml), operator);
   }
 
   static void syncProjectBundle(Path sourceSailYamlPath, Path canonicalYamlPath) throws Exception {

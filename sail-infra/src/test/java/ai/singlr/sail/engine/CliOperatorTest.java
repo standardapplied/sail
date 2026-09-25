@@ -18,6 +18,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -85,6 +86,25 @@ class CliOperatorTest {
     assertEquals(
         Actor.cliOperator("uday"),
         CliOperator.current(new SyncConfig("main", null, "uday", null), dir.resolve("absent.db")));
+  }
+
+  @Test
+  void aPreviewActsAsNoOneSoAnUnsyncedNodeCanStillDescribeIt() {
+    try (var db = roster()) {
+      Supplier<Actor> operator = () -> CliOperator.of(NODE, () -> new FdeStore(db));
+
+      assertEquals("described", CliOperator.actingUnlessPreview(true, operator, () -> "described"));
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () -> CliOperator.actingUnlessPreview(false, operator, () -> "launched"));
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+
+      new FdeStore(db).add("mady", null, null, "member");
+      assertEquals(
+          new Actor("mady", Role.MEMBER, Actor.Lane.CLI),
+          CliOperator.actingUnlessPreview(false, operator, Actor::current));
+    }
   }
 
   private Sqlite roster() {

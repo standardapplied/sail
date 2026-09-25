@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -34,7 +35,6 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -42,7 +42,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -310,7 +309,7 @@ public final class RunCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            asOperatorUnlessPreview(
+            CliOperator.actingUnlessPreview(
                 describeOnly,
                 operations.identity()::operator,
                 () ->
@@ -349,17 +348,6 @@ public final class RunCommand implements Runnable {
    */
   static boolean rollbackSafe(ApiException e, boolean activeSession) {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
-  }
-
-  /**
-   * Runs {@code start} as this box's operator, except a preview: it writes nothing, so it needs no
-   * actor, and a node whose roster has not synced can still describe the launch.
-   */
-  static <T> T asOperatorUnlessPreview(
-      boolean preview,
-      Supplier<Actor> operator,
-      ScopedValue.CallableOp<T, RuntimeException> start) {
-    return preview ? start.call() : Actor.call(operator.get(), start);
   }
 
   private HostOperations operations(

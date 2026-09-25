@@ -44,6 +44,15 @@ public final class CliOperator {
                     "Run 'sail sync' first, then try again."));
   }
 
+  /**
+   * Runs {@code work} as {@code operator}, or as no one for a preview: a preview writes nothing, so
+   * a node whose roster has not synced can still describe what it would do.
+   */
+  public static <T> T actingUnlessPreview(
+      boolean preview, Supplier<Actor> operator, ScopedValue.CallableOp<T, RuntimeException> work) {
+    return preview ? work.call() : Actor.call(operator.get(), work);
+  }
+
   /** The operator of this box, read from its host configuration and control-plane roster. */
   public static Actor current() {
     return current(NodeIdentity.config(), SailPaths.controlPlaneDb());

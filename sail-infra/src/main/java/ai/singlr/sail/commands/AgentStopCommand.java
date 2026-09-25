@@ -17,6 +17,7 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -87,12 +88,9 @@ public final class AgentStopCommand implements Runnable {
             SailPaths.PROJECT_DESCRIPTOR,
             hooks(shell, this::publishLifecycle, listener()),
             SessionYield.NONE)) {
-      StopOperations.Outcome outcome;
-      if (dryRun) {
-        outcome = stop(operations, handle);
-      } else {
-        outcome = Actor.call(operations.identity().operator(), () -> stop(operations, handle));
-      }
+      var outcome =
+          CliOperator.actingUnlessPreview(
+              dryRun, operations.identity()::operator, () -> stop(operations, handle));
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();

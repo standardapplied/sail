@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,18 @@ class MainTest {
         Main.report(new IllegalStateException("boom: run sail host init"), withCapturedErr(err));
     assertEquals(1, code);
     assertTrue(err.toString().contains("boom: run sail host init"), err.toString());
+  }
+
+  @Test
+  void reportFollowsARefusalWithItsFix() {
+    var err = new StringWriter();
+    var code =
+        Main.report(
+            new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'."),
+            withCapturedErr(err));
+    assertEquals(1, code);
+    assertTrue(err.toString().contains("The roster is unsynced."), err.toString());
+    assertTrue(err.toString().contains("Run 'sail sync'."), err.toString());
   }
 
   @Test

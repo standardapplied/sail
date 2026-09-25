@@ -14,6 +14,7 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
@@ -106,7 +107,7 @@ public final class AgentSweepCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            RunCommand.asOperatorUnlessPreview(
+            CliOperator.actingUnlessPreview(
                 describeOnly,
                 operations.identity()::operator,
                 () -> operations.dispatching().startAdhoc(name, request, handle));
