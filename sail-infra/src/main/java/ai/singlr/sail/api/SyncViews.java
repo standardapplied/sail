@@ -31,6 +31,19 @@ public final class SyncViews {
     map.put("bytes_sent", round.sentBytes());
     map.put("bytes_freed", round.freedBytes());
     map.put("types", round.types().stream().map(SyncViews::type).toList());
+    map.put("denials", denials(round.denials()));
+    return map;
+  }
+
+  public static List<Map<String, Object>> denials(List<SyncSession.Denial> denials) {
+    return denials.stream().map(SyncViews::denial).toList();
+  }
+
+  private static Map<String, Object> denial(SyncSession.Denial denial) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("type", denial.type());
+    map.put("id", denial.id());
+    map.put("reason", denial.reason());
     return map;
   }
 
@@ -63,6 +76,7 @@ public final class SyncViews {
     map.put("bytes_sent", status.sentBytes());
     map.put("bytes_freed", status.freedBytes());
     map.put("last_report", status.lastReport() == null ? null : report(status.lastReport()));
+    map.put("denials", denials(status.denials()));
     return map;
   }
 

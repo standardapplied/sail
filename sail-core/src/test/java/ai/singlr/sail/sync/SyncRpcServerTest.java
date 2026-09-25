@@ -503,16 +503,90 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aReadOnlySessionMayPullButItsPushIsRefusedNamingTheType() throws Exception {
-    var server = new SyncRpcServer(new FakeMain(), false);
-    assertInstanceOf(SyncWire.Page.class, after(server, new SyncWire.Pull("spec", 0, 10)));
-    var failed =
+  void aReadOnlySessionMayPullAndEachOfItsOffersIsDeniedWithMainsVersion() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      var server = main.server(Actor.sync(null, Role.VIEWER));
+      var mainsRev = main.specs.latestRev("auth");
+      var replies =
+          serve(
+              server,
+              HELLO,
+              new SyncWire.Pull("spec", 0, 10),
+              push(
+                  "spec",
+                  new MainReplica.Offer("auth", Map.of("title", "Viewer edit"), mainsRev),
+                  new MainReplica.Offer("born", Map.of("title", "Viewer spec"), null)),
+              push("run", new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
+      assertInstanceOf(SyncWire.Page.class, replies.get(1));
+      var results = assertInstanceOf(SyncWire.Results.class, replies.get(2)).results();
+      var edit = assertInstanceOf(SyncWire.Denied.class, results.get(0));
+      assertTrue(edit.reason().contains("read-only"), edit.reason());
+      assertEquals(mainsRev, edit.rev());
+      assertEquals("Auth", edit.snapshot().get("title"));
+      var born = assertInstanceOf(SyncWire.Denied.class, results.get(1));
+      assertNull(born.rev(), "main holds none of a spec it never took");
+      assertNull(born.snapshot());
+      assertInstanceOf(
+          SyncWire.Denied.class,
+          only(replies.get(3)),
+          "a viewer's run is decided on authority before it is checked for a handle");
+      assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
+      assertTrue(main.specs.findById("born").isEmpty());
+    }
+  }
+
+  @Test
+  void theAuthoritysDenialReachesTheNodeAsDeniedForThatOfferAlone() throws Exception {
+    var deciding =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
+            return "forged".equals(id)
+                ? new CommitOutcome.Denied("not yours", "3-m", Map.of("title", "main's"))
+                : new CommitOutcome.Accepted("1-x");
+          }
+        };
+    var results =
         assertInstanceOf(
-            SyncWire.Failed.class,
-            after(server, push("spec", new MainReplica.Offer("a", Map.of(), null))));
-    assertEquals("refused", failed.kind());
-    assertTrue(failed.message().startsWith("spec:"), failed.message());
-    assertTrue(failed.message().contains("read-only"));
+                SyncWire.Results.class,
+                after(
+                    server(deciding, "spec", Actor.sync("ada", Role.MEMBER)),
+                    push(
+                        "spec",
+                        new MainReplica.Offer("forged", Map.of(), null),
+                        new MainReplica.Offer("honest", Map.of(), null))))
+            .results();
+    assertEquals(
+        new SyncWire.Denied("forged", "not yours", "3-m", Map.of("title", "main's")),
+        results.get(0));
+    assertInstanceOf(SyncWire.Accepted.class, results.get(1));
+  }
+
+  @Test
+  void aDenialWhoseVersionWouldOverflowTheFrameIsAnsweredWithoutIt() throws Exception {
+    var large = Map.<String, Object>of("body", "x".repeat(700));
+    var deciding =
+        new FakeMain() {
+          @Override
+          public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
+            return new CommitOutcome.Denied("not yours", "2-m", large);
+          }
+        };
+    var replies =
+        serveLines(
+            server(deciding, "spec", Actor.sync("ada", Role.MEMBER)),
+            1200,
+            List.of(
+                SyncWire.encode(HELLO),
+                SyncWire.encode(
+                    push(
+                        "spec",
+                        new MainReplica.Offer("a", Map.of(), null),
+                        new MainReplica.Offer("b", Map.of(), null)))));
+    var results = assertInstanceOf(SyncWire.Results.class, replies.get(1)).results();
+    assertEquals(new SyncWire.Denied("a", "not yours", "2-m", large), results.get(0));
+    assertEquals(new SyncWire.Denied("b", "not yours", null, null, false), results.get(1));
   }
 
   @Test
@@ -650,67 +724,9 @@ class SyncRpcServerTest {
         "sumesh", seenPeer.get(), "the change_log written during the commit must name the pusher");
   }
 
-  private static SyncWire.Result serveRun(
-      String handle, Map<String, Object> mainCurrent, MainReplica.Offer offer) throws Exception {
-    return serveRun(handle, mainCurrent, mainCurrent == null ? null : "1-x", offer);
-  }
-
-  private static SyncWire.Result serveRun(
-      String handle, Map<String, Object> mainCurrent, String mainRev, MainReplica.Offer offer)
-      throws Exception {
-    var main =
-        new FakeMain() {
-          @Override
-          public Map<String, Object> current(String entityId) {
-            return mainCurrent;
-          }
-
-          @Override
-          public String currentRev(String entityId) {
-            return mainRev;
-          }
-        };
-    return only(after(server(main, "run", Actor.sync(handle, Role.MEMBER)), push("run", offer)));
-  }
-
-  @Test
-  void aSessionCommitsItsOwnRunAndDeletesIt() throws Exception {
-    assertInstanceOf(
-        SyncWire.Accepted.class,
-        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
-    assertInstanceOf(
-        SyncWire.Accepted.class,
-        serveRun("ada", Map.of("node", "ada"), new MainReplica.Offer("r1", null, "1-x")));
-    assertInstanceOf(
-        SyncWire.Accepted.class,
-        serveRun("ada", null, "2-x", new MainReplica.Offer("r1", null, "2-x")),
-        "replaying a delete over a tombstone stays allowed");
-  }
-
-  @Test
-  void aForeignOrUnstampedRunIsStaleNotFailed() throws Exception {
-    assertInstanceOf(
-        SyncWire.Stale.class,
-        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("node", "grace"), null)),
-        "an un-owned run push is stale, not failed, so one bad run cannot abort the whole sync");
-    assertInstanceOf(
-        SyncWire.Stale.class,
-        serveRun(
-            "ada",
-            Map.of("node", "grace"),
-            new MainReplica.Offer("r1", Map.of("node", "ada"), "1-x")),
-        "the node then fetches main's authoritative version to adopt, converging instead of"
-            + " clobbering");
-    assertInstanceOf(
-        SyncWire.Stale.class,
-        serveRun("ada", Map.of("node", "grace"), new MainReplica.Offer("r1", null, "1-x")));
-    assertInstanceOf(
-        SyncWire.Stale.class,
-        serveRun("ada", null, "2-x", new MainReplica.Offer("r1", Map.of("node", "ada"), "2-x")),
-        "recreating a tombstoned run id is stale so the node adopts the deletion");
-    assertInstanceOf(
-        SyncWire.Stale.class,
-        serveRun("ada", null, new MainReplica.Offer("r1", Map.of("status", "running"), null)));
+  private static SyncWire.Result serveRun(String handle, MainReplica.Offer offer) throws Exception {
+    return only(
+        after(server(new FakeMain(), "run", Actor.sync(handle, Role.MEMBER)), push("run", offer)));
   }
 
   @Test
@@ -793,7 +809,7 @@ class SyncRpcServerTest {
     var refused =
         assertInstanceOf(
             SyncWire.Refused.class,
-            serveRun(null, null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
+            serveRun(null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
     assertEquals("r1", refused.id());
     assertTrue(refused.reason().contains("handle"), refused.reason());
   }

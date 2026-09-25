@@ -231,8 +231,9 @@ batch the node `announce`s the blob hashes the batch references and main answers
 node sends those manifests, main validates every one against its own `limits.file_max` and
 answers `lack` again with the chunks it does not hold; the node sends exactly those and main
 assembles. `lack` has one meaning in both replies — of what you just named, I hold none of these
-— and a commit naming a hash main does not hold is refused. A read-only principal is refused at
-`announce`, before main stores a byte. Every protocol-4 message names an `op` and no earlier
+— and a commit naming a hash main does not hold is refused. A read-only principal's `announce`
+is answered lacking nothing, so main never stores a byte of its content, and each offer it
+then pushes is denied. Every protocol-4 message names an `op` and no earlier
 protocol did, so a main that answers `hello` with a message naming none is on an older protocol
 and the node fails naming the remedy: upgrade main. Anything on the channel that is not a
 message at all is reported as that, never blamed on main's version.
@@ -273,6 +274,25 @@ file's content and a project's definition are single opaque blobs, so they take 
 theirs only. Resolving rebases the row onto main's version and writes the choice, so a
 follow-up sync converges and the conflict cannot re-raise. Every version stays in the change
 log, so no choice loses work.
+
+Main answers each offer on its own: `accepted` with the rev it minted, `stale` when it moved
+since the node fetched, `refused` on integrity grounds (content it does not hold, a pruned id, a
+run pushed with no node handle), or `denied` when this principal may not make this change. A
+denial is decided inside the commit's transaction, never thrown, and never fails the offers
+beside it. Main denies a read-only principal's offers (erase requests keep their own path), a
+message whose author the pusher may not post as, a reply to a message main does not hold, and a
+run whose execution provenance is not the pusher's. The answer carries main's current version of
+the entity: a revision, a tombstone, or nothing. A version that would push the results past the
+frame is withheld, and the node fetches it with `need`, as it does for a stale offer.
+
+The node settles a denial as it settles a pull: it adopts main's version at main's rev, or
+removes its row when main holds none. A denied message leaves the room with the replies this
+box posted under it. The node's own revision stays in its change log, no conflict is parked,
+and the round carries on, so the next round has nothing to offer again. `sail sync` prints each
+denial and where the node's version is kept, `sail sync --json` and `GET /v1/sync` list them
+(type, id, reason), and a node's running server logs them. On the wire a denial is a `refused`
+result marked `denied: true`, so a 0.46 node reads the refusal it knows and fails its round
+naming the reason, as it did before.
 
 A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
 a resolve is refused (`409` over the API) when the live row no longer matches the conflict's
@@ -340,8 +360,8 @@ process's stdio as a newline-framed JSON RPC pipe. Auth is pure SSH keys, with
 join` generated, so a missing key fails fast. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
-admits the `_sync` session. The write gate lives next to the write: the `_sync` server
-refuses pushes from read-only viewer roles while still letting them pull.
+admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
+session is denied to a read-only viewer role, which may still pull.
 
 ### Identity isolation in synced projects
 

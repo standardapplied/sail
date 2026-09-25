@@ -114,7 +114,9 @@ class SyncCommandTest {
               "bytes_sent",
               0,
               "bytes_freed",
-              0),
+              0,
+              "denials",
+              List.of()),
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
 
@@ -243,6 +245,62 @@ class SyncCommandTest {
     assertEquals("spec", type.get("type"));
     assertEquals(456, type.get("bytes_fetched"));
     assertEquals(123, type.get("bytes_sent"));
+  }
+
+  private static SyncReport deniedRound() {
+    return new SyncReport(
+        SyncEngine.Report.NONE,
+        null,
+        List.of(
+            new SyncSession.TypeReport(
+                "spec",
+                SyncEngine.Report.NONE,
+                0,
+                0,
+                false,
+                null,
+                0,
+                0,
+                0,
+                List.of(new SyncSession.Denial("spec", "auth", "your role is read-only"))),
+            new SyncSession.TypeReport(
+                "message",
+                SyncEngine.Report.NONE,
+                0,
+                0,
+                false,
+                null,
+                0,
+                0,
+                0,
+                List.of(
+                    new SyncSession.Denial("message", "m1", "'ada' may not post as 'grace'")))));
+  }
+
+  @Test
+  void rendersEachDenialNamingWhatMainKeptAndWhereTheNodesVersionIs() {
+    var text = SyncCommand.render(deniedRound(), false);
+    assertFalse(text.contains("Already in sync"), text);
+    assertTrue(
+        text.contains(
+            "spec auth: main kept its version — your role is read-only. Yours is in its history:"
+                + " sail spec history auth."),
+        text);
+    assertTrue(
+        text.contains(
+            "message m1: main kept its version — 'ada' may not post as 'grace'. Yours is in this"
+                + " box's history."),
+        text);
+  }
+
+  @Test
+  void rendersDenialsInJsonByTypeIdAndReason() {
+    var report = ai.singlr.sail.config.YamlUtil.parseMap(SyncCommand.render(deniedRound(), true));
+    assertEquals(
+        List.of(
+            Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),
+            Map.of("type", "message", "id", "m1", "reason", "'ada' may not post as 'grace'")),
+        report.get("denials"));
   }
 
   @Test

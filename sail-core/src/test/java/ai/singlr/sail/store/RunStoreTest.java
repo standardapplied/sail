@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -741,6 +742,73 @@ class RunStoreTest {
 
     var stale = other.commitRevision("00000000-0000-7000-8000-000000000001", moved(), "rev-base");
     assertInstanceOf(PushOutcome.Stale.class, stale);
+  }
+
+  @Test
+  void aSyncSessionCommitsAndDeletesOnlyTheRunsItsOwnNodeExecuted() {
+    var id = "00000000-0000-7000-8000-000000000001";
+    var own = Actor.sync("node-a", Role.MEMBER);
+    assertInstanceOf(
+        PushOutcome.Accepted.class, Actor.call(own, () -> store.commitRevision(id, base(), null)));
+    var rev = store.latestRev(id);
+    assertInstanceOf(
+        PushOutcome.Accepted.class, Actor.call(own, () -> store.commitRevision(id, null, rev)));
+    var tombstone = store.latestRev(id);
+    assertInstanceOf(
+        PushOutcome.Accepted.class,
+        Actor.call(own, () -> store.commitRevision(id, null, tombstone)),
+        "replaying a delete over a tombstone stays allowed");
+  }
+
+  @Test
+  void aSyncSessionIsDeniedARunAnotherNodeExecutedWithMainsRun() {
+    var id = "00000000-0000-7000-8000-000000000001";
+    Actor.call(Actor.sync("node-a", Role.MEMBER), () -> store.commitRevision(id, base(), null));
+    var rev = store.latestRev(id);
+    var other = Actor.sync("node-b", Role.MEMBER);
+    var restamped = new java.util.HashMap<>(moved());
+    restamped.put("node", "node-b");
+
+    for (var offered : java.util.Arrays.asList(restamped, moved(), null)) {
+      var denied =
+          assertInstanceOf(
+              PushOutcome.Denied.class,
+              Actor.call(other, () -> store.commitRevision(id, offered, rev)));
+      assertTrue(denied.reason().contains("'node-b'"), denied.reason());
+      assertEquals(rev, denied.currentRev());
+      assertEquals("node-a", denied.currentSnapshot().get("node"));
+    }
+    assertEquals(rev, store.latestRev(id), "main's run is left untouched");
+  }
+
+  @Test
+  void aSyncSessionIsDeniedAForgedOrUnstampedRunAndATombstonedRunsReturn() {
+    var own = Actor.sync("node-a", Role.MEMBER);
+    var unstamped = new java.util.HashMap<>(base());
+    unstamped.remove("node");
+    assertInstanceOf(
+        PushOutcome.Denied.class,
+        Actor.call(
+            Actor.sync("node-b", Role.MEMBER),
+            () -> store.commitRevision("00000000-0000-7000-8000-000000000002", base(), null)));
+    assertInstanceOf(
+        PushOutcome.Denied.class,
+        Actor.call(
+            own,
+            () -> store.commitRevision("00000000-0000-7000-8000-000000000003", unstamped, null)));
+
+    var id = "00000000-0000-7000-8000-000000000004";
+    Actor.call(own, () -> store.commitRevision(id, base(), null));
+    var rev = store.latestRev(id);
+    Actor.call(own, () -> store.commitRevision(id, null, rev));
+    var tombstone = store.latestRev(id);
+    var resurrected =
+        assertInstanceOf(
+            PushOutcome.Denied.class,
+            Actor.call(own, () -> store.commitRevision(id, base(), tombstone)));
+    assertTrue(resurrected.reason().contains("deleted run"), resurrected.reason());
+    assertEquals(tombstone, resurrected.currentRev());
+    assertNull(resurrected.currentSnapshot());
   }
 
   @Test

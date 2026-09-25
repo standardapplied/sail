@@ -12,6 +12,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1351,9 +1352,52 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
-  /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
+  /**
+   * Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. A sync
+   * session is bound to execution provenance and denied, with main's run, what is not its own to
+   * change ({@link #provenanceDenial}), decided in the same transaction as the commit.
+   */
   public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+    return db.transaction(
+        () -> {
+          var actor = Actor.current();
+          if (actor.lane() == Actor.Lane.SYNC) {
+            var current = comparableSnapshot(id);
+            var currentRev = latestRev(id);
+            var denial = provenanceDenial(actor.handle(), snapshot, current, currentRev);
+            if (denial.isPresent()) {
+              return new PushOutcome.Denied(denial.get(), currentRev, current);
+            }
+          }
+          return journal.commitRevision(id, snapshot, expectedRev);
+        });
+  }
+
+  /**
+   * Why a session acting as {@code handle} may not commit {@code incoming} over main's run, if it
+   * may not: both the incoming run's {@code node} and the run main holds must be the session's own
+   * handle, which refuses a forged foreign stamp and the clobbering of another node's run with a
+   * re-stamped one; a missing or blank stamp fails closed. A tombstone is not a fresh id: its owner
+   * is no longer readable, so bringing it back is refused outright.
+   */
+  private static Optional<String> provenanceDenial(
+      String handle, Map<String, Object> incoming, Map<String, Object> current, String currentRev) {
+    if (incoming != null && current == null && currentRev != null) {
+      return Optional.of("a deleted run cannot be brought back");
+    }
+    if (!executedBy(handle, incoming) || !executedBy(handle, current)) {
+      return Optional.of(
+          "only the node that executed a run may change it, and this is '" + handle + "'");
+    }
+    return Optional.empty();
+  }
+
+  private static boolean executedBy(String handle, Map<String, Object> run) {
+    if (run == null) {
+      return true;
+    }
+    var node = Objects.toString(run.get("node"), "");
+    return !node.isBlank() && node.equals(handle);
   }
 
   /**

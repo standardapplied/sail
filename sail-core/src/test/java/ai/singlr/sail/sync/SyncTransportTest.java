@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -667,7 +668,7 @@ class SyncTransportTest {
   }
 
   @Test
-  void aReadOnlyFdeMayPullButItsPushIsRefused() throws Exception {
+  void aReadOnlyFdeMayPullButItsPushIsDenied() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
     var readOnly = main.server(Actor.sync("A", Role.VIEWER));
     try (var link = SyncBox.connect(readOnly, nodeA)) {
@@ -676,9 +677,9 @@ class SyncTransportTest {
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
     nodeA.specs.create(spec("mine", "Local only", "pending"));
     try (var link = SyncBox.connect(main.server(Actor.sync("A", Role.VIEWER)), nodeA)) {
-      var failure =
-          assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
-      assertEquals("refused", failure.kind());
+      var report = link.reconcile("spec", nodeA.replica);
+      assertNull(report.failure());
+      assertEquals("mine", report.denials().getFirst().id());
     }
     assertTrue(main.specs.findById("mine").isEmpty(), "the read-only push never reached main");
   }

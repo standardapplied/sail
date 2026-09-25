@@ -6,6 +6,8 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,6 +17,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -209,35 +212,32 @@ class MessageSyncTest {
   void theNarratorAuthorCannotBeForgedIntoARoomThePeerNeverRanIn() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
 
-    var error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Actor.call(
-                    Actor.sync("node", Role.MEMBER),
-                    () ->
-                        main.messages.commitRevision(
-                            "019fee00-0000-7000-8000-0000000000bd",
-                            snapshot("sail", "room"),
-                            null)));
+    var denied =
+        assertInstanceOf(
+            PushOutcome.Denied.class,
+            Actor.call(
+                Actor.sync("node", Role.MEMBER),
+                () ->
+                    main.messages.commitRevision(
+                        "019fee00-0000-7000-8000-0000000000bd", snapshot("sail", "room"), null)));
 
-    assertTrue(error.getMessage().contains("may not post as 'sail'"));
+    assertTrue(denied.reason().contains("may not post as 'sail'"), denied.reason());
   }
 
   @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
     var messageId = "00000000-0000-7000-8000-000000000001";
 
-    var error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Actor.call(
-                    Actor.sync("node", Role.MEMBER),
-                    () ->
-                        main.messages.commitRevision(messageId, snapshot("admin", "room"), null)));
+    var denied =
+        assertInstanceOf(
+            PushOutcome.Denied.class,
+            Actor.call(
+                Actor.sync("node", Role.MEMBER),
+                () -> main.messages.commitRevision(messageId, snapshot("admin", "room"), null)));
 
-    assertTrue(error.getMessage().contains("may not post as 'admin'"));
+    assertTrue(denied.reason().contains("may not post as 'admin'"), denied.reason());
+    assertNull(denied.currentRev(), "main holds no version of a message it never took");
+    assertNull(denied.currentSnapshot());
     assertTrue(main.messages.findById(messageId).isEmpty());
   }
 
@@ -245,26 +245,20 @@ class MessageSyncTest {
   void authenticatedPeerCannotPostToForeignOrMissingSpec() {
     main.db.execute("UPDATE rooms SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            Actor.call(
-                Actor.sync("mallory", Role.MEMBER),
-                () ->
-                    main.messages.commitRevision(
-                        "00000000-0000-7000-8000-000000000002",
-                        snapshot("mallory", "room"),
-                        null)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            Actor.call(
-                Actor.sync("mallory", Role.MEMBER),
-                () ->
-                    main.messages.commitRevision(
-                        "00000000-0000-7000-8000-000000000003",
-                        snapshot("mallory", "missing"),
-                        null)));
+    assertInstanceOf(
+        PushOutcome.Denied.class,
+        Actor.call(
+            Actor.sync("mallory", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000002", snapshot("mallory", "room"), null)));
+    assertInstanceOf(
+        PushOutcome.Denied.class,
+        Actor.call(
+            Actor.sync("mallory", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000003", snapshot("mallory", "missing"), null)));
 
     assertTrue(main.messages.list("room", null, 10).isEmpty());
   }
@@ -292,16 +286,15 @@ class MessageSyncTest {
         """
         INSERT INTO rooms (id, title, project, created_at, updated_at)
         VALUES ('other-room', 'Other room', 'acme', 'now', 'now')""");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            Actor.call(
-                Actor.sync("node", Role.MEMBER),
-                () ->
-                    main.messages.commitRevision(
-                        "00000000-0000-7000-8000-000000000012",
-                        snapshot("codex/run-1", "other-room"),
-                        null)));
+    assertInstanceOf(
+        PushOutcome.Denied.class,
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000012",
+                    snapshot("codex/run-1", "other-room"),
+                    null)));
   }
 
   private static Map<String, Object> snapshot(String author, String specId) {

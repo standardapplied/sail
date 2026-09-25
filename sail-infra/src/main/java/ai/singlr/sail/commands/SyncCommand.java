@@ -265,11 +265,13 @@ public final class SyncCommand implements Callable<Integer> {
       map.put("bytes_sent", round.sentBytes());
       map.put("bytes_freed", round.freedBytes());
       map.put("types", round.types().stream().map(SyncViews::type).toList());
+      map.put("denials", SyncViews.denials(round.denials()));
       return YamlUtil.dumpJson(map);
     }
     var detail =
         round.types().stream().filter(SyncCommand::worthALine).map(SyncCommand::line).toList();
-    if (report.total() == 0 && detail.isEmpty()) {
+    var denials = round.denials().stream().map(SyncCommand::denialLine).toList();
+    if (report.total() == 0 && detail.isEmpty() && denials.isEmpty()) {
       return Ansi.AUTO.string("  @|green ✓|@ Already in sync with main.");
     }
     var lines = new ArrayList<String>();
@@ -283,6 +285,7 @@ public final class SyncCommand implements Callable<Integer> {
                 + report.merged()
                 + "|@ merged."));
     lines.addAll(detail);
+    lines.addAll(denials);
     if (report.conflicts() > 0) {
       lines.add(
           Banner.errorLine(
@@ -291,6 +294,24 @@ public final class SyncCommand implements Callable<Integer> {
               Ansi.AUTO));
     }
     return String.join("\n", lines);
+  }
+
+  /** One denied offer: what main kept, why, and where this box's own version still is. */
+  static String denialLine(SyncSession.Denial denial) {
+    var history =
+        "spec".equals(denial.type())
+            ? "its history: sail spec history " + denial.id()
+            : "this box's history";
+    return Banner.warnLine(
+        denial.type()
+            + " "
+            + denial.id()
+            + ": main kept its version — "
+            + denial.reason()
+            + ". Yours is in "
+            + history
+            + ".",
+        Ansi.AUTO);
   }
 
   private static boolean worthALine(SyncSession.TypeReport type) {

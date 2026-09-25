@@ -5,7 +5,9 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.time.Instant;
+import java.util.List;
 
 public record SyncStatus(
     String role,
@@ -20,7 +22,12 @@ public record SyncStatus(
     Instant staleSince,
     long fetchedBytes,
     long sentBytes,
-    long freedBytes) {
+    long freedBytes,
+    List<SyncSession.Denial> denials) {
+  public SyncStatus {
+    denials = List.copyOf(denials);
+  }
+
   public SyncStatus(
       String role,
       String main,
@@ -45,7 +52,8 @@ public record SyncStatus(
         staleSince,
         0,
         0,
-        0);
+        0,
+        List.of());
   }
 
   /** A node that has never completed a round, or a box with no main: nothing to report yet. */

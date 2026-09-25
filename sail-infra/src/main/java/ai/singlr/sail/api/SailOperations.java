@@ -195,7 +195,8 @@ public final class SailOperations implements HostOperations {
         round.report(),
         round.fetchedBytes(),
         round.sentBytes(),
-        round.freedBytes())) {
+        round.freedBytes(),
+        round.denials())) {
       publishSyncTransition(target, true, null, null);
     }
     return round;
@@ -249,7 +250,8 @@ public final class SailOperations implements HostOperations {
             health.staleSince(),
             health.fetchedBytes(),
             health.sentBytes(),
-            health.freedBytes());
+            health.freedBytes(),
+            health.denials());
   }
 
   @Override

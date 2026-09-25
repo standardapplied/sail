@@ -306,7 +306,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             ENTITY));
   }
 
+  /**
+   * Adopts main's copy of a message. Main holding none ({@code snapshot} and {@code rev} both null)
+   * is how a message main denied leaves this box: it goes with the replies this box posted under
+   * it, which main cannot hold either, and every revision stays in the change log.
+   */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
+    if (snapshot == null && rev == null) {
+      withdraw(id);
+      return;
+    }
     if (snapshot == null) {
       throw new IllegalArgumentException("messages are immutable and cannot be deleted");
     }
@@ -332,8 +341,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  private void withdraw(String id) {
+    db.execute(
+        """
+        WITH RECURSIVE thread(id) AS (
+            SELECT ?1
+            UNION
+            SELECT m.id FROM room_messages m JOIN thread t ON m.reply_to = t.id)
+        DELETE FROM room_messages WHERE id IN (SELECT id FROM thread)""",
+        id);
+  }
+
   /**
-   * The one way a message leaves this box: erased with its room or by retention, never edited or
+   * How a message main holds leaves this box: erased with its room or by retention, never edited or
    * deleted on its own. A reply erased with it may go first; {@link Erasure} defers the reply
    * constraint to its commit.
    */
@@ -360,10 +380,12 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var row = fromSnapshot(id, snapshot);
           var peer = Actor.current().peer();
           if (!mayPostAs(peer, row.author(), row.roomId())) {
-            throw new IllegalArgumentException(
-                "sync principal '" + peer + "' may not post as '" + row.author() + "'");
+            return new PushOutcome.Denied(
+                "'" + peer + "' may not post as '" + row.author() + "' in this room", null, null);
           }
-          requireReplyTarget(row);
+          if (!holdsReplyTarget(row)) {
+            return new PushOutcome.Denied("it replies to a message main does not hold", null, null);
+          }
           write(row, rev, null);
           changeLog.appendSynced(ENTITY, id, rev, row.author(), "sync", false, json);
           return new PushOutcome.Accepted(rev);
@@ -513,13 +535,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   private void requireReplyTarget(MessageRow row) {
-    if (row.replyTo() != null
-        && findById(row.replyTo())
-            .filter(parent -> parent.roomId().equals(row.roomId()))
-            .isEmpty()) {
+    if (!holdsReplyTarget(row)) {
       throw new IllegalArgumentException(
           "reply_to must reference a message in room '" + row.roomId() + "'");
     }
+  }
+
+  private boolean holdsReplyTarget(MessageRow row) {
+    return row.replyTo() == null
+        || findById(row.replyTo())
+            .filter(parent -> parent.roomId().equals(row.roomId()))
+            .isPresent();
   }
 
   private static MessageRow fromSnapshot(String id, Map<String, Object> snapshot) {
