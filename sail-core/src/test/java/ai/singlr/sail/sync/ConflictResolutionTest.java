@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.nio.file.Path;
@@ -108,6 +110,48 @@ class ConflictResolutionTest {
     assertTrue(
         node.specs.history("auth").stream().anyMatch(e -> e.snapshot().contains("Title from node")),
         "the local version is retained in the change log");
+  }
+
+  @Test
+  void takeTheirsKeepsMainsAuthorOnTheResolvingNode() {
+    var theirs = snapshot(raiseTitleConflictBetween("mady", "rajesh").remoteSnapshot());
+
+    Acting.as("rajesh", () -> node.specs.resolveConflict("auth", theirs, theirs));
+
+    assertEquals("mady", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals(
+        "mady",
+        node.specs.findById("auth").orElseThrow().updatedBy(),
+        "main's title, adopted, is still mady's");
+    var head = node.specs.history("auth").getLast();
+    assertEquals("mady", head.actor());
+    assertEquals(Actor.MAIN_HANDLE, head.peer());
+  }
+
+  @Test
+  void keepMineCreditsTheResolverOnlyWithTheEditItPushes() {
+    var conflict = raiseTitleConflictBetween("mady", "rajesh");
+    var mine = snapshot(conflict.localSnapshot());
+    var theirs = snapshot(conflict.remoteSnapshot());
+
+    Acting.as("rajesh", () -> node.specs.resolveConflict("auth", mine, theirs));
+
+    var history = node.specs.history("auth");
+    assertEquals("mady", history.get(history.size() - 2).actor(), "the adopted base is main's");
+    assertEquals("rajesh", history.getLast().actor());
+    assertEquals("rajesh", node.specs.findById("auth").orElseThrow().updatedBy());
+  }
+
+  private SyncConflicts.Conflict raiseTitleConflictBetween(String onOther, String onNode) {
+    Acting.as(onNode, () -> node.specs.create(SyncBox.spec("auth", "Auth", "pending")));
+    sync(node);
+    sync(other);
+    Acting.as(
+        onOther, () -> other.specs.update(SyncBox.spec("auth", "Title from other", "pending")));
+    sync(other);
+    Acting.as(onNode, () -> node.specs.update(SyncBox.spec("auth", "Title from node", "pending")));
+    sync(node);
+    return node.conflicts.pendingFor("spec", "auth").orElseThrow();
   }
 
   @Test

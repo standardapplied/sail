@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -170,7 +171,7 @@ public final class RevisionJournal implements ConflictResolver {
         db.execute("UPDATE " + schema.table() + " SET rev = ? WHERE id = ?", rev, id);
       }
     }
-    changeLog.append(schema.entityType(), id, rev, offeredAuthor, origin, deleted, snapshot);
+    changeLog.appendSynced(schema.entityType(), id, rev, offeredAuthor, origin, deleted, snapshot);
     return rev;
   }
 
@@ -239,13 +240,14 @@ public final class RevisionJournal implements ConflictResolver {
    * chosen} differs from {@code remote} the row becomes a forward local edit the next sync pushes;
    * when they match the row simply adopts main's value, and the earlier local version is still in
    * the {@link ChangeLog}. A {@code null} side is a deletion. Returns the rev the row now carries.
-   * No work is ever lost: every state is journaled.
+   * No work is ever lost: every state is journaled. The base is main's revision, adopted as {@link
+   * Actor#main()} so it keeps the author main recorded; only {@code chosen} is the resolver's.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
     return db.transaction(
         () -> {
-          var baseRev = adoptBase(id, remote);
+          var baseRev = Actor.call(Actor.main(), () -> adoptBase(id, remote));
           if (sameContent(chosen, remote)) {
             return baseRev;
           }
@@ -265,7 +267,7 @@ public final class RevisionJournal implements ConflictResolver {
       return rev;
     }
     schema.apply(id, remote);
-    return recordRevision(id, null, null, "sync", false, true);
+    return recordRevision(id, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true);
   }
 
   private String writeChosen(String id, Map<String, Object> chosen) {

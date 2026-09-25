@@ -294,13 +294,15 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * {@code remote} as the new merge base — so the next sync can never re-raise the same conflict —
    * then writes {@code chosen} as the resolved state. Take-theirs simply adopts main's value;
    * keep-mine writes a forward local edit the next sync pushes. A {@code null} side is a deletion.
-   * Every state stays in the {@link ChangeLog}, so no choice loses work.
+   * Every state stays in the {@link ChangeLog}, so no choice loses work. The base is main's
+   * revision, adopted as {@link Actor#main()} so it keeps the author main recorded; only {@code
+   * chosen} is the resolver's.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
     return db.transaction(
         () -> {
-          var baseRev = adoptBase(id, remote);
+          var baseRev = Actor.call(Actor.main(), () -> adoptBase(id, remote));
           if (Objects.equals(definitionOf(chosen), definitionOf(remote))) {
             return baseRev;
           }
@@ -314,7 +316,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
     var definition = definitionOf(remote);
     writeRow(id, definition, Snapshots.actor(remote));
-    return recordRevision(id, definition, null, "sync", false, true);
+    return recordRevision(
+        id, definition, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true, false);
   }
 
   private String adoptBaseDeletion(String id) {
@@ -414,7 +417,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
         db.execute("UPDATE projects SET rev = ? WHERE name = ?", rev, id);
       }
     }
-    changeLog.append(ENTITY, id, rev, offeredAuthor, origin, deleted, snapshot);
+    changeLog.appendSynced(ENTITY, id, rev, offeredAuthor, origin, deleted, snapshot);
     return rev;
   }
 

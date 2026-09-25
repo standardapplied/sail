@@ -276,7 +276,6 @@ class ContentMigrationTest {
             "file",
             "proj/file",
             "1-file",
-            null,
             "local",
             false,
             YamlUtil.dumpJson(Map.of("content", "AAECAw==")));

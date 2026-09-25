@@ -320,7 +320,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           requireReplyTarget(row);
           write(row, rev, rev);
           if (!Objects.equals(existing.map(MessageRow::rev).orElse(null), rev)) {
-            changeLog.append(
+            changeLog.appendSynced(
                 ENTITY,
                 id,
                 rev,
@@ -365,7 +365,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           }
           requireReplyTarget(row);
           write(row, rev, null);
-          changeLog.append(ENTITY, id, rev, row.author(), "sync", false, json);
+          changeLog.appendSynced(ENTITY, id, rev, row.author(), "sync", false, json);
           return new PushOutcome.Accepted(rev);
         });
   }
@@ -441,7 +441,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * Messages are append-only, so the only resolution that can stand is main's: {@code chosen} must
    * be {@code remote}. The local row is replaced by main's content and rebased onto it, and the
    * revision is content-addressed so the next round links it to main's without a push. Keeping mine
-   * would need main to rewrite a message, which the wire refuses.
+   * would need main to rewrite a message, which the wire refuses. Main's copy is adopted as {@link
+   * Actor#main()}, so it keeps the author main recorded.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
@@ -449,6 +450,10 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
       throw new IllegalArgumentException(
           "message '" + id + "' is append-only: main's copy stands; resolve it with --theirs");
     }
+    return Actor.call(Actor.main(), () -> adoptMainCopy(id, remote));
+  }
+
+  private String adoptMainCopy(String id, Map<String, Object> remote) {
     return db.transaction(
         () -> {
           var row = fromSnapshot(id, remote);
@@ -456,7 +461,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var json = YamlUtil.dumpJson(remote);
           var rev = Revisions.next(latestRev(id), json);
           replace(row, rev);
-          changeLog.append(
+          changeLog.appendSynced(
               ENTITY,
               id,
               rev,

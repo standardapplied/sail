@@ -138,7 +138,7 @@ public final class ChangeLog {
       String origin,
       boolean deleted,
       String snapshot) {
-    append(entityType, entityId, rev, null, origin, deleted, snapshot);
+    appendSynced(entityType, entityId, rev, null, origin, deleted, snapshot);
   }
 
   /**
@@ -147,7 +147,7 @@ public final class ChangeLog {
    * push and on a node adopting main's, and ignored on every other lane (see {@link
    * Actor#authorOf}).
    */
-  public void append(
+  public void appendSynced(
       String entityType,
       String entityId,
       String rev,

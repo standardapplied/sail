@@ -51,7 +51,7 @@ class ChangeLogTest {
   void aRevisionAppendedUnderASyncPeerRecordsThatPeerAsItsProvenance() {
     Actor.run(
         Actor.sync("sumesh", Role.MEMBER),
-        () -> log.append("spec", "a", "1-x", "uday", "sync", false, "{}"));
+        () -> log.appendSynced("spec", "a", "1-x", "uday", "sync", false, "{}"));
 
     var entry = log.history("spec", "a").getFirst();
     assertEquals("sumesh", entry.peer());
@@ -73,7 +73,7 @@ class ChangeLogTest {
 
   @Test
   void aLocalRevisionIsAuthoredByTheBoundActorWhateverItOffers() {
-    log.append("spec", "a", "1-x", "someone-else", "local", false, "{}");
+    log.appendSynced("spec", "a", "1-x", "someone-else", "local", false, "{}");
 
     assertEquals("uday", log.history("spec", "a").getFirst().actor());
   }
@@ -98,7 +98,8 @@ class ChangeLogTest {
 
   @Test
   void adoptionRecordsTheAuthorMainRecordedWithMainAsThePeer() {
-    Actor.run(Actor.main(), () -> log.append("spec", "a", "1-x", "sumesh", "sync", false, "{}"));
+    Actor.run(
+        Actor.main(), () -> log.appendSynced("spec", "a", "1-x", "sumesh", "sync", false, "{}"));
     Actor.run(Actor.main(), () -> log.append("spec", "b", "1-y", "sync", false, "{}"));
 
     var adopted = log.history("spec", "a").getFirst();

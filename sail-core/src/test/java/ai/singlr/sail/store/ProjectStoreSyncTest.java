@@ -131,21 +131,29 @@ class ProjectStoreSyncTest {
   }
 
   @Test
-  void resolveConflictTakeTheirsAdoptsMainsDefinition() {
+  void resolveConflictTakeTheirsAdoptsMainsDefinitionUnderMainsAuthor() {
     store.upsert("acme", "mine");
 
-    store.resolveConflict("acme", def("theirs"), def("theirs"));
+    store.resolveConflict("acme", def("theirs", "mady"), def("theirs", "mady"));
 
-    assertEquals(def("theirs", "uday"), store.comparableSnapshot("acme"));
+    assertEquals(def("theirs", "mady"), store.comparableSnapshot("acme"));
+    var head = new ChangeLog(db).head("project", "acme").orElseThrow();
+    assertEquals("mady", head.actor(), "main's revision keeps main's author, not the resolver");
+    assertEquals(Actor.MAIN_HANDLE, head.peer());
   }
 
   @Test
   void resolveConflictKeepMineWritesAForwardEditThatPushes() {
     store.applyRevision("acme", def("theirs"), "rev-theirs");
 
-    store.resolveConflict("acme", def("mine"), def("theirs"));
+    store.resolveConflict("acme", def("mine"), def("theirs", "mady"));
 
     assertEquals(def("mine", "uday"), store.comparableSnapshot("acme"));
+    var history = new ChangeLog(db).history("project", "acme");
+    assertEquals(
+        "mady",
+        history.get(history.size() - 2).actor(),
+        "the base adopted from main keeps main's author");
     assertNotEquals("rev-theirs", store.latestRev("acme"));
     assertNotEquals(
         store.baseRevOf("acme"), store.latestRev("acme"), "a forward local edit awaits push");
