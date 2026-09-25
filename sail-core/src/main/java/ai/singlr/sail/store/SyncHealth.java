@@ -6,7 +6,9 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -37,7 +39,8 @@ public final class SyncHealth {
       Instant staleSince,
       long fetchedBytes,
       long sentBytes,
-      long freedBytes) {}
+      long freedBytes,
+      List<SyncSession.Denial> denials) {}
 
   public Optional<Health> find(String peer) {
     return db.queryOne(
@@ -58,7 +61,8 @@ public final class SyncHealth {
                 instant(row.text(8)),
                 bytes(row.text(6), "bytes_fetched"),
                 bytes(row.text(6), "bytes_sent"),
-                bytes(row.text(6), "bytes_freed")),
+                bytes(row.text(6), "bytes_freed"),
+                denials(row.text(6))),
         peer);
   }
 
@@ -87,6 +91,18 @@ public final class SyncHealth {
       long fetchedBytes,
       long sentBytes,
       long freedBytes) {
+    return succeeded(peer, at, report, fetchedBytes, sentBytes, freedBytes, List.of());
+  }
+
+  /** A completed round, with the offers main denied in it. */
+  public boolean succeeded(
+      String peer,
+      Instant at,
+      SyncEngine.Report report,
+      long fetchedBytes,
+      long sentBytes,
+      long freedBytes,
+      List<SyncSession.Denial> denials) {
     return db.transaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
@@ -113,7 +129,9 @@ public final class SyncHealth {
                       "bytes_sent",
                       sentBytes,
                       "bytes_freed",
-                      freedBytes)),
+                      freedBytes,
+                      "denials",
+                      denials.stream().map(SyncHealth::denial).toList())),
               peer);
           return recovered;
         });
@@ -148,6 +166,25 @@ public final class SyncHealth {
         ((Number) map.get("pushed")).intValue(),
         ((Number) map.get("merged")).intValue(),
         ((Number) map.get("conflicts")).intValue());
+  }
+
+  private static Map<String, Object> denial(SyncSession.Denial denial) {
+    return Map.of("type", denial.type(), "id", denial.id(), "reason", denial.reason());
+  }
+
+  private static List<SyncSession.Denial> denials(String json) {
+    if (json == null || !(YamlUtil.parseMap(json).get("denials") instanceof List<?> denials)) {
+      return List.of();
+    }
+    return denials.stream()
+        .map(Map.class::cast)
+        .map(
+            denial ->
+                new SyncSession.Denial(
+                    String.valueOf(denial.get("type")),
+                    String.valueOf(denial.get("id")),
+                    String.valueOf(denial.get("reason"))))
+        .toList();
   }
 
   private static long bytes(String json, String field) {

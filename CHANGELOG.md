@@ -2,6 +2,12 @@
 
 ## 0.46.2
 
+- **A push main refuses on authority settles, and the node keeps syncing.** Main answers each such offer `denied`, with its current version. The node adopts that version, keeps its own in history, and carries on. It used to fail the round, and offer the same revision again every round.
+  - Main denies a read-only session's offers, a message posted as someone the pusher may not post as, a reply to a message main does not hold, and a run whose provenance is not the pusher's. A denied offer never fails the offers beside it. A viewer's push used to fail whole, a forged author failed the push with every other offer in it, and a foreign run was answered as a race.
+  - A node-born entity main denies leaves the node: a denied message leaves its room with the replies this box posted under it. Every revision stays in the change log.
+  - A read-only session is asked for no content, so its push reaches main's decision instead of failing at the upload.
+  - `sail sync` prints each denial, such as `spec auth: main kept its version — <reason>. Yours is in its history: sail spec history auth.` `sail sync --json` and `GET /v1/sync` list them (`type`, `id`, `reason`), and a node's running server logs them.
+  - On the wire a denial is a refusal marked `denied`, so a 0.46 node reads the refusal it knows and fails its round naming the reason, as before. The sync floor does not change.
 - **Every write names who is acting.** One `Actor` (handle, role, lane) is the identity of every write, bound by the entry point that makes it, and the change log reads it for every revision, tombstone and erasure. This changes no authority rule; it is where the next release enforces them.
   - Lanes: `CLI` (the box's operator), `API` (an HTTP token), `AGENT` and `ROOM` (a run's principal on the socket), `SYNC` (an FDE pushing to main), `MAIN` (a node adopting main's revisions) and `SYSTEM` (this box's machinery, recorded as `sail`).
   - The author in `sail spec history` and in `updated_by` is always the one who made that revision. A status-only or content-only change, a delete, a restore and a project move used to keep the previous editor's name; a synced row with no author used to read `sync`, and retention's erasures `sail-retention` (they now say `sail`, with origin `retention`).

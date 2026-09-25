@@ -34,10 +34,12 @@ import java.util.Optional;
  * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
  * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
  * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, carries the push half of Door-2
- * authorization: a {@code viewer} opens a session and pulls every type, but its offers are refused
+ * authorization: a {@code viewer} opens a session and pulls every type, but its offers are denied
  * so only {@code member}+ work propagates. The principal's handle additionally binds run offers to
  * execution provenance — a session may create, update, or delete only runs stamped with its own
- * node, so no member can forge run metadata another box would treat as its own execution.
+ * node, so no member can forge run metadata another box would treat as its own execution. Every
+ * such decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the
+ * node settles it instead of offering the same change again every round.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
@@ -209,6 +211,11 @@ public final class SyncRpcServer {
     }
   }
 
+  /**
+   * Serves one content exchange. A read-only principal's announcement is answered lacking nothing:
+   * every offer it pushes next is denied, so its content is never stored, and its push still
+   * reaches main's decision instead of failing before it.
+   */
   private void serveContent(SyncWire.Content content, InputStream in, OutputStream out, int frame)
       throws IOException {
     switch (content) {
@@ -221,11 +228,11 @@ public final class SyncRpcServer {
         reply(out, new SyncWire.Done());
       }
       case SyncWire.Announce announce -> {
-        if (!principal.canWrite()) {
-          reply(out, new SyncWire.Refuse("read-only principal cannot upload content"));
-          return;
+        if (principal.canWrite()) {
+          receiveContent(announce, in, out, frame);
+        } else {
+          reply(out, new SyncWire.Lack(List.of()));
         }
-        receiveContent(announce, in, out, frame);
       }
       default ->
           throw new IllegalArgumentException(
@@ -310,7 +317,7 @@ public final class SyncRpcServer {
             case SyncWire.Heads ignored -> welcomed ? tips() : helloRequired();
             case SyncWire.Pull pull -> welcomed ? page(pull, frame) : helloRequired();
             case SyncWire.Need need -> welcomed ? current(need, frame) : helloRequired();
-            case SyncWire.Push push -> welcomed ? results(push) : helloRequired();
+            case SyncWire.Push push -> welcomed ? results(push, frame) : helloRequired();
             case SyncWire.FetchFdes ignored ->
                 welcomed ? new SyncWire.Fdes(fdeRoster.entries()) : helloRequired();
             case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session");
@@ -483,22 +490,27 @@ public final class SyncRpcServer {
   }
 
   /**
-   * Main's verdicts on one push. A read-only principal's push is refused whole — except a batch of
-   * erase requests, each refused on its own, so the node learns the verdict and drops them instead
-   * of asking again every round.
+   * Main's verdicts on one push, one per offer: a decision on one offer never fails the offers
+   * beside it. An erase request is decided by {@link EraseAuthority}; every other offer goes to the
+   * type's authority, which denies what the principal may not change — a read-only role's offers
+   * among them — inside the commit's own transaction. A denial carries main's version only while
+   * the results still fit the frame; past it, the node fetches the version itself.
    */
-  private SyncWire.Response results(SyncWire.Push push) {
-    if (!principal.canWrite() && !push.offers().stream().allMatch(MainReplica.Offer::erase)) {
-      return new SyncWire.Failed(
-          "Your role is read-only: it can pull the shared board but not push changes.");
-    }
+  private SyncWire.Response results(SyncWire.Push push, int frame) {
     var main = replicas.get(push.type());
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + push.type());
     }
+    var budget = new SyncWire.Frame(frame);
     var results = new ArrayList<SyncWire.Result>();
     for (var offer : push.offers()) {
-      results.add(offer.erase() ? erased(push.type(), offer) : result(push.type(), main, offer));
+      var result = offer.erase() ? erased(push.type(), offer) : result(push.type(), main, offer);
+      if (result instanceof SyncWire.Denied denied
+          && !budget.admits(SyncWire.encodedLength(denied))) {
+        result = denied.withheld();
+      }
+      budget.add(SyncWire.encodedLength(result));
+      results.add(result);
     }
     return new SyncWire.Results(results, main.maxSeq());
   }
@@ -540,16 +552,13 @@ public final class SyncRpcServer {
   }
 
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
-    if (RUN_ENTITY.equals(type)) {
-      if (principal.handle() == null || principal.handle().isBlank()) {
-        return new SyncWire.Refused(
-            offer.id(),
-            "This sync session has no node handle, so a run cannot be attributed to it; "
-                + "set the node's sync handle before pushing runs.");
-      }
-      if (!ownsRun(offer, main)) {
-        return new SyncWire.Stale(offer.id());
-      }
+    if (RUN_ENTITY.equals(type)
+        && principal.canWrite()
+        && (principal.handle() == null || principal.handle().isBlank())) {
+      return new SyncWire.Refused(
+          offer.id(),
+          "This sync session has no node handle, so a run cannot be attributed to it; "
+              + "set the node's sync handle before pushing runs.");
     }
     var before = main.current(offer.id());
     CommitOutcome outcome;
@@ -566,6 +575,8 @@ public final class SyncRpcServer {
         yield new SyncWire.Accepted(offer.id(), accepted.rev());
       }
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
+      case CommitOutcome.Denied denied ->
+          new SyncWire.Denied(offer.id(), denied.reason(), denied.rev(), denied.snapshot());
     };
   }
 
@@ -584,30 +595,5 @@ public final class SyncRpcServer {
     } catch (RuntimeException e) {
       System.err.println("  [sync] transition notification failed; the sync is unaffected: " + e);
     }
-  }
-
-  /**
-   * Whether this session may commit the run: both the incoming snapshot's {@code node} and the run
-   * main already holds must be the principal's own handle. Checking both sides refuses a forged
-   * foreign stamp and the clobbering of another node's run with a re-stamped one; a missing or
-   * blank stamp fails closed. A null current snapshot alongside a non-null revision is a tombstone,
-   * not a fresh ID — resurrecting it is refused outright, since the deleted run's owner is no
-   * longer readable and every session is handed the tombstone's revision to replay against.
-   */
-  private boolean ownsRun(MainReplica.Offer offer, MainReplica main) {
-    var incoming = offer.snapshot();
-    var current = main.current(offer.id());
-    if (incoming != null && current == null && main.currentRev(offer.id()) != null) {
-      return false;
-    }
-    return ownedByPrincipal(incoming) && ownedByPrincipal(current);
-  }
-
-  private boolean ownedByPrincipal(Map<String, Object> run) {
-    if (run == null) {
-      return true;
-    }
-    var owner = Objects.toString(run.get("node"), "");
-    return !owner.isBlank() && owner.equals(principal.handle());
   }
 }

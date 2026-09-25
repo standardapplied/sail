@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.SyncConflicts;
@@ -33,6 +34,9 @@ import java.util.function.Supplier;
  * like a run supplies a policy so a reader box never pushes a run it did not author.
  */
 public final class StoreReplica implements LocalReplica, MainReplica {
+
+  static final String READ_ONLY =
+      "your role is read-only: it can pull the shared board but not push changes";
 
   private final String id;
   private final SyncedStore store;
@@ -141,7 +145,9 @@ public final class StoreReplica implements LocalReplica, MainReplica {
    * Main's compare-and-set commit. An erased entity takes no commit at all — every offer is stale
    * against its erasure, so the node adopts it and nothing brings the entity back — and a state
    * that would belong to an erased entity is refused by the journal ({@link ChangeLog.Pruned}),
-   * inside the commit's own transaction, so a prune cannot slip between the two.
+   * inside the commit's own transaction, so a prune cannot slip between the two. Who may write is
+   * decided in the same transaction: a read-only actor's offer is {@linkplain CommitOutcome.Denied
+   * denied} with main's version, as is any change the store itself refuses the actor.
    */
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
@@ -151,10 +157,16 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
           }
+          if (!Actor.current().canWrite()) {
+            return new CommitOutcome.Denied(
+                READ_ONLY, store.latestRev(entityId), current(entityId));
+          }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
             case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
             case PushOutcome.Stale s ->
                 new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
+            case PushOutcome.Denied d ->
+                new CommitOutcome.Denied(d.reason(), d.currentRev(), d.currentSnapshot());
           };
         });
   }

@@ -79,6 +79,7 @@ public final class SyncWire {
   private static final String STALE = "stale";
   private static final String REFUSED = "refused";
   private static final String REASON = "reason";
+  private static final String DENIED = "denied";
   private static final String PROTOCOL_KEY = "protocol";
   private static final String VERSION = "version";
   private static final String FLOOR = "floor";
@@ -374,7 +375,7 @@ public final class SyncWire {
       implements Response {}
 
   /** Main's verdict on one pushed offer. */
-  public sealed interface Result permits Accepted, Stale, Refused {
+  public sealed interface Result permits Accepted, Stale, Refused, Denied {
     String id();
   }
 
@@ -389,8 +390,33 @@ public final class SyncWire {
    */
   public record Stale(String id) implements Result {}
 
-  /** Main would not take the offer at all — a read-only role, an unattributable run. */
+  /**
+   * Main could not take the offer on integrity grounds — content it does not hold, a pruned id, a
+   * run pushed with no node handle. Not a decision about who may write: that is {@link Denied}.
+   */
   public record Refused(String id, String reason) implements Result {}
+
+  /**
+   * Main decided this principal may not make this change, naming why, and answers with its current
+   * version of the entity: a revision, a tombstone ({@code rev} with a null {@code snapshot}), or
+   * nothing when main holds none. The node adopts it and keeps its own in history. It travels as a
+   * {@code refused} result marked {@code denied}, so a node that predates it reads the {@link
+   * Refused} it knows, naming the same reason. A version that would push the results past the frame
+   * is not {@code carried}: the node fetches it through the bounded {@link Need} path, as it does
+   * for a {@link Stale} offer.
+   */
+  public record Denied(
+      String id, String reason, String rev, Map<String, Object> snapshot, boolean carried)
+      implements Result {
+    public Denied(String id, String reason, String rev, Map<String, Object> snapshot) {
+      this(id, reason, rev, snapshot, true);
+    }
+
+    /** This denial without main's version, which the node then fetches. */
+    public Denied withheld() {
+      return new Denied(id, reason, null, null, false);
+    }
+  }
 
   /** One result per pushed offer, in order, and main's high-water afterwards. */
   public record Results(List<Result> results, long maxSeq) implements Response {}
@@ -457,6 +483,11 @@ public final class SyncWire {
   /** The bytes {@code entry} takes inside a page. */
   public static int encodedLength(Entry entry) {
     return YamlUtil.dumpJson(entryMap(entry)).getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  /** The bytes {@code result} takes inside a batch of results. */
+  public static int encodedLength(Result result) {
+    return YamlUtil.dumpJson(resultMap(result)).getBytes(StandardCharsets.UTF_8).length;
   }
 
   /** The bytes {@code offer} takes inside a push. */
@@ -665,6 +696,16 @@ public final class SyncWire {
       case Accepted accepted -> map.put(ACCEPTED, Map.of(REV, accepted.rev()));
       case Stale _ -> map.put(STALE, true);
       case Refused refused -> map.put(REFUSED, Map.of(REASON, refused.reason()));
+      case Denied denied -> {
+        var refused = new LinkedHashMap<String, Object>();
+        refused.put(REASON, denied.reason());
+        refused.put(DENIED, true);
+        if (denied.carried()) {
+          refused.put(REV, denied.rev());
+          refused.put(SNAPSHOT, denied.snapshot());
+        }
+        map.put(REFUSED, refused);
+      }
     }
     return map;
   }
@@ -679,6 +720,14 @@ public final class SyncWire {
       return new Stale(id);
     }
     var refused = snapshot(map, REFUSED);
+    if (refused != null && bool(refused, DENIED)) {
+      return new Denied(
+          id,
+          string(refused, REASON),
+          string(refused, REV),
+          snapshot(refused, SNAPSHOT),
+          refused.containsKey(SNAPSHOT));
+    }
     if (refused != null) {
       return new Refused(id, string(refused, REASON));
     }

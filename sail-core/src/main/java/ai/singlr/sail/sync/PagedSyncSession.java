@@ -74,6 +74,7 @@ public final class PagedSyncSession implements SyncSession {
   private boolean sawTombstone;
   private int adopted;
   private Set<String> touched = Set.of();
+  private List<SyncSession.Denial> denials = new ArrayList<>();
   private String broken;
 
   PagedSyncSession content(Sqlite db) {
@@ -204,6 +205,7 @@ public final class PagedSyncSession implements SyncSession {
     var sentBefore = sentBytes;
     sawTombstone = false;
     touched = Set.of();
+    denials = new ArrayList<>();
     var ask = askedFor(type);
     adopted = ask.adopted();
     var tip = tips().get(type);
@@ -255,7 +257,9 @@ public final class PagedSyncSession implements SyncSession {
         pages == 0 && dirty.isEmpty() && ask.count() + late.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
-        sentBytes - sentBefore);
+        sentBytes - sentBefore,
+        0,
+        denials);
   }
 
   /** What asking main to erase one type's pending prunes came to. */
@@ -755,7 +759,8 @@ public final class PagedSyncSession implements SyncSession {
               type + ": main answered " + result.id() + " for " + batch.get(i).id(),
               null);
         }
-        if (result instanceof SyncWire.Stale) {
+        if (result instanceof SyncWire.Stale
+            || result instanceof SyncWire.Denied denied && !denied.carried()) {
           stale.add(result.id());
         }
       }
@@ -768,8 +773,9 @@ public final class PagedSyncSession implements SyncSession {
     }
 
     /**
-     * Replaces the view's entries for the ids main called stale with main's present rows, fetched
-     * through the frame-bounded need path; an id main no longer knows leaves the view.
+     * Replaces the view's entries for the ids main called stale, or denied without their version,
+     * with main's present rows, fetched through the frame-bounded need path; an id main no longer
+     * knows leaves the view.
      */
     private void refresh(List<String> ids) {
       if (ids.isEmpty()) {
@@ -786,6 +792,22 @@ public final class PagedSyncSession implements SyncSession {
           });
     }
 
+    /**
+     * Makes main's version in a denial this view's entry — the content it names fetched first, so
+     * the node can adopt it — or drops the entry when main holds none.
+     */
+    private void holdMainsVersion(SyncWire.Denied denied) {
+      if (denied.rev() == null) {
+        entries.remove(denied.id());
+        return;
+      }
+      var entry =
+          new SyncWire.Entry(
+              0, denied.id(), denied.rev(), denied.snapshot() == null, denied.snapshot());
+      fetchContent(type, List.of(entry));
+      entries.put(denied.id(), entry);
+    }
+
     private CommitOutcome settle(Offer offer, SyncWire.Result result) {
       return switch (result) {
         case SyncWire.Accepted accepted -> {
@@ -797,6 +819,14 @@ public final class PagedSyncSession implements SyncSession {
         }
         case SyncWire.Stale _ ->
             new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));
+        case SyncWire.Denied denied -> {
+          if (denied.carried()) {
+            holdMainsVersion(denied);
+          }
+          denials.add(new SyncSession.Denial(type, denied.id(), denied.reason()));
+          yield new CommitOutcome.Denied(
+              denied.reason(), currentRev(offer.id()), current(offer.id()));
+        }
         case SyncWire.Refused refused ->
             throw new SyncTransportException(
                 "refused", type + " " + offer.id() + ": " + refused.reason(), null);

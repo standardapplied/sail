@@ -20,11 +20,14 @@ import java.util.function.Consumer;
  */
 public sealed interface SyncSession extends AutoCloseable permits PagedSyncSession {
 
+  /** An offer main denied: the node now holds main's version, and its own is in its history. */
+  record Denial(String type, String id, String reason) {}
+
   /**
    * How one entity type fared in a round: the engine's counts, how many pages and entries main
    * served for it, whether nothing at all had to move ({@code skipped}), the failure that stopped
-   * it, if one did, the content bytes it moved each way, and the bytes the collection after it
-   * freed.
+   * it, if one did, the content bytes it moved each way, the bytes the collection after it freed,
+   * and the offers main denied.
    */
   record TypeReport(
       String type,
@@ -35,7 +38,12 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       String failure,
       long fetchedBytes,
       long sentBytes,
-      long freedBytes) {
+      long freedBytes,
+      List<Denial> denials) {
+    public TypeReport {
+      denials = List.copyOf(denials);
+    }
+
     public TypeReport(
         String type,
         SyncEngine.Report report,
@@ -45,7 +53,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
         String failure,
         long fetchedBytes,
         long sentBytes) {
-      this(type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, 0);
+      this(type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, 0, List.of());
     }
 
     public TypeReport(
@@ -61,7 +69,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     /** This report with the bytes the collection after it freed. */
     public TypeReport withFreedBytes(long freed) {
       return new TypeReport(
-          type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, freed);
+          type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, freed, denials);
     }
 
     public static TypeReport failed(String type, String failure) {

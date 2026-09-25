@@ -6,6 +6,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -553,24 +554,19 @@ class SyncBlobTest {
   }
 
   @Test
-  void aViewerIsRefusedAtAnnounceBeforeMainStoresAnyContent() throws Exception {
+  void aViewerIsAskedForNoContentAndItsFileIsDeniedWithoutMainStoringAny() throws Exception {
     try (var main = new SyncBox(dir, "main");
         var node = new SyncBox(dir, "node")) {
       new FileStore(node.db)
           .put("proj", "binary", new java.io.ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
-      var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), node);
-      var failure =
-          assertThrows(
-              SyncTransportException.class,
-              () -> {
-                try (link) {
-                  link.reconcile(
-                      "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
-                }
-              });
-      assertEquals("refused", failure.kind());
-      assertEquals(1, link.count("announce"));
-      assertEquals(0, link.count("chunk"));
+      try (var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), node)) {
+        var report =
+            link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+        assertNull(report.failure());
+        assertEquals(1, report.denials().size());
+        assertEquals(1, link.count("announce"));
+        assertEquals(0, link.count("chunk"));
+      }
       assertEquals(
           0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
       assertEquals(

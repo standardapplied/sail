@@ -68,7 +68,8 @@ public final class SyncEngine {
     PUSHED,
     MERGED,
     CONFLICT,
-    OFFERED
+    OFFERED,
+    DENIED
   }
 
   public Report reconcile(LocalReplica local, MainReplica main) {
@@ -118,7 +119,7 @@ public final class SyncEngine {
     }
 
     private void record(Outcome outcome) {
-      if (outcome != Outcome.OFFERED) {
+      if (outcome != Outcome.OFFERED && outcome != Outcome.DENIED) {
         tally.merge(outcome, 1, Integer::sum);
       }
     }
@@ -233,7 +234,12 @@ public final class SyncEngine {
       return Outcome.OFFERED;
     }
 
-    /** Applies main's verdict on one offer: adopt via the stale guard, or re-reconcile. */
+    /**
+     * Applies main's verdict on one offer: adopt via the stale guard, or re-reconcile. A denial is
+     * settled by adopting main's version, exactly as a pulled revision is — the offered revision
+     * stays in the change log and no conflict is parked. A local write landing since the offer is
+     * left alone; the next round offers it, and main decides it then.
+     */
     private Outcome settle(Pending offer, CommitOutcome outcome) {
       return switch (outcome) {
         case CommitOutcome.Accepted a ->
@@ -249,6 +255,10 @@ public final class SyncEngine {
                 ? recordStaleConflict(offer.id(), r.currentSnapshot())
                 : reconcileEntity(
                     offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
+        case CommitOutcome.Denied d -> {
+          local.adoptIfCurrent(offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev());
+          yield Outcome.DENIED;
+        }
       };
     }
 

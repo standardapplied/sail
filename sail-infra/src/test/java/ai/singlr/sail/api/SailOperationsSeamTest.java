@@ -239,7 +239,8 @@ class SailOperationsSeamTest {
               "stale_since",
               "bytes_fetched",
               "bytes_sent",
-              "bytes_freed"),
+              "bytes_freed",
+              "denials"),
           YamlUtil.parseMap(stale.body()).keySet());
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
