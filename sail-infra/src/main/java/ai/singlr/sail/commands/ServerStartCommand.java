@@ -44,6 +44,7 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DataMigration;
@@ -211,8 +212,9 @@ public final class ServerStartCommand implements Runnable {
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
-    var orphaned = reviewStore.failOrphanedRunning();
-    var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
+    var orphaned = Actor.call(Actor.system(), reviewStore::failOrphanedRunning);
+    var orphanedRuns =
+        Actor.call(Actor.system(), () -> runStore.failRunningReviewsOnNode(NodeIdentity.handle()));
     if (orphanedRuns > 0) {
       syncScheduler.afterWrite();
     }

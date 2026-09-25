@@ -7,6 +7,8 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -153,7 +155,7 @@ class UploadFailureRepliesTest {
     for (var reply : replies) expected.append(SyncWire.encode(reply)).append('\n');
     try (var main = new SyncBox("main")) {
       var output = new ByteStreams.Output();
-      main.server(new SyncPrincipal("node", true))
+      main.server(Actor.sync("node", Role.MEMBER))
           .content(main.db, limits)
           .serve(new ByteArrayInputStream(request.toByteArray()), output);
       assertEquals(expected.toString(), output.toString());

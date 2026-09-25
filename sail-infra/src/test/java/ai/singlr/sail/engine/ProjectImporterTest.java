@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class ProjectImporterTest {
 
   @TempDir Path tempDir;

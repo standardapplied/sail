@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.identity.Actor;
 import java.util.List;
 import java.util.Map;
 
@@ -46,12 +47,11 @@ public final class Snapshots {
   }
 
   /**
-   * The author a synced snapshot attributes its revision to — the reserved {@link #ACTOR} key — or
-   * {@code sync} when absent (or the snapshot itself is null), so a row that arrived with no
-   * attribution is still recorded as a sync write rather than crashing.
+   * The author a row written from {@code snapshot} records, as the change log records it for the
+   * same revision: the snapshot's reserved {@link #ACTOR} key where the bound {@link Actor} honours
+   * an offered author, otherwise the actor itself (see {@link Actor#authorOf}).
    */
   public static String actor(Map<String, Object> snapshot) {
-    var actor = snapshot == null ? null : snapshot.get(ACTOR);
-    return actor == null ? "sync" : actor.toString();
+    return Actor.current().authorOf(snapshot == null ? null : text(snapshot, ACTOR));
   }
 }

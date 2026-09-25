@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
 import java.util.Set;
@@ -67,11 +68,7 @@ public final class RunTracker implements EventSubscriber {
   @Override
   public void onEvent(Event event) {
     try {
-      switch (event.type()) {
-        case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> complete(event, "stopped");
-        case Event.WellKnownTypes.AGENT_SESSION_COMPLETED -> complete(event, "completed");
-        default -> {}
-      }
+      Actor.run(Actor.system(), () -> track(event));
     } catch (Exception e) {
       System.err.println(
           "run-tracker: failed to process "
@@ -80,6 +77,14 @@ public final class RunTracker implements EventSubscriber {
               + event.project()
               + ": "
               + e.getMessage());
+    }
+  }
+
+  private void track(Event event) {
+    switch (event.type()) {
+      case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> complete(event, "stopped");
+      case Event.WellKnownTypes.AGENT_SESSION_COMPLETED -> complete(event, "completed");
+      default -> {}
     }
   }
 

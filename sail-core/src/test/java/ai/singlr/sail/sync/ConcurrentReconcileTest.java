@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
  * concurrent paths are deterministic: a disjoint concurrent edit re-merges and lands, and main
  * churning past every retry parks the entity as a conflict rather than looping or losing work.
  */
+@ActingAs
 class ConcurrentReconcileTest {
 
   @TempDir Path tempDir;

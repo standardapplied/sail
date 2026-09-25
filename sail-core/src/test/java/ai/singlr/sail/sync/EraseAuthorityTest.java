@@ -9,6 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -21,10 +25,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Main decides a node's request to erase on main's own copy, never the node's. */
+@ActingAs
 class EraseAuthorityTest {
 
-  private static final SyncPrincipal MADY = new SyncPrincipal("mady", true);
-  private static final SyncPrincipal ADMIN = new SyncPrincipal("uday", true, true);
+  private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
+  private static final Actor ADMIN = Actor.sync("uday", Role.ADMIN);
 
   private Sqlite db;
   private SpecStore specs;
@@ -45,8 +50,8 @@ class EraseAuthorityTest {
 
   @Test
   void theAssigneeOrTheCreatorOfAnUnassignedSpecMayPruneIt() {
-    specs.create(spec("assigned", "mady", "uday"));
-    specs.create(spec("unassigned", null, "mady"));
+    create(spec("assigned", "mady", "uday"));
+    create(spec("unassigned", null, "mady"));
 
     assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "assigned"));
     assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "unassigned"));
@@ -54,19 +59,18 @@ class EraseAuthorityTest {
 
   @Test
   void anotherMembersSpecIsRefusedNamingItsOwnerAndAnAdminMayPruneIt() {
-    specs.create(spec("theirs", "uday", "uday"));
+    create(spec("theirs", "uday", "uday"));
 
     assertEquals(
         Optional.of("spec 'theirs' belongs to 'uday'; ask them or an admin"),
         authority.refusal(MADY, "spec", "theirs"));
     assertEquals(
-        Optional.empty(),
-        authority.refusal(new SyncPrincipal("mady", true, true), "spec", "theirs"));
+        Optional.empty(), authority.refusal(Actor.sync("mady", Role.ADMIN), "spec", "theirs"));
   }
 
   @Test
   void aDeletedSpecIsOwnedByWhoItsTombstoneNames() {
-    specs.create(spec("gone", "uday", "uday"));
+    create(spec("gone", "uday", "uday"));
     specs.delete("gone");
 
     assertTrue(authority.refusal(MADY, "spec", "gone").orElseThrow().contains("'uday'"));
@@ -74,7 +78,7 @@ class EraseAuthorityTest {
 
   @Test
   void aSpecMainHoldsNothingOfIsRefusedEvenToAnAdminAndOneWithNoOwnerIsAdminOnly() {
-    specs.create(spec("ownerless", null, null));
+    create(spec("ownerless", null, null));
     var never =
         Optional.of(
             "main holds no spec 'never-here', so it cannot tell whose it is; sync it before"
@@ -90,9 +94,9 @@ class EraseAuthorityTest {
 
   @Test
   void aSpecStillOnTheBoardIsRefusedWhateverItsOwnerSaysUntilArchivedCancelledOrDeleted() {
-    specs.create(spec("live", "mady", "mady", SpecStatus.IN_PROGRESS));
-    specs.create(spec("dropped", "mady", "mady", SpecStatus.CANCELLED));
-    specs.create(spec("deleted", "mady", "mady", SpecStatus.PENDING));
+    create(spec("live", "mady", "mady", SpecStatus.IN_PROGRESS));
+    create(spec("dropped", "mady", "mady", SpecStatus.CANCELLED));
+    create(spec("deleted", "mady", "mady", SpecStatus.PENDING));
     specs.delete("deleted");
 
     assertEquals(
@@ -104,7 +108,7 @@ class EraseAuthorityTest {
 
   @Test
   void aPlanWithARunStillGoingMustWait() {
-    specs.create(spec("busy", "mady", "mady"));
+    create(spec("busy", "mady", "mady"));
     var runs = new RunStore(db);
     var going =
         runs.create(
@@ -123,31 +127,35 @@ class EraseAuthorityTest {
 
   @Test
   void aSpecMainAlreadyErasedHasNothingLeftToProtect() {
-    specs.create(spec("theirs", "uday", "uday"));
+    create(spec("theirs", "uday", "uday"));
     var erasure = new Erasure(db);
-    erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "theirs"))), "uday", "local");
+    erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "theirs"))), "local");
 
     assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "theirs"));
     assertEquals(
         Optional.of("a read-only role cannot prune"),
-        authority.refusal(new SyncPrincipal("mady", false), "spec", "theirs"));
+        authority.refusal(Actor.sync("mady", Role.VIEWER), "spec", "theirs"));
   }
 
   @Test
   void aViewerAWholeProjectAndAnythingButSpecsAndProjectsAreRefused() {
     assertEquals(
         Optional.of("a read-only role cannot prune"),
-        authority.refusal(new SyncPrincipal("mady", false), "spec", "any"));
+        authority.refusal(Actor.sync("mady", Role.VIEWER), "spec", "any"));
     assertEquals(
         Optional.of("pruning a whole project is admin-only"),
         authority.refusal(MADY, "project", "acme"));
     assertEquals(
         Optional.of("main holds no project 'acme'"), authority.refusal(ADMIN, "project", "acme"));
-    specs.create(spec("in-acme", "mady", "mady", SpecStatus.DONE, "acme"));
+    create(spec("in-acme", "mady", "mady", SpecStatus.DONE, "acme"));
     assertEquals(Optional.empty(), authority.refusal(ADMIN, "project", "acme"));
     assertEquals(
         Optional.of("only specs and projects are pruned on request, not a message"),
-        authority.refusal(new SyncPrincipal("uday", true, true), "message", "m"));
+        authority.refusal(Actor.sync("uday", Role.ADMIN), "message", "m"));
+  }
+
+  private void create(SpecStore.SpecRow row) {
+    Acting.as(row.createdBy(), () -> specs.create(row));
   }
 
   private static SpecStore.SpecRow spec(String id, String assignee, String createdBy) {

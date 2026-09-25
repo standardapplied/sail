@@ -7,11 +7,12 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncPeer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -31,12 +32,12 @@ import java.util.Optional;
  * there, once. It then answers {@link SyncWire.Heads} with every type's high-water, pages the
  * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
  * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
- * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The {@link
- * SyncPrincipal} carries the push half of Door-2 authorization: a {@code viewer} opens a session
- * and pulls every type, but its offers are refused so only {@code member}+ work propagates. The
- * principal's handle additionally binds run offers to execution provenance — a session may create,
- * update, or delete only runs stamped with its own node, so no member can forge run metadata
- * another box would treat as its own execution.
+ * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
+ * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, carries the push half of Door-2
+ * authorization: a {@code viewer} opens a session and pulls every type, but its offers are refused
+ * so only {@code member}+ work propagates. The principal's handle additionally binds run offers to
+ * execution provenance — a session may create, update, or delete only runs stamped with its own
+ * node, so no member can forge run metadata another box would treat as its own execution.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
@@ -56,7 +57,7 @@ public final class SyncRpcServer {
   }
 
   private final Map<String, MainReplica> replicas;
-  private final SyncPrincipal principal;
+  private final Actor principal;
   private final FdeRoster fdeRoster;
   private final SyncTransitionSink transitionSink;
   private final ChangeHeads heads;
@@ -71,21 +72,23 @@ public final class SyncRpcServer {
   private boolean erasedInSession;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
-    this(Map.of("spec", main), new SyncPrincipal(null, writable), FdeRoster.EMPTY);
+    this(
+        Map.of("spec", main),
+        Actor.sync(null, writable ? Role.MEMBER : Role.VIEWER),
+        FdeRoster.EMPTY);
   }
 
   public SyncRpcServer(MainReplica main, boolean writable, FdeRoster fdeRoster) {
-    this(Map.of("spec", main), new SyncPrincipal(null, writable), fdeRoster);
+    this(Map.of("spec", main), Actor.sync(null, writable ? Role.MEMBER : Role.VIEWER), fdeRoster);
   }
 
-  public SyncRpcServer(
-      Map<String, MainReplica> replicas, SyncPrincipal principal, FdeRoster fdeRoster) {
+  public SyncRpcServer(Map<String, MainReplica> replicas, Actor principal, FdeRoster fdeRoster) {
     this(replicas, principal, fdeRoster, SyncTransitionSink.NONE);
   }
 
   public SyncRpcServer(
       Map<String, MainReplica> replicas,
-      SyncPrincipal principal,
+      Actor principal,
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink) {
     this(replicas, principal, fdeRoster, transitionSink, ChangeHeads.NONE, SyncWire.UPGRADE_FLOOR);
@@ -93,7 +96,7 @@ public final class SyncRpcServer {
 
   public SyncRpcServer(
       Map<String, MainReplica> replicas,
-      SyncPrincipal principal,
+      Actor principal,
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink,
       ChangeHeads heads,
@@ -113,7 +116,7 @@ public final class SyncRpcServer {
   public static SyncRpcServer over(
       Sqlite db,
       String boxId,
-      SyncPrincipal principal,
+      Actor principal,
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink,
       String version) {
@@ -512,8 +515,8 @@ public final class SyncRpcServer {
       return new SyncWire.Refused(offer.id(), "this main keeps no erasure log");
     }
     var root = new Erasure.Target(type, offer.id());
-    return SyncPeer.with(
-        principal.handle(),
+    return Actor.call(
+        principal,
         () ->
             db.<SyncWire.Result>transaction(
                 () -> {
@@ -528,7 +531,7 @@ public final class SyncRpcServer {
                     if (busy.isPresent()) {
                       return new SyncWire.Refused(offer.id(), busy.get());
                     }
-                    erasure.erase(plan, principal.handle(), "sync");
+                    erasure.erase(plan, "sync");
                     erasedInSession = true;
                   }
                   return new SyncWire.Accepted(
@@ -552,9 +555,8 @@ public final class SyncRpcServer {
     CommitOutcome outcome;
     try {
       outcome =
-          SyncPeer.with(
-              principal.handle(),
-              () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
+          Actor.call(
+              principal, () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
     } catch (BlobStore.NotHeld | ChangeLog.Pruned e) {
       return new SyncWire.Refused(offer.id(), e.getMessage());
     }

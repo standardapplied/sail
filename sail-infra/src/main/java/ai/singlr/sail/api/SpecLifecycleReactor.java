@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Objects;
 import java.util.Set;
@@ -53,7 +54,11 @@ public final class SpecLifecycleReactor implements EventSubscriber {
   @Override
   public void onEvent(Event event) {
     try {
-      specStore.compareAndSetStatus(event.spec(), SpecStatus.IN_PROGRESS, SpecStatus.REVIEW);
+      Actor.run(
+          Actor.system(),
+          () ->
+              specStore.compareAndSetStatus(
+                  event.spec(), SpecStatus.IN_PROGRESS, SpecStatus.REVIEW));
     } catch (Exception e) {
       System.err.println(
           "  [spec-lifecycle] Warning: failed to advance "

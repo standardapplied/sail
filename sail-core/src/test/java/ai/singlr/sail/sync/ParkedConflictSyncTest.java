@@ -8,6 +8,9 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
@@ -27,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
  * is neither: main's entry is behind the checkpoint and the stamp carries no revision. The conflict
  * itself has to keep the entity in the round, or no round ever looks at it again.
  */
+@ActingAs
 class ParkedConflictSyncTest {
 
   @TempDir Path tempDir;
@@ -58,7 +62,7 @@ class ParkedConflictSyncTest {
   }
 
   private SyncSession.TypeReport round() throws IOException {
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+    try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
       return link.reconcile("run", nodeReplica);
     }
   }

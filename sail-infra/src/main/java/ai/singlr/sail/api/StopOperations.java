@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;

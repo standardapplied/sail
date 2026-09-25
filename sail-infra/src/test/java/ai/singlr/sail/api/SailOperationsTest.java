@@ -15,6 +15,10 @@ import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -41,6 +45,7 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class SailOperationsTest {
 
   private static final String RUNNING_JSON =
@@ -166,8 +171,8 @@ class SailOperationsTest {
         operationsWith(
             shell().on("incus list --format json", LIST_ALL_JSON),
             store -> {
-              store.upsert("beta", "name: beta", "me");
-              store.upsert("acme", "name: acme", "me");
+              store.upsert("beta", "name: beta");
+              store.upsert("acme", "name: acme");
             },
             environment());
 
@@ -195,7 +200,7 @@ class SailOperationsTest {
     var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var projectStore = new ProjectStore(db);
-    projectStore.upsert("beta", "name: beta", "me");
+    projectStore.upsert("beta", "name: beta");
     var operations =
         new SailOperations(
             shell().on("incus list --format json", EMPTY_JSON),
@@ -1015,7 +1020,7 @@ class SailOperationsTest {
                 .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
 
     var assignee = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
-    var result = operations.runLog(R1, 2, "node-a", assignee);
+    var result = Acting.by(assignee, () -> operations.runLog(R1, 2, "node-a", assignee));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
   }
@@ -1025,7 +1030,9 @@ class SailOperationsTest {
     var operations = opsWithLocalRunAndSpec(shell().on("incus list ^acme$", RUNNING_JSON));
 
     var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
-    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, operations.runLog(R1, 200, "node-a", other));
+    assertError(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        Acting.by(other, () -> operations.runLog(R1, 200, "node-a", other)));
   }
 
   @Test
@@ -1033,7 +1040,9 @@ class SailOperationsTest {
     var operations = opsWithLocalRunAndSpec(shell().on("incus list ^acme$", RUNNING_JSON));
 
     var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
-    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, operations.stopRun(R1, "node-a", other));
+    assertError(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        Acting.by(other, () -> operations.stopRun(R1, "node-a", other)));
   }
 
   @Test
@@ -1044,7 +1053,7 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
 
-    var result = operations.runLog(R1, 2, "node-a", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a", ADMIN));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
     assertEquals(R1, get(result, "run_id"));
@@ -1076,7 +1085,9 @@ class SailOperationsTest {
                     "/home/dev/.ssh/id_ed25519",
                     "sail-agent-" + R1));
 
-    assertEquals(List.of("safe"), get(operations.runLog(R1, 2, "node-a", ADMIN), "lines"));
+    assertEquals(
+        List.of("safe"),
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a", ADMIN)), "lines"));
     assertTrue(shell.invocations().stream().noneMatch(cmd -> cmd.contains("id_ed25519")));
   }
 
@@ -1089,7 +1100,8 @@ class SailOperationsTest {
                 .on("tail -n 200 -- " + RUN_LOG, new ShellExec.Result(1, "", "No such file")));
 
     assertEquals(
-        "No log found for this run.", get(operations.runLog(R1, 200, "node-a", ADMIN), "error"));
+        "No log found for this run.",
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)), "error"));
   }
 
   @Test
@@ -1100,14 +1112,16 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .throwOn("tail -n 200 -- " + RUN_LOG, new IOException("no shell")));
 
-    assertError(ErrorCode.COMMAND_FAILED, operations.runLog(R1, 200, "node-a", ADMIN));
+    assertError(
+        ErrorCode.COMMAND_FAILED,
+        Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
   }
 
   @Test
   void runLogRefusesAForeignRunWithStructuredProvenance() throws Exception {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    var result = operations.runLog(R1, 200, "sumesh", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 200, "sumesh", ADMIN));
 
     assertError(ErrorCode.RUN_ON_OTHER_NODE, result);
     var fields =
@@ -1142,7 +1156,9 @@ class SailOperationsTest {
                     RUN_LOG,
                     "sail-agent-" + R2));
 
-    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog(R2, 200, "node-a", ADMIN));
+    assertError(
+        ErrorCode.RUN_ON_OTHER_NODE,
+        Acting.by(ADMIN, () -> operations.runLog(R2, 200, "node-a", ADMIN)));
   }
 
   @Test
@@ -1169,21 +1185,25 @@ class SailOperationsTest {
                     RUN_LOG,
                     "sail-agent-" + R2));
 
-    assertEquals(List.of("hi"), get(operations.runLog(R2, 2, "", ADMIN), "lines"));
+    assertEquals(
+        List.of("hi"), get(Acting.by(ADMIN, () -> operations.runLog(R2, 2, "", ADMIN)), "lines"));
   }
 
   @Test
   void aStampedRunIsForeignToABoxThatHasNoHandle() throws Exception {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.runLog(R1, 200, "", ADMIN));
+    assertError(
+        ErrorCode.RUN_ON_OTHER_NODE, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "", ADMIN)));
   }
 
   @Test
   void runLogUnknownRunIsNotFound() throws Exception {
     var operations = opsWithRun(shell());
 
-    assertError(ErrorCode.RUN_NOT_FOUND, operations.runLog("nope", 200, "node-a", ADMIN));
+    assertError(
+        ErrorCode.RUN_NOT_FOUND,
+        Acting.by(ADMIN, () -> operations.runLog("nope", 200, "node-a", ADMIN)));
   }
 
   @Test
@@ -1199,7 +1219,9 @@ class SailOperationsTest {
   void stopRunRefusesAForeignRun() throws Exception {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    assertError(ErrorCode.RUN_ON_OTHER_NODE, operations.stopRun(R1, "sumesh", ADMIN));
+    assertError(
+        ErrorCode.RUN_ON_OTHER_NODE,
+        Acting.by(ADMIN, () -> operations.stopRun(R1, "sumesh", ADMIN)));
   }
 
   @Test
@@ -1212,7 +1234,8 @@ class SailOperationsTest {
                     "cat /home/dev/.sail/runs/" + R1 + "/agent.pid",
                     new ShellExec.Result(1, "", "missing")));
 
-    assertEquals(false, get(operations.stopRun(R1, "node-a", ADMIN), "stopped"));
+    assertEquals(
+        false, get(Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)), "stopped"));
   }
 
   @Test
@@ -1241,7 +1264,7 @@ class SailOperationsTest {
               runs.complete(R1, "completed", 0);
             });
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
 
     assertEquals(false, get(result, "stopped"));
     assertEquals("run_not_running", get(result, "reason"));
@@ -1257,7 +1280,7 @@ class SailOperationsTest {
             .on("cat /home/dev/.sail/runs/" + R1 + "/agent-session.json", "{\"task\": \"other\"}");
     var operations = opsWithRun(shell);
 
-    var error = operations.stopRun(R1, "node-a", ADMIN);
+    var error = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
 
     assertError(ErrorCode.CONFLICT, error);
   }
@@ -1318,7 +1341,7 @@ class SailOperationsTest {
                   "sail-review-" + R3);
             });
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
 
     assertEquals(true, get(result, "stopped"));
     assertTrue(
@@ -2206,7 +2229,7 @@ class SailOperationsTest {
                 .on("kill -9 123", "")
                 .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""));
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(123, get(result, "pid"));
@@ -2250,7 +2273,7 @@ class SailOperationsTest {
                     RUN_LOG,
                     "sail-agent-" + R1));
 
-    var result = operations.stopRun(R1, "node-a", ADMIN);
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(true, get(result, "spec_cancelled"));
@@ -2269,7 +2292,9 @@ class SailOperationsTest {
                     "{\"task\": \"work\"}")
                 .throwOn("kill 123", new IOException("permission denied")));
 
-    assertError(ErrorCode.AGENT_STOP_FAILED, operations.stopRun(R1, "node-a", ADMIN));
+    assertError(
+        ErrorCode.AGENT_STOP_FAILED,
+        Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)));
   }
 
   @Test
@@ -2325,7 +2350,9 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("tail -n 200 -- " + RUN_LOG, new ShellExec.Result(1, "", "permission denied")));
 
-    assertError(ErrorCode.AGENT_LOG_FAILED, operations.runLog(R1, 200, "node-a", ADMIN));
+    assertError(
+        ErrorCode.AGENT_LOG_FAILED,
+        Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
   }
 
   @Test
@@ -2540,7 +2567,9 @@ class SailOperationsTest {
     var operations = operations(baseYaml(), shell());
     var rev = operations.globalSpecHistory("auth").orThrow().revisions().getLast().rev();
 
-    var result = operations.restoreGlobalSpec("auth", new SpecRestoreRequest(rev), ADMIN);
+    var result =
+        Acting.by(
+            ADMIN, () -> operations.restoreGlobalSpec("auth", new SpecRestoreRequest(rev), ADMIN));
 
     assertTrue(result.isSuccess());
     assertEquals(rev, get(result, "from_rev"));
@@ -2565,8 +2594,11 @@ class SailOperationsTest {
     var operations = operationsWithStores(baseYaml(), shell(), null, s -> {}, s -> {});
 
     assertError(ErrorCode.NOT_FOUND, operations.reviewDetail("nope"));
-    assertError(ErrorCode.NOT_FOUND, operations.approveReview("nope", ADMIN));
-    assertError(ErrorCode.NOT_FOUND, operations.dismissFinding("nope", "f1", ADMIN));
+    assertError(
+        ErrorCode.NOT_FOUND, Acting.by(ADMIN, () -> operations.approveReview("nope", ADMIN)));
+    assertError(
+        ErrorCode.NOT_FOUND,
+        Acting.by(ADMIN, () -> operations.dismissFinding("nope", "f1", ADMIN)));
   }
 
   @Test
@@ -2600,8 +2632,9 @@ class SailOperationsTest {
             shell(), yaml.toString(), null, null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
-    assertTrue(operations.dismissFinding(reviewId, findingId, ADMIN).isSuccess());
-    assertTrue(operations.approveReview(reviewId, ADMIN).isSuccess());
+    assertTrue(
+        Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId, ADMIN)).isSuccess());
+    assertTrue(Acting.by(ADMIN, () -> operations.approveReview(reviewId, ADMIN)).isSuccess());
   }
 
   @Test
@@ -2701,8 +2734,10 @@ class SailOperationsTest {
 
     assertError(ErrorCode.INTERNAL, operations.runs("acme", null));
     assertError(ErrorCode.INTERNAL, operations.run(R1));
-    assertError(ErrorCode.INTERNAL, operations.runLog(R1, 200, "node-a", ADMIN));
-    assertError(ErrorCode.INTERNAL, operations.stopRun(R1, "node-a", ADMIN));
+    assertError(
+        ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
+    assertError(
+        ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)));
   }
 
   @Test
@@ -2730,7 +2765,8 @@ class SailOperationsTest {
                     "sail-agent-" + R1));
 
     assertEquals(
-        "This run has no log file.", get(operations.runLog(R1, 200, "node-a", ADMIN), "error"));
+        "This run has no log file.",
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)), "error"));
   }
 
   @Test
@@ -2905,24 +2941,27 @@ class SailOperationsTest {
   }
 
   private static void seedAssigned(SpecStore store, String id, String status, String assignee) {
-    store.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "Title " + id,
-            SpecStatus.fromWire(status),
-            assignee,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "Title " + id,
+                    SpecStatus.fromWire(status),
+                    assignee,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of(),
+                    List.of())));
     store.setContent(id, "Do " + id, "");
   }
 
@@ -3046,7 +3085,10 @@ class SailOperationsTest {
 
   private static void seedSpec(
       SpecStore store, String id, String title, String status, List<String> deps, String body) {
-    seedSpec(store, id, title, status, deps, body, null, null, null, null);
+    Acting.system(
+        () -> {
+          seedSpec(store, id, title, status, deps, body, null, null, null, null);
+        });
   }
 
   private static void seedSpec(
@@ -3060,24 +3102,27 @@ class SailOperationsTest {
       String model,
       String effort,
       String branch) {
-    store.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            title,
-            SpecStatus.fromWire(status),
-            LOCAL_HANDLE,
-            agent,
-            model,
-            effort,
-            branch,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            deps,
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    title,
+                    SpecStatus.fromWire(status),
+                    LOCAL_HANDLE,
+                    agent,
+                    model,
+                    effort,
+                    branch,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    deps,
+                    List.of())));
     if (!body.isEmpty()) {
       store.setContent(id, body, "");
     }

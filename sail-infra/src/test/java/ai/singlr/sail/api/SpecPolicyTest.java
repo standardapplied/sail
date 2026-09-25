@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import org.junit.jupiter.api.Test;
 
 /** Table tests for the pure spec access policy: every {role × ownership × verb} shape. */

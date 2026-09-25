@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -28,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class SnapshotOperationsTest {
 
   private static final String RUNNING_JSON =

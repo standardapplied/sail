@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The defensive edges of the room commit guard: best-effort baseline, timestamp and shell
  * fallbacks.
  */
+@ActingAs
 class RoomCommitGuardTest {
 
   @TempDir Path tempDir;

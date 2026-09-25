@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.api;
+package ai.singlr.sail.identity;
 
 import java.util.EnumSet;
 import java.util.Locale;

@@ -23,7 +23,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -63,6 +65,7 @@ class ConflictsCommandTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    new FdeStore(db).add("node", null, null, "member");
     conflicts = new SyncConflicts(db);
   }
 
@@ -186,10 +189,10 @@ class ConflictsCommandTest {
       theirs[theirs.length - 1] += 2;
       var mainFiles = new FileStore(main.db);
       var nodeFiles = new FileStore(node.db);
-      mainFiles.put("acme", "file", new ByteArrayInputStream(base), 0644);
+      Acting.system(() -> mainFiles.put("acme", "file", new ByteArrayInputStream(base), 0644));
       SyncBox.round(main.db, node.db, "file");
-      mainFiles.put("acme", "file", new ByteArrayInputStream(theirs), 0644);
-      nodeFiles.put("acme", "file", new ByteArrayInputStream(mine), 0644);
+      Acting.system(() -> mainFiles.put("acme", "file", new ByteArrayInputStream(theirs), 0644));
+      Acting.system(() -> nodeFiles.put("acme", "file", new ByteArrayInputStream(mine), 0644));
       SyncBox.round(main.db, node.db, "file");
 
       var conflict = new ConflictOperations(node.db).find("file", "acme/file");
@@ -237,10 +240,13 @@ class ConflictsCommandTest {
   }
 
   private void parkASpecAndItsRoomUnderOneId() {
-    new SpecStore(db).create(SyncBox.spec("auth", "node title", "pending"));
-    new RoomStore(db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
-    park("spec", "title", "main's title");
-    park("room", "wake", "main's wake");
+    Acting.system(
+        () -> {
+          new SpecStore(db).create(SyncBox.spec("auth", "node title", "pending"));
+          new RoomStore(db).ensureFor("auth", "proj", "Auth", "uday", "mention");
+          park("spec", "title", "main's title");
+          park("room", "wake", "main's wake");
+        });
   }
 
   private void park(String type, String field, String theirs) {
@@ -367,7 +373,8 @@ class ConflictsCommandTest {
   @Test
   void aConflictTheBoxHasSinceWrittenOverIsRefusedOnTheCommandLineWithTheRemedy() {
     parkASpecAndItsRoomUnderOneId();
-    new SpecStore(db).setContent("auth", "written after the conflict was recorded", "");
+    Acting.system(
+        () -> new SpecStore(db).setContent("auth", "written after the conflict was recorded", ""));
 
     var stale = run(resolve(), "auth", "--type", "spec", "--mine");
 
@@ -436,7 +443,8 @@ class ConflictsCommandTest {
   @Test
   void aConflictTheBoxHasSinceWrittenOverIsRefusedAMergeBeforeTheEditorOpens() {
     parkASpecAndItsRoomUnderOneId();
-    new SpecStore(db).setContent("auth", "written after the conflict was recorded", "");
+    Acting.system(
+        () -> new SpecStore(db).setContent("auth", "written after the conflict was recorded", ""));
     var opened = new ArrayList<Path>();
 
     var stale = run(resolve(mergingTitle(opened, () -> {})), "auth", "--type", "spec", "--merge");

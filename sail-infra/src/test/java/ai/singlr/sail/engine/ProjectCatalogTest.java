@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -29,11 +30,13 @@ class ProjectCatalogTest {
     var catalog = dir.resolve("sail.db");
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert("gone", "name: gone\n", "uday");
-      new ProjectStore(db).upsert("kept", "name: kept\n", "uday");
+      Acting.system(() -> new ProjectStore(db).upsert("gone", "name: gone\n"));
+      Acting.system(() -> new ProjectStore(db).upsert("kept", "name: kept\n"));
       var erasure = new Erasure(db);
-      erasure.erase(
-          erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "gone"))), "uday", "local");
+      Acting.system(
+          () ->
+              erasure.erase(
+                  erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "gone"))), "local"));
     }
 
     var refused =

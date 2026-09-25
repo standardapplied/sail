@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -95,8 +96,9 @@ class ServerStartShutdownIT {
     try (var db = ai.singlr.sail.store.Sqlite.open(database)) {
       new ai.singlr.sail.store.SchemaManager(db).migrate();
       var specs = new ai.singlr.sail.store.SpecStore(db);
-      specs.create(ai.singlr.sail.sync.SyncBox.spec("waiting", "Waiting", "pending"));
-      specs.setContent("waiting", "must be migrated", "");
+      Acting.system(
+          () -> specs.create(ai.singlr.sail.sync.SyncBox.spec("waiting", "Waiting", "pending")));
+      Acting.system(() -> specs.setContent("waiting", "must be migrated", ""));
       db.execute("UPDATE specs SET body_hash = NULL, plan_hash = NULL");
       db.execute(
           "CREATE TRIGGER block_content BEFORE UPDATE OF body_hash ON specs BEGIN SELECT RAISE(ABORT, 'migration blocked'); END");

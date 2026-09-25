@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.FileStore;
@@ -37,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Two nodes and a main joined by the real protocol-4 wire: each round opens a {@link SyncSession}
  * over a pipe to a {@link SyncRpcServer} and the wire log says what it cost.
  */
+@ActingAs
 class SyncTransportTest {
 
   private static final int SMALL_FRAME = 1_500;
@@ -85,12 +90,12 @@ class SyncTransportTest {
   }
 
   private SyncBox.Link connect(SyncBox node) throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node);
+    return SyncBox.connect(main.server(Actor.sync(node.id, Role.MEMBER)), node);
   }
 
   private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal(node.id, true)), node, frame, serverOut);
+    return SyncBox.connect(main.server(Actor.sync(node.id, Role.MEMBER)), node, frame, serverOut);
   }
 
   private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
@@ -114,7 +119,7 @@ class SyncTransportTest {
   @Test
   void replayingAnAlreadyAdoptedRenameTombstoneDoesNotJournalItAgain() throws Exception {
     var projects = new ProjectStore(main.db);
-    projects.upsert("old", "name: old\n", "uday");
+    projects.upsert("old", "name: old\n");
     projects.rename("old", "new", "name: new\n");
     try (var link = connect(nodeA)) {
       link.reconcile(
@@ -135,9 +140,9 @@ class SyncTransportTest {
 
   @Test
   void anUnbasedLocalRenameConflictsWithMainsExistingProject() throws Exception {
-    new ProjectStore(main.db).upsert("old", "name: old\n", "uday");
+    new ProjectStore(main.db).upsert("old", "name: old\n");
     var projects = new ProjectStore(nodeA.db);
-    projects.upsert("old", "name: old\n", "uday");
+    projects.upsert("old", "name: old\n");
     projects.rename("old", "new", "name: new\n");
 
     try (var link = connect(nodeA)) {
@@ -294,16 +299,33 @@ class SyncTransportTest {
 
   @Test
   void authorsReachEveryReplicaOnCreateAndEdit() throws Exception {
-    nodeA.specs.create(specBy("auth", "Auth", "ada"));
+    Acting.as("ada", () -> nodeA.specs.create(specBy("auth", "Auth", "ada")));
     syncToMain(nodeA);
     syncToMain(nodeB);
     assertEquals("ada", main.specs.findById("auth").orElseThrow().updatedBy());
     assertEquals("ada", nodeB.specs.findById("auth").orElseThrow().updatedBy());
-    nodeB.specs.update(specBy("auth", "Revised", "bob"));
+    Acting.as("bob", () -> nodeB.specs.update(specBy("auth", "Revised", "bob")));
     syncToMain(nodeB);
     syncToMain(nodeA);
     assertEquals("bob", main.specs.findById("auth").orElseThrow().updatedBy());
     assertEquals("bob", nodeA.specs.findById("auth").orElseThrow().updatedBy());
+    var committed = main.specs.history("auth").getLast();
+    assertEquals("bob", committed.actor(), "main records the author the push offered");
+    assertEquals("B", committed.peer(), "and the FDE whose session pushed it");
+    var adopted = nodeA.specs.history("auth").getLast();
+    assertEquals("bob", adopted.actor(), "a node adopts the author main recorded");
+    assertEquals("main", adopted.peer());
+  }
+
+  @Test
+  void aPushThatOffersNoAuthorIsRecordedAsThePushingFde() throws Exception {
+    Acting.as(null, () -> nodeA.specs.create(spec("auth", "Auth", "pending")));
+
+    syncToMain(nodeA);
+
+    var committed = main.specs.history("auth").getLast();
+    assertEquals("A", committed.actor());
+    assertEquals("A", main.specs.findById("auth").orElseThrow().updatedBy());
   }
 
   @Test
@@ -550,7 +572,8 @@ class SyncTransportTest {
           nodeB.specs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
           engine.reconcile(nodeB.replica, main.replica);
         };
-    try (var link = connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(bLandsFirst))) {
+    try (var link =
+        connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(Actor.carrying(bLandsFirst)))) {
       var round = link.reconcile("spec", nodeA.replica);
       assertEquals(1, round.report().merged());
       assertEquals(2, link.count("push"), "the stale push is rejected and the merge pushed again");
@@ -576,7 +599,8 @@ class SyncTransportTest {
           nodeB.specs.update(spec("auth", "Title from B", "pending"));
           engine.reconcile(nodeB.replica, main.replica);
         };
-    try (var link = connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(bLandsFirst))) {
+    try (var link =
+        connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(Actor.carrying(bLandsFirst)))) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().conflicts());
     }
     assertEquals("Title from B", main.specs.findById("auth").orElseThrow().title());
@@ -642,13 +666,13 @@ class SyncTransportTest {
   @Test
   void aReadOnlyFdeMayPullButItsPushIsRefused() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
-    var readOnly = main.server(new SyncPrincipal("A", false));
+    var readOnly = main.server(Actor.sync("A", Role.VIEWER));
     try (var link = SyncBox.connect(readOnly, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
     }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
     nodeA.specs.create(spec("mine", "Local only", "pending"));
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("A", false)), nodeA)) {
+    try (var link = SyncBox.connect(main.server(Actor.sync("A", Role.VIEWER)), nodeA)) {
       var failure =
           assertThrows(SyncTransportException.class, () -> link.reconcile("spec", nodeA.replica));
       assertEquals("refused", failure.kind());
@@ -670,7 +694,7 @@ class SyncTransportTest {
         SyncRpcServer.over(
             main.db,
             "main",
-            new SyncPrincipal("A", true),
+            Actor.sync("A", Role.MEMBER),
             () -> roster,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR);

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class SpecJournalTest {
 
   @TempDir Path tempDir;

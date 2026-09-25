@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -24,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class ReviewOperationsTest {
 
   @TempDir Path tempDir;
@@ -40,24 +45,27 @@ class ReviewOperationsTest {
     new SchemaManager(db).migrate();
     reviewStore = new ReviewStore(db);
     specStore = new SpecStore(db);
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "manatee",
-            "Auth",
-            SpecStatus.IN_PROGRESS,
-            null,
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of("api", "web")));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "manatee",
+                    "Auth",
+                    SpecStatus.IN_PROGRESS,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of("api", "web"))));
     ops = new ReviewOperations(reviewStore, specStore);
   }
 
@@ -67,22 +75,25 @@ class ReviewOperationsTest {
   }
 
   private String seedReviewWithFinding() {
-    var reviewId = reviewStore.createReview("auth", 1);
-    var stageId = reviewStore.createStage(reviewId, "security", "agent");
-    reviewStore.addFinding(
-        stageId,
-        Finding.create(
-            Finding.Severity.HIGH,
-            Finding.Category.SECURITY,
-            "Auth.java",
-            10,
-            12,
-            "Issue",
-            "Description",
-            "Evidence",
-            new Finding.Suggestion("bad", "good", "why"),
-            0.8));
-    return reviewId;
+    return Acting.system(
+        () -> {
+          var reviewId = reviewStore.createReview("auth", 1);
+          var stageId = reviewStore.createStage(reviewId, "security", "agent");
+          reviewStore.addFinding(
+              stageId,
+              Finding.create(
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "Auth.java",
+                  10,
+                  12,
+                  "Issue",
+                  "Description",
+                  "Evidence",
+                  new Finding.Suggestion("bad", "good", "why"),
+                  0.8));
+          return reviewId;
+        });
   }
 
   @Test
@@ -113,7 +124,7 @@ class ReviewOperationsTest {
     var stageId = reviewStore.createStage(reviewId, "human", "human");
     reviewStore.startStage(stageId, "uday");
 
-    var response = ops.approve(reviewId, UDAY_ADMIN);
+    var response = Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId, UDAY_ADMIN));
 
     assertTrue(response.approved());
     var review = reviewStore.findReview(reviewId).orElseThrow();
@@ -130,13 +141,17 @@ class ReviewOperationsTest {
     var reviewId = reviewStore.createReview("auth", 1);
     reviewStore.createStage(reviewId, "security", "agent");
 
-    var ex = assertThrows(ApiException.class, () -> ops.approve(reviewId, UDAY_ADMIN));
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId, UDAY_ADMIN)));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
   @Test
   void approveMissingThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.approve("nope", UDAY_ADMIN));
+    assertThrows(
+        ApiException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.approve("nope", UDAY_ADMIN)));
   }
 
   @Test
@@ -144,7 +159,7 @@ class ReviewOperationsTest {
     var reviewId = seedReviewWithFinding();
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
 
-    var response = ops.dismissFinding(reviewId, findingId, UDAY_ADMIN);
+    var response = Acting.by(UDAY_ADMIN, () -> ops.dismissFinding(reviewId, findingId, UDAY_ADMIN));
 
     assertTrue(response.dismissed());
     assertEquals(
@@ -154,7 +169,9 @@ class ReviewOperationsTest {
 
   @Test
   void dismissFindingMissingReviewThrowsNotFound() {
-    assertThrows(ApiException.class, () -> ops.dismissFinding("nope", "f1", UDAY_ADMIN));
+    assertThrows(
+        ApiException.class,
+        () -> Acting.by(UDAY_ADMIN, () -> ops.dismissFinding("nope", "f1", UDAY_ADMIN)));
   }
 
   @Test
@@ -166,7 +183,10 @@ class ReviewOperationsTest {
 
     var ex =
         assertThrows(
-            ApiException.class, () -> ops.dismissFinding(otherReview, victimFinding, UDAY_ADMIN));
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY_ADMIN, () -> ops.dismissFinding(otherReview, victimFinding, UDAY_ADMIN)));
 
     assertEquals(ErrorCode.NOT_FOUND, ex.failure().errorCode());
     assertEquals(
@@ -175,43 +195,48 @@ class ReviewOperationsTest {
   }
 
   private String seedPassedReviewWithOpenFindings() {
-    var reviewId = reviewStore.createReview("auth", 1);
-    var stageId = reviewStore.createStage(reviewId, "security", "agent");
-    reviewStore.addFinding(
-        stageId,
-        Finding.create(
-            Finding.Severity.MEDIUM,
-            Finding.Category.EDGE_CASE,
-            "Flow.java",
-            5,
-            5,
-            "Unchecked null",
-            "Null flows through.",
-            "",
-            null,
-            0.6));
-    reviewStore.addFinding(
-        stageId,
-        Finding.create(
-            Finding.Severity.HIGH,
-            Finding.Category.SECURITY,
-            "Auth.java",
-            10,
-            12,
-            "Token leak",
-            "Token is logged.",
-            "log.info(token)",
-            new Finding.Suggestion("log.info(token)", "log.info(mask(token))", "Never log secrets"),
-            0.9));
-    reviewStore.updateReviewStatus(reviewId, "passed");
-    return reviewId;
+    return Acting.system(
+        () -> {
+          var reviewId = reviewStore.createReview("auth", 1);
+          var stageId = reviewStore.createStage(reviewId, "security", "agent");
+          reviewStore.addFinding(
+              stageId,
+              Finding.create(
+                  Finding.Severity.MEDIUM,
+                  Finding.Category.EDGE_CASE,
+                  "Flow.java",
+                  5,
+                  5,
+                  "Unchecked null",
+                  "Null flows through.",
+                  "",
+                  null,
+                  0.6));
+          reviewStore.addFinding(
+              stageId,
+              Finding.create(
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "Auth.java",
+                  10,
+                  12,
+                  "Token leak",
+                  "Token is logged.",
+                  "log.info(token)",
+                  new Finding.Suggestion(
+                      "log.info(token)", "log.info(mask(token))", "Never log secrets"),
+                  0.9));
+          reviewStore.updateReviewStatus(reviewId, "passed");
+          return reviewId;
+        });
   }
 
   @Test
   void createFollowupDraftsSpecFromOpenFindings() {
     var reviewId = seedPassedReviewWithOpenFindings();
 
-    var response = ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+    var response =
+        Acting.as("uday", () -> ops.createFollowup("auth", new FollowupCreateRequest(null)));
 
     assertEquals("auth-followup", response.spec().id());
     assertEquals("Address review findings: Auth", response.spec().title());
@@ -242,7 +267,7 @@ class ReviewOperationsTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> ops.createFollowup("auth", new FollowupCreateRequest("../bad id!", "uday")));
+            () -> ops.createFollowup("auth", new FollowupCreateRequest("../bad id!")));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
@@ -250,7 +275,7 @@ class ReviewOperationsTest {
   void createFollowupHonorsExplicitId() {
     seedPassedReviewWithOpenFindings();
 
-    var response = ops.createFollowup("auth", new FollowupCreateRequest("auth-round2", "uday"));
+    var response = ops.createFollowup("auth", new FollowupCreateRequest("auth-round2"));
 
     assertEquals("auth-round2", response.spec().id());
   }
@@ -259,8 +284,7 @@ class ReviewOperationsTest {
   void createFollowupMissingSpecThrowsSpecNotFound() {
     var ex =
         assertThrows(
-            ApiException.class,
-            () -> ops.createFollowup("nope", new FollowupCreateRequest(null, "uday")));
+            ApiException.class, () -> ops.createFollowup("nope", new FollowupCreateRequest(null)));
     assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
   }
 
@@ -268,8 +292,7 @@ class ReviewOperationsTest {
   void createFollowupWithoutReviewsExplainsItself() {
     var ex =
         assertThrows(
-            ApiException.class,
-            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+            ApiException.class, () -> ops.createFollowup("auth", new FollowupCreateRequest(null)));
     assertEquals(ErrorCode.NOT_FOUND, ex.failure().errorCode());
     assertTrue(ex.failure().errorMessage().contains("no reviews"));
   }
@@ -281,8 +304,7 @@ class ReviewOperationsTest {
 
     var ex =
         assertThrows(
-            ApiException.class,
-            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+            ApiException.class, () -> ops.createFollowup("auth", new FollowupCreateRequest(null)));
     assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
     assertTrue(ex.failure().errorMessage().contains("superseded"));
   }
@@ -296,8 +318,7 @@ class ReviewOperationsTest {
 
     var ex =
         assertThrows(
-            ApiException.class,
-            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+            ApiException.class, () -> ops.createFollowup("auth", new FollowupCreateRequest(null)));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
     assertTrue(ex.failure().errorMessage().contains("no open findings"));
   }
@@ -305,12 +326,11 @@ class ReviewOperationsTest {
   @Test
   void createFollowupWithExistingIdThrowsConflict() {
     seedPassedReviewWithOpenFindings();
-    ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+    ops.createFollowup("auth", new FollowupCreateRequest(null));
 
     var ex =
         assertThrows(
-            ApiException.class,
-            () -> ops.createFollowup("auth", new FollowupCreateRequest(null, "uday")));
+            ApiException.class, () -> ops.createFollowup("auth", new FollowupCreateRequest(null)));
     assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
     assertTrue(ex.failure().errorMessage().contains("auth-followup"));
   }
@@ -318,23 +338,20 @@ class ReviewOperationsTest {
   @Test
   void approveLeavesSourceFindingsOpenUntilTheSpecReachesDone() {
     seedPassedReviewWithOpenFindings();
-    ops.createFollowup("auth", new FollowupCreateRequest(null, "uday"));
+    ops.createFollowup("auth", new FollowupCreateRequest(null));
     var followupReview = reviewStore.createReview("auth-followup", 1);
     var humanStage = reviewStore.createStage(followupReview, "human", "human");
     reviewStore.startStage(humanStage, "uday");
     var sourceReview = reviewStore.reviewsForSpec("auth").getFirst().id();
 
-    ops.approve(followupReview, UDAY_ADMIN);
+    Acting.by(UDAY_ADMIN, () -> ops.approve(followupReview, UDAY_ADMIN));
 
     var afterApprove =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();
     assertEquals(List.of(Finding.Resolution.OPEN, Finding.Resolution.OPEN), afterApprove);
 
     new GlobalSpecOperations(specStore, reviewStore)
-        .update(
-            "auth-followup",
-            SpecUpdateRequest.fromMap(Map.of("status", "done")).withUpdatedBy("uday"),
-            UDAY_ADMIN);
+        .update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done")), UDAY_ADMIN);
 
     var afterDone =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();

@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /** The server loop in isolation: the handshake, paging, batching, the write gate, and clean EOF. */
+@ActingAs
 class SyncRpcServerTest {
 
   private static final SyncWire.Hello HELLO = SyncWire.Hello.of("0.44.0", "node-box");
@@ -63,7 +67,7 @@ class SyncRpcServerTest {
     }
   }
 
-  private static SyncRpcServer server(MainReplica main, String type, SyncPrincipal principal) {
+  private static SyncRpcServer server(MainReplica main, String type, Actor principal) {
     return new SyncRpcServer(Map.of(type, main), principal, FdeRoster.EMPTY);
   }
 
@@ -121,7 +125,7 @@ class SyncRpcServerTest {
       }
       requests.add(SyncWire.encode(new SyncWire.Done()));
       var response =
-          serveLines(main.server(new SyncPrincipal("node", true)), 900, requests).getLast();
+          serveLines(main.server(Actor.sync("node", Role.MEMBER)), 900, requests).getLast();
       var failure = assertInstanceOf(SyncWire.Failed.class, response);
       assertEquals("protocol", failure.kind());
       assertTrue(failure.message().contains("announce fewer blobs"));
@@ -141,7 +145,7 @@ class SyncRpcServerTest {
       var failure =
           assertInstanceOf(
               SyncWire.Failed.class,
-              after(main.server(new SyncPrincipal("node", true)), new SyncWire.Done()));
+              after(main.server(Actor.sync("node", Role.MEMBER)), new SyncWire.Done()));
       assertEquals("protocol", failure.kind());
       assertTrue(failure.message().contains("Unexpected content operation"));
     }
@@ -154,7 +158,7 @@ class SyncRpcServerTest {
           assertInstanceOf(
               SyncWire.Failed.class,
               after(
-                  main.server(new SyncPrincipal("node", true)),
+                  main.server(Actor.sync("node", Role.MEMBER)),
                   new SyncWire.Announce(
                       List.of(ai.singlr.sail.store.BlobStore.hash(new byte[] {1})))));
       assertEquals("unreachable", failure.kind());
@@ -169,7 +173,7 @@ class SyncRpcServerTest {
       var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
       var response =
           after(
-              main.server(new SyncPrincipal("node", true)),
+              main.server(Actor.sync("node", Role.MEMBER)),
               new SyncWire.Push(
                   "file",
                   List.of(
@@ -204,7 +208,7 @@ class SyncRpcServerTest {
           request.writeBytes((content + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
         request.writeBytes(truncated ? new byte[] {1, 2} : new byte[] {3, 2, 1});
         var output = new ByteStreams.Output();
-        main.server(new SyncPrincipal("node", true))
+        main.server(Actor.sync("node", Role.MEMBER))
             .serve(new java.io.ByteArrayInputStream(request.toByteArray()), output);
         var failed =
             assertInstanceOf(
@@ -264,7 +268,7 @@ class SyncRpcServerTest {
     var server =
         new SyncRpcServer(
             Map.of("spec", new FakeMain()),
-            new SyncPrincipal("node", true),
+            Actor.sync("node", Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             SyncRpcServer.ChangeHeads.NONE,
@@ -321,7 +325,7 @@ class SyncRpcServerTest {
       var tips =
           assertInstanceOf(
               SyncWire.Tips.class,
-              after(main.server(new SyncPrincipal("n", true)), new SyncWire.Heads()));
+              after(main.server(Actor.sync("n", Role.MEMBER)), new SyncWire.Heads()));
       assertEquals(
           SyncedEntities.all().stream().map(SyncedEntities.Entity::type).toList(),
           List.copyOf(tips.tips().keySet()));
@@ -343,7 +347,7 @@ class SyncRpcServerTest {
           assertInstanceOf(
               SyncWire.Page.class,
               after(
-                  main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", 0, 20_000)));
+                  main.server(Actor.sync("n", Role.MEMBER)), new SyncWire.Pull("spec", 0, 20_000)));
       assertEquals(10_000, page.entries().size());
       assertTrue(page.done());
       assertEquals(main.replica.maxSeq(), page.next());
@@ -356,7 +360,7 @@ class SyncRpcServerTest {
     try (var main = new SyncBox("main")) {
       main.specs.create(SyncBox.spec("a", "x".repeat(600), "pending"));
       main.specs.create(SyncBox.spec("b", "y".repeat(600), "pending"));
-      var server = main.server(new SyncPrincipal("n", true));
+      var server = main.server(Actor.sync("n", Role.MEMBER));
       var first =
           assertInstanceOf(
               SyncWire.Page.class,
@@ -390,7 +394,7 @@ class SyncRpcServerTest {
   void anEntryOverTheBoundIsRefusedNamingTheTypeIdAndSize() throws Exception {
     try (var main = new SyncBox("main")) {
       main.specs.create(SyncBox.spec("huge", "x".repeat(700), "pending"));
-      var server = main.server(new SyncPrincipal("n", true));
+      var server = main.server(Actor.sync("n", Role.MEMBER));
       for (var request :
           List.<SyncWire.Request>of(
               new SyncWire.Pull("spec", 0, 100), new SyncWire.Need("spec", List.of("huge")))) {
@@ -415,7 +419,7 @@ class SyncRpcServerTest {
           assertInstanceOf(
               SyncWire.Page.class,
               after(
-                  main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", high, 100)));
+                  main.server(Actor.sync("n", Role.MEMBER)), new SyncWire.Pull("spec", high, 100)));
       assertTrue(page.entries().isEmpty());
       assertTrue(page.done());
       assertEquals(high, page.next());
@@ -432,7 +436,7 @@ class SyncRpcServerTest {
       var page =
           assertInstanceOf(
               SyncWire.Page.class,
-              after(main.server(new SyncPrincipal("n", true)), new SyncWire.Pull("spec", 0, 100)));
+              after(main.server(Actor.sync("n", Role.MEMBER)), new SyncWire.Pull("spec", 0, 100)));
       assertEquals(
           List.of("gone", "kept"), page.entries().stream().map(SyncWire.Entry::id).toList());
       var tombstone = page.entries().getFirst();
@@ -448,7 +452,7 @@ class SyncRpcServerTest {
     try (var main = new SyncBox("main")) {
       main.specs.create(SyncBox.spec("a", "x".repeat(600), "pending"));
       main.specs.create(SyncBox.spec("b", "y".repeat(600), "pending"));
-      var server = main.server(new SyncPrincipal("n", true));
+      var server = main.server(Actor.sync("n", Role.MEMBER));
       var whole =
           assertInstanceOf(
               SyncWire.Page.class,
@@ -538,7 +542,7 @@ class SyncRpcServerTest {
     for (var bad : List.of("{", "x".repeat(600))) {
       var replies =
           serveLines(
-              server(new FakeMain(), "message", new SyncPrincipal("node", true)),
+              server(new FakeMain(), "message", Actor.sync("node", Role.MEMBER)),
               512,
               List.of(SyncWire.encode(HELLO), pull, bad, pull));
       assertEquals(3, replies.size());
@@ -597,7 +601,7 @@ class SyncRpcServerTest {
             throw new IllegalStateException("database is locked");
           }
         };
-    var server = server(failing, "file", new SyncPrincipal("node", true));
+    var server = server(failing, "file", Actor.sync("node", Role.MEMBER));
     var captured = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
@@ -635,12 +639,12 @@ class SyncRpcServerTest {
         new FakeMain() {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-            seenPeer.set(ai.singlr.sail.store.SyncPeer.current());
+            seenPeer.set(Actor.current().peer());
             return new CommitOutcome.Accepted("1-x");
           }
         };
     after(
-        server(capturing, "spec", new SyncPrincipal("sumesh", true)),
+        server(capturing, "spec", Actor.sync("sumesh", Role.MEMBER)),
         push("spec", new MainReplica.Offer("a", Map.of(), null)));
     assertEquals(
         "sumesh", seenPeer.get(), "the change_log written during the commit must name the pusher");
@@ -666,7 +670,7 @@ class SyncRpcServerTest {
             return mainRev;
           }
         };
-    return only(after(server(main, "run", new SyncPrincipal(handle, true)), push("run", offer)));
+    return only(after(server(main, "run", Actor.sync(handle, Role.MEMBER)), push("run", offer)));
   }
 
   @Test
@@ -740,7 +744,7 @@ class SyncRpcServerTest {
         assertInstanceOf(
             SyncWire.Page.class,
             after(
-                server(torn, "spec", new SyncPrincipal(null, true)),
+                server(torn, "spec", Actor.sync(null, Role.MEMBER)),
                 new SyncWire.Need("spec", List.of("auth"))));
     var entry = page.entries().getFirst();
     assertEquals("1-x", entry.rev(), "the rev must belong to the snapshot beside it");
@@ -770,7 +774,7 @@ class SyncRpcServerTest {
         };
     var response =
         after(
-            server(moved, "spec", new SyncPrincipal(null, true)),
+            server(moved, "spec", Actor.sync(null, Role.MEMBER)),
             push(
                 "spec",
                 new MainReplica.Offer("a", null, "1-x"),
@@ -819,7 +823,7 @@ class SyncRpcServerTest {
         after(
             new SyncRpcServer(
                 Map.of("spec", remembering()),
-                new SyncPrincipal(null, true),
+                Actor.sync(null, Role.MEMBER),
                 FdeRoster.EMPTY,
                 seen::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), null)));
@@ -840,7 +844,7 @@ class SyncRpcServerTest {
         after(
             new SyncRpcServer(
                 Map.of("spec", rejecting),
-                new SyncPrincipal(null, true),
+                Actor.sync(null, Role.MEMBER),
                 FdeRoster.EMPTY,
                 quiet::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), "1-x")));
@@ -859,7 +863,7 @@ class SyncRpcServerTest {
           after(
               new SyncRpcServer(
                   Map.of("spec", remembering()),
-                  new SyncPrincipal(null, true),
+                  Actor.sync(null, Role.MEMBER),
                   FdeRoster.EMPTY,
                   transition -> {
                     throw new IllegalStateException("slack is down");

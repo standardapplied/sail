@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.SchemaManager;
@@ -91,10 +92,9 @@ class RetentionSweeperTest {
     assertEquals(1, sweeper.retain().specs());
     assertTrue(specs.findById("old").isEmpty());
     assertTrue(specs.findById("recent").isPresent(), "archived ten days ago is inside the age");
-    assertEquals(
-        "sail-retention",
-        new ChangeLog(db).head("spec", "old").orElseThrow().actor(),
-        "the erasure row names retention as who pruned");
+    var erasure = new ChangeLog(db).head("spec", "old").orElseThrow();
+    assertEquals("sail", erasure.actor(), "retention is this box's machinery");
+    assertEquals("retention", erasure.origin(), "the erasure row says retention pruned it");
 
     clock.set(NOW.plus(Duration.ofDays(400)));
     assertEquals(1, sweeper.retain().specs(), "the same policy, later, takes the rest");
@@ -189,17 +189,23 @@ class RetentionSweeperTest {
   }
 
   private void archived(String id, Instant since) {
-    specs.create(row(id, id, SpecStatus.ARCHIVED));
-    db.execute("UPDATE specs SET archived_at = ? WHERE id = ?", since.toString(), id);
+    Acting.system(
+        () -> {
+          specs.create(row(id, id, SpecStatus.ARCHIVED));
+          db.execute("UPDATE specs SET archived_at = ? WHERE id = ?", since.toString(), id);
+        });
   }
 
   private void busyHistory() {
-    if (specs.findById("busy").isEmpty()) {
-      specs.create(row("busy", "busy", SpecStatus.PENDING));
-    }
-    for (var i = 0; i < 25; i++) {
-      specs.update(row("busy", "edit " + i + " " + System.nanoTime(), SpecStatus.PENDING));
-    }
+    Acting.system(
+        () -> {
+          if (specs.findById("busy").isEmpty()) {
+            specs.create(row("busy", "busy", SpecStatus.PENDING));
+          }
+          for (var i = 0; i < 25; i++) {
+            specs.update(row("busy", "edit " + i + " " + System.nanoTime(), SpecStatus.PENDING));
+          }
+        });
   }
 
   private static SpecStore.SpecRow row(String id, String title, SpecStatus status) {

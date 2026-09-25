@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Actor;
 import java.util.Locale;
 
 /**
@@ -67,21 +68,25 @@ public final class PersonalRooms {
 
   /**
    * Mints {@code fde}'s personal room in {@code project} unless it exists, was deleted, or the id
-   * is already a spec's. Returns whether a room was minted.
+   * is already a spec's. Returns whether a room was minted. Minted by this box's machinery ({@link
+   * Actor#system()}), whoever's read asked for it, so every box mints the same revision.
    */
   public static boolean ensure(
       RoomStore rooms, SpecStore specs, FdeStore.Fde fde, ProjectStore.ProjectRow project) {
     var id = idOf(fde.handle(), project.name());
-    return rooms.atomically(
-        () -> {
-          if (rooms.findById(id).isPresent()
-              || rooms.isTombstoned(id)
-              || (specs != null && specs.findById(id).isPresent())) {
-            return false;
-          }
-          rooms.createJournaled(row(id, fde, project));
-          return true;
-        });
+    return Actor.call(
+        Actor.system(),
+        () ->
+            rooms.atomically(
+                () -> {
+                  if (rooms.findById(id).isPresent()
+                      || rooms.isTombstoned(id)
+                      || (specs != null && specs.findById(id).isPresent())) {
+                    return false;
+                  }
+                  rooms.createJournaled(row(id, fde, project));
+                  return true;
+                }));
   }
 
   static RoomStore.RoomRow row(String id, FdeStore.Fde fde, ProjectStore.ProjectRow project) {

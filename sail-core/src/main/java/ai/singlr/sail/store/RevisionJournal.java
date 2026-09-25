@@ -114,17 +114,24 @@ public final class RevisionJournal implements ConflictResolver {
 
   /** Appends a revision for the current state of {@code id}, minting a rev from the counter. */
   public String recordRevision(String id, String origin, boolean deleted) {
-    return recordRevision(id, null, origin, deleted, false);
+    return recordRevision(id, null, null, origin, deleted, false);
   }
 
   /**
-   * Appends a revision for the current state of {@code id}. With {@code explicitRev} null the rev
-   * is minted from the current counter; otherwise the caller-supplied rev is used verbatim (sync
-   * adopting main's authoritative rev). {@code setBaseRev} records that this revision is the new
-   * synced ancestor — set only when adopting from main, never on a local edit.
+   * Appends a revision for the current state of {@code id}, authored by the bound actor. With
+   * {@code explicitRev} null the rev is minted from the current counter; otherwise the
+   * caller-supplied rev is used verbatim (sync adopting main's authoritative rev). {@code
+   * offeredAuthor} is the {@code _actor} a synced revision carries. {@code setBaseRev} records that
+   * this revision is the new synced ancestor — set only when adopting from main, never on a local
+   * edit.
    */
-  public String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
+  private String recordRevision(
+      String id,
+      String explicitRev,
+      String offeredAuthor,
+      String origin,
+      boolean deleted,
+      boolean setBaseRev) {
     var map = schema.snapshotMap(id);
     if (map == null) {
       return null;
@@ -142,7 +149,7 @@ public final class RevisionJournal implements ConflictResolver {
         db.execute("UPDATE " + schema.table() + " SET rev = ? WHERE id = ?", rev, id);
       }
     }
-    changeLog.append(schema.entityType(), id, rev, schema.author(id), origin, deleted, snapshot);
+    changeLog.append(schema.entityType(), id, rev, offeredAuthor, origin, deleted, snapshot);
     return rev;
   }
 
@@ -163,14 +170,14 @@ public final class RevisionJournal implements ConflictResolver {
         () -> {
           if (snapshot == null) {
             if (schema.exists(id)) {
-              recordRevision(id, rev, "sync", true, false);
+              recordRevision(id, rev, null, "sync", true, false);
               schema.deleteRow(id);
             } else {
-              changeLog.append(schema.entityType(), id, rev, null, "sync", true, EMPTY_SNAPSHOT);
+              changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
             }
           } else {
             schema.apply(id, snapshot);
-            recordRevision(id, rev, "sync", false, true);
+            recordRevision(id, rev, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, true);
           }
           return null;
         });
@@ -193,12 +200,14 @@ public final class RevisionJournal implements ConflictResolver {
             if (!schema.exists(id)) {
               return new PushOutcome.Accepted(latestRev(id));
             }
-            var rev = recordRevision(id, null, "sync", true, false);
+            var rev = recordRevision(id, null, null, "sync", true, false);
             schema.deleteRow(id);
             return new PushOutcome.Accepted(rev);
           }
           schema.apply(id, snapshot);
-          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
+          return new PushOutcome.Accepted(
+              recordRevision(
+                  id, null, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, false));
         });
   }
 
@@ -226,16 +235,16 @@ public final class RevisionJournal implements ConflictResolver {
   private String adoptBase(String id, Map<String, Object> remote) {
     if (remote == null) {
       if (schema.exists(id)) {
-        var rev = recordRevision(id, null, "sync", true, false);
+        var rev = recordRevision(id, null, null, "sync", true, false);
         schema.deleteRow(id);
         return rev;
       }
       var rev = Revisions.next(currentRev(id), EMPTY_SNAPSHOT);
-      changeLog.append(schema.entityType(), id, rev, null, "sync", true, EMPTY_SNAPSHOT);
+      changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
       return rev;
     }
     schema.apply(id, remote);
-    return recordRevision(id, null, "sync", false, true);
+    return recordRevision(id, null, null, "sync", false, true);
   }
 
   private String writeChosen(String id, Map<String, Object> chosen) {
@@ -243,12 +252,12 @@ public final class RevisionJournal implements ConflictResolver {
       if (!schema.exists(id)) {
         return latestRev(id);
       }
-      var rev = recordRevision(id, null, "resolve", true, false);
+      var rev = recordRevision(id, null, null, "resolve", true, false);
       schema.deleteRow(id);
       return rev;
     }
     schema.apply(id, chosen);
-    return recordRevision(id, null, "resolve", false, false);
+    return recordRevision(id, null, null, "resolve", false, false);
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

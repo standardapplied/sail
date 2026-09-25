@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.Arrays;
@@ -72,20 +73,14 @@ final class LocalApiRouter implements LocalApiHandler {
 
   /**
    * Who is on the other end of the socket: a sail-launched run authenticated by its minted
-   * credential, or an interactive session covered by the box's ambient FDE credential. Both carry
-   * the authorship string and the policy {@link Actor} every write route needs; only the run caller
-   * may narrate run lifecycle on the events route.
+   * credential, or an interactive session covered by the box's ambient FDE credential. Each is the
+   * {@link Actor} its request acts as; only the run caller may narrate run lifecycle on the events
+   * route.
    */
   private sealed interface Caller {
-    String author();
-
     Actor actor();
 
     record Run(RunStore.RunRow run) implements Caller {
-      @Override
-      public String author() {
-        return run.principal();
-      }
 
       /**
        * A read-only lane run's credential — a {@code room} wake, or a read-only invite launched
@@ -104,11 +99,6 @@ final class LocalApiRouter implements LocalApiHandler {
 
     record Box(Actor fde) implements Caller {
       @Override
-      public String author() {
-        return fde.handle();
-      }
-
-      @Override
       public Actor actor() {
         return fde;
       }
@@ -124,6 +114,11 @@ final class LocalApiRouter implements LocalApiHandler {
               + " SAIL_RUN_CREDENTIAL of a live run (a finished run's credential is revoked) or"
               + " this box's ambient box.credential as a bearer token.");
     }
+    return Actor.call(caller.actor(), () -> route(request, caller));
+  }
+
+  /** Routes an authenticated request, acting as its caller. */
+  private ApiResponse route(LocalApiRequest request, Caller caller) {
     var path = request.path();
     if ("/v1/sync".equals(path)) {
       return "GET".equals(request.method())
@@ -290,8 +285,7 @@ final class LocalApiRouter implements LocalApiHandler {
           yield problem(403, "A room session reads and converses; it cannot create specs.");
         }
         yield ApiResponse.fromCreated(
-            operations.createGlobalSpec(
-                createFrom(request.form(), caller.author()), caller.actor()));
+            operations.createGlobalSpec(createFrom(request.form()), caller.actor()));
       }
       default -> problem(405, "specs accepts GET or POST");
     };
@@ -319,8 +313,7 @@ final class LocalApiRouter implements LocalApiHandler {
       case "GET" -> ApiResponse.from(operations.globalSpec(tail));
       case "PUT" ->
           ApiResponse.from(
-              operations.updateGlobalSpec(
-                  tail, updateFrom(request.form(), caller.author()), caller.actor()));
+              operations.updateGlobalSpec(tail, updateFrom(request.form()), caller.actor()));
       case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, caller.actor()));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
@@ -351,7 +344,7 @@ final class LocalApiRouter implements LocalApiHandler {
                     form.get("reply_to"),
                     Boolean.parseBoolean(form.get("question"))),
                 caller.actor(),
-                caller.author()));
+                caller.actor().handle()));
       }
       default -> problem(405, "messages accepts GET or POST");
     };
@@ -479,44 +472,40 @@ final class LocalApiRouter implements LocalApiHandler {
         query.get("search"));
   }
 
-  private static SpecCreateRequest createFrom(Map<String, String> form, String principal) {
+  private static SpecCreateRequest createFrom(Map<String, String> form) {
     return new SpecCreateRequest(
-            form.get("id"),
-            form.get("project"),
-            form.get("title"),
-            form.getOrDefault("status", "draft"),
-            form.get("assignee"),
-            form.get("agent"),
-            form.get("model"),
-            form.get("reasoning_effort"),
-            form.get("branch"),
-            intOr(form.get("priority"), 0),
-            csv(form.get("depends_on")),
-            csv(form.get("repos")),
-            form.get("body"),
-            form.get("plan"),
-            null,
-            form.get("room_id"))
-        .withCreatedBy(principal);
+        form.get("id"),
+        form.get("project"),
+        form.get("title"),
+        form.getOrDefault("status", "draft"),
+        form.get("assignee"),
+        form.get("agent"),
+        form.get("model"),
+        form.get("reasoning_effort"),
+        form.get("branch"),
+        intOr(form.get("priority"), 0),
+        csv(form.get("depends_on")),
+        csv(form.get("repos")),
+        form.get("body"),
+        form.get("plan"),
+        form.get("room_id"));
   }
 
-  private static SpecUpdateRequest updateFrom(Map<String, String> form, String principal) {
+  private static SpecUpdateRequest updateFrom(Map<String, String> form) {
     return new SpecUpdateRequest(
-            form.get("project"),
-            form.get("title"),
-            form.get("status"),
-            form.get("assignee"),
-            form.get("agent"),
-            form.get("model"),
-            form.get("reasoning_effort"),
-            form.get("branch"),
-            form.containsKey("priority") ? intOr(form.get("priority"), 0) : null,
-            form.containsKey("depends_on") ? csv(form.get("depends_on")) : null,
-            form.containsKey("repos") ? csv(form.get("repos")) : null,
-            form.get("wake"),
-            null,
-            Boolean.parseBoolean(form.get("force")))
-        .withUpdatedBy(principal);
+        form.get("project"),
+        form.get("title"),
+        form.get("status"),
+        form.get("assignee"),
+        form.get("agent"),
+        form.get("model"),
+        form.get("reasoning_effort"),
+        form.get("branch"),
+        form.containsKey("priority") ? intOr(form.get("priority"), 0) : null,
+        form.containsKey("depends_on") ? csv(form.get("depends_on")) : null,
+        form.containsKey("repos") ? csv(form.get("repos")) : null,
+        form.get("wake"),
+        Boolean.parseBoolean(form.get("force")));
   }
 
   private static List<String> csv(String value) {

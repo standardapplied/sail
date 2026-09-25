@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PersonalRooms;
@@ -36,32 +39,35 @@ class PersonalRoomMintTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    var yaml = tempDir.resolve("sail.yaml");
-    Files.writeString(yaml, "name: acme\n");
-    db = Sqlite.open(tempDir.resolve("rooms.db"));
-    new SchemaManager(db).migrate();
-    roomStore = new RoomStore(db);
-    var fdes = new FdeStore(db);
-    fdes.add("uday", "Uday", null, "admin");
-    fdes.add("rajesh", "Rajesh", null, "member");
-    var projects = new ProjectStore(db);
-    projects.upsert("acme", "name: acme\nagent:\n  type: claude-code\n", "uday");
-    projects.upsert("nautilus", "name: nautilus\nagent:\n  type: codex\n", "uday");
-    ops =
-        new SailOperations(
-                new ShellExecutor(false),
-                yaml.toString(),
-                null,
-                null,
-                new SpecStore(db),
-                new ReviewStore(db),
-                new RunStore(db),
-                projects,
-                SyncScheduler.disabled(),
-                fdes,
-                SessionYield.NONE)
-            .useMessages(new MessageStore(db))
-            .useRooms(roomStore);
+    Acting.system(
+        () -> {
+          var yaml = tempDir.resolve("sail.yaml");
+          Files.writeString(yaml, "name: acme\n");
+          db = Sqlite.open(tempDir.resolve("rooms.db"));
+          new SchemaManager(db).migrate();
+          roomStore = new RoomStore(db);
+          var fdes = new FdeStore(db);
+          fdes.add("uday", "Uday", null, "admin");
+          fdes.add("rajesh", "Rajesh", null, "member");
+          var projects = new ProjectStore(db);
+          projects.upsert("acme", "name: acme\nagent:\n  type: claude-code\n");
+          projects.upsert("nautilus", "name: nautilus\nagent:\n  type: codex\n");
+          ops =
+              new SailOperations(
+                      new ShellExecutor(false),
+                      yaml.toString(),
+                      null,
+                      null,
+                      new SpecStore(db),
+                      new ReviewStore(db),
+                      new RunStore(db),
+                      projects,
+                      SyncScheduler.disabled(),
+                      fdes,
+                      SessionYield.NONE)
+                  .useMessages(new MessageStore(db))
+                  .useRooms(roomStore);
+        });
   }
 
   @AfterEach

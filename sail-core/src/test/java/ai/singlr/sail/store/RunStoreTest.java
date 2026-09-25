@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class RunStoreTest {
 
   @TempDir Path tempDir;
@@ -1380,19 +1383,20 @@ class RunStoreTest {
       threads.add(
           Thread.ofVirtual()
               .start(
-                  () -> {
-                    try (var connection = Sqlite.open(path)) {
-                      var contender = new RunStore(connection);
-                      start.await();
-                      var id = DateTimeUtils.newId().toString();
-                      if (reserve(contender, id, spec, "node-a", java.util.List.of("app"))
-                          .isEmpty()) {
-                        admitted.incrementAndGet();
-                      }
-                    } catch (InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                    }
-                  }));
+                  Actor.carrying(
+                      () -> {
+                        try (var connection = Sqlite.open(path)) {
+                          var contender = new RunStore(connection);
+                          start.await();
+                          var id = DateTimeUtils.newId().toString();
+                          if (reserve(contender, id, spec, "node-a", java.util.List.of("app"))
+                              .isEmpty()) {
+                            admitted.incrementAndGet();
+                          }
+                        } catch (InterruptedException e) {
+                          Thread.currentThread().interrupt();
+                        }
+                      })));
     }
     start.countDown();
     for (var thread : threads) {

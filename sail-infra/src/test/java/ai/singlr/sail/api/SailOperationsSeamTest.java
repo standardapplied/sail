@@ -19,6 +19,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -33,6 +36,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
@@ -40,7 +44,6 @@ import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
-import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
@@ -413,16 +416,24 @@ class SailOperationsSeamTest {
         var operations = operations(box.db)) {
       var runs = new RunStore(box.db);
       var run = DateTimeUtils.newId().toString();
-      runs.create(
-          run, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null, "/log",
-          "unit");
-      var review = new ReviewStore(box.db).createReview("auth", 1);
-      new RoomStore(box.db)
-          .create(
-              new RoomStore.RoomRow(
-                  "room", "proj", "Room", "node", "on", "[]", "node", null, null, "node"));
+      Acting.system(
+          () ->
+              runs.create(
+                  run, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
+                  "/log", "unit"));
+      var review = Acting.system(() -> new ReviewStore(box.db).createReview("auth", 1));
+      Acting.system(
+          () ->
+              new RoomStore(box.db)
+                  .create(
+                      new RoomStore.RoomRow(
+                          "room", "proj", "Room", "node", "on", "[]", "node", null, null, "node")));
       var message =
-          new ai.singlr.sail.store.MessageStore(box.db).append("room", "node", "local", null).id();
+          Acting.system(
+              () ->
+                  new ai.singlr.sail.store.MessageStore(box.db)
+                      .append("room", "node", "local", null)
+                      .id());
       for (var entry : Map.of("run", run, "review", review, "message", message).entrySet()) {
         var store = SyncedEntities.require(entry.getKey()).store(box.db);
         var local = store.comparableSnapshot(entry.getValue());
@@ -464,7 +475,7 @@ class SailOperationsSeamTest {
               }));
       new FdeStore(box.db).add(handle, null, null, role);
       var token = new ai.singlr.sail.store.BoxCredentialStore(box.db).replace(handle);
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
       box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
       var response =
@@ -499,7 +510,7 @@ class SailOperationsSeamTest {
               target -> {
                 throw new IOException("unused");
               }));
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
       box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
       var lane =
@@ -546,7 +557,7 @@ class SailOperationsSeamTest {
                 target -> {
                   throw new IOException("unused");
                 }));
-        box.specs.create(SyncBox.spec("auth", "local", "pending"));
+        Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
         var local = box.specs.comparableSnapshot("auth");
         var remote = new LinkedHashMap<>(local);
         remote.put("title", "remote");
@@ -620,7 +631,7 @@ class SailOperationsSeamTest {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
         var server = server(operations, box.db)) {
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       var remote = new LinkedHashMap<>(local);
       remote.put("title", "remote");
@@ -650,7 +661,12 @@ class SailOperationsSeamTest {
       var admin = credential(box.db, "admin", "admin", lane);
       var allowed = send(server, "POST", "/v1/conflicts/auth/resolve", admin, body);
       assertEquals(200, allowed.statusCode(), allowed.body());
-      assertEquals(strategy.equals("mine") ? local : remote, box.specs.comparableSnapshot("auth"));
+      var resolved = new LinkedHashMap<>(box.specs.comparableSnapshot("auth"));
+      assertEquals(
+          "admin", resolved.remove(Snapshots.ACTOR), "the resolver authors the resolution");
+      var expected = new LinkedHashMap<>(strategy.equals("mine") ? local : remote);
+      expected.remove(Snapshots.ACTOR);
+      assertEquals(expected, resolved);
       assertTrue(box.conflicts.pending().isEmpty());
     }
   }
@@ -767,9 +783,9 @@ class SailOperationsSeamTest {
       assertEquals(List.of("dir/config"), files.materialize().skipped());
       Files.delete(local);
       assertEquals(1, files.materialize().written());
-      assertTrue(files.remove("dir/config"));
+      assertTrue(Acting.system(() -> files.remove("dir/config")));
       assertFalse(Files.exists(local));
-      assertFalse(files.remove("dir/config"));
+      assertFalse(Acting.system(() -> files.remove("dir/config")));
       assertTrue(files.list().isEmpty());
       assertThrows(
           IllegalArgumentException.class,
@@ -785,11 +801,13 @@ class SailOperationsSeamTest {
       assertThrows(IllegalArgumentException.class, () -> operations.projectFiles("../escape"));
       assertEquals(
           "cap",
-          files.put(
-              "cap",
-              java.io.InputStream.nullInputStream(),
-              ai.singlr.sail.config.FileLimits.DEFAULT_MAX,
-              0644));
+          Acting.system(
+              () ->
+                  files.put(
+                      "cap",
+                      java.io.InputStream.nullInputStream(),
+                      ai.singlr.sail.config.FileLimits.DEFAULT_MAX,
+                      0644)));
     }
   }
 
@@ -797,7 +815,7 @@ class SailOperationsSeamTest {
   void conflictsCanBeListedInspectedAndResolvedWithoutOpeningStoresInCommands() {
     try (var box = new SyncBox("node");
         var operations = operations(box.db)) {
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       var remote = new LinkedHashMap<>(local);
       remote.put("title", "remote");
@@ -827,7 +845,7 @@ class SailOperationsSeamTest {
                   operations.resolveConflict(
                       "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
       assertEquals(404, settled.status());
-      box.specs.update(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.update(SyncBox.spec("auth", "local", "pending")));
       box.conflicts.record(
           "spec",
           "auth",
@@ -871,9 +889,12 @@ class SailOperationsSeamTest {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");
         var operations = operations(node.db)) {
-      main.specs.create(SyncBox.spec("auth", "main spec", "pending"));
+      Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       var content = "shared config".getBytes(StandardCharsets.UTF_8);
-      new FileStore(main.db).put("proj", "config", new java.io.ByteArrayInputStream(content), 0644);
+      Acting.system(
+          () ->
+              new FileStore(main.db)
+                  .put("proj", "config", new java.io.ByteArrayInputStream(content), 0644));
       var targets = new ArrayList<String>();
       operations.useControlPlane(
           node.db,
@@ -906,8 +927,8 @@ class SailOperationsSeamTest {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");
         var operations = operations(node.db)) {
-      main.specs.create(SyncBox.spec("auth", "main spec", "pending"));
-      new MessageStore(main.db).append("auth", "raj", "hello from main", null);
+      Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
+      Acting.system(() -> new MessageStore(main.db).append("auth", "raj", "hello from main", null));
       var replicas =
           new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", "node"));
       replicas.remove("file");
@@ -924,7 +945,7 @@ class SailOperationsSeamTest {
                   channel(
                       new SyncRpcServer(
                               replicas,
-                              new SyncPrincipal("node", true),
+                              Actor.sync("node", Role.MEMBER),
                               List::of,
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
@@ -987,12 +1008,16 @@ class SailOperationsSeamTest {
   void pruneAndTheRetentionSweeperWorkOnTheHostsOneDatabase() {
     try (var box = new SyncBox("main");
         var operations = operations(box.db)) {
-      box.specs.create(SyncBox.spec("old", "Old", "archived"));
-      box.specs.create(SyncBox.spec("kept", "Kept", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("old", "Old", "archived")));
+      Acting.system(() -> box.specs.create(SyncBox.spec("kept", "Kept", "pending")));
       var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
 
-      var rehearsed = operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin);
-      var erased = operations.pruneSpecs(PruneRequest.ids(List.of("old"), false), admin);
+      var rehearsed =
+          Acting.by(
+              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin));
+      var erased =
+          Acting.by(
+              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), false), admin));
 
       assertEquals(1, ((Result.Success<PruneReport>) rehearsed).value().specs());
       assertEquals(1, ((Result.Success<PruneReport>) erased).value().specs());
@@ -1013,7 +1038,7 @@ class SailOperationsSeamTest {
   void aNodesPurgeIsAskedOfMainAndErasesNothingHereYet() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
@@ -1045,7 +1070,7 @@ class SailOperationsSeamTest {
   void aNodeThatHasNotSyncedItsRosterSaysSoInsteadOfGuessingARole() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       try (var operations =
           OperationsFactory.create(
                   db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -1073,7 +1098,7 @@ class SailOperationsSeamTest {
   void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert("old", "name: old\n", "owner");
+      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
@@ -1105,7 +1130,7 @@ class SailOperationsSeamTest {
       new SchemaManager(db).migrate();
       var projects = new ProjectStore(db);
       var definition = "name: old\n";
-      projects.upsert("old", definition, "owner");
+      Acting.system(() -> projects.upsert("old", definition));
       ai.singlr.sail.engine.ProjectFileFixtures.put(
           operations.projectFiles("old"), "config", new byte[] {1});
       assertFalse(operations.catalog().destroy("old", false).purged());
@@ -1138,8 +1163,8 @@ class SailOperationsSeamTest {
   void hostReadsAndCredentialsUseTheSameDatabaseAsTheApi() throws Exception {
     try (var box = new SyncBox("node");
         var operations = operations(box.db)) {
-      box.specs.create(SyncBox.spec("auth", "task", "pending"));
-      box.specs.setContent("auth", "body", "plan");
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "task", "pending")));
+      Acting.system(() -> box.specs.setContent("auth", "body", "plan"));
       assertEquals("auth", operations.catalog().projectSpecs("proj").getFirst().id());
       assertEquals("body", operations.catalog().specContent("auth").orElseThrow().body());
       assertTrue(operations.dispatching().latestRun("proj", "node").isEmpty());
@@ -1147,10 +1172,13 @@ class SailOperationsSeamTest {
       assertNull(operations.dispatching().projectSession("proj", "node"));
       assertFalse(operations.catalog().roomKnown(null));
       assertFalse(operations.catalog().roomKnown("auth"));
-      new RoomStore(box.db)
-          .create(
-              new RoomStore.RoomRow(
-                  "auth", "proj", "room", "owner", "on", "[]", "owner", null, null, "owner"));
+      Acting.system(
+          () ->
+              new RoomStore(box.db)
+                  .create(
+                      new RoomStore.RoomRow(
+                          "auth", "proj", "room", "owner", "on", "[]", "owner", null, null,
+                          "owner")));
       assertTrue(operations.catalog().roomKnown("auth"));
       var owner = new FdeStore(box.db).add("owner", null, null, "admin");
       assertEquals(owner, operations.identity().fde("owner").orElseThrow());
@@ -1195,16 +1223,18 @@ class SailOperationsSeamTest {
         var operations = operations(box.db)) {
       var runs = new RunStore(box.db);
       var id = DateTimeUtils.newId().toString();
-      runs.create(
-          id, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null, "/log",
-          "unit");
+      Acting.system(
+          () ->
+              runs.create(
+                  id, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
+                  "/log", "unit"));
       assertEquals(id, operations.dispatching().latestRun("proj", "node").orElseThrow().id());
       assertEquals(id, operations.dispatching().activeRun("proj", "node").orElseThrow().id());
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
       assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
       assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
       var fallback = operations.dispatching().reviewLog("proj", "node");
-      var review = new ReviewStore(box.db).createReview("auth", 1);
+      var review = Acting.system(() -> new ReviewStore(box.db).createReview("auth", 1));
       assertEquals(
           AgentUnit.forReview(review).logPath(),
           operations.dispatching().reviewLog("proj", "node"));
@@ -1240,7 +1270,7 @@ class SailOperationsSeamTest {
         SyncRpcServer.over(
             main.db,
             "main",
-            new SyncPrincipal("node", true),
+            Actor.sync("node", Role.MEMBER),
             List::of,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR));

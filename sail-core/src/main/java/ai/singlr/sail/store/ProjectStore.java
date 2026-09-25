@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -52,20 +53,21 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       String updatedAt) {}
 
   /**
-   * Inserts the project or replaces its definition, preserving the original {@code
-   * created_by}/{@code created_at}, and journals it as a local edit the next sync pushes.
-   * Idempotent in effect; re-applying the same definition still records a revision that converges.
+   * Inserts the project or replaces its definition as the bound {@link Actor}, preserving the
+   * original {@code created_by}/{@code created_at}, and journals it as a local edit the next sync
+   * pushes. Idempotent in effect; re-applying the same definition still records a revision that
+   * converges.
    *
    * <p>The definition is {@linkplain PersonalFields#redact redacted} first, so the catalogued,
    * synced state never carries this box's git identity or SSH keys — each box resolves those
    * locally at provision time. This is the one seam where a definition a human authored enters the
    * catalog; revisions arriving over sync are already redacted at their origin.
    */
-  public void upsert(String name, String definition, String actor) {
+  public void upsert(String name, String definition) {
     var canonical = PersonalFields.redact(definition);
     db.transaction(
         () -> {
-          writeRow(name, canonical, actor);
+          writeRow(name, canonical, author());
           recordRevision(name, canonical, null, "local", false, false);
         });
   }
@@ -103,9 +105,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           if (findByName(renamed).isPresent()) {
             throw new IllegalStateException("A project named '" + renamed + "' already exists.");
           }
-          recordRevision(old, existing.definition(), null, "local", true, false, true);
+          recordRevision(old, existing.definition(), null, null, "local", true, false, true);
           db.execute("DELETE FROM projects WHERE name = ?", old);
-          writeRow(renamed, canonical, existing.updatedBy());
+          writeRow(renamed, canonical, author());
           recordRevision(renamed, canonical, null, "local", false, false);
         });
   }
@@ -204,7 +206,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var changed = 0;
     for (var row : list()) {
       if (!PersonalFields.redact(row.definition()).equals(row.definition())) {
-        upsert(row.name(), row.definition(), row.updatedBy());
+        upsert(row.name(), row.definition());
         changed++;
       }
     }
@@ -222,7 +224,15 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           } else {
             var definition = definitionOf(snapshot);
             writeRow(id, definition, Snapshots.actor(snapshot));
-            recordRevision(id, definition, rev, "sync", false, true);
+            recordRevision(
+                id,
+                definition,
+                rev,
+                Snapshots.text(snapshot, Snapshots.ACTOR),
+                "sync",
+                false,
+                true,
+                false);
           }
         });
   }
@@ -254,6 +264,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
                     id,
                     present == null ? null : present.definition(),
                     null,
+                    null,
                     "sync",
                     true,
                     false,
@@ -266,7 +277,15 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           var definition = definitionOf(snapshot);
           writeRow(id, definition, Snapshots.actor(snapshot));
           return new PushOutcome.Accepted(
-              recordRevision(id, definition, null, "sync", false, false));
+              recordRevision(
+                  id,
+                  definition,
+                  null,
+                  Snapshots.text(snapshot, Snapshots.ACTOR),
+                  "sync",
+                  false,
+                  false,
+                  false));
         });
   }
 
@@ -302,7 +321,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var present = findByName(id).orElse(null);
     if (present == null) {
       var rev = Revisions.next(currentRev(id), "{}");
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+      changeLog.append(ENTITY, id, rev, "sync", true, "{}");
       return rev;
     }
     var rev = recordRevision(id, present.definition(), null, "sync", true, false);
@@ -321,14 +340,14 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       return rev;
     }
     var definition = definitionOf(chosen);
-    writeRow(id, definition, "resolve");
+    writeRow(id, definition, author());
     return recordRevision(id, definition, null, "resolve", false, false);
   }
 
   private void adoptDeletion(String id, String rev) {
     var present = findByName(id).orElse(null);
     if (present == null) {
-      changeLog.append(ENTITY, id, rev, null, "sync", true, "{}");
+      changeLog.append(ENTITY, id, rev, "sync", true, "{}");
       return;
     }
     recordRevision(id, present.definition(), rev, "sync", true, false);
@@ -342,7 +361,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       String origin,
       boolean deleted,
       boolean setBaseRev) {
-    return recordRevision(id, definition, explicitRev, origin, deleted, setBaseRev, false);
+    return recordRevision(id, definition, explicitRev, null, origin, deleted, setBaseRev, false);
   }
 
   /**
@@ -373,6 +392,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       String id,
       String definition,
       String explicitRev,
+      String offeredAuthor,
       String origin,
       boolean deleted,
       boolean setBaseRev,
@@ -394,8 +414,12 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
         db.execute("UPDATE projects SET rev = ? WHERE name = ?", rev, id);
       }
     }
-    changeLog.append(ENTITY, id, rev, null, origin, deleted, snapshot);
+    changeLog.append(ENTITY, id, rev, offeredAuthor, origin, deleted, snapshot);
     return rev;
+  }
+
+  private static String author() {
+    return Actor.current().handle();
   }
 
   private void writeRow(String name, String definition, String actor) {

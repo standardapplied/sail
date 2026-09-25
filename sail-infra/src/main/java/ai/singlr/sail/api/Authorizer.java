@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Capability;
+import ai.singlr.sail.identity.Role;
 import com.sun.net.httpserver.HttpExchange;
 import java.util.Locale;
 

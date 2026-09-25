@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -79,8 +80,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var snapshot = snapshot(row);
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
-          changeLog.append(
-              ENTITY, id, rev, author.strip(), "local", false, YamlUtil.dumpJson(snapshot));
+          changeLog.append(ENTITY, id, rev, "local", false, YamlUtil.dumpJson(snapshot));
           return findById(id).orElseThrow();
         });
   }
@@ -358,7 +358,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var json = YamlUtil.dumpJson(snapshot);
           var rev = Revisions.next(null, json);
           var row = fromSnapshot(id, snapshot);
-          var peer = SyncPeer.current();
+          var peer = Actor.current().peer();
           if (!mayPostAs(peer, row.author(), row.roomId())) {
             throw new IllegalArgumentException(
                 "sync principal '" + peer + "' may not post as '" + row.author() + "'");

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  * forward: unassigned specs, node-less runs, and unjournaled rows are exactly what an interrupted
  * 0.14 'sail migrate' leaves behind.
  */
+@ActingAs
 class LegacyDataMigrationTest {
 
   @TempDir Path tempDir;

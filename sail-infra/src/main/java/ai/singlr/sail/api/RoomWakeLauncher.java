@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -63,8 +64,12 @@ public final class RoomWakeLauncher {
     this.roomCommitGuard = roomCommitGuard;
   }
 
-  /** Launches a room wake for {@code specId}, returning the run id. */
+  /** Launches a room wake for {@code specId} as this box's machinery, returning the run id. */
   public String wake(String project, String specId, String localHandle) {
+    return Actor.call(Actor.system(), () -> launch(project, specId, localHandle));
+  }
+
+  private String launch(String project, String specId, String localHandle) {
     var loaded = projects.loadRunning(project);
     var config = loaded.config();
     if (config.agent() == null) {

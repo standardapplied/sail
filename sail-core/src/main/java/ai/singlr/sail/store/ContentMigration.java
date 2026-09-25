@@ -18,7 +18,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
-/** Resumable conversion of live content, retained revisions, and every conflict side. */
+/**
+ * Resumable conversion of live content, retained revisions, and every conflict side. Rewrites rows
+ * and history in place and journals nothing: the content is unchanged, only its storage moves.
+ */
 public final class ContentMigration implements DataMigration {
   public static final String NAME = "content-addressed-blobs-v1";
 

@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
  * three bugs that reached a real box: the {@code depends_on} foreign key that aborted the round,
  * the un-journaled project invisible to sync, and the roster pull that those aborts skipped.
  */
+@ActingAs
 class FleetSyncTest {
 
   @TempDir Path dir;
@@ -128,8 +131,8 @@ class FleetSyncTest {
     main.specs.create(spec("oauth", "OAuth flow", "done", List.of()));
     main.specs.create(spec("billing", "Billing", "pending", List.of("oauth")));
     ai.singlr.sail.store.ContentFixtures.put(main.files, "acme", "scripts/deploy.sh", "deploy");
-    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
-    main.projects.upsert("outline", "name: outline\n", "uday");
+    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n");
+    main.projects.upsert("outline", "name: outline\n");
     main.fdes.add("uday", "Alex Morgan", "uday@example.com", "admin");
     main.fdes.add("mady", "Mady M", "mady@example.com", "member");
   }
@@ -163,8 +166,7 @@ class FleetSyncTest {
         "acme",
         "name: acme\n"
             + "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
-            + "ssh:\n  authorized_keys:\n    - ssh-ed25519 UDAYKEY uday@main\n",
-        "uday");
+            + "ssh:\n  authorized_keys:\n    - ssh-ed25519 UDAYKEY uday@main\n");
 
     syncFromMain();
 
@@ -203,7 +205,7 @@ class FleetSyncTest {
 
   @Test
   void aSyncedProjectIsAttributedToItsRealAuthorNotSync() {
-    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
+    Acting.as("uday", () -> main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n"));
 
     syncFromMain();
 

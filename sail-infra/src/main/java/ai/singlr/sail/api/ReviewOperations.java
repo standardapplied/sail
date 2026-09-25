@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
@@ -119,10 +120,10 @@ final class ReviewOperations {
             null,
             null,
             FollowupDraft.priority(findings),
-            request.createdBy(),
+            null,
             "",
             "",
-            request.createdBy(),
+            null,
             List.of(),
             source.repos()));
     specStore.setContent(followupId, FollowupDraft.body(sourceSpecId, review, findings), "");

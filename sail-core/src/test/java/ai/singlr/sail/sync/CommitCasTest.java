@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
  * rev still matches main's current rev, so a stale push is rejected with main's untouched state
  * instead of overwriting it.
  */
+@ActingAs
 class CommitCasTest {
 
   @TempDir Path tempDir;

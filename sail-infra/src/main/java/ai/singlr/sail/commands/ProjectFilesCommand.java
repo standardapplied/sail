@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -134,9 +135,13 @@ public final class ProjectFilesCommand implements Runnable {
           System.err.println(Banner.errorLine(source + ": " + problem.get(), Ansi.AUTO));
           return 1;
         }
-        try (var input = Files.newInputStream(source)) {
-          files.put(path, input, Files.size(source), WorkspaceFiles.mode(source));
-        }
+        Actor.call(
+            operations.identity().operator(),
+            () -> {
+              try (var input = Files.newInputStream(source)) {
+                return files.put(path, input, Files.size(source), WorkspaceFiles.mode(source));
+              }
+            });
         files.materialize();
         System.out.println(
             Ansi.AUTO.string(
@@ -230,7 +235,10 @@ public final class ProjectFilesCommand implements Runnable {
       }
       Shared shared;
       try (var operations = OperationsFactory.open()) {
-        shared = share(operations.projectFiles(project), fileSource, root, selected);
+        shared =
+            Actor.call(
+                operations.identity().operator(),
+                () -> share(operations.projectFiles(project), fileSource, root, selected));
       }
       for (var skip : shared.skipped()) {
         System.err.println(Ansi.AUTO.string("  @|yellow ⚠|@ skipped " + skip));
@@ -402,7 +410,9 @@ public final class ProjectFilesCommand implements Runnable {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var operations = OperationsFactory.open()) {
-        if (!operations.projectFiles(project).remove(path)) {
+        if (!Actor.call(
+            operations.identity().operator(),
+            () -> operations.projectFiles(project).remove(path))) {
           System.err.println(
               Banner.errorLine("No shared file '" + path + "' on " + project + ".", Ansi.AUTO));
           return 1;

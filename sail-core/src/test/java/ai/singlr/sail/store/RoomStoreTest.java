@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs(value = Actor.Lane.CLI, handle = "uday")
 class RoomStoreTest {
 
   @TempDir Path tempDir;
@@ -92,7 +96,7 @@ class RoomStoreTest {
     var created = rooms.findById("auth").orElseThrow();
     var firstRev = rooms.latestRev("auth");
 
-    rooms.updateRoster("auth", null, "sam");
+    Actor.run(Actor.cliOperator("sam"), () -> rooms.updateRoster("auth", null));
     var afterRoster = rooms.findById("auth").orElseThrow();
     assertNull(afterRoster.roster());
     assertEquals(created.wake(), afterRoster.wake(), "a roster write never touches wake");
@@ -100,7 +104,7 @@ class RoomStoreTest {
     assertEquals("sam", afterRoster.updatedBy());
     assertFalse(firstRev.equals(rooms.latestRev("auth")), "an edit mints a new revision");
 
-    rooms.updateWake("auth", "mention", "ada");
+    rooms.updateWake("auth", "mention");
     var afterWake = rooms.findById("auth").orElseThrow();
     assertEquals("mention", afterWake.wake());
     assertNull(afterWake.roster(), "a wake write never resurrects the roster");
@@ -117,6 +121,20 @@ class RoomStoreTest {
     assertNotNull(rooms.latestRev("auth"), "the tombstone stays journaled for sync");
     assertTrue(rooms.syncEntityIds().contains("auth"));
     assertFalse(rooms.delete("auth"), "deleting an absent room is a no-op");
+  }
+
+  @Test
+  void aDeleteAndARestoreEachNameTheirOwnAuthor() {
+    rooms.create(room("auth"));
+
+    Actor.run(Actor.cliOperator("mady"), () -> rooms.delete("auth"));
+    var tombstone = new ChangeLog(db).head("room", "auth").orElseThrow();
+    assertEquals("mady", tombstone.actor());
+    assertEquals("mady", YamlUtil.parseMap(tombstone.snapshot()).get("updated_by"));
+
+    Actor.run(Actor.cliOperator("raj"), () -> rooms.restoreDeleted("auth"));
+    assertEquals("raj", rooms.findById("auth").orElseThrow().updatedBy());
+    assertEquals("raj", new ChangeLog(db).head("room", "auth").orElseThrow().actor());
   }
 
   @Test
@@ -153,7 +171,7 @@ class RoomStoreTest {
     snapshot.put("created_at", "2026-08-01T00:00:00Z");
     snapshot.put(Snapshots.ACTOR, "sam");
 
-    rooms.applyRevision("synced", snapshot, "3-abc");
+    Actor.run(Actor.main(), () -> rooms.applyRevision("synced", snapshot, "3-abc"));
 
     var found = rooms.findById("synced").orElseThrow();
     assertEquals("Synced room", found.title());
@@ -206,10 +224,10 @@ class RoomStoreTest {
   @Test
   void ensureForReturnsTheExistingRoomOrMintsTheIdentityRoom() {
     rooms.create(room("auth"));
-    var existing = rooms.ensureFor("auth", "other", "Other title", null, null, "sam");
+    var existing = rooms.ensureFor("auth", "other", "Other title", null, null);
     assertEquals("Auth design", existing.title(), "an existing room is returned untouched");
 
-    var minted = rooms.ensureFor("fresh", "acme", "Fresh spec", "uday", "on", "uday");
+    var minted = rooms.ensureFor("fresh", "acme", "Fresh spec", "uday", "on");
     assertEquals("Fresh spec", minted.title());
     assertEquals("uday", minted.assignee());
     assertEquals("on", minted.wake());

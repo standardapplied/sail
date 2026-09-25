@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
@@ -152,7 +154,7 @@ class SyncServerCommandTest {
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
             n -> {},
             nodeDb)) {
-      return session.reconcile(entityType, replica).report();
+      return Actor.call(Actor.main(), () -> session.reconcile(entityType, replica)).report();
     } finally {
       serverThread.join();
     }
@@ -160,7 +162,7 @@ class SyncServerCommandTest {
 
   @Test
   void aMemberTokenMayPushToMain() throws Exception {
-    nodeSpecs.create(spec("auth", "Auth"));
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     var report = syncWithToken(tokenFor("member"));
 
     assertEquals(1, report.pushed());
@@ -169,21 +171,21 @@ class SyncServerCommandTest {
 
   @Test
   void aViewerTokenMayPullButNotPush() throws Exception {
-    mainSpecs.create(spec("board", "Shared"));
+    Acting.system(() -> mainSpecs.create(spec("board", "Shared")));
     var token = tokenFor("viewer");
 
     var pull = syncWithToken(token);
     assertEquals(1, pull.pulled());
     assertEquals("Shared", nodeSpecs.findById("board").orElseThrow().title());
 
-    nodeSpecs.create(spec("mine", "Local only"));
+    Acting.system(() -> nodeSpecs.create(spec("mine", "Local only")));
     assertThrows(SyncTransportException.class, () -> syncWithToken(token));
     assertTrue(mainSpecs.findById("mine").isEmpty());
   }
 
   @Test
   void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
-    nodeSpecs.create(spec("auth", "Auth"));
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     assertThrows(SyncTransportException.class, () -> syncWithToken(null));
     assertTrue(mainSpecs.findById("auth").isEmpty());
   }
@@ -200,23 +202,26 @@ class SyncServerCommandTest {
   }
 
   private String createNodeRun(String node) {
-    var id = DateTimeUtils.newId().toString();
-    new RunStore(nodeDb)
-        .create(
-            id,
-            "proj",
-            "auth",
-            node,
-            node,
-            "build",
-            "claude-code",
-            "feat/x",
-            "task",
-            1,
-            null,
-            "/home/dev/.sail/runs/" + id + "/agent.log",
-            "sail-agent-" + id);
-    return id;
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          new RunStore(nodeDb)
+              .create(
+                  id,
+                  "proj",
+                  "auth",
+                  node,
+                  node,
+                  "build",
+                  "claude-code",
+                  "feat/x",
+                  "task",
+                  1,
+                  null,
+                  "/home/dev/.sail/runs/" + id + "/agent.log",
+                  "sail-agent-" + id);
+          return id;
+        });
   }
 
   @Test
@@ -243,8 +248,8 @@ class SyncServerCommandTest {
 
   @Test
   void aCommittedPushHandsItsTransitionsToTheSink() throws Exception {
-    nodeSpecs.create(spec("auth", "Auth"));
-    nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.system(() -> nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress")));
     var seen = new java.util.ArrayList<SyncTransition>();
 
     syncWithToken(tokenFor("member"), "spec", nodeReplica, seen::add);
@@ -257,7 +262,7 @@ class SyncServerCommandTest {
 
   @Test
   void aReSyncedUnchangedSpecEmitsNoTransition() throws Exception {
-    nodeSpecs.create(spec("auth", "Auth"));
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");
     syncWithToken(token);
     var seen = new java.util.ArrayList<SyncTransition>();

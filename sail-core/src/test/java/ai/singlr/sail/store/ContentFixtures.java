@@ -4,6 +4,7 @@
  */
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.identity.Acting;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -11,8 +12,15 @@ import java.util.Map;
 public final class ContentFixtures {
   private ContentFixtures() {}
 
+  /** Shares {@code text} at {@code path} as fixture state, written by this box's machinery. */
   public static void put(FileStore files, String project, String path, String text) {
-    files.put(project, path, new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)), 0644);
+    Acting.system(
+        () ->
+            files.put(
+                project,
+                path,
+                new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)),
+                0644));
   }
 
   public static String text(FileStore files, String project, String path) {

@@ -6,12 +6,14 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class ReviewStoreTest {
 
   @TempDir Path tempDir;
@@ -142,6 +145,27 @@ class ReviewStoreTest {
     store.linkSourceFindings("auth-followup", List.of(finding.id()));
 
     assertEquals(List.of(finding.id()), store.sourceFindingIds("auth-followup"));
+  }
+
+  @Test
+  void resolvingSourceFindingsJournalsTheReviewItChangedAndNothingElse() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var linked = addOpenFinding(stageId, Finding.Severity.HIGH, "Linked");
+    createSpec("auth-followup");
+    store.linkSourceFindings("auth-followup", List.of(linked.id()));
+    var log = new ChangeLog(db);
+    var before = log.head("review", reviewId).orElseThrow();
+
+    store.resolveSourceFindings("auth-followup");
+    var resolved = log.head("review", reviewId).orElseThrow();
+    store.resolveSourceFindings("auth-followup");
+
+    assertNotEquals(before.rev(), resolved.rev(), "the resolution is a revision of the review");
+    assertEquals(
+        resolved.seq(),
+        log.head("review", reviewId).orElseThrow().seq(),
+        "resolving nothing journals nothing");
   }
 
   @Test

@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,8 +41,15 @@ public final class DataMigrator {
     return migrations.stream().map(DataMigration::name).toList();
   }
 
-  /** Applies every migration not yet recorded in {@code data_migrations}. Returns each report. */
+  /**
+   * Applies every migration not yet recorded in {@code data_migrations}, as this box's machinery
+   * ({@link Actor#system()}). Returns each report.
+   */
   public List<Run> run(ProjectRegistry projects, DataMigration.Prompter prompter) {
+    return Actor.call(Actor.system(), () -> runAll(projects, prompter));
+  }
+
+  private List<Run> runAll(ProjectRegistry projects, DataMigration.Prompter prompter) {
     var runs = new ArrayList<Run>();
     for (var migration : migrations) {
       if (migration.resumable()) {

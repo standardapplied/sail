@@ -7,6 +7,9 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -23,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  * A reply is only valid once its parent exists, so a page or a push batch must reach the store in
  * the order main or the node produced it. Both directions run over the protocol-4 pipe.
  */
+@ActingAs
 class ReplyChainSyncTest {
 
   private static final int CHAIN = 30;
@@ -63,7 +67,7 @@ class ReplyChainSyncTest {
   }
 
   private SyncBox.Link connect() throws IOException {
-    return SyncBox.connect(main.server(new SyncPrincipal("node", true)), node);
+    return SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node);
   }
 
   private static void chain(MessageStore messages) {

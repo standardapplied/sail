@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -46,8 +47,10 @@ import java.util.function.Supplier;
  */
 final class SpecPruner {
 
-  /** Who retention's erasures are attributed to in the erasure rows every box keeps. */
-  static final String RETENTION_ACTOR = "sail-retention";
+  /** The origin retention's erasures carry, so every box can tell them from a prune. */
+  static final String RETENTION = "retention";
+
+  private static final String LOCAL = "local";
 
   private static final int BATCH = 200;
 
@@ -89,13 +92,13 @@ final class SpecPruner {
     IntFunction<List<Erasure.Target>> select = limit -> roots(request, actor, limit);
     var idle = request.project() == null;
     if (request.dryRun()) {
-      return rehearse(select, handle, idle);
+      return rehearse(select, idle);
     }
     return node ? ask(request, actor, handle, select, idle) : apply(select, handle, idle);
   }
 
   /**
-   * Main's retention: turns {@code policy} into erasures, as {@link #RETENTION_ACTOR} — archived
+   * Main's retention: turns {@code policy} into erasures of origin {@link #RETENTION} — archived
    * specs past their age with no run still going, messages past theirs that no thread still needs,
    * runs finished before theirs. Returns what went; collecting the content is the sweeper's.
    */
@@ -115,7 +118,7 @@ final class SpecPruner {
                       targets(
                           Erasure.SPEC,
                           specs.prunableSince(List.of(SpecStatus.ARCHIVED), null, cutoff, limit)),
-                  RETENTION_ACTOR,
+                  RETENTION,
                   true,
                   projects));
     }
@@ -125,7 +128,7 @@ final class SpecPruner {
           result.plus(
               eraseAll(
                   limit -> targets(Erasure.MESSAGE, messages.retiredBefore(cutoff, limit)),
-                  RETENTION_ACTOR,
+                  RETENTION,
                   false,
                   projects));
     }
@@ -135,27 +138,27 @@ final class SpecPruner {
           result.plus(
               eraseAll(
                   limit -> targets(Erasure.RUN, runs.finishedBefore(cutoff, limit)),
-                  RETENTION_ACTOR,
+                  RETENTION,
                   false,
                   projects));
     }
-    projects.forEach(project -> publishBoardUpdated(project, RETENTION_ACTOR));
+    var actor = Actor.current().handle();
+    projects.forEach(project -> publishBoardUpdated(project, actor));
     return PruneReport.of(result, 0, false, false);
   }
 
-  private PruneReport rehearse(
-      IntFunction<List<Erasure.Target>> select, String handle, boolean idle) {
+  private PruneReport rehearse(IntFunction<List<Erasure.Target>> select, boolean idle) {
     return db.rehearse(
         () -> {
           var before = blobs.collectable();
-          var result = eraseAll(select, handle, idle, new LinkedHashSet<>());
+          var result = eraseAll(select, LOCAL, idle, new LinkedHashSet<>());
           return PruneReport.of(result, blobs.collectable() - before, true, false);
         });
   }
 
   private PruneReport apply(IntFunction<List<Erasure.Target>> select, String handle, boolean idle) {
     var projects = new LinkedHashSet<String>();
-    var result = eraseAll(select, handle, idle, projects);
+    var result = eraseAll(select, LOCAL, idle, projects);
     var freed = result.entities().isEmpty() ? 0L : collect();
     projects.forEach(project -> publishBoardUpdated(project, handle));
     return PruneReport.of(result, freed, false, false);
@@ -173,7 +176,7 @@ final class SpecPruner {
       String handle,
       IntFunction<List<Erasure.Target>> select,
       boolean idle) {
-    var rehearsed = rehearse(select, handle, idle);
+    var rehearsed = rehearse(select, idle);
     var requests = new EraseRequests(db);
     var projects = new LinkedHashSet<String>();
     var discarded = new ArrayList<Erasure.Target>();
@@ -208,7 +211,7 @@ final class SpecPruner {
    * sweep. Every batch erases something new, so the loop ends.
    */
   private Erasure.Result eraseAll(
-      IntFunction<List<Erasure.Target>> select, String handle, boolean idle, Set<String> projects) {
+      IntFunction<List<Erasure.Target>> select, String origin, boolean idle, Set<String> projects) {
     var result = Erasure.Result.NONE;
     while (true) {
       var batch =
@@ -217,7 +220,7 @@ final class SpecPruner {
                 var plan = erasure.closure(select.apply(BATCH));
                 requireIdle(plan, idle);
                 projects.addAll(projectsOf(plan));
-                return erasure.erase(plan, handle, "local");
+                return erasure.erase(plan, origin);
               });
       if (batch.entities().isEmpty()) {
         return result;

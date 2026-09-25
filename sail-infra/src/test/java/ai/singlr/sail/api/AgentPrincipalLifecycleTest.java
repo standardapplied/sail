@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -82,25 +84,28 @@ class AgentPrincipalLifecycleTest {
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            null,
-            null,
-            HANDLE,
-            List.of(),
-            List.of()));
-    specStore.setContent("auth", "Do auth", "");
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Add auth",
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE,
+                    List.of(),
+                    List.of())));
+    Acting.system(() -> specStore.setContent("auth", "Do auth", ""));
 
     var agentAlive = new AtomicBoolean(true);
     var shell = new AgentShell(agentAlive);
@@ -129,11 +134,14 @@ class AgentPrincipalLifecycleTest {
             SessionYield.NONE);
 
     var outcome =
-        dispatchOps.dispatch(
-            "acme",
-            new DispatchOperations.Request("auth", "background", false, null, false),
+        Acting.by(
             ADMIN,
-            HANDLE);
+            () ->
+                dispatchOps.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    ADMIN,
+                    HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     var runId = dispatched.runId();
     assertTrue(credential.get().startsWith("sailrun_"), "the launch env carries the credential");
@@ -218,7 +226,9 @@ class AgentPrincipalLifecycleTest {
             bus::publish,
             (project, unit) -> agentAlive.set(false),
             StopOperations.Listener.NONE);
-    var stopped = stopOps.stop(new StopOperations.RunTarget(runId), ADMIN, HANDLE, false);
+    var stopped =
+        Acting.by(
+            ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), ADMIN, HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
     var refused = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
@@ -238,25 +248,28 @@ class AgentPrincipalLifecycleTest {
     var fdes = new FdeStore(db);
     fdes.add(HANDLE, null, null, "member");
     fdes.add("alice", null, null, "admin");
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            null,
-            null,
-            HANDLE,
-            List.of(),
-            List.of()));
-    specStore.setContent("auth", "Do auth", "");
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Add auth",
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE,
+                    List.of(),
+                    List.of())));
+    Acting.system(() -> specStore.setContent("auth", "Do auth", ""));
 
     var shell = new AgentShell(new AtomicBoolean(true));
     var credential = new AtomicReference<String>();
@@ -283,11 +296,14 @@ class AgentPrincipalLifecycleTest {
             SessionYield.NONE);
 
     var outcome =
-        dispatchOps.dispatch(
-            "acme",
-            new DispatchOperations.Request("auth", "background", false, null, false),
+        Acting.by(
             Actor.cliOperator("alice"),
-            HANDLE);
+            () ->
+                dispatchOps.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    Actor.cliOperator("alice"),
+                    HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
 
     var run = runStore.findById(dispatched.runId()).orElseThrow();

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -165,11 +166,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   @Override
   public void onEvent(Event event) {
     try {
-      if (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(event.type())) {
-        handleMessage(event);
-      } else {
-        handleStop(event);
-      }
+      Actor.call(Actor.system(), () -> handle(event));
     } catch (Exception e) {
       System.err.println(
           "room-wake: failed to process "
@@ -179,6 +176,15 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
               + ": "
               + e.getMessage());
     }
+  }
+
+  private Void handle(Event event) throws Exception {
+    if (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(event.type())) {
+      handleMessage(event);
+    } else {
+      handleStop(event);
+    }
+    return null;
   }
 
   /**
@@ -261,7 +267,11 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (!pending.add(specId)) {
       return;
     }
-    executor.execute(() -> debounceThenFire(specId, message, engaged ? engagedDebounce : debounce));
+    executor.execute(
+        () ->
+            Actor.run(
+                Actor.system(),
+                () -> debounceThenFire(specId, message, engaged ? engagedDebounce : debounce)));
   }
 
   private void debounceThenFire(String specId, Message message, Duration pause) {
@@ -378,9 +388,14 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   /**
    * The engaged loop's safety net, run by a periodic pass: any engaged room this box owns whose
    * newest human message no chat turn has answered gets its turn scheduled — a crashed debounce, a
-   * lost event, or a turn deferred behind a build must never strand a conversation.
+   * lost event, or a turn deferred behind a build must never strand a conversation. Runs as this
+   * box's machinery.
    */
   public void sweepEngagedRooms() {
+    Actor.run(Actor.system(), this::refireOwedTurns);
+  }
+
+  private void refireOwedTurns() {
     var engaged = new java.util.LinkedHashSet<String>();
     roomStore.listEngaged().forEach(room -> engaged.add(room.id()));
     for (var id : engaged) {

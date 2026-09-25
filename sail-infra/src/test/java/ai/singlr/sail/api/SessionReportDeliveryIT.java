@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailSessionReport;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -82,19 +83,21 @@ class SessionReportDeliveryIT {
     runId = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                runId,
-                "acme",
-                "room",
-                "node-a",
-                "ada",
-                "build",
-                List.of(),
-                "claude-code",
-                "b",
-                "t",
-                "l",
-                "u");
+            Acting.system(
+                () ->
+                    runStore.reserveDispatch(
+                        runId,
+                        "acme",
+                        "room",
+                        "node-a",
+                        "ada",
+                        "build",
+                        List.of(),
+                        "claude-code",
+                        "b",
+                        "t",
+                        "l",
+                        "u"));
     credential = reservation.credential();
     listener = new LocalApiSocket(bus, operations, root.resolve("api.sock"));
     listener.start();
@@ -147,7 +150,7 @@ class SessionReportDeliveryIT {
   @Test
   void aFinishedRunsRevokedCredentialCannotRewriteItsSession() throws Exception {
     runScript("{\"session_id\": \"live-111\", \"source\": \"startup\"}");
-    runStore.complete(runId, "completed", 0);
+    Acting.system(() -> runStore.complete(runId, "completed", 0));
 
     var late = runScript("{\"session_id\": \"stale-999\", \"source\": \"resume\"}");
 

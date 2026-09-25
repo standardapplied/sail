@@ -42,7 +42,7 @@ final class ProjectMutations {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectDefinitions.persist(name, explicitFile, definition, Actor.current());
+    ProjectDefinitions.persist(name, explicitFile, definition);
   }
 
   static IllegalStateException notFound(String name) {

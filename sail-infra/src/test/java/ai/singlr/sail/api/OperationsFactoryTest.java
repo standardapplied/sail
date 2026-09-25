@@ -16,6 +16,9 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
@@ -76,32 +79,34 @@ class OperationsFactoryTest {
       assertNotNull(prepared.runId());
       assertTrue(operations.dispatching().runningRuns("proj", "node").isEmpty());
       assertEquals(0, bus.publishedCount());
-      box.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "Auth", "pending")));
       var runId = DateTimeUtils.newId().toString();
       var runs = new RunStore(box.db);
-      runs.create(
-          runId,
-          "proj",
-          "auth",
-          "node",
-          "node",
-          "build",
-          "codex",
-          "agent/auth",
-          "task",
-          123,
-          null,
-          "/home/dev/.sail/runs/" + runId + "/agent.log",
-          "sail-agent-" + runId);
-
-      var outcome =
-          operations
-              .dispatching()
-              .stop(
-                  new StopOperations.RunTarget(runId),
-                  new Actor("node", Role.ADMIN, Actor.Lane.API),
+      Acting.system(
+          () ->
+              runs.create(
+                  runId,
+                  "proj",
+                  "auth",
                   "node",
-                  false);
+                  "node",
+                  "build",
+                  "codex",
+                  "agent/auth",
+                  "task",
+                  123,
+                  null,
+                  "/home/dev/.sail/runs/" + runId + "/agent.log",
+                  "sail-agent-" + runId));
+
+      var actor = new Actor("node", Role.ADMIN, Actor.Lane.API);
+      var outcome =
+          Actor.call(
+              actor,
+              () ->
+                  operations
+                      .dispatching()
+                      .stop(new StopOperations.RunTarget(runId), actor, "node", false));
 
       assertTrue(assertInstanceOf(StopOperations.NotRunning.class, outcome).runReleased());
       assertEquals("stopped", runs.findById(runId).orElseThrow().status());

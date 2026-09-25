@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -105,7 +106,10 @@ public final class AgentSweepCommand implements Runnable {
           new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
       DispatchOperations.AdhocSession session;
       try {
-        session = operations.dispatching().startAdhoc(name, request, handle);
+        session =
+            Actor.call(
+                operations.identity().operator(),
+                () -> operations.dispatching().startAdhoc(name, request, handle));
       } catch (ApiException e) {
         var action = e.failure().action();
         throw new IllegalStateException(

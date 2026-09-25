@@ -6,22 +6,21 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
-import ai.singlr.sail.api.Capability;
 import ai.singlr.sail.api.Event;
-import ai.singlr.sail.api.Role;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
-import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.BufferedInputStream;
@@ -41,12 +40,12 @@ import picocli.CommandLine.Command;
  * Main's side of a sync session, reached only through the SSH-key gateway: a node's {@code sail
  * sync} opens {@code ssh sail@main sail _sync}, the gateway authorizes the calling FDE and re-execs
  * this with {@code SAIL_TOKEN} set, and the {@link SyncRpcServer} then exchanges {@link
- * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to a {@link
- * SyncPrincipal} — the FDE's handle plus its role's write capability: only {@code member}+ may push
- * (write), a read-only FDE can pull but its commits are refused, and the handle binds run commits
- * to the pushing node so no FDE can forge another node's execution provenance. The serving database
- * is opened through {@link SyncDatabase}, so main's schema is converged before any revision is
- * served or committed. Not meant to be run by hand.
+ * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to a {@link Actor} —
+ * the FDE's handle plus its role's write capability: only {@code member}+ may push (write), a
+ * read-only FDE can pull but its commits are refused, and the handle binds run commits to the
+ * pushing node so no FDE can forge another node's execution provenance. The serving database is
+ * opened through {@link SyncDatabase}, so main's schema is converged before any revision is served
+ * or committed. Not meant to be run by hand.
  */
 @Command(
     name = "_sync",
@@ -163,19 +162,18 @@ public final class SyncServerCommand implements Callable<Integer> {
     return map;
   }
 
-  private static SyncPrincipal principal(Sqlite db, String token) {
+  private static Actor principal(Sqlite db, String token) {
     if (Strings.isBlank(token)) {
-      return SyncPrincipal.readOnly();
+      return Actor.sync(null, Role.VIEWER);
     }
     return new AuthSessionStore(db)
         .validate(token)
         .flatMap(session -> new FdeStore(db).byId(session.fdeId()))
         .map(SyncServerCommand::principalOf)
-        .orElse(SyncPrincipal.readOnly());
+        .orElse(Actor.sync(null, Role.VIEWER));
   }
 
-  private static SyncPrincipal principalOf(FdeStore.Fde fde) {
-    var role = Role.fromAttribute(fde.role());
-    return new SyncPrincipal(fde.handle(), role.allows(Capability.WRITE), role == Role.ADMIN);
+  private static Actor principalOf(FdeStore.Fde fde) {
+    return Actor.sync(fde.handle(), Role.fromAttribute(fde.role()));
   }
 }

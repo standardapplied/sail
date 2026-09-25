@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+@ActingAs
 class ContainerFileSourceTest {
 
   private static final String WORKSPACE = "/home/dev/workspace";

@@ -34,6 +34,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -308,18 +309,21 @@ public final class RunCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            operations
-                .dispatching()
-                .startAdhoc(
-                    name,
-                    request,
-                    handle,
-                    () -> {
-                      if (!noRegen) {
-                        regenContext(shell, config);
-                      }
-                      prepareContainer(shell, workDir, snapshotTaken, label, branchName);
-                    });
+            Actor.call(
+                operations.identity().operator(),
+                () ->
+                    operations
+                        .dispatching()
+                        .startAdhoc(
+                            name,
+                            request,
+                            handle,
+                            () -> {
+                              if (!noRegen) {
+                                regenContext(shell, config);
+                              }
+                              prepareContainer(shell, workDir, snapshotTaken, label, branchName);
+                            }));
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null

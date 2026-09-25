@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailRoomRelay;
 import ai.singlr.sail.engine.SailStopGate;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -82,19 +83,21 @@ class RoomRelayDeliveryIT {
     runId = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                runId,
-                "acme",
-                "room",
-                "node-a",
-                "ada",
-                "build",
-                java.util.List.of(),
-                "claude-code",
-                "b",
-                "t",
-                "l",
-                "u");
+            Acting.system(
+                () ->
+                    runStore.reserveDispatch(
+                        runId,
+                        "acme",
+                        "room",
+                        "node-a",
+                        "ada",
+                        "build",
+                        java.util.List.of(),
+                        "claude-code",
+                        "b",
+                        "t",
+                        "l",
+                        "u"));
     credential = reservation.credential();
     listener = new LocalApiSocket(bus, operations, root.resolve("api.sock"));
     listener.start();
@@ -111,7 +114,8 @@ class RoomRelayDeliveryIT {
 
   @Test
   void aMidRunMessageIsInjectedOnceAndTheStopGatePassesAsAlreadyDelivered() throws Exception {
-    var posted = messages.append("room", "ada", "also update the docs, please", null);
+    var posted =
+        Acting.system(() -> messages.append("room", "ada", "also update the docs, please", null));
 
     var relay = runScript(relayScript(), "");
     assertEquals(0, relay.exitCode());
@@ -139,7 +143,7 @@ class RoomRelayDeliveryIT {
 
   @Test
   void aDeadSocketLeavesTheRelaySilent() throws Exception {
-    messages.append("room", "ada", "anyone there?", null);
+    Acting.system(() -> messages.append("room", "ada", "anyone there?", null));
     listener.close();
     Files.deleteIfExists(root.resolve("api.sock"));
 

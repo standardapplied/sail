@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
@@ -22,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class BlobStreamingTest {
   @TempDir Path dir;
 
@@ -69,6 +72,10 @@ class BlobStreamingTest {
 
   public static final class Probe {
     public static void main(String[] args) throws Exception {
+      Acting.system(() -> run(args));
+    }
+
+    private static void run(String[] args) throws Exception {
       var directory = Path.of(args[0]);
       var source = directory.resolve("source.bin");
       var random = new Random(615);
@@ -113,6 +120,10 @@ class BlobStreamingTest {
     private static final int CHUNKS_PER_FILE = 1615;
 
     public static void main(String[] args) throws Exception {
+      Acting.system(() -> run(args));
+    }
+
+    private static void run(String[] args) throws Exception {
       var directory = Path.of(args[0]);
       try (var main = new SyncBox(directory, "main");
           var node = new SyncBox(directory, "node")) {

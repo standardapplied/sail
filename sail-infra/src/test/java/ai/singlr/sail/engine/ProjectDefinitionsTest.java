@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -38,7 +39,7 @@ class ProjectDefinitionsTest {
 
   @Test
   void resolvePrefersTheCatalogOverTheCanonicalFile() throws Exception {
-    store.upsert("acme", "from-db", "uday");
+    Acting.system(() -> store.upsert("acme", "from-db"));
     var canonical = dir.resolve("acme.yaml");
     Files.writeString(canonical, "from-file");
 
@@ -57,7 +58,7 @@ class ProjectDefinitionsTest {
 
   @Test
   void resolveLetsAnExplicitFileOverrideTheCatalog() throws Exception {
-    store.upsert("acme", "from-db", "uday");
+    Acting.system(() -> store.upsert("acme", "from-db"));
     var explicit = dir.resolve("override.yaml");
     Files.writeString(explicit, "from-explicit");
     var canonical = dir.resolve("acme.yaml");

@@ -8,6 +8,8 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
  * its stages, and each stage's finding counts land on main and every reader box, while the finding
  * ROWS stay on the executing node. Single-writer: only the executing node mutates its own reviews.
  */
+@ActingAs
 class ReviewSyncTest {
 
   @TempDir Path tempDir;
@@ -163,7 +166,9 @@ class ReviewSyncTest {
     var rounds = 25;
     for (var round = 0; round < rounds; round++) {
       var writer =
-          new Thread(() -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL)));
+          new Thread(
+              Actor.carrying(
+                  () -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL))));
       writer.start();
       sync(node);
       writer.join();

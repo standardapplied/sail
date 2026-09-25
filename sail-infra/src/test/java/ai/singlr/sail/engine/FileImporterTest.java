@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Importing is the disk-to-DB boundary: it captures the workspace files an FDE already has so they
  * become the shared, replicated copy, and it is idempotent so every upgrade can run it for free.
  */
+@ActingAs
 class FileImporterTest {
 
   @TempDir Path tempDir;
@@ -121,8 +124,7 @@ class FileImporterTest {
     writeOnDisk("acme", "a.txt", "A");
     importer.importAll();
     var erasure = new Erasure(db);
-    erasure.erase(
-        erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "uday", "local");
+    erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "local");
     writeOnDisk("globex", "b.txt", "B");
 
     var report = importer.importAll();
@@ -207,20 +209,23 @@ class FileImporterTest {
    * {@code rowMode}, and the copy on disk at {@code diskMode}.
    */
   private String legacy(String path, int diskMode, int rowMode) throws Exception {
-    writeOnDisk("acme", path, "#!/bin/sh\necho " + path);
-    WorkspaceFiles.mode(projectsDir.resolve("acme/files").resolve(path), diskMode);
-    importer.importAll();
-    var id = FileStore.idOf("acme", path);
-    var snapshot =
-        new LinkedHashMap<>(
-            YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
-    snapshot.remove("mode");
-    db.execute(
-        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
-        YamlUtil.dumpJson(snapshot),
-        id);
-    db.execute("UPDATE project_files SET mode = ? WHERE id = ?", rowMode, id);
-    return id;
+    return Acting.system(
+        () -> {
+          writeOnDisk("acme", path, "#!/bin/sh\necho " + path);
+          WorkspaceFiles.mode(projectsDir.resolve("acme/files").resolve(path), diskMode);
+          importer.importAll();
+          var id = FileStore.idOf("acme", path);
+          var snapshot =
+              new LinkedHashMap<>(
+                  YamlUtil.parseMap(new ChangeLog(db).head("file", id).orElseThrow().snapshot()));
+          snapshot.remove("mode");
+          db.execute(
+              "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
+              YamlUtil.dumpJson(snapshot),
+              id);
+          db.execute("UPDATE project_files SET mode = ? WHERE id = ?", rowMode, id);
+          return id;
+        });
   }
 
   @Test

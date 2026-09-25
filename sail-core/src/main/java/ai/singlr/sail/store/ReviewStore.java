@@ -569,13 +569,27 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * fixed by other means are left untouched.
    */
   public int resolveSourceFindings(String specId) {
-    db.execute(
-        """
-        UPDATE review_findings SET resolution = 'FIXED'
-        WHERE resolution = 'OPEN'
-        AND id IN (SELECT finding_id FROM spec_source_findings WHERE spec_id = ?)""",
-        specId);
-    return db.changes();
+    return db.transaction(
+        () -> {
+          var reviewIds =
+              db.query(
+                  """
+                  SELECT DISTINCT s.review_id FROM review_findings f
+                  JOIN review_stages s ON s.id = f.stage_id
+                  WHERE f.resolution = 'OPEN'
+                  AND f.id IN (SELECT finding_id FROM spec_source_findings WHERE spec_id = ?)""",
+                  row -> row.text(0),
+                  specId);
+          db.execute(
+              """
+              UPDATE review_findings SET resolution = 'FIXED'
+              WHERE resolution = 'OPEN'
+              AND id IN (SELECT finding_id FROM spec_source_findings WHERE spec_id = ?)""",
+              specId);
+          var changed = db.changes();
+          reviewIds.forEach(this::journal);
+          return changed;
+        });
   }
 
   /**
@@ -614,9 +628,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /** Backfills a revision for the one-time legacy data migration; delegates to the journal. */
-  String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
-    return revisions.recordRevision(id, explicitRev, origin, deleted, setBaseRev);
+  String recordRevision(String id, String origin) {
+    return revisions.recordRevision(id, origin, false);
   }
 
   /** Journals the aggregate a stage belongs to — a stage or finding change is a review revision. */
@@ -846,11 +859,6 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     @Override
     public Map<String, Object> snapshotMap(String id) {
       return aggregateMap(id);
-    }
-
-    @Override
-    public String author(String id) {
-      return specIdOf(id);
     }
 
     /**

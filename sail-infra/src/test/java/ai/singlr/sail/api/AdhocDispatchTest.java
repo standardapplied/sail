@@ -16,6 +16,9 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -41,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
  * same transaction as dispatch, launches on the run-scoped identity, and shares dispatch's watcher
  * and bookkeeping — so ad-hoc and dispatched agents are mutually exclusive by construction.
  */
+@ActingAs
 class AdhocDispatchTest {
 
   private static final String HANDLE = "me";
@@ -592,24 +596,27 @@ class AdhocDispatchTest {
   }
 
   private void seedSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "Spec " + id,
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            null,
-            null,
-            HANDLE,
-            List.of(),
-            List.of("app")));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "Spec " + id,
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE,
+                    List.of(),
+                    List.of("app"))));
     specStore.setContent(id, "Do " + id, "");
   }
 

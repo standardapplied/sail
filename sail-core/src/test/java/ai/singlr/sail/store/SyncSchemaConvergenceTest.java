@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
  * same round, and a below-floor database is refused with the remedy before any sync data moves.
  * Lives in the store package to reach the package-private {@link FloorSchema} fixture.
  */
+@ActingAs
 class SyncSchemaConvergenceTest {
 
   @TempDir Path tempDir;

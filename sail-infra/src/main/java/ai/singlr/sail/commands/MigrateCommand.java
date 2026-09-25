@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
@@ -198,10 +199,14 @@ public final class MigrateCommand implements Runnable {
   }
 
   private static void importAll(Sqlite db, boolean jsonOutput) {
-    importProjects(db, jsonOutput);
-    scrubProjectIdentity(db, jsonOutput);
-    importFiles(db, jsonOutput);
-    seedDemo(db, jsonOutput);
+    Actor.run(
+        Actor.system(),
+        () -> {
+          importProjects(db, jsonOutput);
+          scrubProjectIdentity(db, jsonOutput);
+          importFiles(db, jsonOutput);
+          seedDemo(db, jsonOutput);
+        });
   }
 
   private static void convergeHost(Sqlite db, boolean jsonOutput) {

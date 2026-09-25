@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
@@ -26,6 +25,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Objects;
@@ -139,7 +139,9 @@ public final class DispatchCommand implements Runnable {
                 renderer(sync),
                 StopOperations.Listener.NONE),
             new PtyHostYield())) {
-      render(dispatch(operations, request, handle));
+      render(
+          Actor.call(
+              operations.identity().operator(), () -> dispatch(operations, request, handle)));
     }
   }
 

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.nio.file.Path;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
  * main's content, so detection can never see the same divergence twice. Covers field-level and
  * delete-vs-edit conflicts in both directions.
  */
+@ActingAs
 class ConflictResolutionTest {
 
   @TempDir Path tempDir;

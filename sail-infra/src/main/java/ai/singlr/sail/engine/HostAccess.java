@@ -6,10 +6,10 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.AccessDecision;
-import ai.singlr.sail.api.Actor;
-import ai.singlr.sail.api.Role;
 import ai.singlr.sail.api.SpecPolicy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;

@@ -82,7 +82,7 @@ public final class ProjectEditCommand implements Runnable {
     }
 
     validate(name, edited);
-    ProjectDefinitions.persist(name, null, edited, Actor.current());
+    ProjectDefinitions.persist(name, null, edited);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

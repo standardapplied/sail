@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -25,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The shared resolution behind both dispatch lanes reads the control-plane DB and picks strictly
  * this box's FDE-assigned specs, honoring {@code --restart} for non-pending re-dispatch.
  */
+@ActingAs
 class DispatchOperationsResolveSpecTest {
 
   private static final String PROJECT = "acme-health";
@@ -167,24 +171,27 @@ class DispatchOperationsResolveSpecTest {
     var store = store();
     store.create(row("auth", "pending"));
     var blocked = row("billing", "pending");
-    store.create(
-        new SpecStore.SpecRow(
-            blocked.id(),
-            blocked.project(),
-            blocked.title(),
-            blocked.status(),
-            blocked.assignee(),
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of("auth"),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    blocked.id(),
+                    blocked.project(),
+                    blocked.title(),
+                    blocked.status(),
+                    blocked.assignee(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of("auth"),
+                    List.of())));
 
     var ex =
         assertThrows(ApiException.class, () -> resolve("billing", false, specsOf(store), store));

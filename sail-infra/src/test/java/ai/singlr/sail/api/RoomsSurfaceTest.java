@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -34,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
  * created, listed with activity decoration, messaged, and deleted without ever minting a spec — the
  * decouple's core promise — while a room holding specs refuses deletion.
  */
+@ActingAs
 class RoomsSurfaceTest {
 
   private static final String HANDLE = "uday";
@@ -77,13 +81,15 @@ class RoomsSurfaceTest {
   }
 
   private RoomDetailResponse create(String id, String title) {
-    var result =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", id, "project", "acme", "title", title))
-                .withCreatedBy(HANDLE),
-            admin());
-    assertTrue(result instanceof Result.Success<RoomDetailResponse>, result.toString());
-    return ((Result.Success<RoomDetailResponse>) result).value();
+    return Acting.system(
+        () -> {
+          var result =
+              ops.createRoom(
+                  RoomCreateRequest.fromMap(Map.of("id", id, "project", "acme", "title", title)),
+                  admin());
+          assertTrue(result instanceof Result.Success<RoomDetailResponse>, result.toString());
+          return ((Result.Success<RoomDetailResponse>) result).value();
+        });
   }
 
   @Test
@@ -138,8 +144,7 @@ class RoomsSurfaceTest {
 
     var second =
         ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "dup-room", "project", "acme", "title", "Two"))
-                .withCreatedBy(HANDLE),
+            RoomCreateRequest.fromMap(Map.of("id", "dup-room", "project", "acme", "title", "Two")),
             admin());
 
     assertTrue(second instanceof Result.Failure<RoomDetailResponse>);
@@ -149,30 +154,32 @@ class RoomsSurfaceTest {
   @Test
   void aRoomIdAlreadyOwnedByASpecIsRefusedSoTheNewRoomIsNeverShadowed() {
     create("adas-room", "Ada's room");
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Auth",
-            ai.singlr.sail.config.SpecStatus.DRAFT,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            "",
-            "",
-            HANDLE,
-            List.of(),
-            List.of(),
-            "adas-room"));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Auth",
+                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    "",
+                    "",
+                    HANDLE,
+                    List.of(),
+                    List.of(),
+                    "adas-room")));
 
     var shadowed =
         ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "auth", "project", "acme", "title", "Namesake"))
-                .withCreatedBy(HANDLE),
+            RoomCreateRequest.fromMap(Map.of("id", "auth", "project", "acme", "title", "Namesake")),
             admin());
 
     assertTrue(shadowed instanceof Result.Failure<RoomDetailResponse>, shadowed.toString());
@@ -194,9 +201,7 @@ class RoomsSurfaceTest {
     var spec =
         ops.createGlobalSpec(
             SpecCreateRequest.fromMap(
-                    Map.of(
-                        "id", "work", "title", "Work", "project", "acme", "room_id", "busy-room"))
-                .withCreatedBy(HANDLE),
+                Map.of("id", "work", "title", "Work", "project", "acme", "room_id", "busy-room")),
             admin());
     assertTrue(spec instanceof Result.Success<GlobalSpecCreatedResponse>, spec.toString());
 
@@ -212,17 +217,14 @@ class RoomsSurfaceTest {
   void invalidCreatesAndMissingRoomsFailLoudly() {
     var noTitle =
         ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme"))
-                .withCreatedBy(HANDLE),
-            admin());
+            RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme")), admin());
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) noTitle).errorCode());
 
     var badWake =
         ops.createRoom(
             RoomCreateRequest.fromMap(
-                    Map.of("id", "y-room", "project", "acme", "title", "Y", "wake", "sometimes"))
-                .withCreatedBy(HANDLE),
+                Map.of("id", "y-room", "project", "acme", "title", "Y", "wake", "sometimes")),
             admin());
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) badWake).errorCode());
@@ -243,9 +245,7 @@ class RoomsSurfaceTest {
     var created =
         ops.createRoom(
             RoomCreateRequest.fromMap(
-                    Map.of(
-                        "id", "wakey-room", "project", "acme", "title", "Wakey", "wake", "mention"))
-                .withCreatedBy(HANDLE),
+                Map.of("id", "wakey-room", "project", "acme", "title", "Wakey", "wake", "mention")),
             admin());
     assertEquals("mention", ((Result.Success<RoomDetailResponse>) created).value().room().wake());
 
@@ -274,8 +274,7 @@ class RoomsSurfaceTest {
         ((Result.Failure<RoomDetailResponse>)
                 unwired.createRoom(
                     RoomCreateRequest.fromMap(
-                            Map.of("id", "z-room", "project", "acme", "title", "Z"))
-                        .withCreatedBy(HANDLE),
+                        Map.of("id", "z-room", "project", "acme", "title", "Z")),
                     admin()))
             .errorCode());
     assertEquals(
@@ -330,12 +329,11 @@ class RoomsSurfaceTest {
 
   @Test
   void blankIdentityFieldsOnCreateAreEachRefused() {
-    var blankId = ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null, HANDLE), admin());
+    var blankId = ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null), admin());
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankId).errorCode());
 
-    var blankProject =
-        ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null, HANDLE), admin());
+    var blankProject = ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null), admin());
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankProject).errorCode());
   }
@@ -380,24 +378,27 @@ class RoomsSurfaceTest {
 
   @Test
   void aSpecsIdentityRoomAnswersOnTheRoomDoorEvenBeforeItsRowExists() {
-    specStore.create(
-        new SpecStore.SpecRow(
-            "legacy",
-            "acme",
-            "Legacy spec",
-            ai.singlr.sail.config.SpecStatus.DRAFT,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            "",
-            "",
-            HANDLE,
-            java.util.List.of(),
-            java.util.List.of()));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "legacy",
+                    "acme",
+                    "Legacy spec",
+                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    "",
+                    "",
+                    HANDLE,
+                    java.util.List.of(),
+                    java.util.List.of())));
 
     var posted =
         ops.postRoomMessage(
@@ -429,10 +430,9 @@ class RoomsSurfaceTest {
                     align(barrier);
                     ops.createGlobalSpec(
                         SpecCreateRequest.fromMap(
-                                Map.of(
-                                    "id", specId, "title", "Race", "project", "acme", "room_id",
-                                    roomId))
-                            .withCreatedBy(HANDLE),
+                            Map.of(
+                                "id", specId, "title", "Race", "project", "acme", "room_id",
+                                roomId)),
                         admin());
                   });
       deleter.join();

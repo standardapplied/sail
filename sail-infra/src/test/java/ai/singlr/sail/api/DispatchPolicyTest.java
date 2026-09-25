@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

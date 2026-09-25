@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -65,21 +66,24 @@ class WatcherRearmerTest {
   }
 
   private String session(String specId, String role, Integer watcherPid, boolean withUnit) {
-    var id = DateTimeUtils.newId().toString();
-    return sessionStore.create(
-        id,
-        "test-project",
-        specId,
-        "node-a",
-        "node-a",
-        role,
-        "claude-code",
-        "feat/test",
-        "task",
-        1,
-        watcherPid,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        withUnit ? "sail-agent-" + id : "");
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return sessionStore.create(
+              id,
+              "test-project",
+              specId,
+              "node-a",
+              "node-a",
+              role,
+              "claude-code",
+              "feat/test",
+              "task",
+              1,
+              watcherPid,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              withUnit ? "sail-agent-" + id : "");
+        });
   }
 
   private WatcherRearmer rearmer(
@@ -275,7 +279,7 @@ class WatcherRearmerTest {
   @Test
   void terminalSessionsAreIgnored() {
     var completed = runningSession("finished", 5678);
-    sessionStore.complete(completed, "stopped", 0);
+    Acting.system(() -> sessionStore.complete(completed, "stopped", 0));
 
     var rearmed =
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))

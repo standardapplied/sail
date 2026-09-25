@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs(value = Actor.Lane.CLI, handle = "uday")
 class SpecStoreTest {
 
   @TempDir Path tempDir;
@@ -160,7 +164,7 @@ class SpecStoreTest {
 
     assertEquals(40, spec.priority(), "priority survives the projection");
     assertEquals("uday", spec.createdBy());
-    assertEquals("mady", spec.updatedBy());
+    assertEquals("uday", spec.updatedBy(), "the row's own attribution is the acting FDE's");
     assertFalse(spec.createdAt().isBlank(), "the store's stamp rides through");
     assertFalse(spec.updatedAt().isBlank());
     assertEquals("lounge", spec.roomId(), "the room link is never dropped");
@@ -728,5 +732,64 @@ class SpecStoreTest {
         "auth",
         store.findById("auth").orElseThrow().roomIdOrIdentity(),
         "a pre-decouple snapshot falls back to the identity room");
+  }
+
+  @Test
+  void aCreateIsCreatedAndUpdatedByTheActorWhateverTheRowNames() {
+    store.create(spec("auth", "Auth", "pending"));
+
+    var row = store.findById("auth").orElseThrow();
+    assertEquals("uday", row.createdBy());
+    assertEquals("uday", row.updatedBy());
+    assertEquals("uday", new ChangeLog(db).head("spec", "auth").orElseThrow().actor());
+  }
+
+  @Test
+  void aStatusOnlyUpdateNamesItsOwnAuthorNotThePreviousEditor() {
+    store.create(spec("auth", "Auth", "pending"));
+
+    Actor.run(Actor.cliOperator("mady"), () -> store.updateStatus("auth", SpecStatus.IN_PROGRESS));
+    assertAuthoredBy("auth", "mady");
+
+    Actor.run(
+        Actor.system(),
+        () -> store.compareAndSetStatus("auth", SpecStatus.IN_PROGRESS, SpecStatus.REVIEW));
+    assertAuthoredBy("auth", "sail");
+
+    Actor.run(
+        Actor.cliOperator("raj"),
+        () -> store.updateReposAndStatus("auth", List.of("api"), SpecStatus.IN_PROGRESS, "b"));
+    assertAuthoredBy("auth", "raj");
+  }
+
+  @Test
+  void aContentOnlyUpdateNamesItsOwnAuthorNotThePreviousEditor() {
+    store.create(spec("auth", "Auth", "pending"));
+
+    Actor.run(Actor.cliOperator("mady"), () -> store.setContent("auth", "the body", ""));
+
+    assertAuthoredBy("auth", "mady");
+  }
+
+  @Test
+  void aReprojectRestoreAndDeleteEachNameTheirOwnAuthor() {
+    store.create(spec("auth", "Auth", "pending"));
+    var first = store.latestRev("auth");
+
+    Actor.run(Actor.cliOperator("mady"), () -> store.reproject("test-project", "renamed"));
+    assertAuthoredBy("auth", "mady");
+
+    Actor.run(Actor.cliOperator("raj"), () -> store.restore("auth", first));
+    assertAuthoredBy("auth", "raj");
+
+    Actor.run(Actor.cliOperator("ada"), () -> store.delete("auth"));
+    var tombstone = new ChangeLog(db).head("spec", "auth").orElseThrow();
+    assertEquals("ada", tombstone.actor());
+    assertEquals("ada", YamlUtil.parseMap(tombstone.snapshot()).get("updated_by"));
+  }
+
+  private void assertAuthoredBy(String id, String author) {
+    assertEquals(author, store.findById(id).orElseThrow().updatedBy());
+    assertEquals(author, new ChangeLog(db).head("spec", id).orElseThrow().actor());
   }
 }

@@ -16,6 +16,10 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -38,6 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
  * its snapshot payment succeeds, off the request thread), disengage clears it, and every transition
  * speaks on the bus so the room renders joins and leaves.
  */
+@ActingAs
 class EngagementLifecycleTest {
 
   private static final String HANDLE = "uday";
@@ -109,24 +114,27 @@ class EngagementLifecycleTest {
   }
 
   private void seedSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "OAuth flow",
-            SpecStatus.DRAFT,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of("app")));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "OAuth flow",
+                    SpecStatus.DRAFT,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of("app"))));
   }
 
   private Engagement stored(String specId) {
@@ -350,6 +358,55 @@ class EngagementLifecycleTest {
   }
 
   @Test
+  void anEngageContinuedOnTheLaunchExecutorRecordsTheRequester() throws Exception {
+    var shell = shell();
+    operations(shell);
+    seedSpec("auth");
+    var yaml = tempDir.resolve("sail-server.yaml");
+    Files.writeString(yaml, YAML);
+    var continued = new java.util.concurrent.CompletableFuture<Void>();
+    try (var bus = new EventBus()) {
+      var sailOps =
+          new SailOperations(
+                  shell,
+                  yaml.toString(),
+                  (command, logPath) -> 4242L,
+                  bus,
+                  null,
+                  specStore,
+                  new ReviewStore(db),
+                  runStore)
+              .useMessages(new MessageStore(db))
+              .useRooms(roomStore)
+              .useLaunchExecutor(
+                  task ->
+                      Thread.ofPlatform()
+                          .start(
+                              () -> {
+                                task.run();
+                                continued.complete(null);
+                              }));
+      var requester = Actor.cliOperator("mady");
+
+      var engaged =
+          Acting.by(
+              requester,
+              () ->
+                  sailOps.addRoomMember(
+                      "auth",
+                      new EngageRequest("claude-code", null, null, true),
+                      requester,
+                      HANDLE));
+      continued.get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+      assertTrue(engaged instanceof Result.Success<EngageResponse>);
+      assertNotNull(stored("auth"), "the snapshot's continuation seated the member");
+      assertEquals("mady", roomStore.findById("auth").orElseThrow().updatedBy());
+      assertEquals("mady", new ChangeLog(db).head("room", "auth").orElseThrow().actor());
+    }
+  }
+
+  @Test
   void theServerLaneDelegatesEngageAndDisengageThroughSailOperations() throws Exception {
     var shell = shell();
     operations(shell);
@@ -492,9 +549,12 @@ class EngagementLifecycleTest {
   @Test
   void aSpeclessRoomSeatsAndDismissesItsCollaborator() throws Exception {
     var ops = operations(shell());
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "chat-room", "acme", "Chat", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    Acting.as(
+        HANDLE,
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "chat-room", "acme", "Chat", HANDLE, null, null, HANDLE, null, null, HANDLE)));
 
     var launch =
         ops.engage(
@@ -520,9 +580,21 @@ class EngagementLifecycleTest {
   @Test
   void aSpeclessRoomRefusesBogusModesAndUnsandboxedReadOnlyAgents() throws Exception {
     var ops = operations(shell());
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "picky-room", "acme", "Picky", HANDLE, null, null, HANDLE, null, null, HANDLE));
+    Acting.as(
+        HANDLE,
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "picky-room",
+                    "acme",
+                    "Picky",
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE)));
 
     var badMode =
         assertThrows(
@@ -557,9 +629,12 @@ class EngagementLifecycleTest {
   @Test
   void aSpeclessRoomRefusesMembershipFromANonOwner() throws Exception {
     var ops = operations(shell());
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "ada-room", "acme", "Ada's", "ada", null, null, "ada", null, null, "ada"));
+    Acting.as(
+        "ada",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "ada-room", "acme", "Ada's", "ada", null, null, "ada", null, null, "ada")));
 
     var ex =
         assertThrows(
@@ -638,7 +713,7 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     var seeded = specStore.findById("auth").orElseThrow();
-    roomStore.ensureFor("auth", seeded.project(), seeded.title(), seeded.assignee(), null, HANDLE);
+    roomStore.ensureFor("auth", seeded.project(), seeded.title(), seeded.assignee(), null);
     assertTrue(ops.roomMembers("auth").isEmpty(), "a fresh room seats nobody");
 
     ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
@@ -696,7 +771,7 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
-    roomStore.updateRoster("auth", null, HANDLE);
+    roomStore.updateRoster("auth", null);
 
     assertNull(
         ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),

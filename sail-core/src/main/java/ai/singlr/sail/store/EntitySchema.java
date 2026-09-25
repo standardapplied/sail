@@ -12,8 +12,9 @@ import java.util.Map;
  * the sync <em>protocol</em> — rev minting, {@code base_rev}/tombstone bookkeeping, the
  * compare-and-set commit, and three-way conflict resolution — identically for every mutable synced
  * store; this strategy supplies the handful of things that genuinely differ: the entity's name, its
- * table (which must carry {@code id}, {@code rev}, and {@code base_rev} columns), how a row
- * projects to and from a snapshot, and who a local revision is attributed to.
+ * table (which must carry {@code id}, {@code rev}, and {@code base_rev} columns), and how a row
+ * projects to and from a snapshot. Who a revision is attributed to is the bound {@link
+ * ai.singlr.sail.identity.Actor}, never the row.
  *
  * <p>Implemented by the five mutable synced stores (specs, runs, reviews, projects, files).
  * Immutable or specially-authorized entities (e.g. messages) keep their own bespoke logic and do
@@ -32,13 +33,6 @@ public interface EntitySchema {
 
   /** The full current snapshot of {@code id} as a JSON-serializable map, or null if absent. */
   Map<String, Object> snapshotMap(String id);
-
-  /**
-   * The author a <em>local</em> revision of {@code id} is attributed to in the journal — the row's
-   * own last writer (e.g. a spec's {@code updated_by}, a run's node). Null when the entity carries
-   * no per-row author.
-   */
-  String author(String id);
 
   /**
    * Upserts {@code id} from an authoritative {@code snapshot}, injecting the surrogate key and

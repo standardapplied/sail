@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class RoomsBackfillMigrationTest {
 
   @TempDir Path tempDir;
@@ -95,7 +97,7 @@ class RoomsBackfillMigrationTest {
     assertEquals("full", seated.mode());
     assertEquals("t0", seated.engagedAt());
     assertEquals("2026-08-01T00:00:00Z", auth.createdAt());
-    assertEquals("uday", auth.updatedBy());
+    assertEquals("sail", auth.updatedBy(), "the backfill is this box's machinery");
     assertNull(rooms.findById("billing").orElseThrow().roster(), "no engagement, empty roster");
     assertNull(
         rooms.baseRevOf("auth"),

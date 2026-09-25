@@ -17,6 +17,8 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -186,24 +188,27 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
   }
 
   private static void seedSpec(SpecStore store, String id, List<String> repos) {
-    store.create(
-        new SpecStore.SpecRow(
-            id,
-            CONTAINER,
-            "Title " + id,
-            SpecStatus.PENDING,
-            HANDLE,
-            "codex",
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            null,
-            null,
-            HANDLE,
-            List.of(),
-            repos));
+    Acting.as(
+        HANDLE,
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    id,
+                    CONTAINER,
+                    "Title " + id,
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    "codex",
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    null,
+                    null,
+                    HANDLE,
+                    List.of(),
+                    repos)));
     store.setContent(id, "Do " + id, "");
   }
 

@@ -14,6 +14,9 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -40,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
  * surfaces as {@code COMMAND_FAILED}; and a room message rendered into the prompt is recorded on
  * the run's delivery ledger at launch.
  */
+@ActingAs
 class BuildDispatchCoverageTest {
 
   private static final String HANDLE = "me";
@@ -165,30 +169,36 @@ class BuildDispatchCoverageTest {
   }
 
   private Sqlite seedDb() {
-    var db = Sqlite.open(tempDir.resolve("sail.db"));
-    new SchemaManager(db).migrate();
-    var specStore = new SpecStore(db);
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
-    specStore.setContent("auth", "Do auth", "");
-    new FdeStore(db).add(HANDLE, null, null, "admin");
-    return db;
+    return Acting.system(
+        () -> {
+          var db = Sqlite.open(tempDir.resolve("sail.db"));
+          new SchemaManager(db).migrate();
+          var specStore = new SpecStore(db);
+          Acting.as(
+              "me",
+              () ->
+                  specStore.create(
+                      new SpecStore.SpecRow(
+                          "auth",
+                          "acme",
+                          "Add auth",
+                          SpecStatus.PENDING,
+                          HANDLE,
+                          null,
+                          null,
+                          null,
+                          null,
+                          0,
+                          "me",
+                          null,
+                          null,
+                          "me",
+                          List.of(),
+                          List.of())));
+          specStore.setContent("auth", "Do auth", "");
+          new FdeStore(db).add(HANDLE, null, null, "admin");
+          return db;
+        });
   }
 
   private DispatchOperations ops(RecordingShell shell, String yamlBody, Sqlite db)

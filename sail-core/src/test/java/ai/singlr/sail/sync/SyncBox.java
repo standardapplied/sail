@@ -7,6 +7,8 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -79,7 +81,7 @@ public final class SyncBox implements AutoCloseable {
   }
 
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
-  public SyncRpcServer server(SyncPrincipal as) {
+  public SyncRpcServer server(Actor as) {
     return SyncRpcServer.over(
         db, id, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR);
   }
@@ -92,8 +94,9 @@ public final class SyncBox implements AutoCloseable {
       Thread server)
       implements AutoCloseable {
 
+    /** One type's round as a node runs it: adopting what main decided, as {@code main}. */
     public SyncSession.TypeReport reconcile(String type, LocalReplica local) {
-      return session.reconcile(type, local);
+      return Actor.call(Actor.main(), () -> session.reconcile(type, local));
     }
 
     /** The {@code op} of every request this session has sent, in order. */
@@ -256,7 +259,7 @@ public final class SyncBox implements AutoCloseable {
         SyncRpcServer.over(
             main,
             "main",
-            new SyncPrincipal("node", true),
+            Actor.sync("node", Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR);

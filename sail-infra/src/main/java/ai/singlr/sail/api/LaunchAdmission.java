@@ -10,6 +10,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import java.util.List;
 

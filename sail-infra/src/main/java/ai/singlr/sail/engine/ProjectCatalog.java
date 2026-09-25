@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -54,12 +56,15 @@ public final class ProjectCatalog {
   }
 
   /**
-   * Returns true if the definition was recorded; false (with a printed hint) on best-effort miss.
+   * Records the definition as this box's operator ({@link CliOperator}). Returns true if the
+   * definition was recorded; false (with a printed hint) on best-effort miss.
    */
-  public static boolean record(String name, String definition, String actor) {
+  public static boolean record(String name, String definition) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert(name, definition, actor);
+      Actor.run(
+          CliOperator.of(NodeIdentity.config(), () -> new FdeStore(db)),
+          () -> new ProjectStore(db).upsert(name, definition));
       return true;
     } catch (Exception e) {
       System.err.println(

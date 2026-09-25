@@ -18,6 +18,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -102,24 +103,27 @@ class MissedStopReconcilerTest {
   }
 
   private void createInProgressSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "Test spec",
-            SpecStatus.IN_PROGRESS,
-            null,
-            "claude-code",
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "test-project",
+                    "Test spec",
+                    SpecStatus.IN_PROGRESS,
+                    null,
+                    "claude-code",
+                    null,
+                    null,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   private void createPendingSpec(String id) {
@@ -127,24 +131,27 @@ class MissedStopReconcilerTest {
   }
 
   private void createSpec(String id, SpecStatus status) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "Test spec",
-            status,
-            null,
-            "claude-code",
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "test-project",
+                    "Test spec",
+                    status,
+                    null,
+                    "claude-code",
+                    null,
+                    null,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   @Test
@@ -344,7 +351,7 @@ class MissedStopReconcilerTest {
     var runId = adhocSession(77);
     MissedStopReconciler.UnitProbe completingProbe =
         (project, id, unit) -> {
-          sessionStore.transition(runId, "running", "completed", 0);
+          Acting.system(() -> sessionStore.transition(runId, "running", "completed", 0));
           return false;
         };
 
@@ -359,7 +366,7 @@ class MissedStopReconcilerTest {
   @Test
   void anInterruptedAdhocStopIsFinalizedOnceItsUnitIsGone() throws Exception {
     var runId = adhocSession(77);
-    sessionStore.transition(runId, "running", "stopping");
+    Acting.system(() -> sessionStore.transition(runId, "running", "stopping"));
     var latch = new CountDownLatch(1);
     var cancels = captureCancels(latch);
 
@@ -376,20 +383,22 @@ class MissedStopReconcilerTest {
   @Test
   void aBlankUnitStoppingClaimStillProbesThroughItsPidFile() {
     var runId = DateTimeUtils.newId().toString();
-    sessionStore.reserveDispatch(
-        runId,
-        "test-project",
-        "",
-        "node-a",
-        "node-a",
-        "adhoc",
-        List.of(),
-        "claude-code",
-        null,
-        "task",
-        "/home/dev/.sail/runs/" + runId + "/agent.log",
-        "");
-    sessionStore.transition(runId, "running", "stopping");
+    Acting.system(
+        () ->
+            sessionStore.reserveDispatch(
+                runId,
+                "test-project",
+                "",
+                "node-a",
+                "node-a",
+                "adhoc",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                "/home/dev/.sail/runs/" + runId + "/agent.log",
+                ""));
+    Acting.system(() -> sessionStore.transition(runId, "running", "stopping"));
     var probe = new CountingProbe(false);
 
     var finalized = reconciler(probe, PAST_GRACE).sweep();
@@ -428,87 +437,112 @@ class MissedStopReconcilerTest {
   }
 
   private String finishedSession(String specId, String status, Integer exitCode) {
-    var id = runningSession(specId);
-    sessionStore.complete(id, status, exitCode);
-    return id;
+    return Acting.system(
+        () -> {
+          var id = runningSession(specId);
+          sessionStore.complete(id, status, exitCode);
+          return id;
+        });
   }
 
   private String adhocSession(Integer pid) {
-    var id = DateTimeUtils.newId().toString();
-    sessionStore.reserveDispatch(
-        id,
-        "test-project",
-        "",
-        "node-a",
-        "node-a",
-        "adhoc",
-        List.of(),
-        "claude-code",
-        null,
-        "task",
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
-    if (pid != null) {
-      sessionStore.updateProcess(id, pid, null, null);
-    }
-    return id;
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          sessionStore.reserveDispatch(
+              id,
+              "test-project",
+              "",
+              "node-a",
+              "node-a",
+              "adhoc",
+              List.of(),
+              "claude-code",
+              null,
+              "task",
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+          if (pid != null) {
+            sessionStore.updateProcess(id, pid, null, null);
+          }
+          return id;
+        });
   }
 
   private String runningSession(String specId) {
-    var id = DateTimeUtils.newId().toString();
-    return sessionStore.create(
-        id,
-        "test-project",
-        specId,
-        "node-a",
-        "node-a",
-        "build",
-        "claude-code",
-        "feat/test",
-        "task",
-        1,
-        null,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return sessionStore.create(
+              id,
+              "test-project",
+              specId,
+              "node-a",
+              "node-a",
+              "build",
+              "claude-code",
+              "feat/test",
+              "task",
+              1,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
   }
 
   private void adoptedForeignRunningSession(String specId, Instant startedAt) {
-    sessionStore.applyRevision(
-        DateTimeUtils.newId().toString(),
-        Map.of(
-            "project", "test-project",
-            "spec_id", specId,
-            "node", "node-b",
-            "role", "build",
-            "agent", "claude-code",
-            "status", "running",
-            "started_at", startedAt.toString()),
-        "1-foreign");
+    Acting.system(
+        () ->
+            sessionStore.applyRevision(
+                DateTimeUtils.newId().toString(),
+                Map.of(
+                    "project", "test-project",
+                    "spec_id", specId,
+                    "node", "node-b",
+                    "role", "build",
+                    "agent", "claude-code",
+                    "status", "running",
+                    "started_at", startedAt.toString()),
+                "1-foreign"));
   }
 
   private void recordEvent(String specId, String type, String timestamp) {
-    eventStore.insert(
-        new EventStore.EventRow(
-            0, timestamp, type, "test-project", specId, "claude-code", HostInfo.hostname(), "{}"));
+    Acting.system(
+        () ->
+            eventStore.insert(
+                new EventStore.EventRow(
+                    0,
+                    timestamp,
+                    type,
+                    "test-project",
+                    specId,
+                    "claude-code",
+                    HostInfo.hostname(),
+                    "{}")));
   }
 
   private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
-    eventStore.insert(
-        new EventStore.EventRow(
-            0,
-            timestamp,
-            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-            "test-project",
-            specId,
-            "claude-code",
-            HostInfo.hostname(),
-            YamlUtil.dumpJson(data)));
+    Acting.system(
+        () ->
+            eventStore.insert(
+                new EventStore.EventRow(
+                    0,
+                    timestamp,
+                    Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                    "test-project",
+                    specId,
+                    "claude-code",
+                    HostInfo.hostname(),
+                    YamlUtil.dumpJson(data))));
   }
 
   private String interruptedStopSession(String specId) {
-    var id = runningSession(specId);
-    sessionStore.transition(id, "running", "stopping");
-    return id;
+    return Acting.system(
+        () -> {
+          var id = runningSession(specId);
+          sessionStore.transition(id, "running", "stopping");
+          return id;
+        });
   }
 
   private ConcurrentLinkedQueue<Event> captureCancels(CountDownLatch latch) {
@@ -695,7 +729,7 @@ class MissedStopReconcilerTest {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
-    reviewStore.updateReviewStatus(erroredReview("auth"), "escalated");
+    Acting.system(() -> reviewStore.updateReviewStatus(erroredReview("auth"), "escalated"));
 
     assertEquals(
         0,
@@ -709,7 +743,8 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
     erroredReview("auth");
-    reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "running");
+    Acting.system(
+        () -> reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "running"));
 
     assertEquals(
         0,
@@ -718,9 +753,11 @@ class MissedStopReconcilerTest {
   }
 
   private String erroredReview(String specId) {
-    var reviewId = reviewStore.createReview(specId, 1);
-    reviewStore.failReviewWithError(
-        reviewId, "reviewer output unparseable: No JSON block found in agent output.");
+    var reviewId = Acting.system(() -> reviewStore.createReview(specId, 1));
+    Acting.system(
+        () ->
+            reviewStore.failReviewWithError(
+                reviewId, "reviewer output unparseable: No JSON block found in agent output."));
     return reviewId;
   }
 
@@ -758,34 +795,37 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         0,
-        rec.releaseStrandedReservations(Set.of("auth")),
+        Acting.system(() -> rec.releaseStrandedReservations(Set.of("auth"))),
         "a run whose stop was replayed earlier this sweep is not also released as a stranded"
             + " reservation, even once its spec has left in_progress");
     assertEquals(
         1,
-        rec.releaseStrandedReservations(Set.of()),
+        Acting.system(() -> rec.releaseStrandedReservations(Set.of())),
         "the same run IS released as stranded when nothing handled it this sweep");
   }
 
   private void createReviewSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "Test spec",
-            SpecStatus.REVIEW,
-            null,
-            "claude-code",
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "test-project",
+                    "Test spec",
+                    SpecStatus.REVIEW,
+                    null,
+                    "claude-code",
+                    null,
+                    null,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   @Test
@@ -1093,16 +1133,18 @@ class MissedStopReconcilerTest {
   void anUnreadableStopEventCountsAsCoveringSoTheSweepStaysConservative() {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
-    eventStore.insert(
-        new EventStore.EventRow(
-            0,
-            Instant.now().plusSeconds(1).toString(),
-            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-            "test-project",
-            "auth",
-            "claude-code",
-            HostInfo.hostname(),
-            "{\"source\": "));
+    Acting.system(
+        () ->
+            eventStore.insert(
+                new EventStore.EventRow(
+                    0,
+                    Instant.now().plusSeconds(1).toString(),
+                    Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                    "test-project",
+                    "auth",
+                    "claude-code",
+                    HostInfo.hostname(),
+                    "{\"source\": ")));
 
     var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
@@ -1330,20 +1372,23 @@ class MissedStopReconcilerTest {
   }
 
   private RunStore.Reservation.Reserved reservedAdhoc(String id) {
-    return (RunStore.Reservation.Reserved)
-        sessionStore.reserveDispatch(
-            id,
-            "test-project",
-            "",
-            "node-a",
-            "node-a",
-            "adhoc",
-            List.of(),
-            "claude-code",
-            null,
-            "task",
-            "/home/dev/.sail/runs/" + id + "/agent.log",
-            "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          return (RunStore.Reservation.Reserved)
+              sessionStore.reserveDispatch(
+                  id,
+                  "test-project",
+                  "",
+                  "node-a",
+                  "node-a",
+                  "adhoc",
+                  List.of(),
+                  "claude-code",
+                  null,
+                  "task",
+                  "/home/dev/.sail/runs/" + id + "/agent.log",
+                  "sail-agent-" + id);
+        });
   }
 
   @Test
@@ -1364,7 +1409,7 @@ class MissedStopReconcilerTest {
   void anInterruptedStopFinalizationRevokesTheRunCredential() {
     var id = DateTimeUtils.newId().toString();
     var reservation = reservedAdhoc(id);
-    sessionStore.transition(id, "running", "stopping");
+    Acting.system(() -> sessionStore.transition(id, "running", "stopping"));
 
     var finalized = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 

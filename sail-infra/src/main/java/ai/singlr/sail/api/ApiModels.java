@@ -15,6 +15,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Capability;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
@@ -619,7 +621,6 @@ record SpecCreateRequest(
     List<String> repos,
     String body,
     String plan,
-    String createdBy,
     String roomId) {
 
   @SuppressWarnings("unchecked")
@@ -639,32 +640,7 @@ record SpecCreateRequest(
         map.containsKey("repos") ? (List<String>) map.get("repos") : List.of(),
         (String) map.get("body"),
         (String) map.get("plan"),
-        null,
         (String) map.get("room_id"));
-  }
-
-  /**
-   * Returns a copy attributed to {@code actor}. {@code created_by} is set by the server from the
-   * authenticated principal, never from the request body, so a client cannot forge authorship.
-   */
-  SpecCreateRequest withCreatedBy(String actor) {
-    return new SpecCreateRequest(
-        id,
-        project,
-        title,
-        status,
-        assignee,
-        agent,
-        model,
-        reasoningEffort,
-        branch,
-        priority,
-        dependsOn,
-        repos,
-        body,
-        plan,
-        actor,
-        roomId);
   }
 }
 
@@ -681,7 +657,6 @@ record SpecUpdateRequest(
     List<String> dependsOn,
     List<String> repos,
     String wake,
-    String updatedBy,
     boolean force) {
 
   @SuppressWarnings("unchecked")
@@ -699,44 +674,13 @@ record SpecUpdateRequest(
         map.containsKey("depends_on") ? (List<String>) map.get("depends_on") : null,
         map.containsKey("repos") ? (List<String>) map.get("repos") : null,
         (String) map.get("wake"),
-        null,
         Boolean.TRUE.equals(map.get("force")));
-  }
-
-  /**
-   * Returns a copy attributed to {@code actor}. {@code updated_by} is set by the server from the
-   * authenticated principal, never from the request body.
-   */
-  SpecUpdateRequest withUpdatedBy(String actor) {
-    return new SpecUpdateRequest(
-        project,
-        title,
-        status,
-        assignee,
-        agent,
-        model,
-        reasoningEffort,
-        branch,
-        priority,
-        dependsOn,
-        repos,
-        wake,
-        actor,
-        force);
   }
 }
 
-record FollowupCreateRequest(String id, String createdBy) {
+record FollowupCreateRequest(String id) {
   static FollowupCreateRequest fromMap(Map<String, Object> map) {
-    return new FollowupCreateRequest((String) map.get("id"), null);
-  }
-
-  /**
-   * Returns a copy attributed to {@code actor}. {@code created_by} is set by the server from the
-   * authenticated principal, never from the request body, so a client cannot forge authorship.
-   */
-  FollowupCreateRequest withCreatedBy(String actor) {
-    return new FollowupCreateRequest(id, actor);
+    return new FollowupCreateRequest((String) map.get("id"));
   }
 }
 
@@ -800,18 +744,13 @@ record DisengageResponse(String agent) implements Mappable {
   }
 }
 
-record RoomCreateRequest(String id, String project, String title, String wake, String createdBy) {
+record RoomCreateRequest(String id, String project, String title, String wake) {
   static RoomCreateRequest fromMap(Map<String, Object> map) {
     return new RoomCreateRequest(
         (String) map.get("id"),
         (String) map.get("project"),
         (String) map.get("title"),
-        (String) map.get("wake"),
-        null);
-  }
-
-  RoomCreateRequest withCreatedBy(String actor) {
-    return new RoomCreateRequest(id, project, title, wake, actor);
+        (String) map.get("wake"));
   }
 }
 

@@ -750,7 +750,7 @@ public final class ProjectApplyCommand implements Runnable {
     Files.createDirectories(projectDir);
     var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     syncProjectBundle(sailYamlPath, canonicalYaml);
-    ProjectCatalog.record(name, Files.readString(canonicalYaml), null);
+    ProjectCatalog.record(name, Files.readString(canonicalYaml));
   }
 
   static void syncProjectBundle(Path sourceSailYamlPath, Path canonicalYamlPath) throws Exception {

@@ -9,10 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class PeriodicPassTest {
@@ -76,5 +78,14 @@ class PeriodicPassTest {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  @Test
+  void aPassRunsAsThisBoxsMachinery() {
+    var actor = new AtomicReference<Actor>();
+    try (var pass = new PeriodicPass("test", () -> actor.set(Actor.current()))) {
+      assertTrue(pass.runIfIdle());
+    }
+    assertEquals(Actor.system(), actor.get());
   }
 }

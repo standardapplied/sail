@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 
 /**
  * Resource-scoped authorization for the review aggregate: approving a review and dismissing a

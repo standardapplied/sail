@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -329,7 +330,12 @@ public final class SyncScheduler implements AutoCloseable {
   private void runRound() {
     Exception failure = null;
     try {
-      reconcile.run();
+      Actor.call(
+          Actor.system(),
+          () -> {
+            reconcile.run();
+            return null;
+          });
       failures = 0;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class ProjectRenamerTest {
 
   private static final String RUNNING = "[{\"name\": \"old\", \"status\": \"Running\"}]";
@@ -41,7 +43,7 @@ class ProjectRenamerTest {
   void setUp() throws Exception {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
-    new ProjectStore(db).upsert("old", DEFINITION, "uday");
+    new ProjectStore(db).upsert("old", DEFINITION);
     new SpecStore(db).create(spec("s1", "old"));
     ai.singlr.sail.store.ContentFixtures.put(new FileStore(db), "old", "start-dev.sh", "echo hi");
     projectsDir = tempDir.resolve("projects");
@@ -204,7 +206,7 @@ class ProjectRenamerTest {
 
   @Test
   void rejectsATargetNameAlreadyInTheCatalog() throws Exception {
-    new ProjectStore(db).upsert("taken", "name: taken\n", "uday");
+    new ProjectStore(db).upsert("taken", "name: taken\n");
 
     assertThrows(IllegalStateException.class, () -> renamer(runningShell()).rename("old", "taken"));
   }

@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -344,17 +345,19 @@ class SyncCommandTest {
       var specs = new SpecStore(db);
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");
-      messages.append("auth", "uday", "posted before the round", null);
+      Acting.system(() -> messages.append("auth", "uday", "posted before the round", null));
       var known = messages.syncEntityIds();
       var pulledId = DateTimeUtils.newId().toString();
-      messages.applyRevision(
-          pulledId,
-          Map.of(
-              "spec_id", "auth",
-              "author", "raj",
-              "body", "hello from main",
-              "created_at", DateTimeUtils.now().toString()),
-          "r1");
+      Acting.system(
+          () ->
+              messages.applyRevision(
+                  pulledId,
+                  Map.of(
+                      "spec_id", "auth",
+                      "author", "raj",
+                      "body", "hello from main",
+                      "created_at", DateTimeUtils.now().toString()),
+                  "r1"));
 
       var events = SyncCommand.pulledMessageEvents(messages, specs, known, "devbox");
 
@@ -383,37 +386,42 @@ class SyncCommandTest {
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");
       var orphanId = DateTimeUtils.newId().toString();
-      messages.applyRevision(
-          orphanId,
-          Map.of(
-              "spec_id", "ghost",
-              "author", "raj",
-              "body", "orphaned on main",
-              "created_at", DateTimeUtils.now().toString()),
-          "r1");
+      Acting.system(
+          () ->
+              messages.applyRevision(
+                  orphanId,
+                  Map.of(
+                      "spec_id", "ghost",
+                      "author", "raj",
+                      "body", "orphaned on main",
+                      "created_at", DateTimeUtils.now().toString()),
+                  "r1"));
 
       assertTrue(SyncCommand.pulledMessageEvents(messages, specs, Set.of(), "devbox").isEmpty());
     }
   }
 
   private static void seedSpec(SpecStore specs, String id) {
-    specs.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "OAuth flow",
-            SpecStatus.DONE,
-            "uday",
-            null,
-            null,
-            null,
-            null,
-            0,
-            "uday",
-            "",
-            "",
-            null,
-            List.of(),
-            List.of("app")));
+    Acting.as(
+        "uday",
+        () ->
+            specs.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "OAuth flow",
+                    SpecStatus.DONE,
+                    "uday",
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "uday",
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of("app"))));
   }
 }

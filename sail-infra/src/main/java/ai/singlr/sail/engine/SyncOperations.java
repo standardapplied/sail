@@ -13,13 +13,13 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -112,7 +112,7 @@ public final class SyncOperations {
     if (target.target() == null) {
       return new SyncReport(SyncEngine.Report.NONE, target.message());
     }
-    var round = SyncPeer.withChecked("main", () -> reconcileSession(target.target(), config));
+    var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
     return new SyncReport(round.report(), null, round.types());
   }
 

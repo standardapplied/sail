@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -115,7 +116,7 @@ final class GlobalSpecOperations {
           "spec project is required.",
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
-    var assignee = Strings.isBlank(request.assignee()) ? request.createdBy() : request.assignee();
+    var assignee = Strings.isBlank(request.assignee()) ? actor.handle() : request.assignee();
     var row =
         new SpecStore.SpecRow(
             request.id(),
@@ -128,14 +129,14 @@ final class GlobalSpecOperations {
             validReasoning(request.reasoningEffort()),
             request.branch(),
             request.priority(),
-            request.createdBy(),
+            null,
             "",
             "",
-            request.createdBy(),
+            null,
             request.dependsOn(),
             request.repos());
     var created = specStore.atomically(() -> birth(row, request, actor));
-    publishBoardUpdated(created.project(), created.id(), principal(request.createdBy()));
+    publishBoardUpdated(created.project(), created.id(), principal(actor.handle()));
     return new GlobalSpecCreatedResponse(viewOf(created));
   }
 
@@ -247,7 +248,7 @@ final class GlobalSpecOperations {
             existing.createdBy(),
             existing.createdAt(),
             existing.updatedAt(),
-            request.updatedBy(),
+            null,
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
@@ -262,13 +263,9 @@ final class GlobalSpecOperations {
     var result = specStore.findById(specId).orElseThrow();
     if (result.status() != existing.status()) {
       publishStatusChanged(
-          result.project(),
-          specId,
-          existing.status(),
-          result.status(),
-          principal(request.updatedBy()));
+          result.project(), specId, existing.status(), result.status(), principal(actor.handle()));
     } else {
-      publishBoardUpdated(result.project(), specId, principal(request.updatedBy()));
+      publishBoardUpdated(result.project(), specId, principal(actor.handle()));
     }
     return new GlobalSpecUpdatedResponse(viewOf(result));
   }
@@ -326,15 +323,9 @@ final class GlobalSpecOperations {
     var wake = validWake(request.wake());
     var roomId = updated.roomIdOrIdentity();
     var room =
-        store.ensureFor(
-            roomId,
-            updated.project(),
-            updated.title(),
-            updated.assignee(),
-            null,
-            request.updatedBy());
+        store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
     if (!Objects.equals(room.wake(), wake)) {
-      store.updateWake(roomId, wake, request.updatedBy());
+      store.updateWake(roomId, wake);
     }
   }
 

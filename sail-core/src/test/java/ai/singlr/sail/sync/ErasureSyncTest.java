@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -44,9 +48,10 @@ import org.junit.jupiter.api.io.TempDir;
  * ordinary pages, the node's own prune is asked of main, and neither a cut round nor a stale push
  * can bring an erased entity back.
  */
+@ActingAs
 class ErasureSyncTest {
 
-  private static final SyncPrincipal NODE = new SyncPrincipal("node", true);
+  private static final Actor NODE = Actor.sync("node", Role.MEMBER);
 
   @TempDir Path dir;
   private SyncBox main;
@@ -186,7 +191,7 @@ class ErasureSyncTest {
   @Test
   void aProjectANodeAsksMainToPruneLeavesNothingOfItInAnyTypeAfterOneRound() throws IOException {
     seedArchivedSpec(main, "old", "node");
-    var admin = new SyncPrincipal("node", true, true);
+    var admin = Actor.sync("node", Role.ADMIN);
     round(admin);
     new EraseRequests(node.db).request(Erasure.PROJECT, "proj", "node");
 
@@ -276,7 +281,7 @@ class ErasureSyncTest {
     seedArchivedSpec(main, "mine", "node");
     round(NODE);
     new EraseRequests(node.db).request(Erasure.SPEC, "mine", "node");
-    var viewer = new SyncPrincipal("node", false);
+    var viewer = Actor.sync("node", Role.VIEWER);
 
     try (var link = SyncBox.connect(main.server(viewer), node)) {
       var refused =
@@ -296,7 +301,7 @@ class ErasureSyncTest {
   @Test
   void anAdminNodeMayPruneASpecItDoesNotOwn() throws IOException {
     seedArchivedSpec(main, "theirs", "uday");
-    var admin = new SyncPrincipal("node", true, true);
+    var admin = Actor.sync("node", Role.ADMIN);
     round(admin);
     new EraseRequests(node.db).request(Erasure.SPEC, "theirs", "node");
 
@@ -380,7 +385,7 @@ class ErasureSyncTest {
       assertTrue(refused.getMessage().contains("main holds no spec 'lobby'"), refused.getMessage());
     }
     new EraseRequests(node.db).request(Erasure.SPEC, "lobby", "node");
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true, true)), node)) {
+    try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.ADMIN)), node)) {
       var refused =
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
@@ -424,7 +429,6 @@ class ErasureSyncTest {
             List.of(
                 new Erasure.Target(Erasure.MESSAGE, parent.id()),
                 new Erasure.Target(Erasure.MESSAGE, reply.id())),
-            "sail",
             "retention");
 
     var reports = round(NODE);
@@ -478,7 +482,7 @@ class ErasureSyncTest {
     assertEquals(0, count(node.db, "SELECT count(*) FROM change_log WHERE entity_id = ?", late));
   }
 
-  private List<SyncSession.TypeReport> round(SyncPrincipal as) throws IOException {
+  private List<SyncSession.TypeReport> round(Actor as) throws IOException {
     var reports = new ArrayList<SyncSession.TypeReport>();
     var replicas = replicas();
     try (var link = SyncBox.connect(main.server(as), node)) {
@@ -561,8 +565,10 @@ class ErasureSyncTest {
 
   private static Erasure.Result prune(SyncBox box, String id, String actor) {
     var erasure = new Erasure(box.db);
-    return erasure.erase(
-        erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))), actor, "local");
+    return Acting.as(
+        actor,
+        () ->
+            erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))), "local"));
   }
 
   private static void assertNothingOf(Sqlite db, List<Erasure.Target> erased) {

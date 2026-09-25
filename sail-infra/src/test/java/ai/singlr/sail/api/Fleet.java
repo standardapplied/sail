@@ -21,6 +21,8 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
@@ -150,8 +152,12 @@ public final class Fleet implements AutoCloseable {
   }
 
   public void scenario(String specId, String assignee, Box... nodes) throws Exception {
-    main.projects.upsert(PROJECT, PROJECT_YAML, main.handle);
-    main.specs.create(spec(specId, assignee));
+    Acting.as(
+        main.handle,
+        () -> {
+          main.projects.upsert(PROJECT, PROJECT_YAML);
+          main.specs.create(spec(specId, assignee));
+        });
     syncAll(nodes);
   }
 
@@ -345,11 +351,11 @@ public final class Fleet implements AutoCloseable {
     }
 
     public void createProject(String name) {
-      projects.upsert(name, "name: " + name + "\n", handle);
+      Acting.as(handle, () -> projects.upsert(name, "name: " + name + "\n"));
     }
 
     public void renameProject(String oldName, String newName) {
-      projects.rename(oldName, newName, "name: " + newName + "\n");
+      Acting.as(handle, () -> projects.rename(oldName, newName, "name: " + newName + "\n"));
     }
 
     public boolean hasProject(String name) {
@@ -358,11 +364,14 @@ public final class Fleet implements AutoCloseable {
 
     public DispatchOperations.Dispatched dispatch(String specId) {
       var outcome =
-          dispatcher.dispatch(
-              PROJECT,
-              new DispatchOperations.Request(specId, "background", false, null, false),
-              Actor.cliOperator(handle),
-              handle);
+          Acting.as(
+              handle,
+              () ->
+                  dispatcher.dispatch(
+                      PROJECT,
+                      new DispatchOperations.Request(specId, "background", false, null, false),
+                      Actor.cliOperator(handle),
+                      handle));
       return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     }
 
@@ -376,12 +385,18 @@ public final class Fleet implements AutoCloseable {
     }
 
     public void updateStatus(String specId, SpecStatus status) {
-      specs.updateStatus(specId, status);
+      Acting.as(handle, () -> specs.updateStatus(specId, status));
     }
 
     public StopOperations.Outcome stop() {
-      return stopper.stop(
-          new StopOperations.ProjectTarget(PROJECT), Actor.cliOperator(handle), handle, false);
+      return Acting.as(
+          handle,
+          () ->
+              stopper.stop(
+                  new StopOperations.ProjectTarget(PROJECT),
+                  Actor.cliOperator(handle),
+                  handle,
+                  false));
     }
 
     /**
@@ -405,7 +420,7 @@ public final class Fleet implements AutoCloseable {
 
     public void authoritativeStop(String specId) {
       var run = runs.listForSpec(specId).stream().filter(r -> handle.equals(r.node())).findFirst();
-      run.ifPresent(row -> runs.complete(row.id(), "completed", 0));
+      run.ifPresent(row -> Acting.system(() -> runs.complete(row.id(), "completed", 0)));
       var event =
           Event.of(
               PROJECT,
@@ -423,9 +438,14 @@ public final class Fleet implements AutoCloseable {
     }
 
     public SpecMessageView postMessage(String specId, String body) {
-      return operations
-          .postRoomMessage(
-              specId, new SpecMessageRequest(body, null, false), Actor.cliOperator(handle), handle)
+      return Acting.as(
+              handle,
+              () ->
+                  operations.postRoomMessage(
+                      specId,
+                      new SpecMessageRequest(body, null, false),
+                      Actor.cliOperator(handle),
+                      handle))
           .orThrow()
           .message();
     }

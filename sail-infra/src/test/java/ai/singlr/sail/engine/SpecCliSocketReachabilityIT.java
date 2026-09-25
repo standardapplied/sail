@@ -12,6 +12,7 @@ import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -50,27 +51,29 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       var specStore = new SpecStore(db);
-      specStore.create(seededSpec());
+      Acting.system(() -> specStore.create(seededSpec()));
       var runStore = new RunStore(db);
       var reservation =
           (RunStore.Reservation.Reserved)
-              runStore.reserveDispatch(
-                  "01890000-0000-7000-8000-000000000001",
-                  CONTAINER,
-                  SPEC_ID,
-                  "it",
-                  "it",
-                  "build",
-                  List.of(),
-                  "claude-code",
-                  null,
-                  "probe",
-                  null,
-                  "");
+              Acting.system(
+                  () ->
+                      runStore.reserveDispatch(
+                          "01890000-0000-7000-8000-000000000001",
+                          CONTAINER,
+                          SPEC_ID,
+                          "it",
+                          "it",
+                          "build",
+                          List.of(),
+                          "claude-code",
+                          null,
+                          "probe",
+                          null,
+                          ""));
       var credential = reservation.credential();
 
       var fdeStore = new FdeStore(db);
-      fdeStore.add("it", "IT", "it@example.dev", "admin");
+      Acting.system(() -> fdeStore.add("it", "IT", "it@example.dev", "admin"));
       var boxStore = new BoxCredentialStore(db);
       BoxCredentialFile.ensure(boxStore, "it", socketDir);
       var bus = new EventBus();

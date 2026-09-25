@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -63,8 +64,15 @@ public final class StuckSpecReconciler implements AutoCloseable {
         this::sweep, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
   }
 
-  /** Runs one reconciliation pass; surfaces any stranded specs via {@code onStranded}. */
+  /**
+   * Runs one reconciliation pass as this box's machinery; surfaces any stranded specs via {@code
+   * onStranded}.
+   */
   void sweep() {
+    Actor.run(Actor.system(), this::reconcile);
+  }
+
+  private void reconcile() {
     try (var db = Sqlite.open(dbPath)) {
       var active = new SpecStore(db).list(ACTIVE_FILTER);
       var stranded = StrandedSpecs.find(active, DateTimeUtils.now(), threshold);

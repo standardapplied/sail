@@ -18,7 +18,8 @@ import java.util.List;
  * <p>Policy: migrations are append-only within a major version, and baselining like this happens
  * only at a major version with a published floor. The floor must be a version a released binary can
  * actually reach — a floor no release can produce strands the fleet behind an impossible remedy.
- * See ARCHITECTURE.md.
+ * See ARCHITECTURE.md. Its rewrites change the shape of rows, never what they say, so they journal
+ * nothing and name no actor.
  */
 public final class SchemaManager {
 

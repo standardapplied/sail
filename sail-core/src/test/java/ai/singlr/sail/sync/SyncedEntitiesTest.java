@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+@ActingAs
 class SyncedEntitiesTest {
   @TempDir Path tempDir;
 

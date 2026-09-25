@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -41,14 +42,14 @@ public final class DemoSeeder {
    * true when it inserted it. The check is the change-log history, not just the live row, so a demo
    * that was purged ({@code project destroy demo --purge} leaves a deletion tombstone) is not
    * resurrected on the next daemon start — which would otherwise undo the team-wide purge on the
-   * next sync.
+   * next sync. Seeded by this box's machinery.
    */
   public static boolean seedIfAbsent(Sqlite db) {
     var store = new ProjectStore(db);
     if (store.latestRev(DemoProject.NAME) != null) {
       return false;
     }
-    store.upsert(DemoProject.NAME, DemoProject.DEFINITION, "sail");
+    Actor.run(Actor.system(), () -> store.upsert(DemoProject.NAME, DemoProject.DEFINITION));
     return true;
   }
 }

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.RetentionConfig;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import java.time.Duration;
 import java.util.Objects;
@@ -107,10 +108,13 @@ public final class RetentionSweeper implements AutoCloseable {
     }
   }
 
-  /** What the {@code retention} block erases now; null when there is no block. */
+  /**
+   * What the {@code retention} block erases now, as this box's machinery; null when there is no
+   * block.
+   */
   PruneReport retain() {
     var policy = retention.get();
-    return policy.isEmpty() ? null : pruner.retain(policy);
+    return policy.isEmpty() ? null : Actor.call(Actor.system(), () -> pruner.retain(policy));
   }
 
   /** Compacts every entity's history and frees the content nothing references. */

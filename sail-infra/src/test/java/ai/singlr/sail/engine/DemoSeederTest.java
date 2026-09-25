@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -48,7 +49,7 @@ class DemoSeederTest {
 
   @Test
   void isIdempotentAndNeverClobbersAnExistingDemo() {
-    store.upsert(DemoProject.NAME, "name: demo\ndescription: mine\n", "me");
+    Acting.system(() -> store.upsert(DemoProject.NAME, "name: demo\ndescription: mine\n"));
 
     assertFalse(DemoSeeder.seedIfAbsent(db), "must not re-seed when a demo already exists");
     assertEquals(
@@ -60,7 +61,7 @@ class DemoSeederTest {
   @Test
   void doesNotResurrectAPurgedDemo() {
     DemoSeeder.seedIfAbsent(db);
-    assertTrue(store.delete(DemoProject.NAME), "purge tombstones the demo");
+    assertTrue(Acting.system(() -> store.delete(DemoProject.NAME)), "purge tombstones the demo");
     assertTrue(store.findByName(DemoProject.NAME).isEmpty());
 
     assertFalse(

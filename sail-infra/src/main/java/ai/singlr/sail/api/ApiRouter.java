@@ -10,6 +10,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Capability;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -173,7 +176,12 @@ public final class ApiRouter implements HttpHandler {
     auth.require(exchange);
     rateLimits.require(exchange);
     Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
+    return Actor.call(actorOf(exchange), () -> routeAuthenticated(exchange, request));
+  }
 
+  /** Routes an authenticated request, acting as its caller. */
+  private ApiResponse routeAuthenticated(HttpExchange exchange, RouteRequest request)
+      throws Exception {
     if (request.matches(GET, V1, WHOAMI)) {
       return whoami(exchange);
     }
@@ -470,9 +478,7 @@ public final class ApiRouter implements HttpHandler {
         case POST ->
             ApiResponse.fromCreated(
                 operations.createRoom(
-                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange))
-                        .withCreatedBy(actor(exchange)),
-                    actorOf(exchange)));
+                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
         default -> throw methodNotAllowed();
       };
     }
@@ -557,16 +563,14 @@ public final class ApiRouter implements HttpHandler {
                   new SpecStore.SpecFilter(
                       params.values().get("project"),
                       params.values().get("status"),
-                      resolveAssignee(params.values().get("assignee"), actor(exchange)),
+                      resolveAssignee(params.values().get("assignee"), caller(exchange)),
                       params.values().get("repo"),
                       params.values().get("q"))));
         }
         case POST ->
             ApiResponse.fromCreated(
                 operations.createGlobalSpec(
-                    SpecCreateRequest.fromMap(JsonBody.readMap(exchange))
-                        .withCreatedBy(actor(exchange)),
-                    actorOf(exchange)));
+                    SpecCreateRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
         default -> throw methodNotAllowed();
       };
     }
@@ -586,8 +590,7 @@ public final class ApiRouter implements HttpHandler {
           yield ApiResponse.from(
               operations.updateGlobalSpec(
                   specId,
-                  SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))
-                      .withUpdatedBy(actor(exchange)),
+                  SpecUpdateRequest.fromMap(JsonBody.readMap(exchange)),
                   actorOf(exchange)));
         }
         case DELETE -> {
@@ -633,9 +636,7 @@ public final class ApiRouter implements HttpHandler {
         requireMethod(request, POST);
         return ApiResponse.fromCreated(
             operations.createFollowupSpec(
-                specId,
-                FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))
-                    .withCreatedBy(actor(exchange))));
+                specId, FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))));
       }
     }
     throw notFound();
@@ -808,7 +809,7 @@ public final class ApiRouter implements HttpHandler {
 
   /**
    * Reflects the authenticated caller's identity back from the exchange attributes stamped by
-   * {@link ApiAuth} — no store access. Mirrors {@link #actor}: {@code fde} is present only for
+   * {@link ApiAuth} — no store access. Mirrors {@link #caller}: {@code fde} is present only for
    * FDE-owned credentials, {@code name} is the credential name. {@code display_name} and {@code
    * email} are present only on passkey/session logins (the {@link SessionAwareAuth} path resolves
    * the FDE record); they are omitted for machine/CI tokens, which carry no personal identity.
@@ -831,10 +832,10 @@ public final class ApiRouter implements HttpHandler {
   }
 
   /**
-   * Resolves the acting principal for attribution: the authenticated FDE handle when the token has
-   * an owner, otherwise the token name (machine/CI credential). Null only when unauthenticated.
+   * Who {@code me} names in a list filter: the authenticated FDE handle when the token has an
+   * owner, otherwise the token name (machine/CI credential). Null only when unauthenticated.
    */
-  private static String actor(HttpExchange exchange) {
+  private static String caller(HttpExchange exchange) {
     var fde = exchange.getAttribute("token.fde");
     if (fde != null) {
       return fde.toString();

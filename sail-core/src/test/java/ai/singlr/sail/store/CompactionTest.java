@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
  * an entity, its synced base, and every tombstone and erasure, compacted only outside a transaction
  * under the exclusive retention lease.
  */
+@ActingAs
 class CompactionTest {
 
   private Sqlite db;
@@ -74,7 +76,7 @@ class CompactionTest {
     edits("gone", 25);
     var erasure = new Erasure(db);
     edits("erased", 3);
-    erasure.erase(List.of(new Erasure.Target("spec", "erased")), "uday", "local");
+    erasure.erase(List.of(new Erasure.Target("spec", "erased")), "local");
 
     new BlobStore(db).gc(BlobStore.Compaction.ALL, false);
 

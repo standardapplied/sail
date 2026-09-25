@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class FileStoreTest {
 
   @TempDir Path tempDir;
@@ -368,14 +371,16 @@ class FileStoreTest {
       ConcurrentLinkedQueue<PushOutcome> outcomes,
       ConcurrentLinkedQueue<Throwable> errors) {
     return new Thread(
-        () -> {
-          try {
-            gate.await();
-            outcomes.add(store.commitRevision(fid, ContentFixtures.snapshot(store, content), base));
-          } catch (Throwable t) {
-            errors.add(t);
-          }
-        });
+        Actor.carrying(
+            () -> {
+              try {
+                gate.await();
+                outcomes.add(
+                    store.commitRevision(fid, ContentFixtures.snapshot(store, content), base));
+              } catch (Throwable t) {
+                errors.add(t);
+              }
+            }));
   }
 
   @Test

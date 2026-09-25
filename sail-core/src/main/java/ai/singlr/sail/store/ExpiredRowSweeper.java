@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.Executors;
@@ -54,7 +55,7 @@ public final class ExpiredRowSweeper implements AutoCloseable {
    */
   void sweepQuietly() {
     try (var db = Sqlite.open(dbPath)) {
-      sweep(db);
+      Actor.run(Actor.system(), () -> sweep(db));
     } catch (Exception e) {
       System.err.println("sail sweep: could not prune expired rows (" + e.getMessage() + ").");
     }

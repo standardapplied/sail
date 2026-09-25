@@ -133,13 +133,12 @@ public final class ProjectDefinitions {
    * project edit} saves — so the change survives the next sync and re-materialize instead of being
    * silently overwritten.
    */
-  public static void persist(String name, Path explicitFile, String definition, String actor)
-      throws IOException {
+  public static void persist(String name, Path explicitFile, String definition) throws IOException {
     if (explicitFile != null) {
       Files.writeString(explicitFile, definition);
       return;
     }
-    ProjectCatalog.record(name, definition, actor);
+    ProjectCatalog.record(name, definition);
     materialize(name, definition);
   }
 
