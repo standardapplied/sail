@@ -51,7 +51,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       var specStore = new SpecStore(db);
-      Acting.system(() -> specStore.create(seededSpec()));
+      Acting.as("it", () -> specStore.create(seededSpec()));
       var runStore = new RunStore(db);
       var reservation =
           (RunStore.Reservation.Reserved)
@@ -73,7 +73,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       var credential = reservation.credential();
 
       var fdeStore = new FdeStore(db);
-      Acting.system(() -> fdeStore.add("it", "IT", "it@example.dev", "admin"));
+      fdeStore.add("it", "IT", "it@example.dev", "admin");
       var boxStore = new BoxCredentialStore(db);
       BoxCredentialFile.ensure(boxStore, "it", socketDir);
       var bus = new EventBus();

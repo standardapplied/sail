@@ -190,26 +190,27 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
   private static void seedSpec(SpecStore store, String id, List<String> repos) {
     Acting.as(
         HANDLE,
-        () ->
-            store.create(
-                new SpecStore.SpecRow(
-                    id,
-                    CONTAINER,
-                    "Title " + id,
-                    SpecStatus.PENDING,
-                    HANDLE,
-                    "codex",
-                    null,
-                    null,
-                    null,
-                    0,
-                    HANDLE,
-                    null,
-                    null,
-                    HANDLE,
-                    List.of(),
-                    repos)));
-    store.setContent(id, "Do " + id, "");
+        () -> {
+          store.create(
+              new SpecStore.SpecRow(
+                  id,
+                  CONTAINER,
+                  "Title " + id,
+                  SpecStatus.PENDING,
+                  HANDLE,
+                  "codex",
+                  null,
+                  null,
+                  null,
+                  0,
+                  HANDLE,
+                  null,
+                  null,
+                  HANDLE,
+                  List.of(),
+                  repos));
+          store.setContent(id, "Do " + id, "");
+        });
   }
 
   private static ai.singlr.sail.engine.ShellExec refusingShell() {

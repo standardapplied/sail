@@ -180,19 +180,22 @@ class AgentResumeSessionIT extends AbstractIncusIT {
   /** Reserves a whole-container build and completes it at once, so the next claim is free. */
   private static String reserve(RunReservation reservation, RunStore runStore) {
     var id = DateTimeUtils.newId().toString();
-    reservation.reserve(
-        id,
-        CONTAINER,
-        ROOM,
+    Acting.as(
         "it",
-        "it",
-        "build",
-        List.of(),
-        "claude-code",
-        null,
-        "task",
-        AgentUnit.forRun(id),
-        CONFIG);
+        () ->
+            reservation.reserve(
+                id,
+                CONTAINER,
+                ROOM,
+                "it",
+                "it",
+                "build",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                AgentUnit.forRun(id),
+                CONFIG));
     Acting.system(() -> runStore.transition(id, "running", "completed", 0));
     return id;
   }

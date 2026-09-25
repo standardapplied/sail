@@ -78,8 +78,8 @@ class PtyRoomSessionIT extends AbstractIncusIT {
       Acting.system(() -> rooms.create(room("design-talk", "Design talk")));
       Acting.system(() -> rooms.create(room("other-talk", "Other talk")));
       var fdeStore = new FdeStore(db);
-      Acting.system(() -> fdeStore.add("it", "IT", "it@example.dev", "admin"));
-      Acting.system(() -> fdeStore.add("mady", "Mady", "mady@example.dev", "admin"));
+      fdeStore.add("it", "IT", "it@example.dev", "admin");
+      fdeStore.add("mady", "Mady", "mady@example.dev", "admin");
       var boxStore = new BoxCredentialStore(db);
       BoxCredentialFile.ensure(boxStore, "it", socketDir);
       var bus = new EventBus();
