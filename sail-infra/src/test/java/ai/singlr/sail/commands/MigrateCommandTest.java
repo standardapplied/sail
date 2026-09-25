@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
@@ -200,6 +201,21 @@ class MigrateCommandTest {
         tempDir.resolve("box/sail.db"), true, true, new MigrateCommand.Scope.Box(), record(steps));
 
     assertEquals(List.of("imports", "host"), steps);
+  }
+
+  @Test
+  void theImportsWriteAsThisBoxsMachinery() {
+    var importedAs = new ArrayList<Actor>();
+
+    MigrateCommand.runMigrations(
+        tempDir.resolve("box/sail.db"),
+        true,
+        true,
+        new MigrateCommand.Scope.DatabaseOnly("only the copy"),
+        new MigrateCommand.Convergence(
+            (db, json) -> importedAs.add(Actor.current()), (db, json) -> {}));
+
+    assertEquals(List.of(Actor.system()), importedAs);
   }
 
   private static MigrateCommand.Convergence record(List<String> steps) {

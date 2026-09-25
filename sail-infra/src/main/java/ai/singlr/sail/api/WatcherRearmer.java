@@ -10,7 +10,6 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.util.Optional;
@@ -113,10 +112,6 @@ public final class WatcherRearmer implements AutoCloseable {
    * is logged and swallowed so re-arming can never block server startup.
    */
   public int rearm() {
-    return Actor.call(Actor.system(), this::rearmAll);
-  }
-
-  private int rearmAll() {
     var rearmed = 0;
     try {
       var node = localHandle.get();

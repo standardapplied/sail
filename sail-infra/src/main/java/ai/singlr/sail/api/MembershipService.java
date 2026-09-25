@@ -243,7 +243,7 @@ public final class MembershipService {
     if (standing == null) {
       return null;
     }
-    writeRoster(spec, Roster.EMPTY, actor);
+    writeRoster(spec, Roster.EMPTY);
     publish(
         spec.project(),
         specId,
@@ -286,12 +286,11 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND,
                         "Spec '" + specId + "' vanished while engaging."));
-    writeRoster(current, Roster.solo(member), actor);
+    writeRoster(current, Roster.solo(member));
   }
 
-  private void writeRoster(SpecStore.SpecRow spec, Roster roster, Actor actor) {
+  private void writeRoster(SpecStore.SpecRow spec, Roster roster) {
     var store = requireRooms();
-    var handle = actor == null ? spec.updatedBy() : actor.handle();
     specStore.atomically(
         () -> {
           store.ensureFor(

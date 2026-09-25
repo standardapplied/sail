@@ -33,6 +33,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -364,7 +366,7 @@ class EngagementLifecycleTest {
     seedSpec("auth");
     var yaml = tempDir.resolve("sail-server.yaml");
     Files.writeString(yaml, YAML);
-    var continued = new java.util.concurrent.CompletableFuture<Void>();
+    var continued = new CompletableFuture<Void>();
     try (var bus = new EventBus()) {
       var sailOps =
           new SailOperations(
@@ -383,8 +385,12 @@ class EngagementLifecycleTest {
                       Thread.ofPlatform()
                           .start(
                               () -> {
-                                task.run();
-                                continued.complete(null);
+                                try {
+                                  task.run();
+                                  continued.complete(null);
+                                } catch (Throwable failure) {
+                                  continued.completeExceptionally(failure);
+                                }
                               }));
       var requester = Actor.cliOperator("mady");
 
@@ -397,7 +403,7 @@ class EngagementLifecycleTest {
                       new EngageRequest("claude-code", null, null, true),
                       requester,
                       HANDLE));
-      continued.get(30, java.util.concurrent.TimeUnit.SECONDS);
+      continued.get(30, TimeUnit.SECONDS);
 
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
       assertNotNull(stored("auth"), "the snapshot's continuation seated the member");

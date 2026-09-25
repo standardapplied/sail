@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -1600,7 +1601,10 @@ class ApiRouterTest {
               "{\"id\": \"fresh-room\", \"project\": \"acme\", \"title\": \"Fresh\"}");
       assertEquals(201, created.statusCode());
       assertEquals("fresh-room", ops.lastRoomCreate.id());
-      assertEquals(Actor.Lane.API, ops.lastRoomCreator.lane(), "the router binds the caller");
+      assertEquals(
+          new Actor(null, Role.ADMIN, Actor.Lane.API),
+          ops.lastRoomCreator,
+          "the router binds the caller: a machine token acts as no FDE, so it names no creator");
 
       var one = get(server, "/v1/rooms/design-room", "token");
       assertEquals(200, one.statusCode());

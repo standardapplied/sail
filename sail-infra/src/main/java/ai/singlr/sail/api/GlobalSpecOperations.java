@@ -303,10 +303,10 @@ final class GlobalSpecOperations {
             spec.assignee(),
             null,
             null,
-            spec.createdBy(),
             null,
             null,
-            spec.createdBy()));
+            null,
+            null));
   }
 
   /**

@@ -139,9 +139,7 @@ public final class DispatchCommand implements Runnable {
                 renderer(sync),
                 StopOperations.Listener.NONE),
             new PtyHostYield())) {
-      render(
-          Actor.call(
-              operations.identity().operator(), () -> dispatch(operations, request, handle)));
+      render(dispatchAsOperator(operations, name, request, handle));
     }
   }
 
@@ -169,10 +167,22 @@ public final class DispatchCommand implements Runnable {
         sessionYield);
   }
 
-  private DispatchOperations.Outcome dispatch(
-      HostOperations operations, DispatchOperations.Request request, String handle) {
+  /**
+   * Dispatches {@code project}'s spec as this box's operator, rendering a refusal, the operator's
+   * own included, with its fix for the terminal.
+   */
+  static DispatchOperations.Outcome dispatchAsOperator(
+      HostOperations operations,
+      String project,
+      DispatchOperations.Request request,
+      String handle) {
     try {
-      return operations.dispatching().dispatch(name, request, Actor.cliOperator(handle), handle);
+      return Actor.call(
+          operations.identity().operator(),
+          () ->
+              operations
+                  .dispatching()
+                  .dispatch(project, request, Actor.cliOperator(handle), handle));
     } catch (ApiException e) {
       throw new IllegalStateException(errorText(e), e);
     }

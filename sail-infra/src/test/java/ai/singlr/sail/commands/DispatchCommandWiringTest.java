@@ -151,13 +151,7 @@ class DispatchCommandWiringTest {
     var operations = cliOperations(shell(), events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
 
-    var outcome =
-        Actor.call(
-            operations.identity().operator(),
-            () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE));
+    var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertEquals("sail/auth", dispatched.branch());
@@ -228,13 +222,7 @@ class DispatchCommandWiringTest {
         () -> specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
     var request = new DispatchOperations.Request("auth", "background", false, null, true);
 
-    var outcome =
-        Actor.call(
-            operations.identity().operator(),
-            () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
+    var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request, HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertTrue(dispatched.restarted());

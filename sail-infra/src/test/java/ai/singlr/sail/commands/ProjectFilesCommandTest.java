@@ -103,7 +103,7 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void addSymlinkPreservesTargetPermissions() throws Exception {
+  void addSymlinkPreservesTargetPermissionsAndRmUnsharesIt() throws Exception {
     var data = Files.createDirectories(tempDir.resolve("isolated"));
     var output = tempDir.resolve("add-output.txt");
     var builder =
@@ -147,6 +147,9 @@ class ProjectFilesCommandTest {
       assertEquals(
           1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
       assertTrue(new FileStore(database).find("acme", "big.bin").isEmpty());
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Rm()).execute("-p", "acme", "linked.txt"));
+      assertTrue(new FileStore(database).find("acme", "linked.txt").isEmpty());
     }
   }
 

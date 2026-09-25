@@ -662,9 +662,11 @@ class SailOperationsSeamTest {
       var allowed = send(server, "POST", "/v1/conflicts/auth/resolve", admin, body);
       assertEquals(200, allowed.statusCode(), allowed.body());
       var resolved = new LinkedHashMap<>(box.specs.comparableSnapshot("auth"));
-      assertEquals(
-          "admin", resolved.remove(Snapshots.ACTOR), "the resolver authors the resolution");
       var expected = new LinkedHashMap<>(strategy.equals("mine") ? local : remote);
+      assertEquals(
+          strategy.equals("mine") ? "admin" : expected.get(Snapshots.ACTOR),
+          resolved.remove(Snapshots.ACTOR),
+          "keeping mine is the resolver's edit; main's version keeps main's author");
       expected.remove(Snapshots.ACTOR);
       assertEquals(expected, resolved);
       assertTrue(box.conflicts.pending().isEmpty());

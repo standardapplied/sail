@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
@@ -17,10 +18,12 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.net.URI;
@@ -30,8 +33,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +64,8 @@ class WriteAuthorshipTest {
         }
       };
 
+  private static final SyncConfig MAIN = new SyncConfig("main", null, "uday", "uday-box");
+
   @TempDir Path tempDir;
   private Sqlite db;
   private SpecStore specs;
@@ -76,7 +83,7 @@ class WriteAuthorshipTest {
   }
 
   @Test
-  void anHttpWriteIsAuthoredByTheTokensFdeThroughStatusAndContentOnlyUpdates() throws Exception {
+  void anHttpWriteIsAuthoredByTheTokensFdeThroughEachEditAndContentUpdate() throws Exception {
     try (var operations = operations(() -> SyncConfig.unset());
         var server = server(operations)) {
       var uday = token("uday", "member");
@@ -140,9 +147,17 @@ class WriteAuthorshipTest {
     var node = new SyncConfig("node", "sail@main", "mady", "mady-box");
     try (var operations = operations(() -> node)) {
       Acting.as("uday", () -> specs.create(spec("auth", "mady")));
-      var snapshot = YamlUtil.dumpJson(specs.comparableSnapshot("auth"));
-      new ai.singlr.sail.store.SyncConflicts(db)
-          .record("spec", "auth", null, snapshot, snapshot, List.of("title"));
+      var local = specs.comparableSnapshot("auth");
+      var remote = new LinkedHashMap<>(local);
+      remote.put("title", "Theirs");
+      new SyncConflicts(db)
+          .record(
+              "spec",
+              "auth",
+              null,
+              YamlUtil.dumpJson(local),
+              YamlUtil.dumpJson(remote),
+              List.of("title"));
       var fdes = new FdeStore(db);
       fdes.add("mady", null, null, "viewer");
 
@@ -160,6 +175,38 @@ class WriteAuthorshipTest {
     }
   }
 
+  @Test
+  void aCatalogRenameAndItsUndoAreTheOperatorsWrites() {
+    try (var operations = operations(() -> MAIN)) {
+      Acting.as("mady", () -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+
+      var renamed = operations.catalog().rename("acme", "web");
+      assertEquals("uday", projectHead("web").actor());
+
+      operations.catalog().undoRename(renamed);
+      assertEquals("uday", projectHead("acme").actor());
+    }
+  }
+
+  @Test
+  void aProjectPurgeIsTheOperatorsErasureAndItsRehearsalWritesNothing() {
+    try (var operations = operations(() -> MAIN)) {
+      Acting.as("mady", () -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+
+      operations.catalog().purgeSummary("acme");
+      assertEquals("mady", projectHead("acme").actor(), "a rehearsal rolls back");
+
+      assertTrue(operations.catalog().destroy("acme", true).purged());
+      var erasure = projectHead("acme");
+      assertEquals(ChangeLog.Kind.ERASURE, erasure.kind());
+      assertEquals("uday", erasure.actor());
+    }
+  }
+
+  private ChangeLog.Entry projectHead(String name) {
+    return new ChangeLog(db).head("project", name).orElseThrow();
+  }
+
   private void assertAuthoredBy(String id, String author) {
     assertEquals(author, specs.findById(id).orElseThrow().updatedBy(), "the row's updated_by");
     assertEquals(
@@ -170,7 +217,7 @@ class WriteAuthorshipTest {
     return new Resolution(Resolution.Strategy.MINE, null);
   }
 
-  private SailOperations operations(java.util.function.Supplier<SyncConfig> config) {
+  private SailOperations operations(Supplier<SyncConfig> config) {
     return OperationsFactory.create(
             db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(

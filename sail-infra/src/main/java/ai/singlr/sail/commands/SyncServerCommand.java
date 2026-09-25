@@ -40,7 +40,7 @@ import picocli.CommandLine.Command;
  * Main's side of a sync session, reached only through the SSH-key gateway: a node's {@code sail
  * sync} opens {@code ssh sail@main sail _sync}, the gateway authorizes the calling FDE and re-execs
  * this with {@code SAIL_TOKEN} set, and the {@link SyncRpcServer} then exchanges {@link
- * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to a {@link Actor} —
+ * ai.singlr.sail.sync.SyncWire} over the channel's stdio. The token resolves to an {@link Actor} —
  * the FDE's handle plus its role's write capability: only {@code member}+ may push (write), a
  * read-only FDE can pull but its commits are refused, and the handle binds run commits to the
  * pushing node so no FDE can forge another node's execution provenance. The serving database is

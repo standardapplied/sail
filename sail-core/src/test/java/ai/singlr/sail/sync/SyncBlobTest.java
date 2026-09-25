@@ -256,7 +256,8 @@ class SyncBlobTest {
               output -> boundedLines(output, frame))) {
         var session = ((PagedSyncSession) link.session()).frame(frame);
         var report =
-            session.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+            SyncBox.reconcile(
+                session, "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(14L * FastCdc.MIN, upload ? report.sentBytes() : report.fetchedBytes());
         assertTrue(link.count(upload ? "announce" : "fetch_chunks") >= 2);
         if (upload) assertEquals(link.count("push"), link.count("announce"));

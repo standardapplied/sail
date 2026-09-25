@@ -12,7 +12,6 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +95,7 @@ final class SnapshotOperations {
       inFlight.remove(project);
       throw e;
     }
-    executor.execute(Actor.carrying(() -> runRestore(project, label, localHandle)));
+    executor.execute(() -> runRestore(project, label, localHandle));
     return new SnapshotActionResponse(project, label, RESTORE_ACTION, "accepted");
   }
 
@@ -105,7 +104,7 @@ final class SnapshotOperations {
     projects.requireExists(project);
     requireSnapshotExists(project, label);
     claim(project);
-    executor.execute(Actor.carrying(() -> runDelete(project, label)));
+    executor.execute(() -> runDelete(project, label));
     return new SnapshotActionResponse(project, label, DELETE_ACTION, "accepted");
   }
 

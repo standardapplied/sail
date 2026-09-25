@@ -212,17 +212,15 @@ public final class ServerStartCommand implements Runnable {
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
-    var orphaned = Actor.call(Actor.system(), reviewStore::failOrphanedRunning);
-    var orphanedRuns =
-        Actor.call(Actor.system(), () -> runStore.failRunningReviewsOnNode(NodeIdentity.handle()));
-    if (orphanedRuns > 0) {
+    var orphans = failOrphans(reviewStore, runStore, NodeIdentity.handle());
+    if (orphans.runs() > 0) {
       syncScheduler.afterWrite();
     }
-    if (orphaned > 0) {
+    if (orphans.reviews() > 0) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ Failed "
-                  + orphaned
+                  + orphans.reviews()
                   + " review(s) interrupted by a restart (they were blocking their specs)"));
     }
     var reviewController =
@@ -430,6 +428,16 @@ public final class ServerStartCommand implements Runnable {
         new AuthSessionStore(db),
         new PendingChallengeStore(db),
         webauthn.sessionTtl());
+  }
+
+  /** How many reviews, and review runs on this node, a restart left running. */
+  record Orphans(int reviews, int runs) {}
+
+  /** Fails what the restart orphaned, as this box's machinery. */
+  static Orphans failOrphans(ReviewStore reviews, RunStore runs, String node) {
+    return Actor.call(
+        Actor.system(),
+        () -> new Orphans(reviews.failOrphanedRunning(), runs.failRunningReviewsOnNode(node)));
   }
 
   /**

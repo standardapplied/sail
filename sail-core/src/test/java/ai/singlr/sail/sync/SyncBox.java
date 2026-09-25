@@ -96,7 +96,7 @@ public final class SyncBox implements AutoCloseable {
 
     /** One type's round as a node runs it: adopting what main decided, as {@code main}. */
     public SyncSession.TypeReport reconcile(String type, LocalReplica local) {
-      return Actor.call(Actor.main(), () -> session.reconcile(type, local));
+      return SyncBox.reconcile(session, type, local);
     }
 
     /** The {@code op} of every request this session has sent, in order. */
@@ -123,6 +123,12 @@ public final class SyncBox implements AutoCloseable {
         }
       }
     }
+  }
+
+  /** One type's round over {@code session} as a node runs it: adopting what main decided. */
+  public static SyncSession.TypeReport reconcile(
+      SyncSession session, String type, LocalReplica local) {
+    return Actor.call(Actor.main(), () -> session.reconcile(type, local));
   }
 
   public static Link connect(SyncRpcServer server, SyncBox box) throws IOException {

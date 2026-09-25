@@ -649,11 +649,13 @@ these roles distinct is what lets the synced catalog stay identity-free.
   Each entry point binds the actor it acts as, at its edge and nowhere deeper, with
   `Actor.run`/`Actor.call` (a `ScopedValue`): `ApiRouter` around routing, `LocalApiRouter`
   per request, a command that writes without the API around its write, the `_sync` session
-  around each commit and erase, the node's round around adoption, and each background entry
-  (the event bus drain, reactors, sweepers, reconcilers, periodic passes, the sync
-  scheduler, migrations, `PersonalRooms.ensure`) as `SYSTEM`. A `ScopedValue` does not cross
-  into a plain executor, so work that continues a request is submitted through
-  `Actor.carrying(task)` and captures its requester. `ChangeLog.append` and `erase` read
+  around each commit and erase, the node's round as `MAIN`, and each background entry that
+  writes (the event bus drain, the reactors, retention, the reconcilers, periodic passes, the
+  sync scheduler, the room-wake launch, migrations, `PersonalRooms.ensure`) as `SYSTEM`. A
+  `ScopedValue` does not cross into a plain executor, so work that continues a request is
+  submitted through `Actor.carrying(task)` and captures its requester. Resolving a conflict
+  adopts main's version as `MAIN`, so it keeps main's author, before the chosen state is
+  written as the resolver. `ChangeLog.append` and `erase` read
   `Actor.current()` for every revision, tombstone and erasure: its handle is the author in
   `change_log.actor`, the pushing FDE or `main` is the `peer`, and a write with nothing bound
   throws and rolls its row back, as a pruned id does. A synced revision keeps the author it
@@ -664,8 +666,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
   one: `RunStore.stampActivity` (a latest-wins heartbeat), `Erasure.discard`,
   `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and retention),
   and the `ContentMigration`/`SchemaManager` rewrites. There is no default actor, in
-  production or in tests: store-level tests opt in with `@ActingAs`, and tests of an entry
-  point run unbound, so each proves its entry point binds.
+  production or in tests: a test binds only the writes it makes itself (`@ActingAs`,
+  `Acting`), and every binding an entry point makes is proven by a test that drives that
+  entry unbound.
 - **Agent principals.** Every run — dispatch, ad-hoc, review — mints an agent principal
   inside its reservation transaction: a handle (`claude/a1b2c3`) plus the FDE it acts for,
   stamped on the run row (they replicate with the run), and an opaque run credential hashed

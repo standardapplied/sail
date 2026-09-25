@@ -619,8 +619,10 @@ class SyncTransportTest {
       var session = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
       assertEquals(
           3,
-          session
-              .reconcile("file", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("file"))
+          SyncBox.reconcile(
+                  session,
+                  "file",
+                  SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("file"))
               .report()
               .pushed());
       assertEquals(3, link.count("need"));
@@ -634,7 +636,7 @@ class SyncTransportTest {
     }
     try (var link = connect(nodeA)) {
       var paged = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
-      var round = paged.reconcile("spec", nodeA.replica);
+      var round = SyncBox.reconcile(paged, "spec", nodeA.replica);
       assertEquals(4, round.report().pushed());
       assertEquals(4, link.count("push"));
       assertEquals(1, link.count("need"));
@@ -656,7 +658,8 @@ class SyncTransportTest {
     try (var link = connect(nodeB)) {
       var paged = ((PagedSyncSession) link.session()).frame(700);
       var failure =
-          assertThrows(SyncTransportException.class, () -> paged.reconcile("spec", nodeB.replica));
+          assertThrows(
+              SyncTransportException.class, () -> SyncBox.reconcile(paged, "spec", nodeB.replica));
       assertEquals("protocol", failure.kind());
       assertTrue(failure.getMessage().startsWith("spec mine:"), failure.getMessage());
     }
