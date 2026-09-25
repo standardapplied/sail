@@ -19,7 +19,6 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -107,8 +106,9 @@ public final class AgentSweepCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            Actor.call(
-                operations.identity().operator(),
+            RunCommand.asOperatorUnlessPreview(
+                describeOnly,
+                operations.identity()::operator,
                 () -> operations.dispatching().startAdhoc(name, request, handle));
       } catch (ApiException e) {
         var action = e.failure().action();

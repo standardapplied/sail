@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
@@ -15,6 +16,13 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -23,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -176,6 +185,28 @@ class RunCommandTest {
     assertTrue(task.contains("(id: auth)"));
     assertTrue(task.contains("Implement the login flow."));
     assertTrue(task.contains("sail spec status acme auth done"));
+  }
+
+  @Test
+  void aPreviewOnANodeWhoseRosterHasNotSyncedDescribesTheLaunchWithoutAnOperator() {
+    try (var db = Sqlite.open(tempDir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var node = new SyncConfig("node", "sail@main", "mady", "mady-box");
+      Supplier<Actor> operator = () -> CliOperator.of(node, () -> new FdeStore(db));
+
+      assertEquals(
+          "described", RunCommand.asOperatorUnlessPreview(true, operator, () -> "described"));
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () -> RunCommand.asOperatorUnlessPreview(false, operator, () -> "launched"));
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+
+      new FdeStore(db).add("mady", null, null, "member");
+      assertEquals(
+          new Actor("mady", Role.MEMBER, Actor.Lane.CLI),
+          RunCommand.asOperatorUnlessPreview(false, operator, Actor::current));
+    }
   }
 
   @Test
