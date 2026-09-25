@@ -93,6 +93,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     var explicit = ProjectDefinitions.explicitFile(file);
+    var operator = ProjectMutations.catalogOperator(explicit, dryRun);
     var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
     var config =
         SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
@@ -140,7 +141,8 @@ public final class ProjectResourcesSetCommand implements Runnable {
           updatedText,
           dryRun,
           out,
-          "record resources for '" + name + "' in the catalog");
+          "record resources for '" + name + "' in the catalog",
+          operator);
     }
 
     var applyManager = new ContainerManager(applyShell());

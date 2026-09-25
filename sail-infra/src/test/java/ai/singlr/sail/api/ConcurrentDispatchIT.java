@@ -150,11 +150,14 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
 
   private DispatchOperations.Dispatched dispatchBackground(DispatchOperations ops, String specId) {
     var outcome =
-        ops.dispatch(
-            CONTAINER,
-            new DispatchOperations.Request(specId, "background", false, null, false),
+        Acting.by(
             OPERATOR,
-            HANDLE);
+            () ->
+                ops.dispatch(
+                    CONTAINER,
+                    new DispatchOperations.Request(specId, "background", false, null, false),
+                    OPERATOR,
+                    HANDLE));
     return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
   }
 

@@ -16,7 +16,6 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -184,14 +183,8 @@ public final class DispatchCommand implements Runnable {
                   .dispatching()
                   .dispatch(project, request, Actor.cliOperator(handle), handle));
     } catch (ApiException e) {
-      throw new IllegalStateException(errorText(e), e);
+      throw new IllegalStateException(CliCommand.describe(e), e);
     }
-  }
-
-  /** A structured refusal rendered for the terminal: the reason and, when known, the fix. */
-  private static String errorText(ApiException e) {
-    var action = e.failure().action();
-    return Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action;
   }
 
   private void render(DispatchOperations.Outcome outcome) {

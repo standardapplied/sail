@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import java.io.IOException;
@@ -63,6 +64,7 @@ public final class ProjectEditCommand implements Runnable {
 
   private void execute() throws Exception {
     NameValidator.requireValidProjectName(name);
+    var operator = CliOperator.current();
     var current =
         ProjectDefinitions.definition(name, null)
             .orElseThrow(
@@ -82,7 +84,7 @@ public final class ProjectEditCommand implements Runnable {
     }
 
     validate(name, edited);
-    ProjectDefinitions.persist(name, null, edited);
+    ProjectDefinitions.persist(name, null, edited, operator);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
@@ -66,6 +67,16 @@ class ProjectDefinitionsTest {
     assertEquals(
         "from-explicit",
         ProjectDefinitions.resolve(store, "acme", explicit, canonical).orElseThrow());
+  }
+
+  @Test
+  void aCatalogWriteWithoutAResolvedOperatorIsRefusedBeforeAnythingIsWritten() {
+    var refused =
+        assertThrows(
+            NullPointerException.class,
+            () -> ProjectDefinitions.persist("acme", null, "name: acme\n", null));
+
+    assertTrue(refused.getMessage().contains("operator"), refused.getMessage());
   }
 
   @Test

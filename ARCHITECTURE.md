@@ -667,8 +667,8 @@ these roles distinct is what lets the synced catalog stay identity-free.
   `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and retention),
   and the `ContentMigration`/`SchemaManager` rewrites. There is no default actor, in
   production or in tests: a test binds only the writes it makes itself (`@ActingAs`,
-  `Acting`), and every binding an entry point makes is proven by a test that drives that
-  entry unbound.
+  `Acting`), and a binding an entry point makes is proven by a test that drives that entry
+  unbound wherever a test can drive it (the interactive files picker needs a console).
 - **Agent principals.** Every run — dispatch, ad-hoc, review — mints an agent principal
   inside its reservation transaction: a handle (`claude/a1b2c3`) plus the FDE it acts for,
   stamped on the run row (they replicate with the run), and an opaque run credential hashed

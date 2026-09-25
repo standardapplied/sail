@@ -8,12 +8,14 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
 
@@ -131,15 +133,20 @@ public final class ProjectDefinitions {
    * there and the catalog is left untouched. Otherwise the catalog (the replicated source of truth)
    * is recorded first and the canonical descriptor re-materialized from it — exactly how {@code
    * project edit} saves — so the change survives the next sync and re-materialize instead of being
-   * silently overwritten. The catalog write is this box's operator's, so a node that cannot name it
-   * refuses the edit before anything is written.
+   * silently overwritten. The catalog write is {@code operator}'s, which the command resolved
+   * before it changed anything.
    */
-  public static void persist(String name, Path explicitFile, String definition) throws IOException {
+  public static void persist(String name, Path explicitFile, String definition, Actor operator)
+      throws IOException {
     if (explicitFile != null) {
       Files.writeString(explicitFile, definition);
       return;
     }
-    ProjectCatalog.record(name, definition, CliOperator.current());
+    ProjectCatalog.record(
+        name,
+        definition,
+        Objects.requireNonNull(
+            operator, "A catalog write names the operator the command resolved."));
     materialize(name, definition);
   }
 

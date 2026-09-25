@@ -129,7 +129,7 @@ class ConflictResolutionTest {
   }
 
   @Test
-  void keepMineCreditsTheResolverOnlyWithTheEditItPushes() {
+  void keepMineCreditsTheResolverOnlyWithItsOwnEdit() {
     var conflict = raiseTitleConflictBetween("mady", "rajesh");
     var mine = snapshot(conflict.localSnapshot());
     var theirs = snapshot(conflict.remoteSnapshot());

@@ -302,11 +302,12 @@ public final class ProjectApplyCommand implements Runnable {
         if (json) {
           var row = new LinkedHashMap<String, Object>();
           row.put("name", project);
-          row.put("error", e.getMessage());
+          row.put("error", CliCommand.describe(e));
           rows.add(row);
         } else {
           System.err.println(
-              Banner.errorLine("Could not apply " + project + ": " + e.getMessage(), Ansi.AUTO));
+              Banner.errorLine(
+                  "Could not apply " + project + ": " + CliCommand.describe(e), Ansi.AUTO));
         }
       }
     }

@@ -19,7 +19,8 @@ import java.nio.file.Path;
  * becomes the shared, replicated source of truth. Best-effort by design: the on-disk {@code
  * sail.yaml} and the container are the operations that must succeed, so a catalog write that fails
  * (DB momentarily unavailable) prints a hint and is recovered by the import migration on the next
- * {@code sail migrate} — it never aborts project creation.
+ * {@code sail migrate}. Only a node that cannot name its operator refuses, and its commands resolve
+ * the operator before they change anything.
  */
 public final class ProjectCatalog {
 

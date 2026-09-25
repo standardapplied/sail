@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -53,6 +55,16 @@ class CliCommandTest {
 
     assertEquals("boom", error.getMessage());
     assertTrue(capturedErr.toString(StandardCharsets.UTF_8).contains("boom"));
+  }
+
+  @Test
+  void describesARefusalWithItsFixAndAnythingElseByItsMessage() {
+    assertEquals(
+        "The roster is unsynced. Run 'sail sync'.",
+        CliCommand.describe(
+            new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.")));
+    assertEquals("boom", CliCommand.describe(new IllegalStateException("boom")));
+    assertEquals("IllegalStateException", CliCommand.describe(new IllegalStateException()));
   }
 
   @Test

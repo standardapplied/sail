@@ -32,19 +32,36 @@ class ServerStartCommandTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var reviews = new ReviewStore(db);
+      var runs = new RunStore(db);
       var review =
-          Acting.system(
+          Acting.as(
+              "uday",
               () -> {
                 var id = reviews.createReview("auth", 1);
                 reviews.updateReviewStatus(id, "running");
                 return id;
               });
+      Acting.as(
+          "uday",
+          () ->
+              runs.createReview(
+                  "review-run",
+                  "acme",
+                  "auth",
+                  "node-a",
+                  "uday",
+                  "claude-code",
+                  "main",
+                  "review it",
+                  "/tmp/review.log",
+                  "sail-review-run"));
 
-      var orphans = ServerStartCommand.failOrphans(reviews, new RunStore(db), "node-a");
+      var orphans = ServerStartCommand.failOrphans(reviews, runs, "node-a");
 
-      assertEquals(new ServerStartCommand.Orphans(1, 0), orphans);
-      var head = new ChangeLog(db).head("review", review).orElseThrow();
-      assertEquals(Actor.SYSTEM_HANDLE, head.actor());
+      assertEquals(new ServerStartCommand.Orphans(1, 1), orphans);
+      var log = new ChangeLog(db);
+      assertEquals(Actor.SYSTEM_HANDLE, log.head("review", review).orElseThrow().actor());
+      assertEquals(Actor.SYSTEM_HANDLE, log.head("run", "review-run").orElseThrow().actor());
     }
   }
 

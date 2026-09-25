@@ -129,10 +129,14 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               SessionYield.NONE);
 
       var session =
-          dispatchOps.startAdhoc(
-              CONTAINER,
-              new DispatchOperations.AdhocRequest("sleep for a while", null, null, true, false),
-              HANDLE);
+          Acting.by(
+              OPERATOR,
+              () ->
+                  dispatchOps.startAdhoc(
+                      CONTAINER,
+                      new DispatchOperations.AdhocRequest(
+                          "sleep for a while", null, null, true, false),
+                      HANDLE));
 
       var run = runStore.findById(session.runId()).orElseThrow();
       assertEquals("adhoc", run.role());
@@ -143,15 +147,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
           new AgentSession(shell).queryStatus(CONTAINER, AgentUnit.recorded(run.id(), run.unit()));
       assertTrue(live != null && live.running(), "the ad-hoc agent runs under its own unit");
 
-      var dispatchRefusal =
-          assertThrows(
-              ApiException.class,
-              () ->
-                  dispatchOps.dispatch(
-                      CONTAINER,
-                      new DispatchOperations.Request("spec-app", "background", false, null, false),
-                      OPERATOR,
-                      HANDLE));
+      var dispatchRefusal = assertThrows(ApiException.class, () -> dispatchAsOperator(dispatchOps));
       assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, dispatchRefusal.failure().errorCode());
       assertEquals(
           SpecStatus.PENDING,
@@ -168,7 +164,11 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               StopOperations.sessionHalter(shell),
               StopOperations.Listener.NONE);
       var outcome =
-          stopOps.stop(new StopOperations.ProjectTarget(CONTAINER), OPERATOR, HANDLE, false);
+          Acting.by(
+              OPERATOR,
+              () ->
+                  stopOps.stop(
+                      new StopOperations.ProjectTarget(CONTAINER), OPERATOR, HANDLE, false));
 
       var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
       assertEquals(session.runId(), stopped.runId());
@@ -178,13 +178,20 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       assertTrue(afterStop == null || !afterStop.running(), "the verified halt left no process");
       assertInstanceOf(
           DispatchOperations.Dispatched.class,
-          dispatchOps.dispatch(
-              CONTAINER,
-              new DispatchOperations.Request("spec-app", "background", false, null, false),
-              OPERATOR,
-              HANDLE),
+          dispatchAsOperator(dispatchOps),
           "the released reservation admits the next dispatch");
     }
+  }
+
+  private static DispatchOperations.Outcome dispatchAsOperator(DispatchOperations ops) {
+    return Acting.by(
+        OPERATOR,
+        () ->
+            ops.dispatch(
+                CONTAINER,
+                new DispatchOperations.Request("spec-app", "background", false, null, false),
+                OPERATOR,
+                HANDLE));
   }
 
   private static void seedSpec(SpecStore store, String id, List<String> repos) {
